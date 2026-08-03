@@ -33,5 +33,9 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
 
+[tool.ruff.lint.flake8-bugbear]
+# Depends/Security no default do parâmetro é o idioma do FastAPI (B008 não se aplica)
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Security"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["ottima_core", "ottima_api", "ottima_opc_worker", "ottima_flow_runtime", "ottima_recorder"]
