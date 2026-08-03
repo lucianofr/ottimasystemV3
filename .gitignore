@@ -16,3 +16,4 @@ frontend/openapi.json
 .codex/
 .cursor/
 .impeccable/
+.tokensave/
