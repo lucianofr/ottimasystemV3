@@ -1,0 +1,1 @@
+"""OttimaSystem — gravador de amostras."""
