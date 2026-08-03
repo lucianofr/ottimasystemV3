@@ -1,0 +1,49 @@
+import type { components } from "./api-types";
+
+export type LoginOut = components["schemas"]["LoginOut"];
+export type UserOut = components["schemas"]["UserOut"];
+export type ProjectOut = components["schemas"]["ProjectOut"];
+
+const TOKEN_KEY = "ottima.token";
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    detail: string,
+  ) {
+    super(detail);
+  }
+}
+
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (init?.body) headers.set("Content-Type", "application/json");
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(path, { ...init, headers });
+  if (res.status === 401 && !path.endsWith("/auth/login")) {
+    // interceptor global de sessão expirada (spec §8.5)
+    clearToken();
+    window.location.assign("/login");
+    throw new ApiError(401, "Sessão expirada");
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { detail?: unknown } | null;
+    const detail = typeof body?.detail === "string" ? body.detail : "Erro inesperado";
+    throw new ApiError(res.status, detail);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
