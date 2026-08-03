@@ -24,7 +24,8 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["packages", "services", "tests"]
 markers = ["e2e: testes end-to-end contra o stack docker compose (fora do run default)"]
-addopts = "-m 'not e2e'"
+# --import-mode=importlib: os serviços têm tests/test_health.py homônimos sem __init__.py
+addopts = "-m 'not e2e' --import-mode=importlib"
 
 [tool.ruff]
 line-length = 100
