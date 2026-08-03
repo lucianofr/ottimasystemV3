@@ -1,6 +1,3 @@
-import pytest
-
-
 async def _criar(client, headers, name: str) -> dict:
     r = await client.post("/api/projects", json={"name": name}, headers=headers)
     assert r.status_code == 201
@@ -39,7 +36,6 @@ async def test_delete_de_projeto_ativo_409(client, admin_headers):
     assert r.json()["detail"] == "Desative o projeto antes de excluí-lo"
 
 
-@pytest.mark.skip(reason="ativado na Task 10")
 async def test_delete_cascateia_conexoes(client, admin_headers):
     p = await _criar(client, admin_headers, "ComConexao")
     c = await client.post(
