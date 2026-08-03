@@ -1,0 +1,91 @@
+# CLAUDE.md — OttimaSystem
+
+Plataforma on-premise de APC industrial: estratégias de controle montadas em canvas de blocos (OPC-Read/Write, MPC via do-mpc, Python-Script, TFS), executadas ciclicamente no servidor, operadas por faceplates com tendência + predição. O controle regulatório fica nos PIDs do PLC; o sistema assume/devolve malhas de forma bumpless e falha sempre para o lado seguro (PLC no comando).
+
+## 🔒 Fonte da verdade (leia antes de qualquer coisa)
+
+1. **`docs/adr/ADR-001…023` são NORMATIVOS.** Nenhuma decisão registrada em ADR pode ser relitigada, "melhorada" ou contornada em código. Em conflito entre código, plano, PRD e ADR — **o ADR vence**.
+2. **`docs/PRD.md`** é a fonte de requisitos (RF-xxx / RNF-xx) e dos contratos (§7: canais do barramento, JSON de projeto, grupos de API) e fases (§8).
+3. **`docs/GLOSSARY.md`** fixa o vocabulário. Use os termos de lá; não invente sinônimos.
+4. Encontrou contradição ou lacuna real? **PARE.** Não resolva silenciosamente no código: proponha a atualização do ADR/PRD ao usuário e aguarde a decisão.
+5. O design do produto está **fechado**. Brainstorm/planejamento é apenas sobre *implementação* (layout, DDL, nomes de módulos) — nunca sobre stack, arquitetura ou escopo.
+
+## Arquitetura (resumo — detalhe no PRD §3 e ADR-001…006)
+
+```
+frontend (React+Vite) ⇄ api (FastAPI: REST + WS)
+                              │
+                        Redis pub/sub (barramento)
+                        ↑      ↑      ↕
+                 opc-worker  recorder  flow-runtime (do-mpc, scripts, TFS)
+                        │                    │
+                 Servidores OPC-UA     Postgres + TimescaleDB
+```
+
+Stack: React + Vite + shadcn/ui + React Flow + uPlot · FastAPI + SQLAlchemy 2.0 async · Postgres/TimescaleDB único · Redis pub/sub · workers asyncio · `uv` · Docker Compose.
+
+## Layout do monorepo
+
+```
+docs/                 # PRD.md, GLOSSARY.md, adr/  (normativos — não editar sem processo do item 4)
+frontend/             # React + Vite (TS strict). NUNCA Next.js.
+packages/
+  ottima-core/        # compartilhado: modelos SQLAlchemy, schemas Pydantic, contratos do barramento
+services/
+  api/                # FastAPI (REST + WebSocket)
+  opc-worker/         # asyncua, watchdog, escritas
+  flow-runtime/       # motor de scan, MPC, scripts, TFS
+  recorder/           # barramento → hypertable
+deploy/               # docker-compose.yml, Dockerfiles, .env.example
+tests/                # integração cross-service (malha fechada MPC↔TFS — RNF-09)
+```
+
+Python organizado como **uv workspace** (um `pyproject.toml` por package/service + workspace na raiz).
+
+## Invariantes de engenharia (violar = bug de arquitetura)
+
+- **Nunca bloquear o event loop.** `mpc.make_step()` (IPOPT) e `exec()` de scripts sempre via `run_in_executor`. (ADR-004)
+- **Sem Celery, sem filas de job.** MPC/OPC são loops vivos em asyncio. (ADR-004)
+- **`opc-worker` é o ÚNICO processo que fala OPC-UA.** Todo o resto usa o barramento. (ADR-006)
+- **Barramento: apenas os canais do PRD §7.1.** Criar/alterar canal exige ADR. Pub/sub é fire-and-forget: comandos vão por `flow.commands` e a UI reflete **estado publicado**, nunca eco de comando. (ADR-002)
+- **Segurança de processo:** nenhuma escrita OPC sem flow em deploy + watchdog vivo + modo REMOTO; falha de comunicação ⇒ cessa escrita e para o flow; boot sobe tudo **parado**. Em LOCAL o sistema não escreve MV (a MV do MPC faz *tracking* do readback do PID). (ADR-009, 010, 017)
+- **Banco único** Postgres/TimescaleDB. Sem SQLite, sem segundo banco. Retenção (1 mês) e downsampling via policies/continuous aggregates do Timescale — **nunca** código manual de limpeza. (ADR-003)
+- **Script block:** escopo restrito a `math` + `numpy`; timeout ≈70% do Ts; `state` dict persistente. (ADR-018)
+- **Frontend nunca executa lógica de flow** — o canvas só edita o grafo; execução é 100% no flow-runtime. (ADR-005)
+- **Hot-swap:** troca de definição de flow é atômica entre varreduras, preservando estado dos blocos não alterados. (ADR-011)
+- Predições do MPC **não são persistidas** — só publicadas no barramento. (ADR-016)
+
+## Convenções de código
+
+- **Python ≥ 3.12**, type hints obrigatórios, Pydantic v2, SQLAlchemy 2.0 async style, `ruff` (lint + format), `pytest` + `pytest-asyncio`.
+- **TypeScript strict**; componentes shadcn/ui; estado de servidor via WebSocket/REST tipados.
+- **Identificadores de código em inglês; strings de UI e docs em pt-BR.** O GLOSSARY é o cânone de tradução (ex.: Restrição → `constraint_var`, faceplate → `faceplate`).
+- Commits no padrão **Conventional Commits** (`feat:`, `fix:`, `refactor:`, `test:`, `docs:` …), mensagens em pt-BR.
+- Novas dependências fora da stack declarada exigem justificativa explícita ao usuário (e ADR se forem estruturais).
+
+## Testes
+
+- **TDD estrito (RED→GREEN→REFACTOR)** em lógica pura: motor de scan (ordenação topológica, hot-swap), discretização SOPDT/IOPDT, montagem do do-mpc, precedência Restrição>CV, bumpless, TFS.
+- **opc-worker:** testar contra **servidor OPC-UA de teste in-process do asyncua** (sem PLC real) — subscriptions, escrita, watchdog, reconexão.
+- **Malha fechada MPC↔TFS** é a suíte de aceitação do sistema (RNF-09): assume/devolve sem salto de MV, restrição vence CV, overrun mantém MV + alarme.
+- Infra (compose, schema): testes de integração; não faça teatro de TDD unitário aqui.
+
+## Workflow de desenvolvimento (Superpowers)
+
+- **Um plano por fase (F1→F6 do PRD §8)** — nunca um plano do sistema inteiro. F4 (MPC) pode ser dividida em dois planos (config/montagem × runtime/modos).
+- Cada tarefa do plano cita os **RF-xxx** que implementa; o *definition of done* da fase são os critérios de aceite do PRD §8.
+- Um **git worktree por fase**; branch limpa; revisão em duas etapas antes de merge.
+- Contratos do PRD §7 entram **verbatim** nos planos (payloads dos canais, JSON de projeto).
+
+## Comandos (materializam na F1 — manter esta seção atualizada)
+
+```bash
+uv sync                                   # ambiente do workspace
+docker compose -f deploy/docker-compose.yml up -d   # sobe o sistema completo
+uv run pytest                             # testes do workspace
+cd frontend && npm run dev                # frontend (Vite, host/porta explícitos)
+```
+
+## Proibições rápidas para agentes
+
+Não editar `docs/` sem o processo do item 4 · Não usar Django, Next.js, Celery, SQLite, InfluxDB · Não criar canal de barramento novo · Não escrever em tag OPC fora do fluxo `opc.writes` · Não persistir predições · Não colocar lógica de backend no frontend · Não "simplificar" removendo watchdog/modos/bumpless em ambiente de teste — use o bloco TFS para simular.
