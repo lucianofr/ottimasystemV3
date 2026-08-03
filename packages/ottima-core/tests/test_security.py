@@ -3,6 +3,7 @@ import time
 import jwt
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
+
 from ottima_core.security import (
     create_access_token,
     decode_access_token,
