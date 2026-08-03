@@ -20,8 +20,9 @@ export function App() {
               <Route element={<AppShell />}>
                 <Route path="/" element={<HomePage />} />
               </Route>
+              {/* dentro do guarda: rota desconhecida sem sessão vai direto a /login */}
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
-            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
       </AuthProvider>

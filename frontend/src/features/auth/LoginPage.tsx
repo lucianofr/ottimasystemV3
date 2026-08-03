@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router";
 
 import { Button } from "../../components/ui/button";
@@ -15,6 +15,9 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // a tela é remontada a cada volta ao /login; nunca herdar o erro da sessão anterior
+  useEffect(() => setError(null), []);
 
   if (user) return <Navigate to="/" replace />;
 

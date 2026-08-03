@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
   useCallback,
@@ -27,6 +28,7 @@ const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserOut | null>(null);
+  const queryClient = useQueryClient();
   const [loading, setLoading] = useState(true);
 
   // restauração de sessão: token persistido -> GET /api/auth/me (spec §5.1/§8.5)
@@ -53,7 +55,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     clearToken();
     setUser(null);
-  }, []);
+    // o QueryClient é singleton: sem isso o próximo operador na mesma estação
+    // veria os dados cacheados do anterior (spec §8.5)
+    queryClient.clear();
+  }, [queryClient]);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout }}>
