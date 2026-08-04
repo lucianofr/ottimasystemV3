@@ -11,8 +11,8 @@ export interface PortaFixa {
 
 export interface RegraPortaDinamica {
   direction: DirecaoPorta;
-  source: string;
   type?: string;
+  source?: string;
   prefix?: string;
   count_field?: string;
   max?: number;
