@@ -677,40 +677,49 @@ def _check_required_inputs(nodes: list[FlowNode], edges: list[FlowEdge], errors:
 
 
 def _check_cycles(nodes: list[FlowNode], edges: list[FlowEdge], errors: list[str]) -> None:
-    """RF-302: o dígrafo source->target precisa ser acíclico."""
+    """RF-302: o dígrafo source->target precisa ser acíclico.
+
+    Travessia iterativa com pilha explícita, não recursão: o `graph_json` chega de um corpo
+    de PUT, e um grafo encadeado com alguns milhares de nós estouraria o limite de recursão
+    do Python — RecursionError vira 500, e nenhuma rota de flows pode devolver 5xx para
+    entrada de usuário.
+    """
     successors: dict[str, list[str]] = {node.id: [] for node in nodes}
     for edge in edges:
         successors[edge.source].append(edge.target)
 
-    open_nodes: set[str] = set()  # na pilha da busca atual
-    closed: set[str] = set()
-    path: list[str] = []
+    closed: set[str] = set()  # subárvore já fechada, não pode fechar ciclo
+    on_path: set[str] = set()  # nós na pilha atual; reencontrar um deles é o ciclo
 
-    def visit(node_id: str) -> list[str] | None:
-        open_nodes.add(node_id)
-        path.append(node_id)
-        for following in successors[node_id]:
-            if following in open_nodes:
-                return path[path.index(following) :] + [following]
-            if following not in closed:
-                cycle = visit(following)
-                if cycle is not None:
-                    return cycle
-        path.pop()
-        open_nodes.discard(node_id)
-        closed.add(node_id)
-        return None
-
-    for node in nodes:
-        if node.id in closed:
+    for root in nodes:
+        if root.id in closed:
             continue
-        cycle = visit(node.id)
-        if cycle is not None:
-            errors.append(
-                f"ciclo detectado no grafo: {' -> '.join(cycle)}; "
-                "o fluxo de dados precisa ser acíclico (RF-302)"
-            )
-            return
+        # `path` espelha a pilha: path[i] é o nó de stack[i], para reconstruir o caminho.
+        stack: list[tuple[str, int]] = [(root.id, 0)]
+        path: list[str] = [root.id]
+        on_path.add(root.id)
+        while stack:
+            node_id, index = stack[-1]
+            following = successors[node_id]
+            if index == len(following):
+                stack.pop()
+                path.pop()
+                on_path.discard(node_id)
+                closed.add(node_id)
+                continue
+            stack[-1] = (node_id, index + 1)
+            next_id = following[index]
+            if next_id in on_path:
+                cycle = path[path.index(next_id) :] + [next_id]
+                errors.append(
+                    f"ciclo detectado no grafo: {' -> '.join(cycle)}; "
+                    "o fluxo de dados precisa ser acíclico (RF-302)"
+                )
+                return
+            if next_id not in closed:
+                stack.append((next_id, 0))
+                path.append(next_id)
+                on_path.add(next_id)
 
 
 def _collect_inversion_warnings(

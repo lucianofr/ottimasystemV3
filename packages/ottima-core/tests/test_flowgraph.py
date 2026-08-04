@@ -308,6 +308,20 @@ def test_parse_rejeita_numero_de_portas_do_script_fora_de_0_8():
         assert has(parse_errors(graph), "s1", field), (field, value)
 
 
+def test_limite_exato_de_portas_do_script():
+    """8 é teto inclusivo (spec §3.3): 8 passa, 9 reprova."""
+    graph = base_graph()
+    node_of(graph, "s1")["data"]["n_inputs"] = 8
+    node_of(graph, "s1")["data"]["n_outputs"] = 8
+    config = parse_graph(graph).node("s1").config
+    assert (config.n_inputs, config.n_outputs) == (8, 8)
+
+    for field in ("n_inputs", "n_outputs"):
+        graph = base_graph()
+        node_of(graph, "s1")["data"][field] = 9
+        assert has(parse_errors(graph), "s1", field), field
+
+
 def test_parse_aceita_script_sem_portas():
     graph = base_graph()
     node_of(graph, "s1")["data"]["n_inputs"] = 0
@@ -408,7 +422,7 @@ def test_exec_order_com_buraco_e_erro():
     graph["edges"] = [e for e in graph["edges"] if e["id"] != "e3"]
     node_of(graph, "w1")["data"]["exec_order"] = 4  # 1, 2, 4 com N=3
     errors = errors_of(graph)
-    assert has(errors, "exec_order", "1", "3")
+    assert has(errors, "exec_order", "contíguo de 1 a 3", "faltam os valores 3")
 
 
 # regra 2 — arestas referenciam nós e handles existentes
@@ -539,30 +553,80 @@ def test_ciclo_de_dois_nos_e_erro():
     assert has(errors, "ciclo", "s1", "w1")
 
 
+def script_node(node_id: str, order: int, *, n_inputs: int = 1, n_outputs: int = 1) -> dict:
+    return {
+        "id": node_id,
+        "type": "script",
+        "position": {"x": 0.0, "y": 0.0},
+        "data": {
+            "exec_order": order,
+            "n_inputs": n_inputs,
+            "n_outputs": n_outputs,
+            "code": "OUT1 = IN1",
+        },
+    }
+
+
+def link(edge_id: str, source: str, target: str) -> dict:
+    return {
+        "id": edge_id,
+        "source": source,
+        "target": target,
+        "sourceHandle": "OUT1",
+        "targetHandle": "IN1",
+    }
+
+
 def test_ciclo_de_tres_nos_e_erro():
-    def script_node(node_id: str, order: int) -> dict:
-        return {
-            "id": node_id,
-            "type": "script",
-            "position": {"x": 0.0, "y": 0.0},
-            "data": {"exec_order": order, "n_inputs": 1, "n_outputs": 1, "code": "OUT1 = IN1"},
-        }
-
-    def link(edge_id: str, source: str, target: str) -> dict:
-        return {
-            "id": edge_id,
-            "source": source,
-            "target": target,
-            "sourceHandle": "OUT1",
-            "targetHandle": "IN1",
-        }
-
     graph = {
         "nodes": [script_node("a", 1), script_node("b", 2), script_node("c", 3)],
         "edges": [link("e1", "a", "b"), link("e2", "b", "c"), link("e3", "c", "a")],
     }
+    assert has(errors_of(graph), "ciclo", "a -> b -> c -> a")
+
+
+def test_auto_laco_e_ciclo():
+    """Aresta de um bloco para ele mesmo: o menor ciclo possível."""
+    graph = {"nodes": [script_node("a", 1)], "edges": [link("e1", "a", "a")]}
+    assert has(errors_of(graph), "ciclo", "a -> a")
+
+
+def test_ciclo_em_componente_desconexo_e_detectado():
+    """A varredura precisa cobrir todos os componentes, não só o do primeiro nó."""
+    graph = {
+        "nodes": [
+            script_node("livre1", 1, n_inputs=0),
+            script_node("livre2", 2),
+            script_node("preso1", 3),
+            script_node("preso2", 4),
+        ],
+        "edges": [
+            link("e1", "livre1", "livre2"),
+            link("e2", "preso1", "preso2"),
+            link("e3", "preso2", "preso1"),
+        ],
+    }
     errors = errors_of(graph)
-    assert has(errors, "ciclo", "a", "b", "c")
+
+    assert has(errors, "ciclo", "preso1 -> preso2 -> preso1")
+    assert not has(errors, "ciclo", "livre1")
+
+
+def test_cadeia_profunda_nao_estoura_a_pilha():
+    """Milhares de nós encadeados: travessia iterativa, nunca RecursionError.
+
+    Com detecção recursiva isto levantava RecursionError, que na rota da tarefa 2.1 viraria
+    500 — e nenhuma rota de flows pode devolver 5xx para entrada de usuário.
+    """
+    total = 3000
+    nodes = [script_node("n1", 1, n_inputs=0)]
+    nodes += [script_node(f"n{i}", i) for i in range(2, total + 1)]
+    edges = [link(f"e{i}", f"n{i}", f"n{i + 1}") for i in range(1, total)]
+
+    result = validate_graph(parse_graph({"nodes": nodes, "edges": edges}), {}, TS)
+
+    assert result.errors == []
+    assert result.warnings == []
 
 
 # regra 6 — entradas obrigatórias conectadas
@@ -628,10 +692,21 @@ def test_teto_de_atraso_ignora_elemento_desabilitado():
     assert errors_of(graph, ts_seconds=0.5) == []
 
 
+def test_limite_exato_do_teto_de_atraso_do_tfs():
+    """7200 amostras é teto inclusivo (spec §3.4)."""
+    graph = base_graph()
+    node_of(graph, "t1")["data"]["matrix"][0][0]["params"]["theta"] = 7200.0
+    assert errors_of(graph, ts_seconds=1.0) == []
+
+    node_of(graph, "t1")["data"]["matrix"][0][0]["params"]["theta"] = 7201.0
+    assert has(errors_of(graph, ts_seconds=1.0), "t1", "7201", "7200")
+
+
 def test_ts_invalido_e_erro_de_programacao():
     graph = parse_graph(base_graph())
-    with pytest.raises(ValueError, match="ts_seconds"):
-        validate_graph(graph, base_tags(), 0.0)
+    for ts_seconds in (0.0, -1.0, -0.5):
+        with pytest.raises(ValueError, match="ts_seconds"):
+            validate_graph(graph, base_tags(), ts_seconds)
 
 
 # warnings de inversão de aresta
