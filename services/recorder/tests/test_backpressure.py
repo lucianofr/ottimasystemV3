@@ -345,14 +345,20 @@ async def test_malformado_conta_separado_do_descarte_por_pressao(
 async def test_stop_duas_vezes_nao_levanta_nem_grava_de_novo(redis_client, factory):
     pipeline = RecorderPipeline(redis_client, factory, flush_interval_s=FAST_INTERVAL_S)
     await pipeline.start()
-    read_task, flush_task = pipeline._read_task, pipeline._flush_task
+    events_task = pipeline._events_listener._task
+    samples_task = pipeline._samples_listener._task
+    flush_task = pipeline._flush_task
     pipeline.ingest_sample(sample(7, value=1.0).model_dump_json())
 
     await pipeline.stop()
     await pipeline.stop()  # segundo desmonte não levanta e não reflusha
 
     assert await count_rows(factory, samples_table) == 1
-    assert (read_task.cancelled(), flush_task.cancelled()) == (True, True)
+    assert (events_task.cancelled(), samples_task.cancelled(), flush_task.cancelled()) == (
+        True,
+        True,
+        True,
+    )
 
 
 async def test_stop_loga_a_etapa_que_falha_e_conclui_o_desmonte(
@@ -366,14 +372,14 @@ async def test_stop_loga_a_etapa_que_falha_e_conclui_o_desmonte(
     async def aclose_quebrado() -> None:
         raise ConnectionError("redis sumiu durante o desmonte")
 
-    monkeypatch.setattr(pipeline._pubsub, "aclose", aclose_quebrado)
+    monkeypatch.setattr(pipeline._samples_listener._pubsub, "aclose", aclose_quebrado)
 
-    with caplog.at_level(logging.ERROR, logger="ottima_recorder.pipeline"):
+    with caplog.at_level(logging.WARNING, logger="ottima_core.pubsub"):
         await pipeline.stop()
 
-    assert any("pubsub" in r.getMessage() for r in caplog.records)
+    assert any("assinante" in r.getMessage() for r in caplog.records)
     assert await count_rows(factory, samples_table) == 1  # flush final aconteceu mesmo assim
-    assert pipeline._pubsub is None
+    assert pipeline._samples_listener._pubsub is None
 
 
 async def test_stop_loga_task_morta_por_excecao_e_segue(redis_client, factory, caplog):
@@ -395,7 +401,8 @@ async def test_stop_loga_task_morta_por_excecao_e_segue(redis_client, factory, c
 
     assert any("task de flush" in r.getMessage() for r in caplog.records)
     assert await count_rows(factory, samples_table) == 1
-    assert (pipeline._read_task, pipeline._flush_task) == (None, None)
+    assert pipeline._flush_task is None
+    assert (pipeline._events_listener._task, pipeline._samples_listener._task) == (None, None)
 
 
 @pytest.fixture

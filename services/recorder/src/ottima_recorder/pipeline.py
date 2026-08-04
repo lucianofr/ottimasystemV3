@@ -13,7 +13,6 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
-from redis.asyncio.client import PubSub
 from sqlalchemy import Table, insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -25,12 +24,12 @@ from ottima_core.bus import (
     publish_event,
 )
 from ottima_core.models import events_table, samples_table
+from ottima_core.pubsub import ChannelListener, PatternListener
 
 logger = logging.getLogger(__name__)
 
 VALUES_PATTERN = "opc.values.*"
 FLUSH_INTERVAL_S = 1.0
-SUBSCRIBE_TIMEOUT_S = 5.0
 # Gatilhos de ciclo: buffer com esse tanto de linhas não espera o intervalo para gravar.
 SAMPLES_FLUSH_ROWS = 1000
 EVENTS_FLUSH_ROWS = 1000
@@ -39,7 +38,6 @@ SAMPLES_QUEUE_MAX = 100_000
 EVENTS_QUEUE_MAX = 10_000
 RETRY_INITIAL_S = 1.0
 RETRY_MAX_S = 30.0
-READ_RETRY_S = 1.0
 MAX_BIND_PARAMS = 32_000  # asyncpg aceita no máximo 32767 parâmetros por statement
 
 
@@ -71,7 +69,13 @@ class _DropOldestBuffer:
 
 
 class RecorderPipeline:
-    """Barramento → hypertables. Único escritor de `samples`/`events` (spec F2 §6)."""
+    """Barramento → hypertables. Único escritor de `samples`/`events` (spec F2 §6).
+
+    Duas assinaturas independentes (`opc.values.*` e `events`), cada uma no seu próprio
+    `PatternListener`/`ChannelListener` do laço resiliente compartilhado — os dois tipos de
+    dado têm buffers, tetos e contadores de descarte próprios (spec §6.4), então nada aqui
+    depende de ordem entre canal e padrão: uma conexão a menos era só economia, não contrato.
+    """
 
     def __init__(
         self,
@@ -95,8 +99,12 @@ class RecorderPipeline:
         self._db_ok = True
         self._last_flush_ts: datetime | None = None
         self._flush_now = asyncio.Event()
-        self._pubsub: PubSub | None = None
-        self._read_task: asyncio.Task[None] | None = None
+        self._events_listener = ChannelListener(
+            redis_client, CHANNEL_EVENTS, self._on_event, name="recorder-events"
+        )
+        self._samples_listener = PatternListener(
+            redis_client, VALUES_PATTERN, self._on_sample, name="recorder-samples"
+        )
         self._flush_task: asyncio.Task[None] | None = None
 
     @property
@@ -128,11 +136,19 @@ class RecorderPipeline:
         return self._last_flush_ts
 
     async def start(self) -> None:
-        """Assina os canais e sobe as tasks de leitura e de flush; retorna já."""
-        if self._read_task is not None:
+        """Assina os canais e sobe as tasks de leitura e de flush; retorna já. Idempotente."""
+        if self._flush_task is not None:
             return
-        self._pubsub = await self._subscribe()
-        self._read_task = asyncio.create_task(self._read_loop())
+        try:
+            await self._events_listener.start()
+            await self._samples_listener.start()
+        except BaseException:
+            # Uma das duas assinaturas falhou depois da outra já ter subido: sem este
+            # desmonte cruzado, a que deu certo ficaria pendurada no servidor — não há
+            # laço de fundo ainda rodando para reassiná-la ou fechá-la sozinha.
+            await self._events_listener.stop()
+            await self._samples_listener.stop()
+            raise
         self._flush_task = asyncio.create_task(self._flush_loop())
 
     async def stop(self) -> None:
@@ -142,20 +158,17 @@ class RecorderPipeline:
         o caminho normal e não vira log de erro; qualquer outra exceção é registrada com a
         etapa que falhou e o desmonte segue.
         """
-        stages = (("task de leitura", self._read_task), ("task de flush", self._flush_task))
-        for stage, task in stages:
-            if task is None:
-                continue
+        task, self._flush_task = self._flush_task, None
+        if task is not None:
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass  # cancelamento é o desmonte normal, não é falha
             except Exception:
-                logger.exception("Desmonte do recorder: %s terminou com erro", stage)
-        self._read_task = None
-        self._flush_task = None
-        await self._close_pubsub()
+                logger.exception("Desmonte do recorder: task de flush terminou com erro")
+        await self._events_listener.stop()
+        await self._samples_listener.stop()
         try:
             await self.flush()
         except Exception:
@@ -230,35 +243,11 @@ class RecorderPipeline:
         if len(self._events) >= EVENTS_FLUSH_ROWS:
             self._flush_now.set()
 
-    def _dispatch(self, message: dict[str, Any]) -> None:
-        """O tipo decide o buffer: `pmessage` vem do padrão, `message` do canal `events`.
+    async def _on_sample(self, channel: str, raw: str) -> None:
+        self.ingest_sample(raw)
 
-        Compartilhado com `_await_confirmations`: os dois caminhos de leitura não podem
-        divergir sobre o que é dado e o que é confirmação de inscrição.
-        """
-        if message["type"] == "pmessage":
-            self.ingest_sample(message["data"])
-        elif message["type"] == "message":
-            self.ingest_event(message["data"])
-
-    async def _read_loop(self) -> None:
-        """Uma task para as duas inscrições: o tipo da mensagem decide o buffer.
-
-        Redis fora do ar: loga, reassina e segue. O que foi publicado durante a queda se
-        perde — perda aceita para dado cíclico (RNF-05).
-        """
-        while True:
-            try:
-                if self._pubsub is None:
-                    self._pubsub = await self._subscribe()
-                async for message in self._pubsub.listen():
-                    self._dispatch(message)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.warning("Leitura do barramento falhou; reassinando", exc_info=True)
-            await self._close_pubsub()
-            await asyncio.sleep(READ_RETRY_S)
+    async def _on_event(self, raw: str) -> None:
+        self.ingest_event(raw)
 
     async def _flush_loop(self) -> None:
         """Flush a cada `flush_interval_s`, quando um buffer enche ou no backoff do retry."""
@@ -320,43 +309,3 @@ class RecorderPipeline:
             self._malformed_total += 1
             logger.warning("Payload inválido descartado pelo recorder: %.200s", raw)
             return None
-
-    async def _subscribe(self) -> PubSub:
-        pubsub = self._redis.pubsub()
-        try:
-            await pubsub.psubscribe(VALUES_PATTERN)
-            await pubsub.subscribe(CHANNEL_EVENTS)
-            await self._await_confirmations(pubsub)
-        except BaseException:
-            # Falhou antes de virar `self._pubsub`, onde nem `stop()` o alcançaria: sem este
-            # fechamento, cada start() que falha vaza conexão e inscrição no servidor.
-            # Entregar ao fechamento padrão reaproveita o log de etapa e zera `_pubsub`.
-            self._pubsub = pubsub
-            await self._close_pubsub()
-            raise
-        return pubsub
-
-    async def _close_pubsub(self) -> None:
-        if self._pubsub is None:
-            return
-        try:
-            await self._pubsub.aclose()  # aclose desfaz as inscrições e devolve a conexão
-        except Exception:
-            logger.exception("Desmonte do recorder: fechamento do pubsub falhou")
-        finally:
-            self._pubsub = None
-
-    async def _await_confirmations(self, pubsub: PubSub) -> None:
-        """Só volta com as duas inscrições confirmadas: publicação seguinte não se perde.
-
-        O padrão já entrega dado enquanto o `subscribe` é confirmado; essa janela vai para os
-        buffers como qualquer outra mensagem, em vez de virar amostra perdida no start.
-        """
-        pending = {"psubscribe", "subscribe"}
-        async with asyncio.timeout(SUBSCRIBE_TIMEOUT_S):
-            while pending:
-                message = await pubsub.get_message(timeout=SUBSCRIBE_TIMEOUT_S)
-                if message is None:
-                    continue
-                pending.discard(message["type"])
-                self._dispatch(message)
