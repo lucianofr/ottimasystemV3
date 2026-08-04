@@ -69,7 +69,7 @@ services/flow-runtime/src/ottima_flow_runtime/
 4. **Executor:** Script via ProcessPool (§3.3, decisão #4). **TFS executa inline** no loop — aritmética de estado-espaço 2×2 é O(µs), não é CPU-bound; pagar IPC nela seria ruído de jitter. MPC (F4) usará executor próprio (ADR-004). **[NOVA — implementação]**
 5. **Publicação:** `flow.status.<id>` a cada varredura `{state, scan_ms, overruns, ts, ports}` (payload §4.2) + publicação imediata em transição de estado (deploy/stop/falha). **`ts` = instante de disparo da varredura** (fronteira real), não o fim — é a referência da medição de jitter. **[NOVA — implementação]**
 6. **Estados e falha:** `stopped → running → stopped|failed`. Exceção/timeout de **script** não derruba o flow (RF-514: mantém saídas + alarme). Exceção **não tratada** do laço ⇒ `failed` + evento alarm `flow_failed` + task encerra; falha de um flow não afeta os demais (RF-402, task isolada). Retomada só por deploy manual.
-7. **Comandos (`flow.commands`):** `deploy`, `stop`, `reload` (dica de hot-swap). Idempotentes (RNF-05): deploy em rodando = no-op; stop em parado = no-op; `flow_id` desconhecido = log e ignora. Eventos edge-triggered emitidos pelo **runtime** ao materializar o efeito (`flow_deployed`, `flow_stopped`, `flow_failed`; `origin` carrega o `user` do comando) — a API não duplica auditoria: comando perdido = nada aconteceu = nenhum evento. **[NOVA — implementação]** (divisão de auditoria)
+7. **Comandos (`flow.commands`):** `deploy`, `stop`, `reload` (dica de hot-swap). Idempotentes (RNF-05): deploy em rodando = no-op; stop em parado = no-op; `flow_id` desconhecido = log e ignora. Eventos edge-triggered emitidos pelo **runtime** ao materializar o efeito (`flow_deployed`, `flow_stopped`, `flow_failed`; `origin` = `flow:<id>` exato — o `user` do comando vai no **payload**, e evento sem usuário comandante **omite** a chave `user`; emenda 2026-08-04) — a API não duplica auditoria: comando perdido = nada aconteceu = nenhum evento. **[NOVA — implementação]** (divisão de auditoria)
 8. **Contrato F2 §3.7:** assina `events`; `kind=comm_failure` ⇒ para (estado `failed`, `reason=comm_failure`) todo flow rodando cujo grafo referencia tag da conexão caída (conjunto de `conn_id`s resolvido no stage). `kind=project_activated` ⇒ para **todos** os flows rodando (pertencem ao projeto anterior) — cumpre o gancho RF-101 registrado na F1 (spec F1 §6.2).
 9. **Watermark backstop (10 s, padrão spec F2 §2.2-1):** pega dica perdida (`updated_at` de flow rodando mudou ⇒ stage), flow deletado ⇒ stop, projeto desativado ⇒ stop. Perda de mensagem nunca produz estado errado, só atraso ≤10 s (RNF-05). **[NOVA — implementação]**
 10. **`/health` (RNF-07):** `{status, service, version, flows:{<id>:{state, scan_ms, overruns, last_scan_ts}}}`; `status` reflete só dependências do serviço (Redis/banco), como na F2 §2.2-8 — flow em falha é condição operacional (alarme), não unhealth do serviço.
@@ -145,12 +145,13 @@ services/flow-runtime/src/ottima_flow_runtime/
 
 | `kind` | severity | origem | quando |
 |---|---|---|---|
-| `flow_deployed` / `flow_stopped` | info | flow-runtime | efeito materializado; `flow_stopped` leva `reason: user\|project_activated` |
+| `flow_deployed` / `flow_stopped` | info | flow-runtime | efeito materializado; `flow_stopped` leva `reason: user\|project_activated\|flow_deleted\|shutdown` (emenda 2026-08-04) |
 | `flow_failed` | alarm | flow-runtime | exceção não tratada ou `reason: comm_failure` (RF-207) |
 | `flow_overrun` | warning | flow-runtime | 1ª ocorrência por período (dedupe) |
 | `script_timeout` / `script_error` | alarm | flow-runtime, `origin=flow:<fid>/block:<bid>` | RF-514 |
 | `write_suppressed` | warning | flow-runtime | §3.2 (dedupe) |
 | `reload_rejected` | warning | flow-runtime | §4.1-5 |
+| `deploy_rejected` | warning | flow-runtime | §2.2-1 — deploy rejeitado (projeto inativo, grafo inválido); `reload_rejected` fica reservado ao staged inválido do hot-swap (emenda 2026-08-04) |
 | `flow_created` / `flow_updated` / `flow_deleted` | info | api | auditoria CRUD + dica de reconcile (padrão spec F2 §7.2) |
 
 ---
@@ -185,7 +186,7 @@ Reprovações (**422** pt-BR):
 
 ### 5.3 WebSocket `/ws` (RF-305 · decisão #2)
 
-- Upgrade em `GET /ws` — o nginx da F1 já proxeia com headers prontos (spec F1 §7.1).
+- Upgrade em `GET /ws` (URL literal, sem barra final). **Emenda 2026-08-04:** a afirmação original ("o nginx da F1 já proxeia com headers prontos") era falsa — o `location /ws/` da F1 não casava `GET /ws`; o proxy do nginx foi corrigido na F3 (`7298aa8`).
 - **Auth:** `?token=` na URL de conexão, papel operator. **[NOVA — implementação]** (forma; risco aceito coerente com HTTP interno, ADR-023)
 - **Protocolo** **[NOVA — implementação]**: cliente envia `{"subscribe": {"flow_status": [<flow_id>…]}}` / `unsubscribe` análogo; servidor responde fanout `{"channel": "flow.status.<id>", "data": {…}}`. A API mantém **uma** assinatura Redis compartilhada (psubscribe) e roteia para os clientes — não uma por socket.
 - Escopo F3: somente `flow_status` (canvas ao vivo). Eventos/valores de tag → F5 na mesma infra. Sem replay (RNF-05: fire-and-forget; UI orientada a estado publicado).
