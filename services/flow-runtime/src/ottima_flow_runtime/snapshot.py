@@ -38,7 +38,7 @@ class TagValue:
 
 
 class ValueSnapshot:
-    """Espelho do barramento: `psubscribe opc.values.*` → último valor por `tag_id`."""
+    """Espelho do barramento: padrão `opc.values.*` → último valor por `tag_id`."""
 
     def __init__(self, redis_client: Redis) -> None:
         self._values: dict[int, TagValue] = {}

@@ -1,6 +1,6 @@
 """WebSocket `/ws`: fanout de `flow.status.<id>` para o canvas ao vivo (RF-305, spec F3 §5.3).
 
-Uma **única** assinatura Redis por processo (`psubscribe flow.status.*`) alimenta todos os
+Uma **única** assinatura Redis por processo (padrão `flow.status.*`) alimenta todos os
 sockets: duas dúzias de editores abertos não podem virar duas dúzias de conexões Redis.
 
 O laço que lê o barramento nunca aguarda um socket — ele só enfileira, e cada socket tem a
