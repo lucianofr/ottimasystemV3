@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { LoginPage } from "../features/auth/LoginPage";
 import { AuthProvider } from "../features/auth/useAuth";
 import { ConnectionsPage } from "../features/connections/ConnectionsPage";
+import { FlowsPage } from "../features/flows/FlowsPage";
 import { TagsPage } from "../features/tags/TagsPage";
 import { TrendPage } from "../features/trend/TrendPage";
 import { AppShell } from "./AppShell";
@@ -24,6 +25,7 @@ export function App() {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/engenharia/conexoes" element={<ConnectionsPage />} />
                 <Route path="/engenharia/tags" element={<TagsPage />} />
+                <Route path="/engenharia/flows" element={<FlowsPage />} />
                 <Route path="/engenharia/trend" element={<TrendPage />} />
               </Route>
               {/* dentro do guarda: rota desconhecida sem sessão vai direto a /login */}
