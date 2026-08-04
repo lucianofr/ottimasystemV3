@@ -1,17 +1,25 @@
 import type uPlot from "uplot";
 
-/** Penas na ordem da spec F2 §9.3; o tamanho da lista É o limite de séries do gráfico. */
-const TOKENS_PENAS = [
-  "--color-pen-1",
-  "--color-pen-2",
-  "--color-pen-3",
-  "--color-pen-4",
-  "--color-pen-5",
-  "--color-pen-6",
+/**
+ * Penas na ordem da spec F2 §9.3; o tamanho da lista É o limite de séries do gráfico.
+ * Cada entrada casa o token lido em runtime (canvas) com a classe usada na legenda (DOM).
+ * Os dois são literais inteiros de propósito: `getPropertyValue` precisa do nome exato e o
+ * Tailwind extrai utilitários varrendo o texto-fonte, então `bg-pen-${n}` nunca seria gerado.
+ */
+const PENAS = [
+  { token: "--color-pen-1", classe: "bg-pen-1" },
+  { token: "--color-pen-2", classe: "bg-pen-2" },
+  { token: "--color-pen-3", classe: "bg-pen-3" },
+  { token: "--color-pen-4", classe: "bg-pen-4" },
+  { token: "--color-pen-5", classe: "bg-pen-5" },
+  { token: "--color-pen-6", classe: "bg-pen-6" },
 ] as const;
 
 /** Limite de penas ⇔ limite de 6 tags do `/api/history` (spec F2 §8). */
-export const LIMITE_PENAS = TOKENS_PENAS.length;
+export const LIMITE_PENAS = PENAS.length;
+
+/** Faixa de cor de cada pena na legenda, na mesma ordem das penas do gráfico. */
+export const CLASSES_PENA: readonly string[] = PENAS.map((pena) => pena.classe);
 
 /** A Regra do Número Tabular (DESIGN.md §Typography): valor sempre em pt-BR, sem notação científica. */
 export const FORMATO_VALOR = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 3 });
@@ -38,7 +46,7 @@ export interface TemaTrend {
 export function lerTemaTrend(): TemaTrend {
   const estilo = getComputedStyle(document.documentElement);
   return {
-    penas: TOKENS_PENAS.map((token) => estilo.getPropertyValue(token).trim()),
+    penas: PENAS.map((pena) => estilo.getPropertyValue(pena.token).trim()),
     linha: estilo.getPropertyValue("--color-hairline").trim(),
     texto: estilo.getPropertyValue("--color-fg-muted").trim(),
     mono: estilo.getPropertyValue("--font-mono").trim(),

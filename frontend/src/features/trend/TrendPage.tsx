@@ -5,7 +5,7 @@ import { Select } from "../../components/ui/select";
 import { cn } from "../../lib/cn";
 import { useActiveProject, useConnections } from "../connections/useConnections";
 import { TrendChart } from "./TrendChart";
-import { FORMATO_VALOR, LIMITE_PENAS } from "./trendTheme";
+import { CLASSES_PENA, FORMATO_VALOR, LIMITE_PENAS } from "./trendTheme";
 import { montarMatriz, resumirSeries, useHistory, useTags } from "./useHistory";
 
 const JANELAS = [
@@ -21,16 +21,6 @@ type JanelaId = (typeof JANELAS)[number]["id"];
 /** O engenheiro precisa saber quando está olhando agregado, não amostra bruta (spec F2 §9.2). */
 const ROTULO_MODO: Record<"raw" | "1m", string> = { raw: "bruto", "1m": "1 min" };
 
-/** Classes de cor das penas: referência aos mesmos tokens que o gráfico lê em runtime. */
-const CLASSES_PENA = [
-  "bg-pen-1",
-  "bg-pen-2",
-  "bg-pen-3",
-  "bg-pen-4",
-  "bg-pen-5",
-  "bg-pen-6",
-] as const;
-
 export function TrendPage() {
   const [selecionadas, setSelecionadas] = useState<number[]>([]);
   const [janelaId, setJanelaId] = useState<JanelaId>("30m");
@@ -42,11 +32,10 @@ export function TrendPage() {
   const tags = useTags();
   const historico = useHistory(selecionadas, janela.segundos);
 
-  const chaveSelecao = selecionadas.join(",");
-  // A seleção entra pela chave estável: o array `selecionadas` é recriado a cada render.
+  // `selecionadas` é estado: a identidade só muda quando a seleção muda de fato.
   const dados = useMemo(
     () => (historico.data ? montarMatriz(historico.data, selecionadas) : null),
-    [historico.data, chaveSelecao],
+    [historico.data, selecionadas],
   );
   const resumos = historico.data ? resumirSeries(historico.data, selecionadas) : [];
 
@@ -178,7 +167,12 @@ export function TrendPage() {
           )}
 
           {dados && (
-            <TrendChart dados={dados} rotulos={rotulos} janelaSegundos={janela.segundos} />
+            <TrendChart
+              dados={dados}
+              ids={selecionadas}
+              rotulos={rotulos}
+              janelaSegundos={janela.segundos}
+            />
           )}
 
           {resumos.length > 0 && (
@@ -206,10 +200,21 @@ export function TrendPage() {
                         BAD
                       </span>
                     )}
+                    {/* Sem amostra dentro do teto: rótulo próprio, não `BAD`. `BAD` é qualidade
+                        ruim que chegou da origem; isto é a aquisição parada. Confundir os dois
+                        mandaria o engenheiro depurar o servidor OPC em vez do worker. */}
+                    {resumo.semDado && (
+                      <span
+                        data-testid="trend-legend-sem-dado"
+                        className="plaqueta rounded-panel border border-warn px-1.5 text-xs text-warn"
+                      >
+                        SEM DADO
+                      </span>
+                    )}
                     <span
                       className={cn(
                         "process-value w-28 text-right text-sm",
-                        resumo.bad ? "text-fg-muted" : "text-fg",
+                        resumo.bad || resumo.semDado ? "text-fg-muted" : "text-fg",
                       )}
                     >
                       {resumo.valor === null ? "—" : FORMATO_VALOR.format(resumo.valor)}

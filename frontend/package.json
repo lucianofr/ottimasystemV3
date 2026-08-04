@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "generate:api": "openapi-typescript openapi.json -o src/lib/api-types.ts",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "test:unit": "playwright test -c playwright.unit.config.ts"
   },
   "dependencies": {
     "@fontsource/archivo": "^5.1.0",

@@ -9,19 +9,25 @@ const ALTURA = 420;
 
 export interface TrendChartProps {
   readonly dados: uPlot.AlignedData;
-  /** Um rótulo por pena, na ordem da seleção. Mudar a lista muda a estrutura do gráfico. */
+  /** Ids das penas, na ordem da seleção: número e ordem de séries são a estrutura do gráfico. */
+  readonly ids: readonly number[];
+  /** Um rótulo por pena, na ordem de `ids`. Texto exibido, nunca estrutura. */
   readonly rotulos: readonly string[];
   readonly janelaSegundos: number;
 }
 
-export function TrendChart({ dados, rotulos, janelaSegundos }: TrendChartProps) {
+export function TrendChart({ dados, ids, rotulos, janelaSegundos }: TrendChartProps) {
   const container = useRef<HTMLDivElement>(null);
   const grafico = useRef<uPlot | null>(null);
   // O efeito de criação só pode depender da estrutura; os dados vivos entram por ref para
   // não recriar o gráfico a cada polling (pisca e perde o zoom).
   const ultimosDados = useRef(dados);
   ultimosDados.current = dados;
-  const estrutura = `${String(janelaSegundos)}|${rotulos.join("\u0000")}`;
+  // Os rótulos ficam fora da estrutura de propósito: `useTags()` resolve depois de
+  // `useHistory()`, e trocar o fallback `String(id)` pelo nome real recriaria a instância —
+  // e o zoom do engenheiro iria junto — sem que nada de estrutural tivesse mudado.
+  const estrutura = `${String(janelaSegundos)}|${ids.join(",")}`;
+  const chaveRotulos = rotulos.join("\u0000");
   const estruturaAtual = useRef({ rotulos, janelaSegundos });
   estruturaAtual.current = { rotulos, janelaSegundos };
 
@@ -50,6 +56,16 @@ export function TrendChart({ dados, rotulos, janelaSegundos }: TrendChartProps) 
       grafico.current = null;
     };
   }, [estrutura]);
+
+  useEffect(() => {
+    const instancia = grafico.current;
+    if (!instancia) return;
+    // Rótulo é texto: trocar o nome vivo, sem destruir a instância. A série 0 é o eixo x.
+    estruturaAtual.current.rotulos.forEach((rotulo, indice) => {
+      const serie = instancia.series[indice + 1];
+      if (serie) serie.label = rotulo;
+    });
+  }, [chaveRotulos]);
 
   useEffect(() => {
     const instancia = grafico.current;
