@@ -29,6 +29,14 @@ ensaio.
 """
 
 
+def _describe(exc: Exception) -> str:
+    """Detalhe curto para o payload do evento, no mesmo idioma de `subscriptions.py`.
+
+    Fica aqui, e não em `connection.py`: aquele módulo importa este, o inverso seria ciclo.
+    """
+    return f"{type(exc).__name__}: {exc}".strip()
+
+
 class WatchdogTask:
     """Handshake de life-bit com o PLC, por conexão (ADR-009, RF-206).
 
@@ -84,8 +92,16 @@ class WatchdogTask:
             await task
 
     async def _loop(self) -> None:
-        read_node = self._client.get_node(self._config.watchdog_read_node_id)
-        write_node = self._client.get_node(self._config.watchdog_write_node_id)
+        # `get_node` já pode falhar: NodeId malformado levanta na hora de parsear. Nenhuma
+        # exceção pode escapar daqui sem virar callback — task de watchdog que morre calada
+        # deixa `watchdog_alive` congelado e o gate de escrita (2.3) decidindo por um valor
+        # que nunca mais muda (ADR-009).
+        try:
+            read_node = self._client.get_node(self._config.watchdog_read_node_id)
+            write_node = self._client.get_node(self._config.watchdog_write_node_id)
+        except Exception as exc:
+            await self._on_hard_failure(_describe(exc))
+            return
         while True:
             await asyncio.sleep(self._period_s)
             try:
@@ -100,7 +116,7 @@ class WatchdogTask:
             except Exception as exc:
                 # Falha dura de sessão (spec §2.2-2): sem retry interno, quem reconecta é
                 # o runtime, com backoff.
-                await self._on_hard_failure(f"{type(exc).__name__}: {exc}".strip())
+                await self._on_hard_failure(_describe(exc))
                 return
             if time.monotonic() - self._last_transition > self._freeze_threshold_s:
                 logger.warning(

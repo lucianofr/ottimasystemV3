@@ -24,6 +24,8 @@ from ottima_opc_worker.watchdog import FREEZE_THRESHOLD_S, WatchdogTask
 CONN_ID = 9
 POLL_INTERVAL_S = 0.01
 MISSING_NODE = "ns=2;s=nao.existe"
+# NodeId sintaticamente torto: nem chega a virar requisição, quebra no parse do client.
+MALFORMED_NODE = "not-a-valid-nodeid"
 
 # Período curto para o teste não arrastar; >= 100 ms para o rung (50 ms) reagir a tempo.
 FAST_PERIOD_MS = 100
@@ -281,6 +283,41 @@ async def test_write_invalido_e_falha_dura_imediata(sim: OpcSimServer) -> None:
     assert len(recorder.hard_failures) == 1
     assert recorder.hard_failures[0]
     assert recorder.freezes == []
+
+
+async def test_read_com_node_id_malformado_avisa_em_vez_de_matar_a_task(
+    sim: OpcSimServer,
+) -> None:
+    """NodeId inválido falha já no parse: tem de virar `on_hard_failure`, não task morta.
+
+    Watchdog que morre calado deixa `watchdog_alive` congelado e o gate de escrita (2.3)
+    decidindo por um valor que nunca mais muda (ADR-009).
+    """
+    recorder = Recorder()
+    async with watchdog_running(sim, recorder, read_node=MALFORMED_NODE):
+        await await_until(lambda: bool(recorder.hard_failures), timeout_s=0.9)
+        await asyncio.sleep(QUIET_WINDOW_S)
+
+    assert len(recorder.hard_failures) == 1
+    # O node_id torto vai no detalhe: é o que permite achar a configuração errada.
+    assert MALFORMED_NODE in recorder.hard_failures[0]
+    assert recorder.freezes == []
+    assert recorder.alives == []
+
+
+async def test_write_com_node_id_malformado_avisa_em_vez_de_matar_a_task(
+    sim: OpcSimServer,
+) -> None:
+    """Mesmo tratamento quando quem está torto é o node de escrita."""
+    recorder = Recorder()
+    async with watchdog_running(sim, recorder, write_node=MALFORMED_NODE):
+        await await_until(lambda: bool(recorder.hard_failures), timeout_s=0.9)
+        await asyncio.sleep(QUIET_WINDOW_S)
+
+    assert len(recorder.hard_failures) == 1
+    assert MALFORMED_NODE in recorder.hard_failures[0]
+    assert recorder.freezes == []
+    assert recorder.alives == []
 
 
 async def test_stop_e_idempotente_e_cala_o_ciclo(sim: OpcSimServer) -> None:
