@@ -1,34 +1,16 @@
 """Contratos do espelho de valores do flow-runtime (RF-401, spec F3 §2.1, §3.0, §3.1)."""
 
 import asyncio
-from collections.abc import Callable
 from datetime import UTC, datetime
 
 import pytest
 from redis.asyncio import Redis
 
+from conftest import AWAIT_TIMEOUT_S, await_until
 from ottima_core.bus import OpcValue, channel_opc_values
 from ottima_flow_runtime.snapshot import ValueSnapshot
 
 TS = datetime(2026, 8, 4, 12, 0, 0, tzinfo=UTC)
-AWAIT_TIMEOUT_S = 5.0
-
-
-async def await_until(
-    condition: Callable[[], bool], timeout_s: float = AWAIT_TIMEOUT_S, interval: float = 0.02
-) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes.
-
-    Equivalente local ao helper de `services/opc-worker/tests/conftest.py`, que não é
-    importável deste pacote de testes.
-    """
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
-        if condition():
-            return
-        await asyncio.sleep(interval)
-    raise AssertionError(f"condição não satisfeita em {timeout_s}s")
 
 
 async def publish(
