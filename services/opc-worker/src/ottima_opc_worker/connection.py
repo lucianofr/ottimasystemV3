@@ -12,7 +12,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from asyncua import Client
+from asyncua import Client, ua
 from redis.asyncio import Redis
 
 from ottima_core.bus import KIND_COMM_FAILURE, KIND_COMM_RESTORED, publish_event
@@ -46,6 +46,15 @@ _REASON_TEXT: dict[str, str] = {
     "watchdog_timeout": "watchdog sem alternância",
     "cert_mismatch": "certificado do servidor não confere",
     "cert_missing": "certificado ausente (aplicação ou servidor)",
+}
+
+# Fallback de codificação quando o DataType do node é ilegível (spec §4.3): o tipo
+# declarado em `tags.data_type` é a intenção do engenheiro, e é o melhor palpite que
+# resta quando o servidor não responde o atributo.
+_FALLBACK_VARIANT_TYPES: dict[str, ua.VariantType] = {
+    "float": ua.VariantType.Double,
+    "int": ua.VariantType.Int32,
+    "bool": ua.VariantType.Boolean,
 }
 
 
@@ -95,6 +104,8 @@ class ConnectionRuntime:
         self._session_open = False
         self._subscription: ValueSubscription | None = None
         self._watchdog: WatchdogTask | None = None
+        # Cache de codificação das tags `w`, preenchido 1× por sessão (spec §4.3).
+        self._write_types: dict[int, ua.VariantType] = {}
         self._watchdog_freeze_threshold_s = watchdog_freeze_threshold_s
         # Edge-trigger dos eventos: só há `comm_restored` depois de um `comm_failure`.
         self._failure_pending = False
@@ -175,6 +186,7 @@ class ConnectionRuntime:
         except Exception as exc:
             await self.fail("session_lost", describe_exception(exc))
             raise
+        await self.load_write_types()
         await self._start_watchdog(client)
 
     async def on_session_down(self) -> None:
@@ -188,6 +200,57 @@ class ConnectionRuntime:
         subscription, self._subscription = self._subscription, None
         if subscription is not None:
             await subscription.stop()
+        # O cache é da sessão: um servidor reconfigurado entre duas sessões pode ter
+        # trocado o DataType do node. Limpar aqui, e não num caminho novo, é o que mantém
+        # este gancho o único ponto de desmonte da sessão.
+        self._write_types = {}
+
+    async def load_write_types(self) -> None:
+        """Lê 1× o DataType de cada node de tag `w` e monta o cache `tag_id -> VariantType`.
+
+        `tags.data_type` valida a intenção do engenheiro; quem decide a codificação é o
+        VariantType real do servidor — escrever Int64 num node Int32 dá `BadTypeMismatch`
+        (spec §4.3). Node ilegível cai no fallback e NUNCA derruba a sessão: uma tag de
+        escrita mal configurada não pode custar a aquisição inteira da conexão.
+
+        As leituras vão em paralelo porque isto roda antes de `up`, dentro da janela em
+        que um `fail()` concorrente ainda pode superar a tentativa: N leituras em série
+        alargariam essa janela por N round-trips, em paralelo custam um.
+        """
+        client = self._client
+        if client is None:
+            return
+        write_tags = [tag for tag in self._config.tags if tag.direction == "w"]
+        self._write_types = dict(
+            await asyncio.gather(*(self._read_write_type(client, tag) for tag in write_tags))
+        )
+
+    async def _read_write_type(self, client: Client, tag: TagConfig) -> tuple[int, ua.VariantType]:
+        """DataType real do node da tag, ou o fallback declarado. Nunca levanta."""
+        try:
+            return tag.id, await client.get_node(tag.node_id).read_data_type_as_variant_type()
+        except Exception as exc:
+            logger.warning(
+                "DataType da tag %s (%s) ilegível; usando o fallback de '%s': %s",
+                tag.id,
+                tag.node_id,
+                tag.data_type,
+                describe_exception(exc),
+            )
+            return tag.id, _FALLBACK_VARIANT_TYPES[tag.data_type]
+
+    def variant_type_for(self, tag_id: int) -> ua.VariantType:
+        """Codificação de escrita da tag: cache da sessão, senão fallback por `data_type`.
+
+        O fallback também cobre a tag que entrou por `apply_tags` depois da subida da
+        sessão: escrever pelo tipo declarado é melhor do que recusar a escrita, e um
+        `BadTypeMismatch` vira evento de erro auditado (spec §4.4).
+        """
+        cached = self._write_types.get(tag_id)
+        if cached is not None:
+            return cached
+        tag = next((t for t in self._config.tags if t.id == tag_id), None)
+        return _FALLBACK_VARIANT_TYPES[tag.data_type] if tag is not None else ua.VariantType.Double
 
     async def _start_watchdog(self, client: Client) -> None:
         """Sobe o watchdog da sessão, se a conexão tiver o par de node_ids (spec §3.1).

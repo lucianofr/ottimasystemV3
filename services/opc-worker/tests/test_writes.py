@@ -1,0 +1,385 @@
+"""Testes do consumidor de `opc.writes` (spec F2 §3.4/3.5/§4, RF-205/207).
+
+Tudo contra o opcsim in-process e o Redis real da fixture da raiz: os espelhos R do
+simulador são a prova de que a escrita chegou ao servidor, e o canal `events` é a prova
+da auditoria.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from typing import Any
+
+import pytest
+from asyncua import ua
+from asyncua.common.node import Node
+from redis.asyncio import Redis
+
+from conftest import AWAIT_TIMEOUT_S, await_until, collecting
+from opcsim import (
+    NODE_MIRROR_BOOL,
+    NODE_MIRROR_FLOAT,
+    NODE_MIRROR_INT,
+    NODE_SINE,
+    NODE_W_BOOL,
+    NODE_W_FLOAT,
+    NODE_W_INT,
+    NODE_WD_FROM_SYSTEM,
+    NODE_WD_TO_SYSTEM,
+    OpcSimServer,
+)
+from ottima_core.bus import (
+    CHANNEL_EVENTS,
+    CHANNEL_OPC_WRITES,
+    KIND_OPC_WRITE,
+    KIND_WRITE_BLOCKED,
+    KIND_WRITE_REJECTED,
+    OpcWrite,
+)
+from ottima_opc_worker.connection import ConnectionRuntime
+from ottima_opc_worker.state import ConnectionConfig, ConnectionSnapshot, ConnectionState, TagConfig
+from ottima_opc_worker.writes import WriteConsumer, coerce_value
+
+CONN_ID = 7
+TAG_FLOAT = 11
+TAG_INT = 12
+TAG_BOOL = 13
+TAG_READONLY = 14
+
+# Backoff e watchdog curtos: o teste não pode esperar a cadência de produção.
+TEST_BACKOFF_INITIAL_S = 0.05
+TEST_BACKOFF_MAX_S = 0.2
+TEST_WATCHDOG_PERIOD_MS = 100
+TEST_FREEZE_THRESHOLD_S = 0.5
+# Janela para provar que algo NÃO acontece.
+QUIET_WINDOW_S = 1.0
+
+TAGS: tuple[TagConfig, ...] = (
+    TagConfig(
+        id=TAG_FLOAT, name="SP Vazão", node_id=NODE_W_FLOAT, direction="w", data_type="float"
+    ),
+    TagConfig(id=TAG_INT, name="SP Passo", node_id=NODE_W_INT, direction="w", data_type="int"),
+    TagConfig(id=TAG_BOOL, name="Liga Bomba", node_id=NODE_W_BOOL, direction="w", data_type="bool"),
+    TagConfig(
+        id=TAG_READONLY, name="Leitura", node_id=NODE_W_FLOAT, direction="r", data_type="float"
+    ),
+)
+
+
+def make_config(
+    endpoint: str,
+    *,
+    conn_id: int = CONN_ID,
+    with_watchdog: bool = True,
+    tags: tuple[TagConfig, ...] = TAGS,
+) -> ConnectionConfig:
+    return ConnectionConfig(
+        id=conn_id,
+        project_id=1,
+        name="Forno 1",
+        endpoint=endpoint,
+        security_policy="none",
+        security_mode="none",
+        auth_mode="anonymous",
+        auth_username=None,
+        auth_password_enc=None,
+        server_cert_file=None,
+        watchdog_read_node_id=NODE_WD_TO_SYSTEM if with_watchdog else None,
+        watchdog_write_node_id=NODE_WD_FROM_SYSTEM if with_watchdog else None,
+        watchdog_period_ms=TEST_WATCHDOG_PERIOD_MS,
+        tags=tags,
+    )
+
+
+class Bancada:
+    """Runtime de conexão e consumidor ligados ao mesmo mapping vivo de runtimes."""
+
+    def __init__(self, runtime: ConnectionRuntime, consumer: WriteConsumer) -> None:
+        self.runtime = runtime
+        self.consumer = consumer
+        self.snapshot = runtime.snapshot
+
+    async def gate_aberto(self) -> None:
+        await await_until(
+            lambda: self.runtime.state is ConnectionState.UP and self.snapshot.watchdog_alive
+        )
+
+
+@asynccontextmanager
+async def bancada(
+    redis_client: Redis,
+    sim: OpcSimServer,
+    *,
+    with_watchdog: bool = True,
+    tags: tuple[TagConfig, ...] = TAGS,
+    conn_id: int = CONN_ID,
+) -> AsyncIterator[Bancada]:
+    config = make_config(sim.endpoint, conn_id=conn_id, with_watchdog=with_watchdog, tags=tags)
+    snapshot = ConnectionSnapshot(name=config.name)
+    runtime = ConnectionRuntime(
+        config,
+        redis_client,
+        snapshot,
+        backoff_initial_s=TEST_BACKOFF_INITIAL_S,
+        backoff_max_s=TEST_BACKOFF_MAX_S,
+        watchdog_freeze_threshold_s=TEST_FREEZE_THRESHOLD_S,
+    )
+    consumer = WriteConsumer(redis_client, {conn_id: runtime})
+    await runtime.start()
+    await consumer.start()
+    try:
+        yield Bancada(runtime, consumer)
+    finally:
+        await consumer.stop()
+        await runtime.stop()
+
+
+async def publicar(
+    redis_client: Redis,
+    *,
+    tag_id: int,
+    value: float,
+    conn_id: int = CONN_ID,
+    source: str = "flow:3/block:opcw1",
+) -> None:
+    write = OpcWrite(
+        conn_id=conn_id, tag_id=tag_id, value=value, source=source, ts=datetime.now(UTC)
+    )
+    await redis_client.publish(CHANNEL_OPC_WRITES, write.model_dump_json())
+
+
+async def esperar_valor(sim: OpcSimServer, node_id: str, esperado: Any) -> None:
+    """Espera o node do simulador valer `esperado`; a leitura é server-side, sem cliente."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + AWAIT_TIMEOUT_S
+    atual: Any = None
+    while loop.time() < deadline:
+        atual = await sim.read(node_id)
+        if atual == esperado:
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"{node_id} ficou em {atual!r}, esperado {esperado!r}")
+
+
+def of_kind(events: list[dict], kind: str) -> list[dict]:
+    return [event for event in events if event["payload"]["kind"] == kind]
+
+
+async def test_escrita_ok_chega_ao_servidor_e_gera_evento_info(redis_client: Redis, sim):
+    async with bancada(redis_client, sim) as banca, collecting(redis_client, CHANNEL_EVENTS) as ev:
+        await banca.gate_aberto()
+
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=61.5)
+
+        await await_until(lambda: len(of_kind(ev, KIND_OPC_WRITE)) == 1)
+        await esperar_valor(sim, NODE_MIRROR_FLOAT, 61.5)
+        evento = of_kind(ev, KIND_OPC_WRITE)[0]
+        assert evento["severity"] == "info"
+        assert evento["origin"] == "flow:3/block:opcw1", "origin é o source verbatim (§4.4)"
+        assert evento["payload"]["status"] == "ok"
+        assert evento["payload"]["conn_id"] == CONN_ID
+        assert evento["payload"]["tag_id"] == TAG_FLOAT
+        assert evento["payload"]["value"] == pytest.approx(61.5)
+
+
+async def test_coercao_usa_o_datatype_real_do_servidor(redis_client: Redis, sim):
+    async with bancada(redis_client, sim) as banca, collecting(redis_client, CHANNEL_EVENTS) as ev:
+        await banca.gate_aberto()
+
+        await publicar(redis_client, tag_id=TAG_INT, value=7.9)
+        await publicar(redis_client, tag_id=TAG_BOOL, value=2.5)
+
+        await await_until(lambda: len(of_kind(ev, KIND_OPC_WRITE)) == 2)
+        assert all(e["payload"]["status"] == "ok" for e in of_kind(ev, KIND_OPC_WRITE)), (
+            "Int64 num node Int32 daria BadTypeMismatch"
+        )
+        await esperar_valor(sim, NODE_MIRROR_INT, 8)
+        await esperar_valor(sim, NODE_MIRROR_BOOL, True)
+
+        await publicar(redis_client, tag_id=TAG_BOOL, value=0.0)
+        await esperar_valor(sim, NODE_MIRROR_BOOL, False)
+
+
+async def test_datatype_e_lido_uma_vez_por_sessao(redis_client: Redis, sim, monkeypatch):
+    original = Node.read_data_type_as_variant_type
+    lidos: list[str] = []
+
+    async def contando(self: Node) -> ua.VariantType:
+        lidos.append(self.nodeid.to_string())
+        return await original(self)
+
+    monkeypatch.setattr(Node, "read_data_type_as_variant_type", contando)
+
+    tags = tuple(tag for tag in TAGS if tag.id == TAG_FLOAT)
+    async with bancada(redis_client, sim, tags=tags) as banca:
+        await banca.gate_aberto()
+        await await_until(lambda: len(lidos) == 1)
+
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=1.0)
+        await esperar_valor(sim, NODE_MIRROR_FLOAT, 1.0)
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=2.0)
+        await esperar_valor(sim, NODE_MIRROR_FLOAT, 2.0)
+
+        assert lidos == [NODE_W_FLOAT], "o cache é de sessão, não de escrita"
+
+
+async def test_datatype_ilegivel_cai_no_fallback_sem_derrubar_a_sessao(redis_client: Redis, sim):
+    tags = (
+        TagConfig(
+            id=TAG_INT,
+            name="SP Fantasma",
+            node_id="ns=2;s=sim.nao.existe",
+            direction="w",
+            data_type="int",
+        ),
+    )
+    async with bancada(redis_client, sim, tags=tags) as banca:
+        await banca.gate_aberto()
+
+        assert banca.runtime.variant_type_for(TAG_INT) is ua.VariantType.Int32
+        await asyncio.sleep(QUIET_WINDOW_S)
+        assert banca.runtime.state is ConnectionState.UP, "node ilegível não derruba a sessão"
+
+
+async def test_tag_de_leitura_e_recusada(redis_client: Redis, sim):
+    async with bancada(redis_client, sim) as banca, collecting(redis_client, CHANNEL_EVENTS) as ev:
+        await banca.gate_aberto()
+        antes = await sim.read(NODE_W_FLOAT)
+
+        await publicar(redis_client, tag_id=TAG_READONLY, value=99.0)
+
+        await await_until(lambda: len(of_kind(ev, KIND_WRITE_REJECTED)) == 1)
+        evento = of_kind(ev, KIND_WRITE_REJECTED)[0]
+        assert evento["severity"] == "warning"
+        assert evento["origin"] == f"conn:{CONN_ID}"
+        assert evento["payload"]["reason"] == "tag_not_writable"
+        assert await sim.read(NODE_W_FLOAT) == antes
+        assert not of_kind(ev, KIND_OPC_WRITE)
+
+
+async def test_conexao_desconhecida_e_recusada_uma_vez(redis_client: Redis, sim):
+    async with bancada(redis_client, sim) as banca, collecting(redis_client, CHANNEL_EVENTS) as ev:
+        await banca.gate_aberto()
+
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=1.0, conn_id=999)
+        await await_until(lambda: len(of_kind(ev, KIND_WRITE_REJECTED)) == 1)
+        assert of_kind(ev, KIND_WRITE_REJECTED)[0]["payload"]["reason"] == "unknown_connection"
+
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=2.0, conn_id=999)
+        # A 2ª escrita idêntica só é observável pelo silêncio: espere e reconte.
+        await asyncio.sleep(QUIET_WINDOW_S)
+        assert len(of_kind(ev, KIND_WRITE_REJECTED)) == 1, "recusa é deduplicada"
+
+
+async def test_conexao_sem_watchdog_recusa_e_nao_escreve(redis_client: Redis, sim):
+    async with (
+        bancada(redis_client, sim, with_watchdog=False) as banca,
+        collecting(redis_client, CHANNEL_EVENTS) as ev,
+    ):
+        await await_until(lambda: banca.runtime.state is ConnectionState.UP)
+        antes = await sim.read(NODE_W_FLOAT)
+
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=77.0)
+        await await_until(lambda: len(of_kind(ev, KIND_WRITE_REJECTED)) == 1)
+        assert of_kind(ev, KIND_WRITE_REJECTED)[0]["payload"]["reason"] == "no_watchdog"
+
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=78.0)
+        await asyncio.sleep(QUIET_WINDOW_S)
+        assert len(of_kind(ev, KIND_WRITE_REJECTED)) == 1, "recusa é deduplicada por conexão"
+        assert await sim.read(NODE_W_FLOAT) == antes
+
+
+async def test_gate_fechado_bloqueia_e_dedupe_conta_suprimidos(redis_client: Redis, sim):
+    async with bancada(redis_client, sim) as banca, collecting(redis_client, CHANNEL_EVENTS) as ev:
+        await banca.gate_aberto()
+        antes = await sim.read(NODE_MIRROR_FLOAT)
+
+        await sim.set_freeze_watchdog(True)
+        await await_until(lambda: not banca.snapshot.watchdog_alive)
+
+        for i in range(5):
+            await publicar(redis_client, tag_id=TAG_FLOAT, value=100.0 + i)
+
+        await await_until(lambda: len(of_kind(ev, KIND_WRITE_BLOCKED)) == 1)
+        evento = of_kind(ev, KIND_WRITE_BLOCKED)[0]
+        assert evento["severity"] == "warning"
+        assert evento["origin"] == f"conn:{CONN_ID}"
+        assert evento["payload"]["suppressed"] >= 4
+        assert len(of_kind(ev, KIND_WRITE_BLOCKED)) == 1, "um evento por período de falha"
+        assert await sim.read(NODE_MIRROR_FLOAT) == antes, "nenhuma escrita chegou ao servidor"
+        assert not of_kind(ev, KIND_OPC_WRITE)
+
+
+async def test_gate_reabre_sozinho_apos_a_primeira_alternancia(redis_client: Redis, sim):
+    async with bancada(redis_client, sim) as banca, collecting(redis_client, CHANNEL_EVENTS) as ev:
+        await banca.gate_aberto()
+
+        await sim.set_freeze_watchdog(True)
+        await await_until(lambda: not banca.snapshot.watchdog_alive)
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=10.0)
+        await await_until(lambda: len(of_kind(ev, KIND_WRITE_BLOCKED)) == 1)
+
+        await sim.set_freeze_watchdog(False)
+        await banca.gate_aberto()
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=33.0)
+        await esperar_valor(sim, NODE_MIRROR_FLOAT, 33.0)
+        assert of_kind(ev, KIND_OPC_WRITE)[-1]["payload"]["status"] == "ok"
+
+        # Novo período de falha volta a avisar: o dedupe é do período, não da conexão.
+        await sim.set_freeze_watchdog(True)
+        await await_until(lambda: not banca.snapshot.watchdog_alive)
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=44.0)
+        await await_until(lambda: len(of_kind(ev, KIND_WRITE_BLOCKED)) == 2)
+
+
+async def test_falha_de_execucao_conta_em_write_errors(redis_client: Redis, sim):
+    tags = (
+        TagConfig(
+            id=TAG_FLOAT, name="SP Senoide", node_id=NODE_SINE, direction="w", data_type="float"
+        ),
+    )
+    async with (
+        bancada(redis_client, sim, tags=tags) as banca,
+        collecting(redis_client, CHANNEL_EVENTS) as ev,
+    ):
+        await banca.gate_aberto()
+
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=5.0)
+
+        await await_until(lambda: len(of_kind(ev, KIND_OPC_WRITE)) == 1)
+        evento = of_kind(ev, KIND_OPC_WRITE)[0]
+        assert evento["severity"] == "warning"
+        assert evento["origin"] == "flow:3/block:opcw1", "erro também é rastro de quem mandou"
+        assert evento["payload"]["status"] == "error"
+        assert evento["payload"]["detail"]
+        assert banca.snapshot.write_errors == 1
+
+
+async def test_payload_malformado_nao_derruba_o_consumidor(redis_client: Redis, sim):
+    async with bancada(redis_client, sim) as banca, collecting(redis_client, CHANNEL_EVENTS) as ev:
+        await banca.gate_aberto()
+
+        await redis_client.publish(CHANNEL_OPC_WRITES, "lixo que não é json")
+        await redis_client.publish(CHANNEL_OPC_WRITES, '{"conn_id": "abacaxi"}')
+
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=12.5)
+        await esperar_valor(sim, NODE_MIRROR_FLOAT, 12.5)
+        assert len(of_kind(ev, KIND_OPC_WRITE)) == 1
+
+
+async def test_stop_e_idempotente(redis_client: Redis, sim):
+    async with bancada(redis_client, sim) as banca:
+        await banca.gate_aberto()
+        await banca.consumer.stop()
+        await banca.consumer.stop()
+
+
+def test_coercao_por_variant_type():
+    assert coerce_value(7.9, ua.VariantType.Int32) == 8
+    assert coerce_value(-7.9, ua.VariantType.Int16) == -8
+    assert coerce_value(0.0, ua.VariantType.Boolean) is False
+    assert coerce_value(2.5, ua.VariantType.Boolean) is True
+    assert isinstance(coerce_value(2, ua.VariantType.Double), float)
