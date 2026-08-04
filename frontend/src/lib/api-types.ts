@@ -192,6 +192,42 @@ export interface paths {
         patch: operations["update_connection_api_connections__connection_id__patch"];
         trace?: never;
     };
+    "/api/connections/{connection_id}/server-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Server Certificate
+         * @description Confia no certificado do servidor (ADR-021): corpo bruto DER ou PEM, gravado como DER.
+         *
+         *     O certificado vem no corpo da request (`application/octet-stream`,
+         *     `application/x-pem-file` ou `application/pkix-cert`), não em multipart: um upload de
+         *     campo único não justifica a dependência extra de parsing de formulário.
+         *
+         *     Emite `connection_updated` porque `server_cert_file` também é campo do PATCH: a mesma
+         *     mudança de estado não pode ser auditada por uma rota e silenciosa pela outra. O evento é
+         *     ainda a dica de reconciliação do worker (spec §2.2-1), e trocar o certificado confiado é
+         *     justamente o que derruba o canal seguro.
+         */
+        post: operations["set_server_certificate_api_connections__connection_id__server_certificate_post"];
+        /**
+         * Clear Server Certificate
+         * @description Deixa de confiar no certificado do servidor. Idempotente: 204 mesmo sem o arquivo.
+         *
+         *     Só emite quando houve mudança de estado — arquivo removido ou coluna limpa. Repetir o
+         *     DELETE numa conexão que já não confia em nada é no-op, e no-op não é evento.
+         */
+        delete: operations["clear_server_certificate_api_connections__connection_id__server_certificate_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tags": {
         parameters: {
             query?: never;
@@ -232,10 +268,154 @@ export interface paths {
         patch: operations["update_tag_api_tags__tag_id__patch"];
         trace?: never;
     };
+    "/api/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Events
+         * @description Eventos mais recentes primeiro; sem paginação (padrão F1 §6.1).
+         */
+        get: operations["list_events_api_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get History
+         * @description Uma série por tag pedida, sempre; ordem temporal crescente (uPlot exige x monotônico).
+         */
+        get: operations["get_history_api_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/app/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate App Cert
+         * @description Gera o certificado autoassinado do worker; `force` substitui o existente (spec §5.7).
+         */
+        post: operations["generate_app_cert_api_certificates_app_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/app": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get App Cert
+         * @description Metadados do certificado. Ausência não é erro: devolve `exists=false`, nunca 404.
+         *
+         *     Arquivo presente mas ilegível é outra coisa: falha de infraestrutura no volume, não
+         *     entrada do usuário. Continua 500, mas mapeado — com mensagem em pt-BR dizendo qual é a
+         *     saída — em vez de subir cru como erro genérico do framework.
+         */
+        get: operations["get_app_cert_api_certificates_app_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/app/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export App Cert
+         * @description Download do `.der` para o operador cadastrar na trust list do servidor OPC-UA.
+         */
+        get: operations["export_app_cert_api_certificates_app_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AppCertificateGenerateIn */
+        AppCertificateGenerateIn: {
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
+        };
+        /** AppCertificateGenerateOut */
+        AppCertificateGenerateOut: {
+            /** Exists */
+            exists: boolean;
+            /** Subject */
+            subject?: string | null;
+            /** Fingerprint Sha256 */
+            fingerprint_sha256?: string | null;
+            /** Not Before */
+            not_before?: string | null;
+            /** Not After */
+            not_after?: string | null;
+            /** Application Uri */
+            application_uri?: string | null;
+            /** Warning */
+            warning?: string | null;
+        };
+        /** AppCertificateOut */
+        AppCertificateOut: {
+            /** Exists */
+            exists: boolean;
+            /** Subject */
+            subject?: string | null;
+            /** Fingerprint Sha256 */
+            fingerprint_sha256?: string | null;
+            /** Not Before */
+            not_before?: string | null;
+            /** Not After */
+            not_after?: string | null;
+            /** Application Uri */
+            application_uri?: string | null;
+        };
         /** ConnectionCreate */
         ConnectionCreate: {
             /** Name */
@@ -360,10 +540,66 @@ export interface components {
             /** Watchdog Period Ms */
             watchdog_period_ms?: number | null;
         };
+        /** EventOut */
+        EventOut: {
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warning" | "alarm";
+            /** Origin */
+            origin: string;
+            /** Message */
+            message: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HistoryResponse */
+        HistoryResponse: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "raw" | "1m";
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Series */
+            series: components["schemas"]["HistorySeries"][];
+        };
+        /** HistorySeries */
+        HistorySeries: {
+            /** Tag Id */
+            tag_id: number;
+            /** T */
+            t: string[];
+            /** V */
+            v: number[];
+            /** Q */
+            q: number[];
+            /** V Min */
+            v_min?: number[] | null;
+            /** V Max */
+            v_max?: number[] | null;
         };
         /** LoginIn */
         LoginIn: {
@@ -423,6 +659,15 @@ export interface components {
             name?: string | null;
             /** Description */
             description?: string | null;
+        };
+        /** ServerCertificateOut */
+        ServerCertificateOut: {
+            /** Conn Id */
+            conn_id: number;
+            /** Server Cert File */
+            server_cert_file: string;
+            /** Fingerprint Sha256 */
+            fingerprint_sha256: string;
         };
         /** TagCreate */
         TagCreate: {
@@ -1140,6 +1385,66 @@ export interface operations {
             };
         };
     };
+    set_server_certificate_api_connections__connection_id__server_certificate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerCertificateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_server_certificate_api_connections__connection_id__server_certificate_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_tags_api_tags_get: {
         parameters: {
             query?: {
@@ -1296,6 +1601,147 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_events_api_events_get: {
+        parameters: {
+            query?: {
+                severity?: ("info" | "warning" | "alarm") | null;
+                origin?: string | null;
+                start?: string | null;
+                end?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_history_api_history_get: {
+        parameters: {
+            query: {
+                tag_ids: string;
+                start?: string | null;
+                end?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_app_cert_api_certificates_app_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AppCertificateGenerateIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppCertificateGenerateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_app_cert_api_certificates_app_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppCertificateOut"];
+                };
+            };
+        };
+    };
+    export_app_cert_api_certificates_app_export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

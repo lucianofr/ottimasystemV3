@@ -14,6 +14,14 @@
   --color-alarm: oklch(0.6 0.19 27);
   --color-warn: oklch(0.74 0.14 80);
   --color-running: oklch(0.6 0.09 150);
+  /* Penas de trend — paleta de série própria, fora da severidade e do azul único
+     (spec F2 §9.3; DESIGN.md §Colors "A Regra do Azul Único"). Consumidas por JS (uPlot). */
+  --color-pen-1: oklch(0.78 0.10 190); /* ciano-petróleo */
+  --color-pen-2: oklch(0.78 0.09 300); /* violeta */
+  --color-pen-3: oklch(0.78 0.10 110); /* oliva */
+  --color-pen-4: oklch(0.78 0.09 330); /* magenta */
+  --color-pen-5: oklch(0.75 0.06 55); /* castanho */
+  --color-pen-6: oklch(0.80 0.02 250); /* cinza neutro */
 
   --font-sans: "Archivo", system-ui, sans-serif;
   --font-label: "Archivo Narrow", "Archivo", sans-serif;
