@@ -15,6 +15,7 @@ só a substitui em retorno `ok` — timeout ou exceção nunca corrompem estado 
 """
 
 import asyncio
+import logging
 import math
 import multiprocessing as mp
 import pickle
@@ -52,6 +53,8 @@ _READY: Final[str] = "ready"
 _JOIN_TIMEOUT_S: Final[float] = 2.0
 _BOOT_TIMEOUT_S: Final[float] = 30.0
 """Partida de um worker `spawn` com numpy: sub-segundo na prática; 30 s é rede de segurança."""
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,10 +250,17 @@ class ScriptPool:
             return ScriptResult("timeout", None, None, None)
 
         try:
-            worker.conn.send((code, inputs, state, n_outputs))
+            # `send` também pode bloquear (buffer do pipe cheio): a mesma regra do `_receive`
+            # vale aqui — nunca no event loop (ADR-004).
+            await asyncio.to_thread(worker.conn.send, (code, inputs, state, n_outputs))
             result = await asyncio.to_thread(
                 _receive, worker.conn, max(0.0, deadline - loop.time())
             )
+        except asyncio.CancelledError:
+            # O worker pode estar rodando código arbitrário do usuário: devolvê-lo à fila é
+            # inaceitável — kill + respawn, e o cancelamento segue propagando.
+            await self._replace(worker, hard=True)
+            raise
         except (OSError, EOFError, ValueError):
             await self._replace(worker, hard=False)
             return ScriptResult("error", None, None, "o worker do pool morreu durante o script")
@@ -290,6 +300,13 @@ class ScriptPool:
         # entrar em laço de respawn. O pool segue menor e as chamadas passam a competir.
         if worker in self._state.workers:
             self._state.workers.remove(worker)
+        if ready != _READY:
+            # Sem isto o encolhimento era silencioso: em planta só se via `script_timeout`.
+            logger.warning(
+                "Handshake de boot do worker do pool de scripts falhou; "
+                "pool reduzido para %d worker(s)",
+                len(self._state.workers),
+            )
         await asyncio.to_thread(_shutdown, worker, hard=True)
 
     async def _replace(self, worker: _Worker, *, hard: bool) -> None:

@@ -8,14 +8,19 @@ que o laço continuou girando.
 
 import asyncio
 import json
+import logging
 import os
+import re
+import signal
+import threading
 import time
+from multiprocessing.connection import Connection
 
 import pytest
 from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
 
-from conftest import await_until
+from conftest import AWAIT_TIMEOUT_S, await_until
 from ottima_core.bus import CHANNEL_EVENTS, KIND_SCRIPT_ERROR, KIND_SCRIPT_TIMEOUT
 from ottima_flow_runtime import script_pool
 from ottima_flow_runtime.blocks.base import PortSample
@@ -320,6 +325,110 @@ async def test_mais_chamadas_simultaneas_que_workers_completam_todas(pool):
     assert [r.outputs["OUT1"] for r in resultados] == [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]
     assert len(pool.worker_pids) == 2
     assert all(processo_vivo(pid) for pid in pool.worker_pids)
+
+
+async def test_cancelamento_no_meio_do_script_mata_o_worker_e_re_poe_o_pool(pool, monkeypatch):
+    """Achado C2 da revisão F3: `FlowTask.stop()` cancela a varredura no `to_thread`.
+
+    O worker cancelado pode estar rodando código arbitrário do usuário: ele NUNCA volta à
+    fila — kill + respawn, e o `CancelledError` segue propagando. Antes da correção o
+    worker ficava órfão (vivo, fora da fila) e o pool encolhia a cada cancelamento, então
+    este teste falha nas asserções (a) e (b). O espião no `_receive` garante que o
+    cancelamento cai exatamente no ponto do `to_thread`, sem sleep cego.
+    """
+    entrou_no_receive = threading.Event()
+    conexao_usada: list[Connection] = []
+    receive_real = script_pool._receive
+
+    def espiao_receive(conn, timeout_s):
+        conexao_usada.append(conn)
+        entrou_no_receive.set()
+        return receive_real(conn, timeout_s)
+
+    monkeypatch.setattr(script_pool, "_receive", espiao_receive)
+
+    corrida = asyncio.create_task(
+        pool.run(code=BUSY_FOREVER, inputs={}, state=None, n_outputs=0, timeout_s=30.0)
+    )
+    assert await asyncio.to_thread(entrou_no_receive.wait, AWAIT_TIMEOUT_S)
+    # Neste instante o worker ocupado consta no estado em qualquer versão do código: é assim
+    # que o seu pid é identificado sem depender do desfecho.
+    pid_alvo = next(w.proc.pid for w in pool._state.workers if w.conn is conexao_usada[0])
+    assert pid_alvo is not None
+
+    corrida.cancel()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await corrida
+        # (c) o cancelamento não foi engolido pelo tratamento.
+        assert corrida.cancelled()
+        # (b) o órfão morreu de verdade (kill + join do `_replace`, hard).
+        await await_until(lambda: not processo_vivo(pid_alvo))
+        # (a) o pool voltou ao tamanho cheio de workers LIVRES (respawn + handshake).
+        await await_until(lambda: pool._idle.qsize() == 2)
+        assert len(pool.worker_pids) == 2
+        assert pid_alvo not in pool.worker_pids
+
+        depois = await pool.run(
+            code="OUT1 = 7.0\n", inputs={}, state=None, n_outputs=1, timeout_s=10.0
+        )
+        assert depois.status == "ok" and depois.outputs == {"OUT1": 7.0}
+    finally:
+        # No estado vermelho o órfão sobrevive: não deixar um `while True` queimando CPU
+        # pelo resto da sessão de testes.
+        try:
+            os.kill(pid_alvo, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+async def test_envio_do_job_roda_fora_do_event_loop(pool, monkeypatch):
+    """ADR-004: `conn.send` pode bloquear com o buffer do pipe cheio — vai para thread.
+
+    Identidade de thread é o observável honesto: antes da correção o `send` rodava no
+    próprio event loop e a asserção final falhava. O espião é na classe `Connection`, não
+    no pool: os `send` dos workers rodam em outros processos e não poluem a medição.
+    """
+    thread_do_loop = threading.get_ident()
+    threads_do_send: list[int] = []
+    send_real = Connection.send
+
+    def espiao_send(self, obj):
+        threads_do_send.append(threading.get_ident())
+        send_real(self, obj)
+
+    monkeypatch.setattr(Connection, "send", espiao_send)
+
+    result = await pool.run(code="OUT1 = 1.0\n", inputs={}, state=None, n_outputs=1, timeout_s=5.0)
+
+    assert result.status == "ok"
+    assert threads_do_send, "o send não foi observado: o teste não mediu o que promete"
+    assert thread_do_loop not in threads_do_send
+
+
+async def test_handshake_de_boot_falho_loga_o_tamanho_do_pool_que_sobrou(monkeypatch, caplog):
+    """Boot falho derruba o worker e o pool segue menor — agora com rastro em warning.
+
+    Antes da correção o encolhimento era silencioso: em planta o único sintoma era
+    `script_timeout`, sem nada que apontasse a causa.
+    """
+    monkeypatch.setattr(script_pool, "_receive", lambda conn, timeout_s: None)
+    pool_local = ScriptPool(size=2)
+
+    with caplog.at_level(logging.WARNING, logger="ottima_flow_runtime.script_pool"):
+        await pool_local.start()
+
+    try:
+        assert pool_local.worker_pids == ()
+        # O tamanho exato em cada aviso depende do interleaving entre os dois boots (o
+        # primeiro pode falhar antes de o segundo worker entrar na lista); o contrato é
+        # nomear a falha e o tamanho que sobrou, seja ele qual for.
+        avisos = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(avisos) == 2
+        padrao = re.compile(r"Handshake de boot.*pool reduzido para \d+ worker\(s\)")
+        assert all(padrao.search(aviso) for aviso in avisos)
+    finally:
+        await pool_local.stop()
 
 
 # --------------------------------------------------------------------------------------
