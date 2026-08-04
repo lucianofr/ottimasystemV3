@@ -24,6 +24,7 @@ from ottima_core.bus import (
     OpcValue,
     channel_opc_values,
 )
+from ottima_opc_worker import subscriptions
 from ottima_opc_worker.connection import ConnectionRuntime
 from ottima_opc_worker.state import (
     ConnectionConfig,
@@ -177,6 +178,12 @@ def test_coerce_value_normaliza_para_float() -> None:
     assert coerce_value(1.5) == 1.5
     assert coerce_value(None) == 0.0
     assert all(isinstance(coerce_value(raw), float) for raw in (True, False, 7, 1.5, None))
+
+
+def test_coerce_value_recusa_valor_nao_numerico() -> None:
+    """Node de tipo incompatível não vira float silenciosamente: quem chama trata."""
+    with pytest.raises(ValueError):
+        coerce_value("texto")
 
 
 # --- subscriptions contra o opcsim -------------------------------------------------
@@ -343,3 +350,45 @@ async def test_cadencia_da_subscription_e_dos_monitored_items(
         assert len(itens) == 2
         assert [item.sampling_interval for item in itens] == [250, 250]
         assert [item.queuesize for item in itens] == [1, 1]
+
+
+async def test_valor_nao_numerico_publica_bad_e_avisa_uma_vez(
+    sim: OpcSimServer, redis_client: Redis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Node de tipo incompatível com a tag não pode deixá-la muda no canal (spec §2.2-4).
+
+    O opcsim não tem node String (e não pode ser alterado), então a incompatibilidade é
+    injetada no ponto de coerção — o caminho percorrido é o handler real da subscription.
+    """
+
+    def coerce_explode(raw: object) -> float:
+        raise ValueError(f"valor não numérico: {raw!r}")
+
+    monkeypatch.setattr(subscriptions, "coerce_value", coerce_explode)
+    config = make_config(sim.endpoint, tags=(TAG_STATIC,))
+    snapshot = ConnectionSnapshot(name=config.name)
+    async with (
+        collect_events(redis_client) as events,
+        collect_values(redis_client) as values,
+        running(ConnectionRuntime(config, redis_client, snapshot)) as runtime,
+    ):
+        await await_until(lambda: bool(of_tag(values, TAG_STATIC.id)))
+        await await_until(lambda: bool(of_kind(events, KIND_TAG_SUBSCRIBE_ERROR)))
+
+        ruins = of_tag(values, TAG_STATIC.id)
+        assert len(ruins) == 1
+        assert ruins[0]["quality"] == 2
+        assert ruins[0]["value"] == 0.0
+        assert snapshot.monitored_errors == 1
+        assert runtime.state is ConnectionState.UP
+        assert len(of_kind(events, KIND_TAG_SUBSCRIBE_ERROR)) == 1
+
+        # Segunda ocorrência na mesma tag: novo bad no canal, sem segundo aviso.
+        await sim.write(NODE_STATIC, 43.0)
+        await await_until(lambda: len(of_tag(values, TAG_STATIC.id)) == 2)
+        assert of_tag(values, TAG_STATIC.id)[1]["quality"] == 2
+        assert of_tag(values, TAG_STATIC.id)[1]["value"] == 0.0
+        assert snapshot.monitored_errors == 2
+        await asyncio.sleep(QUIET_WINDOW_S)
+        assert len(of_kind(events, KIND_TAG_SUBSCRIBE_ERROR)) == 1
+        assert runtime.state is ConnectionState.UP

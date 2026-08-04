@@ -153,14 +153,20 @@ class ValueSubscription:
                 node, queuesize=QUEUE_SIZE, sampling_interval=SAMPLING_INTERVAL_MS
             )
         except Exception as exc:
-            await self._report_tag_error(tag, f"{type(exc).__name__}: {exc}".strip())
+            await self._report_tag_error(
+                tag, "node inválido ou inexistente", f"{type(exc).__name__}: {exc}".strip()
+            )
             return False
         if isinstance(handle, int):
             self._tags_by_handle[handle] = tag
         return True
 
-    async def _report_tag_error(self, tag: TagConfig, detail: str) -> None:
-        """Node inválido: a tag vira bad e avisa uma vez, sem derrubar a conexão (§2.2-4)."""
+    async def _report_tag_error(self, tag: TagConfig, reason: str, detail: str) -> None:
+        """Erro de cadastro da tag: ela vira bad e avisa uma vez, sem derrubar a conexão.
+
+        Tag muda por erro de configuração é proibido (spec §2.2-4): quem consome
+        `opc.values` precisa distinguir "sem dado" de "dado ruim".
+        """
         self._snapshot.monitored_errors += 1
         await publish_value(
             self._redis,
@@ -171,10 +177,11 @@ class ValueSubscription:
             quality=QUALITY_BAD,
         )
         logger.warning(
-            "Falha ao subscrever a tag %s (%s) da conexão %s: %s",
+            "Tag %s (%s) da conexão %s em falha: %s — %s",
             tag.id,
             tag.node_id,
             self._config.id,
+            reason,
             detail,
         )
         if tag.id in self._reported_errors:
@@ -184,10 +191,7 @@ class ValueSubscription:
             self._redis,
             severity="warning",
             origin=f"conn:{self._config.id}",
-            message=(
-                f"Falha ao subscrever a tag '{tag.name}' da conexão "
-                f"'{self._config.name}': node inválido ou inexistente"
-            ),
+            message=(f"Falha na tag '{tag.name}' da conexão '{self._config.name}': {reason}"),
             kind=KIND_TAG_SUBSCRIBE_ERROR,
             payload={
                 "conn_id": self._config.id,
@@ -226,12 +230,21 @@ class ValueSubscription:
                 )
                 return
             data_value = data.monitored_item.Value
+            try:
+                value = coerce_value(val)
+            except (TypeError, ValueError) as exc:
+                # Node de tipo incompatível com a tag é erro de cadastro: publica bad e
+                # avisa, em vez de deixar a tag muda no canal.
+                await self._report_tag_error(
+                    tag, "valor do node não é numérico", f"{type(exc).__name__}: {exc}".strip()
+                )
+                return
             await publish_value(
                 self._redis,
                 self._config.id,
                 self._snapshot,
                 tag_id=tag.id,
-                value=coerce_value(val),
+                value=value,
                 quality=status_to_quality(data_value.StatusCode if data_value else None),
                 ts=_notification_ts(data_value),
             )
