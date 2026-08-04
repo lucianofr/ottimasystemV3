@@ -109,6 +109,19 @@ sys.exit(0 if conn and conn["state"] == "up" and conn["watchdog_alive"] else 1)
       exit 1
     fi
   done
+
+  echo "E2E-F3-L1a: boot parado do flow-runtime (ADR-017, spec F3 §7.2-L1)..."
+  # Não é health genérico: `flows` vazio logo depois do up é a evidência de que o motor não
+  # auto-aplica `desired_state` — só o comando `deploy` sobe flow. E `status` precisa ser
+  # "ok" (não "degraded"): é ele que denuncia o banco fora do alcance do runtime, a
+  # dependência que este serviço passou a ter (spec F3 §2.2-10).
+  "${COMPOSE[@]}" exec -T flow-runtime python -c '
+import json, urllib.request
+corpo = json.load(urllib.request.urlopen("http://localhost:8002/health", timeout=3))
+assert corpo["status"] == "ok", corpo
+assert corpo["flows"] == {}, corpo
+print("  /health: status=ok, flows={} (nenhum flow subiu no boot)")
+'
 fi
 
 echo "SMOKE OK"
