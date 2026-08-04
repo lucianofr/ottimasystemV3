@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from ottima_api import API_VERSION
-from ottima_core.config import Settings, get_settings
+from ottima_core.config import Settings, get_settings, validate_secrets
 from ottima_core.db import create_engine, create_session_factory
 from ottima_core.logging import setup_logging
 
@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     setup_logging(settings.log_level)
+    validate_secrets(settings)  # falha o boot se a chave de assinatura JWT não for própria
     app = FastAPI(
         title="OttimaSystem API",
         version=API_VERSION,

@@ -72,6 +72,9 @@ async def update_user(
         raise HTTPException(
             status_code=409, detail="Não é possível rebaixar ou desativar o próprio usuário"
         )
+    # Com as regras atuais este ramo é inalcançável: `current` é sempre um admin ativo
+    # diferente de `user` (a auto-gestão já foi barrada acima), logo sempre existe outro
+    # admin ativo. Mantido como defesa em profundidade caso as guardas acima mudem.
     if (
         (rebaixa or desativa)
         and user.role == "admin"
@@ -107,6 +110,8 @@ async def delete_user(
     user = await _carregar(db, user_id)
     if user.id == current.id:
         raise HTTPException(status_code=409, detail="Não é possível excluir o próprio usuário")
+    # Inalcançável hoje pelo mesmo motivo do PATCH: `current` é um admin ativo distinto de
+    # `user`. Mantido como defesa em profundidade caso a guarda de auto-exclusão mude.
     if user.role == "admin" and user.is_active and not await _outro_admin_ativo_existe(db, user.id):
         raise HTTPException(
             status_code=409, detail="Não é possível remover o último administrador ativo"
