@@ -77,18 +77,28 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 - Um **git worktree por fase**; branch limpa; revisão em duas etapas antes de merge.
 - Contratos do PRD §7 entram **verbatim** nos planos (payloads dos canais, JSON de projeto).
 
-## Comandos (materializam na F1 — manter esta seção atualizada)
+## Comandos (materializam na F1, estendidos na F2 — manter esta seção atualizada)
 
 ```bash
 uv sync --all-packages                              # ambiente do workspace
-docker compose -f deploy/docker-compose.yml up -d   # sobe o sistema completo (deploy/.env necessário)
 uv run pytest                                       # testes do workspace (sobe Timescale efêmero)
 uv run ruff check . && uv run ruff format --check . # lint + formato
-cd frontend && npm run dev                          # frontend (Vite, 127.0.0.1:5173, proxy /api->8000)
-# Gate E2E da F1 (docs/specs/F1-testes-e2e.md):
-bash deploy/smoke.sh                                # L1 — stack + retenção + login do seed
-uv run pytest -m e2e tests/e2e -v                   # L2 — API contra o compose (exporte E2E_*)
-cd frontend && npm run e2e                          # L3 — Playwright
+cd frontend && npm run dev                          # frontend (Vite, 127.0.0.1:5173, proxy /api->8080)
+cd frontend && npm run test:unit                    # checks puros do frontend (sem browser, sem backend)
+
+# Stack. A F2 acrescentou o opcsim e as portas de host do gate: use SEMPRE os dois arquivos.
+cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 8 serviços
+# Sem o override e2e sobem 7 (sem opcsim) e o opcsim/redis não ficam acessíveis do host.
+# deploy/.env é obrigatório. Se a 6379 já estiver ocupada por outro projeto da máquina,
+# defina OTTIMA_E2E_REDIS_PORT (ex.: 6399) — senão a L2 fala com o Redis do vizinho.
+
+# Gate E2E — 3 camadas (docs/specs/F1-testes-e2e.md; cenários da F2 em docs/specs/F2-aquisicao.md §11.2):
+bash deploy/smoke.sh                                # L1 — stack + retenção + login + conexão up/watchdog_alive
+uv run pytest -m e2e tests/e2e -v                   # L2 — 14 cenários de API (5 F1 + 9 F2) contra o compose
+cd frontend && npm run e2e                          # regressão Playwright da F1 (specs novas não)
+# L3 das superfícies novas da F2 = roteiro browser-tool B-01..B-07 (spec §11.2), executado pelo
+# agente com a tool `browser`, screenshot por passo. Exige o bundle novo dentro do container:
+cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build frontend
 ```
 
 ## Proibições rápidas para agentes
