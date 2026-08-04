@@ -7,6 +7,8 @@ import redis.asyncio as redis
 from fastapi import FastAPI
 
 from ottima_api import API_VERSION
+from ottima_api.ws import FlowStatusHub
+from ottima_api.ws import router as ws_router
 from ottima_core.config import Settings, get_settings, validate_secrets
 from ottima_core.db import create_engine, create_session_factory
 from ottima_core.logging import setup_logging
@@ -14,14 +16,18 @@ from ottima_core.logging import setup_logging
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Cria engine, session factory e cliente Redis na subida; descarta tudo na descida."""
+    """Cria engine, session factory, Redis e o hub do /ws na subida; descarta na descida."""
     settings: Settings = app.state.settings
     engine = create_engine(settings.database_url)
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
     # decode_responses=True é contrato do barramento na F2: consumidor recebe str
     app.state.redis = redis.from_url(settings.redis_url, decode_responses=True)
+    # Uma assinatura de flow.status.* para todos os sockets do /ws (spec F3 §5.3)
+    app.state.flow_status_hub = FlowStatusHub(app.state.redis)
+    await app.state.flow_status_hub.start()
     yield
+    await app.state.flow_status_hub.stop()  # antes do aclose: o hub usa este cliente
     await app.state.redis.aclose()
     await engine.dispose()
 
@@ -62,4 +68,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(events.router, prefix="/api/events", tags=["events"])
     app.include_router(history.router, prefix="/api/history", tags=["history"])
     app.include_router(certificates.router, prefix="/api/certificates", tags=["certificates"])
+    app.include_router(ws_router, tags=["ws"])  # /ws sem prefixo /api (plano e spec §5.3)
     return app
