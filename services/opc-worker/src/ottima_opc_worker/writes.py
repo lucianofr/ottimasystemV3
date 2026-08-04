@@ -99,6 +99,10 @@ class _BlockedPeriod:
     first: OpcWrite
     reason: BlockReason
     conn_name: str
+    # `gate_generation` do runtime quando o período abriu: o gate reabrir e fechar de novo
+    # avança o contador e prova que o período seguinte é OUTRO, mesmo que nenhuma escrita
+    # tenha chegado na janela aberta (spec §4.2-c).
+    generation: int
     dropped: int = 0
     emitted: bool = False
     task: asyncio.Task[None] | None = None
@@ -198,9 +202,10 @@ class WriteConsumer:
             await self._block(write, runtime, blocked)
             return
 
-        # Gate aberto: o período de falha anterior (se houver) terminou aqui — é o rearme
-        # stateless da spec §3.4, sem latch nem intervenção.
-        await self._reopen_gate(write.conn_id)
+        # O rearme do dedupe NÃO acontece aqui: ele é dirigido por `runtime.gate_generation`,
+        # que avança na aresta real de recuperação. Rearmar na chegada de uma escrita
+        # silenciaria o alarme quando a conexão falhasse de novo sem que nenhuma escrita
+        # tivesse passado pela janela aberta.
         await self._execute(write, runtime, tag)
 
     @staticmethod
@@ -214,8 +219,15 @@ class WriteConsumer:
 
     async def _execute(self, write: OpcWrite, runtime: ConnectionRuntime, tag: TagConfig) -> None:
         """Escreve no node e audita o resultado (RF-205: toda escrita gera evento)."""
+        # Reconferência COMPLETA do gate, não só da sessão: `watchdog_alive` e `state` são
+        # zerados juntos por `fail()` hoje, mas depender disso seria invariante implícita
+        # entre dois módulos. Aqui é o último ponto antes de o valor chegar ao PLC.
+        blocked = self._gate_reason(runtime)
+        if blocked is not None:
+            await self._block(write, runtime, blocked)
+            return
         client = runtime.client
-        if client is None:  # sessão caiu entre o gate e aqui
+        if client is None:  # estreitado por `_gate_reason`; o type checker não sabe disso
             await self._block(write, runtime, "session_down")
             return
         variant_type = runtime.variant_type_for(tag.id)
@@ -297,10 +309,26 @@ class WriteConsumer:
     async def _block(
         self, write: OpcWrite, runtime: ConnectionRuntime, reason: BlockReason
     ) -> None:
-        """Descarta pelo gate; um evento por conexão por período de falha (spec §4.2-c)."""
+        """Descarta pelo gate; um evento por conexão por período de falha (spec §4.2-c).
+
+        O período é identificado pela `gate_generation` do runtime, que avança na aresta
+        real de recuperação. Assim, dois episódios de falha separados por uma janela de
+        gate aberto rendem dois eventos mesmo que nenhuma escrita tenha chegado no meio —
+        senão o alarme ficaria silenciado indefinidamente, refém do acaso de uma escrita
+        cair na janela certa.
+        """
+        generation = runtime.gate_generation
         period = self._blocked.get(write.conn_id)
+        if period is not None and period.generation != generation:
+            await self._close_period(write.conn_id)
+            period = None
         if period is None:
-            period = _BlockedPeriod(first=write, reason=reason, conn_name=runtime.config.name)
+            period = _BlockedPeriod(
+                first=write,
+                reason=reason,
+                conn_name=runtime.config.name,
+                generation=generation,
+            )
             self._blocked[write.conn_id] = period
             period.task = asyncio.create_task(
                 self._emit_blocked_later(write.conn_id), name=f"opc-write-blocked-{write.conn_id}"
@@ -319,8 +347,8 @@ class WriteConsumer:
         if period is not None:
             await self._emit_blocked(period)
 
-    async def _reopen_gate(self, conn_id: int) -> None:
-        """Fecha o período de falha: publica o que ainda não foi avisado e rearma."""
+    async def _close_period(self, conn_id: int) -> None:
+        """Encerra o período: publica o que ainda não foi avisado e esquece a conexão."""
         period = self._blocked.pop(conn_id, None)
         if period is None:
             return

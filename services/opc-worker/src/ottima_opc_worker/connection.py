@@ -106,6 +106,9 @@ class ConnectionRuntime:
         self._watchdog: WatchdogTask | None = None
         # Cache de codificação das tags `w`, preenchido 1× por sessão (spec §4.3).
         self._write_types: dict[int, ua.VariantType] = {}
+        # Avança a cada reabertura do gate de escrita (ver `mark_restored`). O consumidor
+        # de `opc.writes` (tarefa 2.3) usa isto para distinguir períodos de bloqueio.
+        self._gate_generation = 0
         self._watchdog_freeze_threshold_s = watchdog_freeze_threshold_s
         # Edge-trigger dos eventos: só há `comm_restored` depois de um `comm_failure`.
         self._failure_pending = False
@@ -134,6 +137,11 @@ class ConnectionRuntime:
     def client(self) -> Client | None:
         """Client asyncua vivo; None fora do estado `up`."""
         return self._client if self._state is ConnectionState.UP else None
+
+    @property
+    def gate_generation(self) -> int:
+        """Conta as reaberturas do gate de escrita; muda ⇒ período de bloqueio novo."""
+        return self._gate_generation
 
     @property
     def subscription(self) -> ValueSubscription | None:
@@ -286,6 +294,15 @@ class ConnectionRuntime:
             await self._replace_subscription(client)
         except Exception as exc:
             await self.fail("session_lost", describe_exception(exc))
+            return
+        # Reconfiguração pode ter trocado o `node_id` de uma tag `w`. Sem recarregar, o
+        # cache devolveria o VariantType do node ANTIGO — e, se os dois tipos
+        # coincidissem por acaso, a escrita iria para o node novo com a codificação do
+        # velho, sem erro nenhum. Recarregar tudo custa o mesmo que a subida da sessão e
+        # é a única opção que mantém o tipo REAL do servidor como autoridade (spec §4.3);
+        # invalidar sem recarregar rebaixaria a tag ao tipo declarado, que é justamente o
+        # que a spec manda não usar quando o servidor sabe responder.
+        await self.load_write_types()
 
     async def _replace_subscription(self, client: Client) -> None:
         """Para a subscription atual (se houver) e sobe outra com a configuração corrente."""
@@ -341,7 +358,15 @@ class ConnectionRuntime:
 
         Exige sessão `up`: uma alternância tardia do watchdog — a que ainda chega enquanto
         `fail()` derruba a sessão — não pode "restaurar" uma conexão caída.
+
+        Também é a aresta REAL de reabertura do gate de escrita: o watchdog chama isto
+        exatamente na transição `False -> True` de `watchdog_alive`, com a sessão `up`.
+        Por isso `gate_generation` avança AQUI, antes de qualquer guarda — o consumidor de
+        `opc.writes` precisa saber que um período de bloqueio acabou mesmo quando nenhuma
+        escrita chegou na janela em que o gate esteve aberto, e mesmo na primeira subida,
+        quando não há `comm_restored` a emitir (spec §3.4/§4.2-c).
         """
+        self._gate_generation += 1
         if not self._failure_pending or self._state is not ConnectionState.UP:
             return
         self._failure_pending = False

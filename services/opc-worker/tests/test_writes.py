@@ -116,6 +116,7 @@ async def bancada(
     with_watchdog: bool = True,
     tags: tuple[TagConfig, ...] = TAGS,
     conn_id: int = CONN_ID,
+    freeze_threshold_s: float = TEST_FREEZE_THRESHOLD_S,
 ) -> AsyncIterator[Bancada]:
     config = make_config(sim.endpoint, conn_id=conn_id, with_watchdog=with_watchdog, tags=tags)
     snapshot = ConnectionSnapshot(name=config.name)
@@ -125,7 +126,7 @@ async def bancada(
         snapshot,
         backoff_initial_s=TEST_BACKOFF_INITIAL_S,
         backoff_max_s=TEST_BACKOFF_MAX_S,
-        watchdog_freeze_threshold_s=TEST_FREEZE_THRESHOLD_S,
+        watchdog_freeze_threshold_s=freeze_threshold_s,
     )
     consumer = WriteConsumer(redis_client, {conn_id: runtime})
     await runtime.start()
@@ -375,6 +376,104 @@ async def test_stop_e_idempotente(redis_client: Redis, sim):
         await banca.gate_aberto()
         await banca.consumer.stop()
         await banca.consumer.stop()
+
+
+async def test_novo_periodo_avisa_mesmo_sem_escrita_na_janela_aberta(redis_client: Redis, sim):
+    """Rearme dirigido pela recuperação real, não pela chegada de uma escrita.
+
+    Com o rearme reativo, o período antigo continuava vivo e o segundo episódio de falha
+    ficava mudo indefinidamente — o alarme só voltava se uma escrita caísse por acaso na
+    janela em que o gate esteve aberto.
+    """
+    async with bancada(redis_client, sim) as banca, collecting(redis_client, CHANNEL_EVENTS) as ev:
+        await banca.gate_aberto()
+
+        await sim.set_freeze_watchdog(True)
+        await await_until(lambda: not banca.snapshot.watchdog_alive)
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=10.0)
+        await await_until(lambda: len(of_kind(ev, KIND_WRITE_BLOCKED)) == 1)
+
+        # Recuperação e nova queda SEM nenhuma escrita no meio.
+        await sim.set_freeze_watchdog(False)
+        await banca.gate_aberto()
+        await sim.set_freeze_watchdog(True)
+        await await_until(lambda: not banca.snapshot.watchdog_alive)
+
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=11.0)
+        await await_until(lambda: len(of_kind(ev, KIND_WRITE_BLOCKED)) == 2)
+
+
+async def test_apply_tags_recarrega_o_datatype_do_node_novo(redis_client: Redis, sim):
+    """Trocar o `node_id` de uma tag `w` numa sessão viva invalida o cache (spec §4.3).
+
+    `data_type` continua "float" de propósito: quem decide a codificação é o tipo REAL do
+    servidor. Com o cache velho, a escrita iria ao node novo com a codificação do antigo.
+    """
+    tags = (
+        TagConfig(id=TAG_FLOAT, name="SP", node_id=NODE_W_FLOAT, direction="w", data_type="float"),
+    )
+    async with bancada(redis_client, sim, tags=tags) as banca:
+        await banca.gate_aberto()
+        assert banca.runtime.variant_type_for(TAG_FLOAT) is ua.VariantType.Double
+
+        trocadas = (
+            TagConfig(
+                id=TAG_FLOAT, name="SP", node_id=NODE_W_INT, direction="w", data_type="float"
+            ),
+        )
+        await banca.runtime.apply_tags(trocadas)
+        assert banca.runtime.variant_type_for(TAG_FLOAT) is ua.VariantType.Int32
+
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=7.9)
+        await esperar_valor(sim, NODE_MIRROR_INT, 8)
+
+
+async def test_sessao_up_sem_a_primeira_alternancia_bloqueia(redis_client: Redis, sim):
+    """Segunda cláusula do gate isolada: sessão `up`, client válido, watchdog nunca armado.
+
+    O limiar de congelamento é alto de propósito para a conexão FICAR nessa janela — é o
+    estado natural entre o connect e a primeira alternância do life-bit.
+    """
+    await sim.set_freeze_watchdog(True)
+    async with (
+        bancada(redis_client, sim, freeze_threshold_s=30.0) as banca,
+        collecting(redis_client, CHANNEL_EVENTS) as ev,
+    ):
+        await await_until(lambda: banca.runtime.state is ConnectionState.UP)
+        assert banca.runtime.client is not None, "a sessão está viva; só o watchdog não armou"
+        assert banca.snapshot.watchdog_alive is False
+
+        await publicar(redis_client, tag_id=TAG_FLOAT, value=55.0)
+
+        await await_until(lambda: len(of_kind(ev, KIND_WRITE_BLOCKED)) == 1)
+        assert of_kind(ev, KIND_WRITE_BLOCKED)[0]["payload"]["reason"] == "watchdog_dead"
+        assert await sim.read(NODE_MIRROR_FLOAT) == 0.0
+        assert not of_kind(ev, KIND_OPC_WRITE)
+
+
+async def test_execucao_reconfere_o_watchdog_antes_de_escrever(redis_client: Redis, sim):
+    """`_execute` revalida o gate inteiro, não só a sessão.
+
+    Chamada direta de propósito: é o último ponto antes de o valor chegar ao PLC, e a
+    reconferência dele não pode depender de `fail()` zerar `state` e `watchdog_alive`
+    juntos — invariante implícita entre dois módulos.
+    """
+    async with bancada(redis_client, sim) as banca, collecting(redis_client, CHANNEL_EVENTS) as ev:
+        await banca.gate_aberto()
+        tag = next(t for t in TAGS if t.id == TAG_FLOAT)
+        write = OpcWrite(
+            conn_id=CONN_ID, tag_id=TAG_FLOAT, value=88.0, source="user:2", ts=datetime.now(UTC)
+        )
+
+        # Sessão viva e client válido; só o watchdog cai. Sem await entre a marcação e a
+        # chamada, então o watchdog não tem como rearmar no meio.
+        banca.snapshot.watchdog_alive = False
+        await banca.consumer._execute(write, banca.runtime, tag)
+
+        await await_until(lambda: len(of_kind(ev, KIND_WRITE_BLOCKED)) == 1)
+        assert of_kind(ev, KIND_WRITE_BLOCKED)[0]["payload"]["reason"] == "watchdog_dead"
+        assert not of_kind(ev, KIND_OPC_WRITE)
+        assert await sim.read(NODE_MIRROR_FLOAT) == 0.0
 
 
 def test_coercao_por_variant_type():
