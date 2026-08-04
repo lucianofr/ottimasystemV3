@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 
 import { cn } from "../../../lib/cn";
 import { ROTULO_BLOCO, type TipoBloco } from "../graph";
+import { formatarValorPorta, type PortValue } from "../useFlowStatus";
+import { useValoresDoBloco, type PortasDoBloco } from "./contexto";
 
 /**
  * Equipamento de painel (DESIGN.md §Shapes): chapa, plaqueta de título com o badge de
@@ -23,16 +25,55 @@ interface Props {
   selecionado: boolean;
   entradas: readonly Porta[];
   saidas: readonly Porta[];
+  /** `block_id`: a chave dos valores ao vivo (§4.2) e do hot-swap (ADR-011). */
+  blockId: string;
+  /** EU da tag do bloco, quando o bloco tem tag (Regra do Número Tabular). */
+  eu?: string | null;
   children: ReactNode;
 }
 
-function LinhaPorta({ porta, lado }: { porta: Porta; lado: "entrada" | "saida" }) {
+/**
+ * Valor ao vivo da porta. Inválido é dessaturado **e** rotulado, nunca só descolorido
+ * (Regra do Canal Redundante); o número sai em mono tabular para não dançar de largura a
+ * cada varredura (Regra do Número Tabular).
+ */
+function ValorPorta({ valor, eu }: { valor: PortValue | undefined; eu?: string | null }) {
+  if (valor === undefined) {
+    return (
+      <span data-testid="porta-valor" className="text-[10px] leading-none text-fg-muted">
+        aguardando dado
+      </span>
+    );
+  }
+  const numerico = typeof valor.v === "number";
+  return (
+    <span data-testid="porta-valor" className="flex items-baseline gap-1 leading-none">
+      <span className={cn("process-value text-[11px]", valor.ok ? "text-fg" : "text-fg-muted")}>
+        {formatarValorPorta(valor)}
+      </span>
+      {numerico && eu ? <span className="text-[9px] text-fg-muted">{eu}</span> : null}
+      {!valor.ok && <span className="text-[9px] text-fg-muted">inválido</span>}
+    </span>
+  );
+}
+
+function LinhaPorta({
+  porta,
+  lado,
+  valores,
+  eu,
+}: {
+  porta: Porta;
+  lado: "entrada" | "saida";
+  valores: PortasDoBloco | null;
+  eu?: string | null;
+}) {
   const entrada = lado === "entrada";
   return (
     <div
       className={cn(
-        "relative flex h-6 items-center",
-        entrada ? "justify-start pl-3" : "justify-end pr-3",
+        "relative flex min-h-6 flex-col justify-center gap-0.5 py-0.5",
+        entrada ? "items-start pl-3" : "items-end pr-3",
       )}
     >
       <Handle
@@ -41,6 +82,7 @@ function LinhaPorta({ porta, lado }: { porta: Porta; lado: "entrada" | "saida" }
         id={porta.id}
       />
       <span className="plaqueta text-[10px] leading-none text-fg-muted">{porta.rotulo}</span>
+      {valores !== null && <ValorPorta valor={valores[porta.id]} eu={eu} />}
     </div>
   );
 }
@@ -52,9 +94,12 @@ export function BlocoChapa({
   selecionado,
   entradas,
   saidas,
+  blockId,
+  eu,
   children,
 }: Props) {
   const titulo = label.trim() || ROTULO_BLOCO[tipo];
+  const valores = useValoresDoBloco(blockId);
   return (
     <div
       className={cn(
@@ -79,12 +124,12 @@ export function BlocoChapa({
         <div className="flex border-t border-hairline py-1">
           <div className="flex-1">
             {entradas.map((porta) => (
-              <LinhaPorta key={porta.id} porta={porta} lado="entrada" />
+              <LinhaPorta key={porta.id} porta={porta} lado="entrada" valores={valores} eu={eu} />
             ))}
           </div>
           <div className="flex-1">
             {saidas.map((porta) => (
-              <LinhaPorta key={porta.id} porta={porta} lado="saida" />
+              <LinhaPorta key={porta.id} porta={porta} lado="saida" valores={valores} eu={eu} />
             ))}
           </div>
         </div>

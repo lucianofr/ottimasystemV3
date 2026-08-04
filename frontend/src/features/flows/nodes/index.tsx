@@ -1,5 +1,6 @@
 import type { NodeProps, NodeTypes } from "@xyflow/react";
 
+import type { TagOut } from "../../../lib/api";
 import { ROTULO_TIPO } from "../../tags/useTags";
 import {
   PORTAS_TFS_ENTRADA,
@@ -18,9 +19,7 @@ function portas(ids: readonly string[]): Porta[] {
   return ids.map((id) => ({ id, rotulo: id }));
 }
 
-function CorpoTag({ tagId }: { tagId: number | null }) {
-  const tags = useTagsDoEditor();
-  const tag = tagId === null ? undefined : tags.get(tagId);
+function CorpoTag({ tagId, tag }: { tagId: number | null; tag: TagOut | undefined }) {
   if (tag === undefined) {
     return (
       <p className="text-warn">
@@ -39,7 +38,9 @@ function CorpoTag({ tagId }: { tagId: number | null }) {
   );
 }
 
-export function NoLeituraOpc({ data, selected }: NodeProps<NoLeitura>) {
+export function NoLeituraOpc({ id, data, selected }: NodeProps<NoLeitura>) {
+  const tags = useTagsDoEditor();
+  const tag = data.tag_id === null ? undefined : tags.get(data.tag_id);
   return (
     <BlocoChapa
       tipo="opc_read"
@@ -48,13 +49,17 @@ export function NoLeituraOpc({ data, selected }: NodeProps<NoLeitura>) {
       selecionado={selected}
       entradas={[]}
       saidas={portas(["out"])}
+      blockId={id}
+      eu={tag?.eu}
     >
-      <CorpoTag tagId={data.tag_id} />
+      <CorpoTag tagId={data.tag_id} tag={tag} />
     </BlocoChapa>
   );
 }
 
-export function NoEscritaOpc({ data, selected }: NodeProps<NoEscrita>) {
+export function NoEscritaOpc({ id, data, selected }: NodeProps<NoEscrita>) {
+  const tags = useTagsDoEditor();
+  const tag = data.tag_id === null ? undefined : tags.get(data.tag_id);
   return (
     <BlocoChapa
       tipo="opc_write"
@@ -63,13 +68,15 @@ export function NoEscritaOpc({ data, selected }: NodeProps<NoEscrita>) {
       selecionado={selected}
       entradas={portas(["in"])}
       saidas={[]}
+      blockId={id}
+      eu={tag?.eu}
     >
-      <CorpoTag tagId={data.tag_id} />
+      <CorpoTag tagId={data.tag_id} tag={tag} />
     </BlocoChapa>
   );
 }
 
-export function NoScriptPython({ data, selected }: NodeProps<NoScript>) {
+export function NoScriptPython({ id, data, selected }: NodeProps<NoScript>) {
   const linhas = data.code === "" ? 0 : data.code.split("\n").length;
   return (
     <BlocoChapa
@@ -79,6 +86,7 @@ export function NoScriptPython({ data, selected }: NodeProps<NoScript>) {
       selecionado={selected}
       entradas={portas(portasScript("IN", data.n_inputs))}
       saidas={portas(portasScript("OUT", data.n_outputs))}
+      blockId={id}
     >
       <div className="space-y-0.5">
         <LinhaResumo
@@ -92,7 +100,7 @@ export function NoScriptPython({ data, selected }: NodeProps<NoScript>) {
 }
 
 /** Mini matriz 2x2: quadradinho aceso = elemento habilitado (linha yJ, coluna uK). */
-export function NoTfsMatriz({ data, selected }: NodeProps<NoTfs>) {
+export function NoTfsMatriz({ id, data, selected }: NodeProps<NoTfs>) {
   const habilitados = data.matrix.flat().filter((elemento) => elemento.enabled).length;
   return (
     <BlocoChapa
@@ -102,6 +110,7 @@ export function NoTfsMatriz({ data, selected }: NodeProps<NoTfs>) {
       selecionado={selected}
       entradas={portas(PORTAS_TFS_ENTRADA)}
       saidas={portas(PORTAS_TFS_SAIDA)}
+      blockId={id}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="grid grid-cols-2 gap-0.5">

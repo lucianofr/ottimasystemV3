@@ -14,12 +14,21 @@ import {
   type NodeChange,
   type XYPosition,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type ReactNode,
+} from "react";
 import { Link, useParams } from "react-router";
 
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { ApiError, type TagOut } from "../../lib/api";
+import { cn } from "../../lib/cn";
 import { useCanMutate } from "../auth/useAuth";
 import { useConnections } from "../connections/useConnections";
 import { useTags } from "../tags/useTags";
@@ -43,8 +52,16 @@ import {
   type TipoBloco,
 } from "./graph";
 import { TIPOS_DE_NO } from "./nodes";
-import { ContextoTags } from "./nodes/contexto";
+import { ContextoTags, ContextoValores, type ValoresAoVivo } from "./nodes/contexto";
 import { formatarTs, useFlow, useSaveFlow } from "./useFlows";
+import {
+  formatarNumero,
+  ROTULO_ESTADO,
+  useFlowStatus,
+  type CanvasAoVivo,
+  type EstadoConexao,
+  type EstadoFlow,
+} from "./useFlowStatus";
 
 import "@xyflow/react/dist/base.css";
 import "./flow-canvas.css";
@@ -77,10 +94,106 @@ function Aviso({ texto, tom }: { texto: string; tom: "warn" | "alarm" }) {
   );
 }
 
+const COR_LAMPADA: Record<EstadoFlow, string> = {
+  running: "text-running",
+  stopped: "text-fg-muted",
+  failed: "text-alarm",
+};
+
+/**
+ * Lâmpada do estado publicado: cor **e** forma **e** rótulo textual (Regra do Canal
+ * Redundante). O verde só aparece aqui — é a lâmpada "rodando/vivo" que o DESIGN.md
+ * reserva, e não uma cor de dado.
+ */
+function LampadaEstado({ estado }: { estado: EstadoFlow }) {
+  return (
+    <span
+      data-testid="canvas-estado"
+      className={cn("inline-flex items-center gap-1.5", COR_LAMPADA[estado])}
+    >
+      <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+        {estado === "running" && <circle cx="5" cy="5" r="4" />}
+        {estado === "stopped" && (
+          <rect x="1" y="1" width="8" height="8" fill="none" stroke="currentColor" />
+        )}
+        {estado === "failed" && <path d="M5 0 10 9H0L5 0Z" />}
+      </svg>
+      <span className="plaqueta text-[11px]">{ROTULO_ESTADO[estado]}</span>
+    </span>
+  );
+}
+
+/** Sem replay (§5.3): entre assinar e a varredura seguinte não há valor nenhum a mostrar. */
+const AGUARDO: Record<Exclude<EstadoConexao, "sessao_invalida">, string> = {
+  conectando: "Conectando ao canal ao vivo…",
+  aberta: "Aguardando dado da varredura",
+  reconectando: "Reconectando ao canal ao vivo…",
+};
+
+/** Cabeçalho ao vivo (RF-305, spec §6.2): estado publicado, varredura e overruns. */
+function CabecalhoAoVivo({ aoVivo }: { aoVivo: CanvasAoVivo }) {
+  if (aoVivo.conexao === "sessao_invalida") {
+    return (
+      <p role="alert" data-testid="canvas-vivo" className="text-xs text-alarm">
+        Sessão inválida ou expirada: entre novamente para ver o canvas ao vivo.
+      </p>
+    );
+  }
+  if (aoVivo.status === null) {
+    return (
+      <p data-testid="canvas-vivo" className="text-xs text-fg-muted">
+        {AGUARDO[aoVivo.conexao]}
+      </p>
+    );
+  }
+  return (
+    <div data-testid="canvas-vivo" className="flex items-center gap-3 text-xs text-fg-muted">
+      <LampadaEstado estado={aoVivo.status.state} />
+      <span>
+        Varredura{" "}
+        <span className="process-value text-fg">{formatarNumero(aoVivo.status.scan_ms)}</span> ms
+      </span>
+      <span>
+        Overruns <span className="process-value text-fg">{aoVivo.status.overruns}</span>
+      </span>
+      {aoVivo.conexao !== "aberta" && (
+        <span className="text-warn">{AGUARDO[aoVivo.conexao]}</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * O que os nós leem de fora de `data`: tags do projeto e valores ao vivo. Nada disso pode
+ * morar em `data` — o servidor recusa chave desconhecida ali com 422.
+ */
+function ContextosDoEditor({
+  tags,
+  valores,
+  children,
+}: {
+  tags: ReadonlyMap<number, TagOut>;
+  valores: ValoresAoVivo;
+  children: ReactNode;
+}) {
+  return (
+    <ContextoTags.Provider value={tags}>
+      <ContextoValores.Provider value={valores}>{children}</ContextoValores.Provider>
+    </ContextoTags.Provider>
+  );
+}
+
 function Editor({ flowId }: { flowId: number }) {
   const flow = useFlow(flowId);
   const salvar = useSaveFlow(flowId);
   const podeMutar = useCanMutate();
+
+  // Um socket por editor aberto, assinando só este flow e morrendo com a página (§5.3).
+  const aoVivo = useFlowStatus(flowId);
+  const valores = useMemo<ValoresAoVivo>(
+    () => ({ ativo: aoVivo.status !== null, ports: aoVivo.ports }),
+    [aoVivo.status, aoVivo.ports],
+  );
 
   const projectId = flow.data?.project_id ?? null;
   // Tags visíveis ao flow são as do projeto **do flow** — o mesmo recorte que o servidor faz
@@ -288,7 +401,7 @@ function Editor({ flowId }: { flowId: number }) {
   }
 
   return (
-    <ContextoTags.Provider value={porId}>
+    <ContextosDoEditor tags={porId} valores={valores}>
       <section className="flex h-[calc(100vh-9rem)] flex-col gap-3">
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-baseline gap-3">
@@ -301,6 +414,7 @@ function Editor({ flowId }: { flowId: number }) {
               · <span className="process-value text-fg">{nodes.length}</span> bloco(s)
             </span>
           </div>
+          <CabecalhoAoVivo aoVivo={aoVivo} />
           {podeMutar && (
             <Button data-testid="flow-salvar" disabled={salvar.isPending} onClick={() => void salvarGrafo()}>
               {salvar.isPending ? "Salvando…" : "Salvar"}
@@ -389,13 +503,13 @@ function Editor({ flowId }: { flowId: number }) {
           />
         )}
       </section>
-    </ContextoTags.Provider>
+    </ContextosDoEditor>
   );
 }
 
 /**
- * Editor de flow (RF-301..307, spec F3 §6.2). O canvas ao vivo (WS, valores nas portas,
- * lâmpada de estado) é da tarefa 4.3 e entra neste mesmo arquivo.
+ * Editor de flow (RF-301..307, spec F3 §6.2), com o canvas ao vivo do RF-305: o socket
+ * nasce e morre com esta página, e `key={id}` garante um por flow aberto.
  */
 export function FlowEditorPage() {
   const { flowId } = useParams();
