@@ -16,12 +16,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any
 
 import jwt
-from fastapi import APIRouter, Depends, WebSocket
+from fastapi import APIRouter, WebSocket
 from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -272,16 +272,6 @@ def _apply_client_message(sub: Subscriber, raw: str) -> None:
             apply(_flow_ids(ids))
 
 
-async def get_ws_db(websocket: WebSocket) -> AsyncIterator[AsyncSession]:
-    """Sessão por conexão WebSocket.
-
-    `deps.get_db` não serve aqui: ele declara `Request`, que o FastAPI não injeta em rota
-    WebSocket (a chamada estoura com argumento faltando).
-    """
-    async with websocket.app.state.session_factory() as session:
-        yield session
-
-
 async def _authenticate(token: str | None, db: AsyncSession, settings: Settings) -> User | None:
     """Token vem na query string (§5.3, risco aceito no ADR-023), não no header.
 
@@ -303,16 +293,16 @@ router = APIRouter()
 
 
 @router.websocket("/ws")
-async def flow_status_ws(
-    websocket: WebSocket,
-    token: str | None = None,
-    db: AsyncSession = Depends(get_ws_db),
-) -> None:
+async def flow_status_ws(websocket: WebSocket, token: str | None = None) -> None:
     """Canal ao vivo do canvas: `?token=` de operador e `subscribe`/`unsubscribe` de flows."""
     # Aceitar antes de recusar é deliberado: fechar sem aceitar vira um 403 HTTP que o
     # cliente WS não distingue de falha de rede, e o canvas precisa saber que foi auth.
     await websocket.accept()
-    if await _authenticate(token, db, websocket.app.state.settings) is None:
+    # A sessão morre com a autenticação, não com o socket: o laço de receive não toca no
+    # banco, e uma conexão retida por socket esgotaria o pool com uma dúzia de editores.
+    async with websocket.app.state.session_factory() as session:
+        user = await _authenticate(token, session, websocket.app.state.settings)
+    if user is None:
         await websocket.close(code=1008, reason="Sessão inválida ou expirada")
         return
 

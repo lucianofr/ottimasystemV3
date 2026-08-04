@@ -7,14 +7,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 
-from ottima_api.ws import QUEUE_MAX, FlowStatusHub, get_ws_db
+from ottima_api.ws import QUEUE_MAX, FlowStatusHub
 from ottima_core.bus import FlowStatus, PortValue, channel_flow_status
 from ottima_core.security import create_access_token
 
@@ -187,9 +187,29 @@ async def hub(app, redis_client):
 
 
 @pytest.fixture
-def connect(app, hub, db_session):
-    """Abre sockets contra o app real; `get_ws_db` aponta para a sessão em SAVEPOINT."""
-    app.dependency_overrides[get_ws_db] = lambda: db_session
+def ws_session_cycles(app, db_session):
+    """Factory do `/ws` instrumentada: conta as sessões que a autenticação abre e fecha.
+
+    A sessão em SAVEPOINT é só emprestada — fechá-la de verdade quebraria o isolamento do
+    teste. O que se conta é o ciclo: `abertas` na entrada, `fechadas` na saída do `with`.
+    """
+    ciclos = {"abertas": 0, "fechadas": 0}
+
+    @asynccontextmanager
+    async def _session_factory():
+        ciclos["abertas"] += 1
+        try:
+            yield db_session
+        finally:
+            ciclos["fechadas"] += 1
+
+    app.state.session_factory = _session_factory
+    return ciclos
+
+
+@pytest.fixture
+def connect(app, hub, ws_session_cycles):
+    """Abre sockets contra o app real; a factory do `/ws` serve a sessão em SAVEPOINT."""
 
     def _connect(token: str | None) -> WSClient:
         return WSClient(app, token)
@@ -262,6 +282,25 @@ async def test_usuario_inativo_fecha_com_1008(connect, make_user, make_token):
     token = make_token(await make_user("oper-off", role="operator", is_active=False))
     async with connect(token) as ws:
         assert await ws.close_code() == 1008
+
+
+async def test_socket_vivo_nao_retem_sessao_do_banco(
+    connect, ws_session_cycles, operator_token, redis_client
+):
+    """A sessão da autenticação fecha antes do laço de `receive`: socket vivo, pool livre.
+
+    Com o `Depends(get_ws_db)` antigo a sessão só fechava junto com o socket — `fechadas`
+    ficaria 0 neste ponto — e uma dúzia de editores abertos esgotava o pool da API inteira.
+    """
+    async with connect(operator_token) as ws:
+        await ws.ready()  # só volta com o servidor já dentro do laço de receive
+
+        assert ws_session_cycles == {"abertas": 1, "fechadas": 1}
+
+        # O socket segue funcional sem sessão alguma: o laço nunca tocou no banco.
+        await ws.subscribe(1)
+        await redis_client.publish(channel_flow_status(1), status_json())
+        assert (await ws.receive_json())["channel"] == "flow.status.1"
 
 
 async def test_sem_subscribe_nao_ha_fanout(connect, operator_token, redis_client):
