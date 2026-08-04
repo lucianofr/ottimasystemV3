@@ -282,18 +282,32 @@ class ConnectionRuntime:
         self._subscription = subscription
 
     async def fail(self, reason: FailureReason, detail: str) -> None:
-        """Leva a conexão a `failed` e emite `comm_failure`. Idempotente em `failed`."""
+        """Leva a conexão a `failed`: rajada bad, alarme e só então queda da sessão.
+
+        Idempotente em `failed` — tentativa de reconexão em backoff não re-emite alarme
+        (spec §3.6). A ordem é normativa (spec §2.2-6/§3.8):
+
+        1. o bloqueio de escrita é simultâneo à detecção, então `state`/`watchdog_alive`
+           caem antes de qualquer `await`;
+        2. a rajada de `quality=2` vai ao barramento ANTES do alarme, para que quem
+           reage ao alarme já leia dado coerente;
+        3. a sessão só é derrubada depois do evento: um `disconnect` contra um servidor
+           que sumiu pode arrastar segundos, e o orçamento do aceite (<12 s) é medido da
+           detecção até o evento.
+        """
         if self._state is ConnectionState.FAILED:
             return
         self._state = ConnectionState.FAILED
         self._snapshot.state = ConnectionState.FAILED
+        self._snapshot.watchdog_alive = False
+        self._snapshot.session_up_since = None
         self._failure_pending = True
         # Invalida connect em voo: não pode ressuscitar a conexão depois do alarme.
         self._generation += 1
-        await self._close_session()
         logger.warning(
             "Conexão %s (%s) em falha: %s — %s", self._config.id, self._config.name, reason, detail
         )
+        await self._heartbeat.burst_bad()
         await publish_event(
             self._redis,
             severity="alarm",
@@ -305,10 +319,15 @@ class ConnectionRuntime:
             kind=KIND_COMM_FAILURE,
             payload={"conn_id": self._config.id, "reason": reason, "detail": detail},
         )
+        await self._close_session()
 
     async def mark_restored(self) -> None:
-        """Emite `comm_restored` uma única vez, se havia falha pendente (spec §3.6)."""
-        if not self._failure_pending:
+        """Emite `comm_restored` uma única vez, se havia falha pendente (spec §3.6).
+
+        Exige sessão `up`: uma alternância tardia do watchdog — a que ainda chega enquanto
+        `fail()` derruba a sessão — não pode "restaurar" uma conexão caída.
+        """
+        if not self._failure_pending or self._state is not ConnectionState.UP:
             return
         self._failure_pending = False
         await publish_event(
