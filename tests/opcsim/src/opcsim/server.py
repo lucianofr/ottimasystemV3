@@ -8,7 +8,6 @@ permitem ao teste congelar o rung ou os valores em runtime.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import math
 import socket
@@ -188,9 +187,9 @@ class OpcSimServer:
     async def stop(self) -> None:
         for task in self._tasks:
             task.cancel()
-        for task in self._tasks:
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+        # Uma task morta por erro de programação não pode abortar o encerramento (a porta
+        # ficaria presa entre testes); o erro é relançado só depois de tudo desmontado.
+        results = await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks = []
         if self._server is not None:
             await self._server.stop()
@@ -200,6 +199,9 @@ class OpcSimServer:
             self._tmp_cert_dir.cleanup()
             self._tmp_cert_dir = None
             self._cert_der_path = None
+        for result in results:
+            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                raise result
 
     async def set_freeze_watchdog(self, value: bool) -> None:
         await self.write(NODE_CTRL_FREEZE_WATCHDOG, value)
@@ -270,7 +272,10 @@ class OpcSimServer:
                 await self.write(NODE_SQUARE, int(elapsed / SQUARE_PERIOD) % 2 == 1)
                 for source, mirror in _MIRRORS:
                     await self.write(mirror, await self.read(source))
-            except Exception:
+            except (ua.UaError, OSError):
+                # Só erros esperados de comunicação/address space são tolerados. Erro de
+                # programação propaga e derruba a task: um retry silencioso a 200 ms viraria
+                # log-spam e chegaria aos testes do worker como timeout distante.
                 _logger.exception("opcsim: falha no loop de simulação de valores")
 
     async def _run_watchdog_rung(self) -> None:
@@ -287,5 +292,6 @@ class OpcSimServer:
                     continue
                 self._last_from_system = current
                 await self.write(NODE_WD_TO_SYSTEM, not await self.read(NODE_WD_TO_SYSTEM))
-            except Exception:
+            except (ua.UaError, OSError):
+                # Mesma política do loop de valores: nada de rede genérica sobre bug.
                 _logger.exception("opcsim: falha no rung do watchdog")

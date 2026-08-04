@@ -402,10 +402,14 @@ version = "0.1.0"
 source = { editable = "tests/opcsim" }
 dependencies = [
     { name = "asyncua" },
+    { name = "cryptography" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "asyncua", specifier = ">=2.0" }]
+requires-dist = [
+    { name = "asyncua", specifier = ">=2.0" },
+    { name = "cryptography", specifier = ">=43.0" },
+]
 
 [[package]]
 name = "ottima-api"

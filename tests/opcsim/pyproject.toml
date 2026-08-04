@@ -5,6 +5,9 @@ description = "OttimaSystem: servidor OPC-UA de simulação para testes do opc-w
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "asyncua>=2.0",
+  # importada diretamente para gerar o certificado autoassinado do servidor; já é
+  # dependência obrigatória do asyncua, não é dependência nova do projeto.
+  "cryptography>=43.0",
 ]
 
 [build-system]

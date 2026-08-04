@@ -134,6 +134,21 @@ async def test_freeze_values_congela_a_senoide(sim: OpcSimServer) -> None:
         await await_until(lambda: _differs(client, NODE_SINE, frozen))
 
 
+async def test_erro_de_programacao_no_loop_nao_e_engolido() -> None:
+    """O loop tolera só erro de comunicação; bug derruba a task e aparece no stop()."""
+    server = OpcSimServer(port=free_port())
+    await server.start()
+    # Um objeto sem a API de Node faz o loop de valores levantar AttributeError, que não é
+    # ua.UaError nem OSError e portanto não pode ser tolerado ciclo após ciclo.
+    server._nodes[NODE_SINE] = object()  # type: ignore[assignment]
+
+    await await_until(lambda: _any_task_done(server))
+    with pytest.raises(AttributeError):
+        await server.stop()
+    # Mesmo relançando, o encerramento completou: uma segunda parada é inócua.
+    await server.stop()
+
+
 @pytest.mark.parametrize(
     "mode", [ua.MessageSecurityMode.Sign, ua.MessageSecurityMode.SignAndEncrypt]
 )
@@ -172,6 +187,10 @@ async def _client_credentials(tmp_path: Path, application_uri: str) -> tuple[Pat
         {"organizationName": "OttimaSystem"},
     )
     return cert_path, key_path
+
+
+async def _any_task_done(server: OpcSimServer) -> bool:
+    return any(task.done() for task in server._tasks)
 
 
 async def _equals(client: Client, node_id: str, expected: Any) -> bool:

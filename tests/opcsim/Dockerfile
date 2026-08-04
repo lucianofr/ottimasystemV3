@@ -7,7 +7,7 @@ COPY pyproject.toml uv.lock ./
 COPY packages ./packages
 COPY services ./services
 COPY tests ./tests
-RUN uv sync --frozen --package opcsim
+RUN uv sync --frozen --no-dev --package opcsim
 
 FROM python:3.12-slim-bookworm
 WORKDIR /app
