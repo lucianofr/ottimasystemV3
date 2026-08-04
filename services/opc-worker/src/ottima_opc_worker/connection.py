@@ -19,6 +19,7 @@ from ottima_core.bus import KIND_COMM_FAILURE, KIND_COMM_RESTORED, publish_event
 
 from .heartbeat import HEARTBEAT_INTERVAL_S, ValueHeartbeat
 from .security import (
+    SECURITY_POLICY_NONE,
     FailureReason,
     configure_client,
     describe_exception,
@@ -44,7 +45,7 @@ _REASON_TEXT: dict[str, str] = {
     "session_lost": "sessão perdida",
     "watchdog_timeout": "watchdog sem alternância",
     "cert_mismatch": "certificado do servidor não confere",
-    "cert_missing": "certificado do servidor ausente",
+    "cert_missing": "certificado ausente (aplicação ou servidor)",
 }
 
 
@@ -294,6 +295,11 @@ class ConnectionRuntime:
     def _origin(self) -> str:
         return f"conn:{self._config.id}"
 
+    @property
+    def _pinning_enabled(self) -> bool:
+        """Conexão com canal seguro: só nela um prazo estourado pode ser cert divergente."""
+        return self._config.security_policy != SECURITY_POLICY_NONE
+
     async def _supervise(self) -> None:
         """Laço de vida da conexão: conecta, vigia a sessão, reconecta em backoff.
 
@@ -306,7 +312,7 @@ class ConnectionRuntime:
             try:
                 await self._open_session()
             except Exception as exc:
-                await self.fail(*map_connect_exception(exc))
+                await self.fail(*map_connect_exception(exc, pinning_enabled=self._pinning_enabled))
             else:
                 attempt = 0
                 await self._watch_session()

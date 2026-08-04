@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,34 @@ async def secure_sim(tmp_path: Path) -> AsyncIterator[OpcSimServer]:
         yield server
     finally:
         await server.stop()
+
+
+@pytest.fixture
+async def endpoint_mudo() -> AsyncIterator[str]:
+    """Endpoint que aceita TCP e nunca responde: o connect do asyncua estoura o prazo (4 s).
+
+    É o sósia do certificado divergente do ponto de vista da exceção — os dois chegam como
+    `TimeoutError` — e é por isso que a classificação precisa da política da conexão.
+    """
+    conexoes: list[asyncio.StreamWriter] = []
+
+    async def mudo(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        conexoes.append(writer)
+        # Nunca responde; o handler só termina quando o socket é fechado de um dos lados.
+        with suppress(Exception):
+            await reader.read()
+
+    port = free_port()
+    server = await asyncio.start_server(mudo, "127.0.0.1", port)
+    try:
+        yield f"opc.tcp://127.0.0.1:{port}/ottima/opcsim/"
+    finally:
+        # Fechar só o servidor não encerra as conexões já aceitas, e `wait_closed()`
+        # esperaria pelos handlers para sempre.
+        for writer in conexoes:
+            writer.close()
+        server.close()
+        await server.wait_closed()
 
 
 def make_config(
@@ -148,13 +177,15 @@ async def falha_unica(
     *,
     certs_dir: Path,
     fernet_key: str = "",
+    snapshot: ConnectionSnapshot | None = None,
 ) -> dict:
     """Sobe o runtime, espera `failed` e devolve o único `comm_failure` da janela.
 
     A janela quieta cobre várias tentativas de reconexão em backoff: falha de
-    configuração não re-emite alarme enquanto insiste (spec §3.6).
+    configuração não re-emite alarme enquanto insiste (spec §3.6). Quem quiser inspecionar
+    o snapshot depois passa o seu.
     """
-    snapshot = ConnectionSnapshot(name=config.name)
+    snapshot = snapshot if snapshot is not None else ConnectionSnapshot(name=config.name)
     async with collecting(redis_client, CHANNEL_EVENTS) as events:
         async with running(
             config, redis_client, snapshot, certs_dir=certs_dir, fernet_key=fernet_key
@@ -272,12 +303,17 @@ async def test_cert_do_servidor_divergente_falha_com_cert_mismatch(
 
 
 async def test_user_password_monta_identidade_e_nunca_vaza_o_segredo(
-    secure_sim: OpcSimServer, certs_dir: Path, redis_client: Redis
+    secure_sim: OpcSimServer,
+    endpoint_mudo: str,
+    certs_dir: Path,
+    redis_client: Redis,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A senha Fernet é decifrada na montagem e não reaparece em evento nem snapshot (§5.2)."""
+    """A senha Fernet é decifrada na montagem e não reaparece em evento, log ou snapshot (§5.2)."""
     fernet_key = Fernet.generate_key().decode()
     senha = "senha-secreta-do-plc"
     token = encrypt_secret(senha, key=fernet_key)
+    cert_file = pin_server_certificate(certs_dir, secure_sim)
     config = make_config(
         secure_sim.endpoint,
         security_policy="basic256sha256",
@@ -285,7 +321,7 @@ async def test_user_password_monta_identidade_e_nunca_vaza_o_segredo(
         auth_mode="user_password",
         auth_username="operador",
         auth_password_enc=token,
-        server_cert_file=pin_server_certificate(certs_dir, secure_sim),
+        server_cert_file=cert_file,
     )
 
     client = Client(config.endpoint)
@@ -300,18 +336,39 @@ async def test_user_password_monta_identidade_e_nunca_vaza_o_segredo(
     ) as runtime:
         await await_until(lambda: runtime.state is ConnectionState.UP)
 
-    # A mesma identidade num caminho de falha: o detail do evento não pode ecoar o segredo.
-    sem_pinning = make_config(
-        secure_sim.endpoint,
+    # Falha DEPOIS da montagem completa: pinning satisfeito, identidade montada (a senha já
+    # decifrada em memória) e o endpoint morto derruba o connect. É o caminho em que o
+    # segredo poderia realmente escapar para o detail, para o log ou para o repr.
+    morto = make_config(
+        endpoint_mudo,
         security_policy="basic256sha256",
         security_mode="sign_and_encrypt",
         auth_mode="user_password",
         auth_username="operador",
         auth_password_enc=token,
+        server_cert_file=cert_file,
     )
-    falha = await falha_unica(sem_pinning, redis_client, certs_dir=certs_dir, fernet_key=fernet_key)
-    assert falha["payload"]["reason"] == "cert_missing"
-    texto = json.dumps(falha, ensure_ascii=False) + repr(snapshot)
+    snapshot_morto = ConnectionSnapshot(name=morto.name)
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        falha = await falha_unica(
+            morto,
+            redis_client,
+            certs_dir=certs_dir,
+            fernet_key=fernet_key,
+            snapshot=snapshot_morto,
+        )
+    assert falha["payload"]["reason"] == "cert_mismatch"
+    # ConnectionRuntime não define __repr__, então o snapshot é a única superfície nossa
+    # que poderia ecoar a senha; o log e o payload do evento são as outras duas.
+    texto = "\n".join(
+        [
+            json.dumps(falha, ensure_ascii=False),
+            caplog.text,
+            repr(snapshot_morto),
+            json.dumps(snapshot_morto.to_health(), ensure_ascii=False),
+        ]
+    )
     assert senha not in texto
     assert token not in texto
 
@@ -334,14 +391,45 @@ async def test_identidade_por_certificado_reusa_o_par_do_app(
         )
 
 
-def test_map_connect_exception_classifica_sem_tocar_a_rede() -> None:
-    """Classificação pura das exceções de connect (spec §3.6)."""
-    assert map_connect_exception(CertMismatchError("divergiu"))[0] == "cert_mismatch"
-    assert map_connect_exception(BadCertificateInvalid())[0] == "cert_mismatch"
-    # O opcsim (e servidores que só derrubam o canal) não devolvem status: sobra o timeout.
-    assert map_connect_exception(TimeoutError())[0] == "cert_mismatch"
-    assert map_connect_exception(CertMissingError("faltou"))[0] == "cert_missing"
+async def test_servidor_mudo_sem_seguranca_nao_e_cert_mismatch(
+    endpoint_mudo: str, certs_dir: Path, redis_client: Redis
+) -> None:
+    """Conexão `none` contra servidor que aceita TCP e cala: `connect_failed` (não cert).
 
-    reason, detail = map_connect_exception(ConnectionRefusedError("conexão recusada"))
-    assert reason == "connect_failed"
-    assert detail == "ConnectionRefusedError: conexão recusada"
+    O prazo estourado é o mesmo sinal do certificado divergente; sem canal seguro não há
+    certificado de servidor para divergir, e o `reason` é lido por operador e pelo
+    flow-runtime (spec §3.7).
+    """
+    falha = await falha_unica(make_config(endpoint_mudo), redis_client, certs_dir=certs_dir)
+    assert falha["payload"]["reason"] == "connect_failed"
+
+
+def test_map_connect_exception_classifica_sem_tocar_a_rede() -> None:
+    """Classificação pura das exceções de connect, nas duas polaridades (spec §3.6)."""
+    for pinning in (True, False):
+        # Divergência declarada ou status do servidor não dependem da política.
+        assert (
+            map_connect_exception(CertMismatchError("divergiu"), pinning_enabled=pinning)[0]
+            == "cert_mismatch"
+        )
+        assert map_connect_exception(BadCertificateInvalid(), pinning_enabled=pinning)[0] == (
+            "cert_mismatch"
+        )
+        assert map_connect_exception(CertMissingError("faltou"), pinning_enabled=pinning)[0] == (
+            "cert_missing"
+        )
+        reason, detail = map_connect_exception(
+            ConnectionRefusedError("conexão recusada"), pinning_enabled=pinning
+        )
+        assert reason == "connect_failed"
+        assert detail == "ConnectionRefusedError: conexão recusada"
+
+    # Com canal seguro, o prazo estourado é o único sinal do certificado divergente...
+    reason, detail = map_connect_exception(TimeoutError(), pinning_enabled=True)
+    assert reason == "cert_mismatch"
+    assert "diverge do pinado" in detail
+    # ...sem canal seguro, não há certificado de servidor para divergir.
+    assert map_connect_exception(TimeoutError(), pinning_enabled=False) == (
+        "connect_failed",
+        "TimeoutError",
+    )

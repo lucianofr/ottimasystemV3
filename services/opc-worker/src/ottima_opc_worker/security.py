@@ -45,6 +45,29 @@ _MESSAGE_SECURITY_MODES: dict[str, ua.MessageSecurityMode] = {
 # não seja `.pem`, então o formato tem de ser dito explicitamente.
 _PEM = "pem"
 
+# Status codes com que um servidor bem-comportado recusa o certificado apresentado. É o
+# discriminador estruturado do OPC-UA (parte 4), não a convenção de nomes do asyncua.
+_CERT_STATUS_CODES = frozenset(
+    {
+        ua.StatusCodes.BadCertificateChainIncomplete,
+        ua.StatusCodes.BadCertificateHostNameInvalid,
+        ua.StatusCodes.BadCertificateInvalid,
+        ua.StatusCodes.BadCertificateIssuerRevocationUnknown,
+        ua.StatusCodes.BadCertificateIssuerRevoked,
+        ua.StatusCodes.BadCertificateIssuerTimeInvalid,
+        ua.StatusCodes.BadCertificateIssuerUseNotAllowed,
+        ua.StatusCodes.BadCertificatePolicyCheckFailed,
+        ua.StatusCodes.BadCertificateRevocationUnknown,
+        ua.StatusCodes.BadCertificateRevoked,
+        ua.StatusCodes.BadCertificateTimeInvalid,
+        ua.StatusCodes.BadCertificateUntrusted,
+        ua.StatusCodes.BadCertificateUriInvalid,
+        ua.StatusCodes.BadCertificateUseNotAllowed,
+        ua.StatusCodes.BadNoValidCertificates,
+        ua.StatusCodes.BadSecurityChecksFailed,
+    }
+)
+
 
 class CertMissingError(RuntimeError):
     """Pinning exigido e ausente: app cert ou server cert não disponível (spec §5.6)."""
@@ -74,18 +97,25 @@ async def configure_client(
     await _configure_identity(client, config, certs_dir=certs_dir, fernet_key=fernet_key)
 
 
-def map_connect_exception(exc: BaseException) -> tuple[FailureReason, str]:
+def map_connect_exception(
+    exc: BaseException, *, pinning_enabled: bool
+) -> tuple[FailureReason, str]:
     """Classifica a exceção de connect em (reason, detail) da spec §3.6.
 
     Divergência de certificado do servidor ⇒ ("cert_mismatch", detail);
     qualquer outra ⇒ ("connect_failed", detail). O detail é sempre seguro para log
     e para o payload do evento: nunca contém senha nem material de chave.
+
+    `pinning_enabled` diz se a conexão tem canal seguro (`security_policy != "none"`).
+    Sem canal seguro não existe certificado de servidor para divergir, e um prazo
+    estourado só pode ser servidor mudo — a função continua pura, a política entra como
+    parâmetro em vez de ser consultada aqui.
     """
     if isinstance(exc, CertMissingError):
         return "cert_missing", describe_exception(exc)
     if isinstance(exc, CertMismatchError) or _is_certificate_status(exc):
         return "cert_mismatch", describe_exception(exc)
-    if isinstance(exc, TimeoutError):
+    if isinstance(exc, TimeoutError) and pinning_enabled:
         # Servidor que só derruba o canal (é o caso do opcsim) não devolve status: o
         # OpenSecureChannel cifrado com a chave pública errada fica sem resposta e o
         # pedido estoura o prazo. Sem status, o prazo estourado é o único sinal.
@@ -184,12 +214,8 @@ def _decrypt_password(token: str, fernet_key: str) -> str:
 
 
 def _is_certificate_status(exc: BaseException) -> bool:
-    """Servidor que rejeita o certificado com status próprio (`BadCertificate*`).
+    """Servidor que rejeita o certificado com status próprio do protocolo.
 
-    O asyncua nomeia a subclasse da exceção pelo status code, então o nome da classe é o
-    discriminador estável — o opcsim não chega a este caminho, mas PLCs reais sim.
+    O opcsim não chega a este caminho (derruba o canal sem responder), mas PLCs reais sim.
     """
-    if not isinstance(exc, UaStatusCodeError):
-        return False
-    name = type(exc).__name__
-    return "Certificate" in name or name == "BadSecurityChecksFailed"
+    return isinstance(exc, UaStatusCodeError) and exc.code in _CERT_STATUS_CODES
