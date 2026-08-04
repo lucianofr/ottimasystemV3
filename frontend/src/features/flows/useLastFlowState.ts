@@ -24,11 +24,14 @@ const KIND_RODANDO = "flow_deployed";
 const KIND_PARADO = "flow_stopped";
 const KIND_FALHA = "flow_failed";
 
-/** `reason` de `flow_stopped` e `flow_failed` (spec F3 §4.3) em pt-BR. */
+/** `reason` de `flow_stopped` e `flow_failed` (spec F3 §4.3) em pt-BR. `flow_deleted` é o
+ *  motivo do backstop de watermark: o supervisor encontrou rodando um flow que sumiu do
+ *  banco (spec §2.2-9, `supervisor.REASON_FLOW_DELETED`). */
 const MOTIVOS: Record<string, string> = {
   user: "comandado pelo usuário",
   project_activated: "projeto ativado",
   comm_failure: "falha de comunicação",
+  flow_deleted: "flow excluído",
 };
 
 export type EstadoPublicado = "rodando" | "parado" | "falha";

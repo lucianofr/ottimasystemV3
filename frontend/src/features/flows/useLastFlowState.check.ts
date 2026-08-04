@@ -111,6 +111,22 @@ test("flow_failed vira estado de falha com motivo em pt-BR; motivo ausente não 
   expect(mapa.get(3)?.rotulo).toBe("Parado: projeto ativado");
 });
 
+/** Vocabulário fechado de `reason` de parada: `supervisor.py` só emite estes quatro
+ *  (`user`, `project_activated`, `comm_failure`, `flow_deleted`). Nenhum pode cair em
+ *  "motivo desconhecido" — esse texto é para o que ainda não existe. */
+test("flow_deleted é o motivo do watermark e tem tradução própria", () => {
+  const mapa = derivarUltimoEstado(
+    desc([
+      evento(0, "flow:1", "flow_stopped", "flow_deleted"),
+      evento(0, "flow:2", "flow_stopped", "user"),
+    ]),
+  );
+
+  expect(mapa.get(1)?.rotulo).toBe("Parado: flow excluído");
+  expect(mapa.get(1)?.estado).toBe("parado");
+  expect(mapa.get(2)?.rotulo).toBe("Parado: comandado pelo usuário");
+});
+
 test("pendente é exatamente a divergência entre desejado e publicado", () => {
   const rodando = derivarUltimoEstado([evento(0, "flow:1", "flow_deployed")]).get(1);
   const parado = derivarUltimoEstado([evento(0, "flow:1", "flow_stopped", "user")]).get(1);
