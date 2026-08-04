@@ -413,7 +413,12 @@ async def test_watermark_para_flow_deletado_do_banco(
 
     await await_until(lambda: harness.flow_state(deletado) in {None, "stopped"})
     await await_until(lambda: len(events.events(KIND_FLOW_STOPPED)) == 1)
-    assert events.events(KIND_FLOW_STOPPED)[0].payload["flow_id"] == deletado
+    parado = events.events(KIND_FLOW_STOPPED)[0]
+    assert parado.payload["flow_id"] == deletado
+    # String literal de propósito: `flow_deleted` é contrato com o mapa de tradução de
+    # `reason` do frontend (tarefa 4.3), e a §4.3 lista só `user|project_activated`. Comparar
+    # com a constante do módulo passaria mesmo se o valor mudasse, que é o risco real aqui.
+    assert parado.payload["reason"] == "flow_deleted"
     # O flow que ninguém tocou segue rodando: a passada é isolada por flow.
     assert harness.flow_state(sobrevivente) == "running"
 
