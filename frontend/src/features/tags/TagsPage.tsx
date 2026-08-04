@@ -5,6 +5,7 @@ import { Card } from "../../components/ui/card";
 import { Label } from "../../components/ui/label";
 import { Select } from "../../components/ui/select";
 import { ApiError, type TagOut } from "../../lib/api";
+import { useCanMutate } from "../auth/useAuth";
 import { useActiveProject, useConnections } from "../connections/useConnections";
 import { TagForm } from "./TagForm";
 import {
@@ -42,6 +43,8 @@ export function TagsPage() {
   // Escopo por projeto ativo em memória: `GET /api/tags` não aceita `project_id` (API da F1).
   const linhas = (tags.data ?? []).filter((tag) => nomePorConexao.has(tag.connection_id));
   const filtrando = filtros.connectionId !== null || filtros.direction !== null;
+  const podeMutar = useCanMutate();
+  const totalColunas = COLUNAS.length + (podeMutar ? 1 : 0);
 
   if (projeto.data === null && projeto.isSuccess) {
     return (
@@ -82,16 +85,18 @@ export function TagsPage() {
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="plaqueta text-sm">Tags</h1>
-        <Button
-          data-testid="tag-new"
-          onClick={abrirCriacao}
-          disabled={listaConexoes.length === 0}
-        >
-          Nova tag
-        </Button>
+        {podeMutar && (
+          <Button
+            data-testid="tag-new"
+            onClick={abrirCriacao}
+            disabled={listaConexoes.length === 0}
+          >
+            Nova tag
+          </Button>
+        )}
       </div>
 
-      {conexoes.isSuccess && listaConexoes.length === 0 && (
+      {podeMutar && conexoes.isSuccess && listaConexoes.length === 0 && (
         <p className="text-sm text-fg-muted">
           Nenhuma conexão cadastrada: cadastre uma conexão antes de criar tags.
         </p>
@@ -140,7 +145,7 @@ export function TagsPage() {
         </div>
       </Card>
 
-      {formAberto && (
+      {podeMutar && formAberto && (
         <TagForm
           key={emEdicao?.id ?? "nova"}
           tag={emEdicao}
@@ -165,22 +170,24 @@ export function TagsPage() {
                   {coluna}
                 </th>
               ))}
-              <th className="px-3 py-2">
-                <span className="sr-only">Ações</span>
-              </th>
+              {podeMutar && (
+                <th className="px-3 py-2">
+                  <span className="sr-only">Ações</span>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {tags.isPending && (
               <tr>
-                <td colSpan={COLUNAS.length + 1} className="px-3 py-4 text-fg-muted">
+                <td colSpan={totalColunas} className="px-3 py-4 text-fg-muted">
                   Carregando…
                 </td>
               </tr>
             )}
             {tags.isError && (
               <tr>
-                <td colSpan={COLUNAS.length + 1} className="px-3 py-4 text-alarm" role="alert">
+                <td colSpan={totalColunas} className="px-3 py-4 text-alarm" role="alert">
                   Falha ao consultar tags
                 </td>
               </tr>
@@ -188,7 +195,7 @@ export function TagsPage() {
             {tags.isSuccess && linhas.length === 0 && (
               <tr>
                 <td
-                  colSpan={COLUNAS.length + 1}
+                  colSpan={totalColunas}
                   data-testid="tag-empty"
                   className="px-3 py-4 text-fg-muted"
                 >
@@ -213,52 +220,54 @@ export function TagsPage() {
                 <td className="px-3 py-2">
                   {tag.description || <span className="text-fg-muted">—</span>}
                 </td>
-                <td className="px-3 py-2">
-                  {aConfirmar === tag.id ? (
-                    <div className="flex items-center justify-end gap-2">
-                      <span className="text-xs text-fg-muted">Excluir esta tag?</span>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        data-testid="tag-delete-confirm"
-                        disabled={excluir.isPending}
-                        onClick={() => void confirmarExclusao(tag.id)}
-                      >
-                        Confirmar
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid="tag-delete-cancel"
-                        onClick={() => setAConfirmar(null)}
-                      >
-                        Cancelar
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid="tag-edit"
-                        onClick={() => abrirEdicao(tag)}
-                      >
-                        Editar
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid="tag-delete"
-                        onClick={() => {
-                          setErro(null);
-                          setAConfirmar(tag.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    </div>
-                  )}
-                </td>
+                {podeMutar && (
+                  <td className="px-3 py-2">
+                    {aConfirmar === tag.id ? (
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="text-xs text-fg-muted">Excluir esta tag?</span>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          data-testid="tag-delete-confirm"
+                          disabled={excluir.isPending}
+                          onClick={() => void confirmarExclusao(tag.id)}
+                        >
+                          Confirmar
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          data-testid="tag-delete-cancel"
+                          onClick={() => setAConfirmar(null)}
+                        >
+                          Cancelar
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          data-testid="tag-edit"
+                          onClick={() => abrirEdicao(tag)}
+                        >
+                          Editar
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          data-testid="tag-delete"
+                          onClick={() => {
+                            setErro(null);
+                            setAConfirmar(tag.id);
+                          }}
+                        >
+                          Excluir
+                        </Button>
+                      </div>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

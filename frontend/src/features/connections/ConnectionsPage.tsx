@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { ApiError, type ConnectionOut } from "../../lib/api";
+import { useCanMutate } from "../auth/useAuth";
 import { ConnectionForm } from "./ConnectionForm";
 import { useActiveProject, useConnections, useDeleteConnection } from "./useConnections";
 import { useLastConnectionState, type UltimoEstado } from "./useLastConnectionState";
@@ -122,18 +123,22 @@ export function ConnectionsPage() {
     }
   }
 
+  const podeMutar = useCanMutate();
   const linhas = conexoes.data ?? [];
+  const totalColunas = COLUNAS.length + (podeMutar ? 1 : 0);
 
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="plaqueta text-sm">Conexões</h1>
-        <Button data-testid="conn-new" onClick={abrirCriacao} disabled={projectId === null}>
-          Nova conexão
-        </Button>
+        {podeMutar && (
+          <Button data-testid="conn-new" onClick={abrirCriacao} disabled={projectId === null}>
+            Nova conexão
+          </Button>
+        )}
       </div>
 
-      {formAberto && projectId !== null && (
+      {podeMutar && formAberto && projectId !== null && (
         <ConnectionForm
           key={emEdicao?.id ?? "nova"}
           conexao={emEdicao}
@@ -158,36 +163,38 @@ export function ConnectionsPage() {
                   {coluna}
                 </th>
               ))}
-              <th className="px-3 py-2">
-                <span className="sr-only">Ações</span>
-              </th>
+              {podeMutar && (
+                <th className="px-3 py-2">
+                  <span className="sr-only">Ações</span>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {projeto.isSuccess && projectId === null && (
               <tr>
-                <td colSpan={COLUNAS.length + 1} className="px-3 py-4 text-fg-muted">
+                <td colSpan={totalColunas} className="px-3 py-4 text-fg-muted">
                   Nenhum projeto ativo: ative um projeto para cadastrar conexões.
                 </td>
               </tr>
             )}
             {conexoes.isPending && projectId !== null && (
               <tr>
-                <td colSpan={COLUNAS.length + 1} className="px-3 py-4 text-fg-muted">
+                <td colSpan={totalColunas} className="px-3 py-4 text-fg-muted">
                   Carregando…
                 </td>
               </tr>
             )}
             {conexoes.isError && (
               <tr>
-                <td colSpan={COLUNAS.length + 1} className="px-3 py-4 text-alarm" role="alert">
+                <td colSpan={totalColunas} className="px-3 py-4 text-alarm" role="alert">
                   Falha ao consultar conexões
                 </td>
               </tr>
             )}
             {conexoes.isSuccess && linhas.length === 0 && (
               <tr>
-                <td colSpan={COLUNAS.length + 1} className="px-3 py-4 text-fg-muted">
+                <td colSpan={totalColunas} className="px-3 py-4 text-fg-muted">
                   Nenhuma conexão cadastrada
                 </td>
               </tr>
@@ -207,52 +214,54 @@ export function ConnectionsPage() {
                 <td className="px-3 py-2">
                   <CelulaUltimoEstado estado={estados.get(conexao.id)} />
                 </td>
-                <td className="px-3 py-2">
-                  {aConfirmar === conexao.id ? (
-                    <div className="flex items-center justify-end gap-2">
-                      <span className="text-xs text-fg-muted">Excluir esta conexão?</span>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        data-testid="conn-delete-confirm"
-                        disabled={excluir.isPending}
-                        onClick={() => void confirmarExclusao(conexao.id)}
-                      >
-                        Confirmar
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid="conn-delete-cancel"
-                        onClick={() => setAConfirmar(null)}
-                      >
-                        Cancelar
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid="conn-edit"
-                        onClick={() => abrirEdicao(conexao)}
-                      >
-                        Editar
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid="conn-delete"
-                        onClick={() => {
-                          setErro(null);
-                          setAConfirmar(conexao.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    </div>
-                  )}
-                </td>
+                {podeMutar && (
+                  <td className="px-3 py-2">
+                    {aConfirmar === conexao.id ? (
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="text-xs text-fg-muted">Excluir esta conexão?</span>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          data-testid="conn-delete-confirm"
+                          disabled={excluir.isPending}
+                          onClick={() => void confirmarExclusao(conexao.id)}
+                        >
+                          Confirmar
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          data-testid="conn-delete-cancel"
+                          onClick={() => setAConfirmar(null)}
+                        >
+                          Cancelar
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          data-testid="conn-edit"
+                          onClick={() => abrirEdicao(conexao)}
+                        >
+                          Editar
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          data-testid="conn-delete"
+                          onClick={() => {
+                            setErro(null);
+                            setAConfirmar(conexao.id);
+                          }}
+                        >
+                          Excluir
+                        </Button>
+                      </div>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

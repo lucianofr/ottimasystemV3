@@ -72,3 +72,12 @@ export function useAuth(): AuthState {
   if (!ctx) throw new Error("useAuth fora de AuthProvider");
   return ctx;
 }
+
+/**
+ * Único ponto de decisão de permissão na UI: o operador enxerga tudo (ADR-015),
+ * só não dispara mutação de engenharia. É ergonomia, não segurança — a fronteira
+ * real é o `require_admin` da API, que devolve 403 independentemente da tela.
+ */
+export function useCanMutate(): boolean {
+  return useAuth().user?.role === "admin";
+}
