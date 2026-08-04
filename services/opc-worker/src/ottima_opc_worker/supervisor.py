@@ -42,6 +42,8 @@ logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_S = 10.0  # spec §2.2-1; constante de código, não knob de env
 MAX_CONNECTIONS = 5  # RF-201: no máximo 5 sessões simultâneas
+# Espera antes de reassinar o canal de eventos depois de uma queda do Redis.
+HINT_RETRY_S = 1.0
 
 # Kinds de auditoria da API (spec §7.2/§7.3) que antecipam a reconciliação.
 HINT_KINDS: frozenset[str] = frozenset(
@@ -210,22 +212,26 @@ class Supervisor:
         if self._poll_task is not None:
             return
         # SUBSCRIBE antes de retornar: uma dica publicada logo após o start() não se perde.
-        self._pubsub = self._redis.pubsub()
-        await self._pubsub.subscribe(CHANNEL_EVENTS)
+        await self._subscribe_events()
         self._hint_task = asyncio.create_task(self._listen_hints(), name="supervisor-hints")
         self._poll_task = asyncio.create_task(self._poll_loop(), name="supervisor-poll")
 
     async def stop(self) -> None:
-        """Derruba assinante, loop e todos os runtimes. Idempotente."""
-        await _cancel(self._poll_task)
-        await _cancel(self._hint_task)
+        """Derruba assinante, loop e todos os runtimes. Idempotente.
+
+        Cada desmonte é isolado: falha em um não pode abortar os outros. Runtime que
+        sobrevivesse a um `stop()` viraria sessão OPC órfã, falando com o PLC sem
+        supervisor nenhum.
+        """
+        await _cancel(self._poll_task, "loop de poll do supervisor")
+        await _cancel(self._hint_task, "assinante do canal de eventos")
         self._poll_task = None
         self._hint_task = None
-        pubsub, self._pubsub = self._pubsub, None
-        if pubsub is not None:
-            await pubsub.aclose()
-        for conn_id in list(self._runtimes):
-            await self._teardown(conn_id)
+        await self._drop_pubsub()
+        await asyncio.gather(
+            *(self._teardown(conn_id) for conn_id in list(self._runtimes)),
+            return_exceptions=True,
+        )
         self._watermark = None
 
     async def reconcile(self) -> None:
@@ -299,21 +305,71 @@ class Supervisor:
         logger.info("Conexão %s (%s) supervisionada", config.id, config.name)
 
     async def _teardown(self, conn_id: int) -> None:
-        runtime = self._runtimes.pop(conn_id, None)
-        self._state.connections.pop(conn_id, None)
-        if runtime is not None:
-            await runtime.stop()
-            logger.info("Conexão %s (%s) desmontada", conn_id, runtime.config.name)
+        """Para o runtime e tira a conexão do mapa e do `/health`.
+
+        A entrada sai do mapa mesmo quando o `stop()` falha, e só depois da tentativa:
+        manter uma conexão quebrada no mapa travaria a reconciliação para sempre, porque
+        toda passada seguinte tropeçaria no mesmo runtime e jamais subiria a configuração
+        nova. Remover antes de tentar seria pior ainda — o runtime seguiria vivo e
+        inalcançável.
+        """
+        runtime = self._runtimes.get(conn_id)
+        try:
+            if runtime is not None:
+                await runtime.stop()
+                logger.info("Conexão %s (%s) desmontada", conn_id, runtime.config.name)
+        except Exception:
+            logger.exception(
+                "Falha ao parar a conexão %s; a entrada é removida assim mesmo", conn_id
+            )
+        finally:
+            self._runtimes.pop(conn_id, None)
+            self._state.connections.pop(conn_id, None)
 
     async def _listen_hints(self) -> None:
-        """Traduz evento de auditoria em sinal; o reconcile é sempre do loop de poll."""
-        pubsub = self._pubsub
+        """Traduz evento de auditoria em sinal; o reconcile é sempre do loop de poll.
+
+        Perder uma dica é inofensivo por contrato (o poll corrige), mas a morte silenciosa
+        desta task não é: o sistema degradaria para o poll de 10 s sem ninguém saber. Por
+        isso o laço reassina o canal depois de qualquer queda do Redis.
+        """
+        while True:
+            try:
+                pubsub = self._pubsub
+                if pubsub is None:
+                    pubsub = await self._subscribe_events()
+                async for message in pubsub.listen():
+                    if message["type"] == "message" and _is_hint(message["data"]):
+                        self._hint.set()
+                # listen() terminando sem exceção também é canal perdido: reassina.
+                await self._drop_pubsub()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning(
+                    "Assinante do canal %s caiu; reassinando em %.1fs",
+                    CHANNEL_EVENTS,
+                    HINT_RETRY_S,
+                    exc_info=True,
+                )
+                await self._drop_pubsub()
+                await asyncio.sleep(HINT_RETRY_S)
+
+    async def _subscribe_events(self) -> PubSub:
+        pubsub = self._redis.pubsub()
+        await pubsub.subscribe(CHANNEL_EVENTS)
+        self._pubsub = pubsub
+        return pubsub
+
+    async def _drop_pubsub(self) -> None:
+        """Fecha o assinante atual sem nunca levantar: é caminho de desmonte."""
+        pubsub, self._pubsub = self._pubsub, None
         if pubsub is None:
             return
-        async for message in pubsub.listen():
-            if message["type"] != "message" or not _is_hint(message["data"]):
-                continue
-            self._hint.set()
+        try:
+            await pubsub.aclose()
+        except Exception:
+            logger.warning("Falha ao fechar o assinante do canal %s", CHANNEL_EVENTS, exc_info=True)
 
 
 def _is_hint(data: str) -> bool:
@@ -325,9 +381,14 @@ def _is_hint(data: str) -> bool:
     return kind in HINT_KINDS
 
 
-async def _cancel(task: asyncio.Task[None] | None) -> None:
+async def _cancel(task: asyncio.Task[None] | None, what: str) -> None:
+    """Cancela e aguarda a task; erro dela não pode impedir o resto do desmonte."""
     if task is None:
         return
     task.cancel()
-    with suppress(asyncio.CancelledError):
+    try:
         await task
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception("Falha ao encerrar %s", what)

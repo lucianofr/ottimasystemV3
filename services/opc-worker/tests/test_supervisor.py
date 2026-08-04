@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager, suppress
 
 import pytest
 from redis.asyncio import Redis
+from redis.asyncio.client import PubSub
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -26,7 +27,12 @@ from ottima_core.bus import (
 )
 from ottima_core.models import OpcConnection, Project, Tag
 from ottima_opc_worker import supervisor as supervisor_module
-from ottima_opc_worker.state import ConnectionState, WorkerState
+from ottima_opc_worker.state import (
+    ConnectionConfig,
+    ConnectionSnapshot,
+    ConnectionState,
+    WorkerState,
+)
 from ottima_opc_worker.supervisor import (
     MAX_CONNECTIONS,
     Supervisor,
@@ -43,6 +49,8 @@ SLOW_POLL_INTERVAL_S = 60.0
 QUIET_WINDOW_S = 1.0
 # A senoide muda a cada 200 ms: uma tag subscrita publica bem dentro desta janela.
 HINT_TIMEOUT_S = 5.0
+# `conn_id` que nunca existe no banco: identifica a entrada injetada pelos testes.
+MISSING_CONN_ID = 999_999
 
 
 async def await_until(
@@ -226,6 +234,66 @@ async def wait_up(supervisor: Supervisor, conn_id: int) -> None:
             and supervisor.runtimes[conn_id].state is ConnectionState.UP
         )
     )
+
+
+def _tasks_do_worker() -> list[asyncio.Task]:
+    """Tasks vivas do worker: nenhuma pode sobrar depois de um `stop()`."""
+    return [
+        task
+        for task in asyncio.all_tasks()
+        if task.get_name().startswith(("opc-conn-", "opc-heartbeat-", "supervisor-"))
+        and not task.done()
+    ]
+
+
+class ExplodingRuntime:
+    """Dublê de runtime que falha ao parar (ex.: disconnect travado no transporte)."""
+
+    def __init__(self, config: ConnectionConfig) -> None:
+        self.config = config
+        self.stop_calls = 0
+
+    async def stop(self) -> None:
+        self.stop_calls += 1
+        raise RuntimeError("stop explodiu")
+
+
+class _BrokenPubSub:
+    """Assinante que morre na primeira escuta, como numa queda de conexão do Redis."""
+
+    def __init__(self, inner: PubSub, owner: FlakyRedis) -> None:
+        self._inner = inner
+        self._owner = owner
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+    def listen(self) -> AsyncIterator[dict]:
+        async def _cai() -> AsyncIterator[dict]:
+            self._owner.broken_listens += 1
+            raise ConnectionError("queda simulada do Redis")
+            yield {}  # pragma: no cover - torna a função um gerador assíncrono
+
+        return _cai()
+
+
+class FlakyRedis:
+    """Cliente cujo primeiro `pubsub()` devolve um assinante que cai ao escutar."""
+
+    def __init__(self, inner: Redis) -> None:
+        self._inner = inner
+        self.pubsub_calls = 0
+        self.broken_listens = 0
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+    def pubsub(self) -> PubSub:
+        self.pubsub_calls += 1
+        pubsub = self._inner.pubsub()
+        if self.pubsub_calls == 1:
+            return _BrokenPubSub(pubsub, self)  # type: ignore[return-value]
+        return pubsub
 
 
 # --- watermark ---------------------------------------------------------------------
@@ -434,12 +502,86 @@ async def test_stop_e_idempotente_e_derruba_os_runtimes(
 
     assert supervisor.runtimes == {}
     assert state.connections == {}
-    pendentes = [
-        task
-        for task in asyncio.all_tasks()
-        if task.get_name().startswith(("opc-conn-", "supervisor-")) and not task.done()
-    ]
-    assert pendentes == []
+    assert _tasks_do_worker() == []
+
+
+async def test_stop_isola_falha_de_um_runtime(
+    session_factory: async_sessionmaker[AsyncSession], redis_client: Redis, sim: OpcSimServer
+) -> None:
+    """Runtime que explode no stop() não pode deixar os outros vivos nem travar o mapa.
+
+    Runtime sobrevivente a um `stop()` seria sessão OPC órfã: fala com o PLC sem
+    supervisor. E entrada que ficasse no mapa travaria toda reconciliação futura.
+    """
+    project_id = await create_project(session_factory)
+    conn_id = await create_connection(session_factory, project_id, sim.endpoint)
+    state = WorkerState()
+    supervisor = make_supervisor(session_factory, redis_client, state)
+
+    await supervisor.start()
+    await wait_up(supervisor, conn_id)
+
+    explosivo = ExplodingRuntime(supervisor.runtimes[conn_id].config)
+    supervisor.runtimes[MISSING_CONN_ID] = explosivo  # type: ignore[index]
+    state.connections[MISSING_CONN_ID] = ConnectionSnapshot(name="Explosiva")
+
+    await supervisor.stop()  # não pode propagar
+
+    assert explosivo.stop_calls == 1, "o stop() do runtime quebrado tem de ser tentado"
+    assert supervisor.runtimes == {}, "a entrada quebrada sai do mapa mesmo em falha"
+    assert state.connections == {}
+    assert _tasks_do_worker() == [], "o runtime saudável tem de ter sido parado"
+
+    await supervisor.stop()  # idempotente mesmo depois da falha
+    assert supervisor.runtimes == {}
+
+
+async def test_assinante_sobrevive_a_queda_do_redis(
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    sim: OpcSimServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Queda do Redis não pode matar a task de dicas: ela reassina e volta a disparar.
+
+    Perder dica é inofensivo (o poll corrige), mas a morte silenciosa da task degradaria
+    o sistema para o poll de 10 s sem ninguém saber.
+    """
+    monkeypatch.setattr(supervisor_module, "HINT_RETRY_S", 0.05)
+    project_id = await create_project(session_factory)
+    state = WorkerState()
+    flaky = FlakyRedis(redis_client)
+    supervisor = Supervisor(
+        session_factory,
+        flaky,  # type: ignore[arg-type]
+        state,
+        poll_interval_s=SLOW_POLL_INTERVAL_S,
+    )
+
+    async with started(supervisor):
+        # A primeira escuta morre com erro de conexão; o laço tem de reassinar.
+        await await_until(lambda: flaky.pubsub_calls >= 2, timeout_s=HINT_TIMEOUT_S)
+        assert flaky.broken_listens == 1
+        vivas = [task.get_name() for task in _tasks_do_worker()]
+        assert "supervisor-hints" in vivas, "a task de dicas morreu na queda do Redis"
+
+        conn_id = await create_connection(session_factory, project_id, sim.endpoint)
+        # Republica a dica até a assinatura nova pegá-la: `subscribe()` do redis-py não
+        # espera confirmação do servidor, e dica repetida é inofensiva por contrato.
+        # Poll de 60 s: se o runtime nasce, foi a dica pela assinatura nova.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + HINT_TIMEOUT_S
+        while conn_id not in supervisor.runtimes and loop.time() < deadline:
+            await publish_event(
+                redis_client,
+                severity="info",
+                origin="api",
+                message="Conexão criada",
+                kind=KIND_CONNECTION_CREATED,
+                payload={"conn_id": conn_id},
+            )
+            await asyncio.sleep(0.1)
+        assert conn_id in supervisor.runtimes, "a dica não voltou depois da reassinatura"
 
 
 # --- dica pelo canal `events` -------------------------------------------------------
