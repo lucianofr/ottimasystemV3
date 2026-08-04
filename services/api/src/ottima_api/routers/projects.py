@@ -84,14 +84,22 @@ async def activate_project(
     """Transação única: desativa o atual e ativa o alvo (ADR-017; índice parcial garante 1 ativo).
 
     F1 apenas persiste; a partir da F3 este endpoint também encerra a execução do projeto
-    anterior via `flow.commands` (gancho registrado no spec §6.2).
+    anterior via `flow.commands` (gancho registrado no spec §6.2). Reativar o projeto que já
+    é o ativo continua respondendo 200 com o projeto, mas **não** republica o evento.
     """
     project = await _carregar(db, project_id)
+    # Lido antes do UPDATE em massa abaixo, que apaga a informação. Reativar quem já é o ativo
+    # não é transição, e desde a F3 o evento é destrutivo: o supervisor do flow-runtime para
+    # TODOS os flows rodando ao recebê-lo (spec §2.2-8, gancho RF-101). Sem esta guarda, um
+    # clique em "ativar" no projeto vigente derrubaria a planta em silêncio.
+    ja_era_o_ativo = project.is_active
     # Um único commit no fim: o índice parcial rejeitaria o estado intermediário com 2 ativos
     await db.execute(update(Project).where(Project.is_active).values(is_active=False))
     project.is_active = True
     await db.commit()
     await db.refresh(project)
+    if ja_era_o_ativo:
+        return project
     # Depois do commit: evento sobre ativação que falhou envenenaria a reconciliação do worker
     await publish_event(
         redis_client,
