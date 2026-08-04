@@ -20,7 +20,7 @@ from ottima_core.bus import (
     publish_event,
 )
 from ottima_core.flowgraph import GraphParseError, TagRef, parse_graph, validate_graph
-from ottima_core.models import Flow, OpcConnection, Project, Tag, User
+from ottima_core.models import Flow, Project, User
 from ottima_core.schemas.flows import (
     MAX_BIGINT,
     FlowCreate,
@@ -29,6 +29,7 @@ from ottima_core.schemas.flows import (
     FlowSaved,
     FlowUpdate,
 )
+from ottima_core.tags import project_tags
 
 logger = logging.getLogger(__name__)
 
@@ -62,27 +63,6 @@ def _reprovado(mensagens: list[str]) -> HTTPException:
     (frontend/src/lib/api.ts) e mostraria "Erro inesperado" no lugar da reprovação.
     """
     return HTTPException(status_code=422, detail=SEPARADOR_REPROVACOES.join(mensagens))
-
-
-async def _tags_do_projeto(db: AsyncSession, project_id: int) -> dict[int, TagRef]:
-    """Tags visíveis ao flow: as do projeto dele, via conexão (o `graph_json` não tem FK).
-
-    Uma consulta para o grafo inteiro — o número de nós não pode virar número de queries.
-    """
-    stmt = (
-        select(Tag.id, Tag.connection_id, Tag.direction, Tag.data_type)
-        .join(OpcConnection, OpcConnection.id == Tag.connection_id)
-        .where(OpcConnection.project_id == project_id)
-    )
-    return {
-        row.id: TagRef(
-            id=row.id,
-            conn_id=row.connection_id,
-            direction=row.direction,
-            data_type=row.data_type,
-        )
-        for row in await db.execute(stmt)
-    }
 
 
 async def _publicar_evento(
@@ -195,7 +175,7 @@ async def update_flow(
     # `ts_seconds` é Numeric(4,1): SQLAlchemy devolve Decimal e a validação faz aritmética
     # com o Ts (teto de atraso do TFS), onde Decimal com float levanta TypeError.
     resultado = validate_graph(
-        graph, await _tags_do_projeto(db, flow.project_id), float(flow.ts_seconds)
+        graph, await project_tags(db, flow.project_id), float(flow.ts_seconds)
     )
     if resultado.errors:
         raise _reprovado(resultado.errors)
