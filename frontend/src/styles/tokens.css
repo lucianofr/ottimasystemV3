@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@theme {
+  /* Neutros grafite (DESIGN.md §Colors; valores exatos: spec F1 §8.1) */
+  --color-field: oklch(0.25 0.012 250);
+  --color-panel: oklch(0.29 0.012 250);
+  --color-well: oklch(0.21 0.01 250);
+  --color-hairline: oklch(0.38 0.01 250);
+  --color-fg: oklch(0.93 0.005 250);
+  --color-fg-muted: oklch(0.72 0.01 250);
+  /* Azul único de interação */
+  --color-accent: oklch(0.66 0.1 242);
+  /* Severidade — uso restrito (A Regra da Cor Anormal) */
+  --color-alarm: oklch(0.6 0.19 27);
+  --color-warn: oklch(0.74 0.14 80);
+  --color-running: oklch(0.6 0.09 150);
+
+  --font-sans: "Archivo", system-ui, sans-serif;
+  --font-label: "Archivo Narrow", "Archivo", sans-serif;
+  --font-mono: "Spline Sans Mono", ui-monospace, monospace;
+
+  /* Bisel de instrumento 2–4px (DESIGN.md §Shapes) */
+  --radius-panel: 3px;
+}
+
+/* Compatibilidade shadcn/ui (spec §8.1): componentes adicionados via CLI nas fases
+   seguintes herdam o tema automaticamente */
+:root {
+  --background: var(--color-field);
+  --foreground: var(--color-fg);
+  --card: var(--color-panel);
+  --card-foreground: var(--color-fg);
+  --popover: var(--color-panel);
+  --popover-foreground: var(--color-fg);
+  --primary: var(--color-accent);
+  --primary-foreground: var(--color-field);
+  --muted: var(--color-well);
+  --muted-foreground: var(--color-fg-muted);
+  --destructive: var(--color-alarm);
+  --border: var(--color-hairline);
+  --input: var(--color-hairline);
+  --ring: var(--color-accent);
+  --radius: 3px;
+}
+
+@layer base {
+  body {
+    @apply bg-field font-sans text-fg antialiased;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* A Regra da Plaqueta (DESIGN.md §Typography) */
+@utility plaqueta {
+  font-family: var(--font-label);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* A Regra do Número Tabular (DESIGN.md §Typography) */
+@utility process-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}

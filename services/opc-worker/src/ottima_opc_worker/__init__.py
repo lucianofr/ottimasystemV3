@@ -1,0 +1,1 @@
+"""OttimaSystem — worker OPC-UA."""

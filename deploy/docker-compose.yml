@@ -1,0 +1,146 @@
+name: ottima
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+      args:
+        PACKAGE: ottima-api
+    command: ["bash", "/app/deploy/entrypoint-api.sh"]
+    env_file: [.env]
+    environment:
+      OTTIMA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
+      OTTIMA_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - certs:/certs
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health',timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  opc-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+      args:
+        PACKAGE: ottima-opc-worker
+    command: ["uvicorn", "ottima_opc_worker.main:app", "--host", "0.0.0.0", "--port", "8001"]
+    env_file: [.env]
+    environment:
+      OTTIMA_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - certs:/certs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health',timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  flow-runtime:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+      args:
+        PACKAGE: ottima-flow-runtime
+    command: ["uvicorn", "ottima_flow_runtime.main:app", "--host", "0.0.0.0", "--port", "8002"]
+    env_file: [.env]
+    environment:
+      OTTIMA_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8002/health',timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  recorder:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+      args:
+        PACKAGE: ottima-recorder
+    command: ["uvicorn", "ottima_recorder.main:app", "--host", "0.0.0.0", "--port", "8003"]
+    env_file: [.env]
+    environment:
+      OTTIMA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
+      OTTIMA_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8003/health',timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../frontend
+    ports:
+      - "${OTTIMA_HTTP_PORT:-80}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  certs:

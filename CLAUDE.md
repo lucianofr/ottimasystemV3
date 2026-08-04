@@ -80,10 +80,15 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 ## Comandos (materializam na F1 — manter esta seção atualizada)
 
 ```bash
-uv sync                                   # ambiente do workspace
-docker compose -f deploy/docker-compose.yml up -d   # sobe o sistema completo
-uv run pytest                             # testes do workspace
-cd frontend && npm run dev                # frontend (Vite, host/porta explícitos)
+uv sync --all-packages                              # ambiente do workspace
+docker compose -f deploy/docker-compose.yml up -d   # sobe o sistema completo (deploy/.env necessário)
+uv run pytest                                       # testes do workspace (sobe Timescale efêmero)
+uv run ruff check . && uv run ruff format --check . # lint + formato
+cd frontend && npm run dev                          # frontend (Vite, 127.0.0.1:5173, proxy /api->8000)
+# Gate E2E da F1 (docs/specs/F1-testes-e2e.md):
+bash deploy/smoke.sh                                # L1 — stack + retenção + login do seed
+uv run pytest -m e2e tests/e2e -v                   # L2 — API contra o compose (exporte E2E_*)
+cd frontend && npm run e2e                          # L3 — Playwright
 ```
 
 ## Proibições rápidas para agentes
