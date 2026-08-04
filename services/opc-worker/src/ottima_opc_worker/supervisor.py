@@ -228,10 +228,12 @@ class Supervisor:
         self._poll_task = None
         self._hint_task = None
         await self._drop_pubsub()
-        await asyncio.gather(
-            *(self._teardown(conn_id) for conn_id in list(self._runtimes)),
+        conn_ids = list(self._runtimes)
+        resultados = await asyncio.gather(
+            *(self._teardown(conn_id) for conn_id in conn_ids),
             return_exceptions=True,
         )
+        _log_teardown_results(conn_ids, resultados)
         self._watermark = None
 
     async def reconcile(self) -> None:
@@ -341,8 +343,13 @@ class Supervisor:
                 async for message in pubsub.listen():
                     if message["type"] == "message" and _is_hint(message["data"]):
                         self._hint.set()
-                # listen() terminando sem exceção também é canal perdido: reassina.
-                await self._drop_pubsub()
+                # Escuta que termina limpa também é canal perdido: o Redis pode fechar a
+                # conexão sem levantar nada.
+                logger.warning(
+                    "Escuta do canal %s terminou sem erro; reassinando em %.1fs",
+                    CHANNEL_EVENTS,
+                    HINT_RETRY_S,
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -352,8 +359,10 @@ class Supervisor:
                     HINT_RETRY_S,
                     exc_info=True,
                 )
-                await self._drop_pubsub()
-                await asyncio.sleep(HINT_RETRY_S)
+            # O freio vale para TODO recomeço, não só para o caminho de exceção: sem ele
+            # um listen() que retorna na hora vira rajada de reassinatura queimando CPU.
+            await self._drop_pubsub()
+            await asyncio.sleep(HINT_RETRY_S)
 
     async def _subscribe_events(self) -> PubSub:
         pubsub = self._redis.pubsub()
@@ -379,6 +388,21 @@ def _is_hint(data: str) -> bool:
         logger.debug("Mensagem descartada no canal %s", CHANNEL_EVENTS, exc_info=True)
         return False
     return kind in HINT_KINDS
+
+
+def _log_teardown_results(conn_ids: list[int], resultados: list[object]) -> None:
+    """Registra o que o gather engoliu: desmonte silencioso esconde sessão OPC órfã."""
+    for conn_id, resultado in zip(conn_ids, resultados, strict=True):
+        if not isinstance(resultado, BaseException):
+            continue
+        if isinstance(resultado, asyncio.CancelledError):
+            # Anormal, mas não é erro de programação: o cancelamento veio de fora, já que
+            # o `stop()` inteiro sendo cancelado repropagaria em vez de cair aqui.
+            logger.warning("Desmonte da conexão %s foi cancelado por fora", conn_id)
+        else:
+            logger.exception(
+                "Falha inesperada ao desmontar a conexão %s", conn_id, exc_info=resultado
+            )
 
 
 async def _cancel(task: asyncio.Task[None] | None, what: str) -> None:

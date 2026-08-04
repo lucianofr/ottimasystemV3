@@ -8,9 +8,9 @@ tabelas truncadas no setup e no teardown). As conexões apontam para o opcsim in
 from __future__ import annotations
 
 import asyncio
-import json
-from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager, suppress
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import pytest
 from redis.asyncio import Redis
@@ -18,7 +18,8 @@ from redis.asyncio.client import PubSub
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from opcsim import NODE_SINE, NODE_STATIC, OpcSimServer, free_port
+from conftest import await_until, collecting
+from opcsim import NODE_SINE, NODE_STATIC, OpcSimServer
 from ottima_core.bus import (
     KIND_CONNECTION_CREATED,
     KIND_OPC_WRITE,
@@ -40,7 +41,6 @@ from ottima_opc_worker.supervisor import (
     read_watermark,
 )
 
-AWAIT_TIMEOUT_S = 20.0
 # Poll curto: a reconciliação dos testes vem do loop, não de chamada direta.
 TEST_POLL_INTERVAL_S = 0.2
 # Poll longo o bastante para que qualquer reconciliação observada venha da dica.
@@ -49,57 +49,11 @@ SLOW_POLL_INTERVAL_S = 60.0
 QUIET_WINDOW_S = 1.0
 # A senoide muda a cada 200 ms: uma tag subscrita publica bem dentro desta janela.
 HINT_TIMEOUT_S = 5.0
+# Freio de reassinatura usado nos testes, e a janela em que ele é medido.
+FREIO_S = 0.1
+JANELA_DO_FREIO_S = 0.6
 # `conn_id` que nunca existe no banco: identifica a entrada injetada pelos testes.
 MISSING_CONN_ID = 999_999
-
-
-async def await_until(
-    condition: Callable[[], bool], timeout_s: float = AWAIT_TIMEOUT_S, interval: float = 0.02
-) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
-        if condition():
-            return
-        await asyncio.sleep(interval)
-    raise AssertionError(f"condição não satisfeita em {timeout_s}s")
-
-
-@asynccontextmanager
-async def collecting(redis_client: Redis, channel: str) -> AsyncIterator[list[dict]]:
-    """Assinante de teste de um canal; só devolve depois do SUBSCRIBE confirmado."""
-    pubsub = redis_client.pubsub()
-    await pubsub.subscribe(channel)
-    received: list[dict] = []
-    subscribed = asyncio.Event()
-
-    async def _reader() -> None:
-        async for message in pubsub.listen():
-            if message["type"] == "subscribe":
-                subscribed.set()
-            elif message["type"] == "message":
-                received.append(json.loads(message["data"]))
-
-    task = asyncio.create_task(_reader(), name=f"test-reader-{channel}")
-    try:
-        await asyncio.wait_for(subscribed.wait(), timeout=5.0)
-        yield received
-    finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
-        await pubsub.aclose()
-
-
-@pytest.fixture
-async def sim() -> AsyncIterator[OpcSimServer]:
-    server = OpcSimServer(port=free_port())
-    await server.start()
-    try:
-        yield server
-    finally:
-        await server.stop()
 
 
 @pytest.fixture
@@ -258,6 +212,18 @@ class ExplodingRuntime:
         raise RuntimeError("stop explodiu")
 
 
+class CancellingRuntime:
+    """Dublê cujo `stop()` é cancelado por fora (task interna morta no meio)."""
+
+    def __init__(self, config: ConnectionConfig) -> None:
+        self.config = config
+        self.stop_calls = 0
+
+    async def stop(self) -> None:
+        self.stop_calls += 1
+        raise asyncio.CancelledError
+
+
 class _BrokenPubSub:
     """Assinante que morre na primeira escuta, como numa queda de conexão do Redis."""
 
@@ -294,6 +260,38 @@ class FlakyRedis:
         if self.pubsub_calls == 1:
             return _BrokenPubSub(pubsub, self)  # type: ignore[return-value]
         return pubsub
+
+
+class _EmptyPubSub:
+    """Assinante cuja escuta termina limpa na hora, sem levantar nada."""
+
+    def __init__(self, inner: PubSub) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+    def listen(self) -> AsyncIterator[dict]:
+        async def _encerra() -> AsyncIterator[dict]:
+            return
+            yield {}  # pragma: no cover - torna a função um gerador assíncrono
+
+        return _encerra()
+
+
+class ClosingRedis:
+    """Cliente cujo `pubsub()` sempre devolve assinante que encerra a escuta na hora."""
+
+    def __init__(self, inner: Redis) -> None:
+        self._inner = inner
+        self.pubsub_calls = 0
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+    def pubsub(self) -> PubSub:
+        self.pubsub_calls += 1
+        return _EmptyPubSub(self._inner.pubsub())  # type: ignore[return-value]
 
 
 # --- watermark ---------------------------------------------------------------------
@@ -534,6 +532,65 @@ async def test_stop_isola_falha_de_um_runtime(
 
     await supervisor.stop()  # idempotente mesmo depois da falha
     assert supervisor.runtimes == {}
+
+
+async def test_stop_loga_desmonte_cancelado_por_fora(
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    sim: OpcSimServer,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Cancelamento de um desmonte isolado não pode sumir sem rastro no gather."""
+    project_id = await create_project(session_factory)
+    conn_id = await create_connection(session_factory, project_id, sim.endpoint)
+    state = WorkerState()
+    supervisor = make_supervisor(session_factory, redis_client, state)
+
+    await supervisor.start()
+    await wait_up(supervisor, conn_id)
+
+    cancelado = CancellingRuntime(supervisor.runtimes[conn_id].config)
+    supervisor.runtimes[MISSING_CONN_ID] = cancelado  # type: ignore[index]
+    state.connections[MISSING_CONN_ID] = ConnectionSnapshot(name="Cancelada")
+
+    with caplog.at_level(logging.WARNING, logger="ottima_opc_worker.supervisor"):
+        await supervisor.stop()  # não pode propagar
+
+    assert cancelado.stop_calls == 1
+    assert any(
+        record.levelno == logging.WARNING and str(MISSING_CONN_ID) in record.getMessage()
+        for record in caplog.records
+    ), "o cancelamento do desmonte tem de aparecer no log"
+    assert supervisor.runtimes == {}
+    assert state.connections == {}
+    assert _tasks_do_worker() == [], "o runtime saudável tem de ter sido parado"
+
+
+async def test_reassinatura_limpa_respeita_o_freio(
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`listen()` que termina limpo não pode virar rajada de reassinatura queimando CPU."""
+    monkeypatch.setattr(supervisor_module, "HINT_RETRY_S", FREIO_S)
+    state = WorkerState()
+    fechando = ClosingRedis(redis_client)
+    supervisor = Supervisor(
+        session_factory,
+        fechando,  # type: ignore[arg-type]
+        state,
+        poll_interval_s=SLOW_POLL_INTERVAL_S,
+    )
+
+    async with started(supervisor):
+        await asyncio.sleep(JANELA_DO_FREIO_S)
+
+    # 1 assinatura do start() + no máximo uma por freio na janela (folga de 2 para o
+    # escalonamento do event loop). Sem freio seriam centenas.
+    teto = 1 + int(JANELA_DO_FREIO_S / FREIO_S) + 2
+    assert 2 <= fechando.pubsub_calls <= teto, (
+        f"reassinaturas fora do esperado: {fechando.pubsub_calls} (teto {teto})"
+    )
 
 
 async def test_assinante_sobrevive_a_queda_do_redis(
