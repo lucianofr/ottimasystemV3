@@ -26,13 +26,23 @@ def test_nomes_de_canais_prd_71():
 def test_payloads_verbatim_prd_71():
     ts = datetime.now(UTC)
     assert set(OpcValue(tag_id=1, ts=ts, value=1.5, quality=0).model_dump()) == {
-        "tag_id", "ts", "value", "quality"
+        "tag_id",
+        "ts",
+        "value",
+        "quality",
     }
-    assert set(
-        OpcWrite(conn_id=1, tag_id=2, value=3.0, source="user:1", ts=ts).model_dump()
-    ) == {"conn_id", "tag_id", "value", "source", "ts"}
+    assert set(OpcWrite(conn_id=1, tag_id=2, value=3.0, source="user:1", ts=ts).model_dump()) == {
+        "conn_id",
+        "tag_id",
+        "value",
+        "source",
+        "ts",
+    }
     assert set(FlowStatus(state="running", scan_ms=12.5, overruns=0, ts=ts).model_dump()) == {
-        "state", "scan_ms", "overruns", "ts"
+        "state",
+        "scan_ms",
+        "overruns",
+        "ts",
     }
     assert set(
         EventMessage(ts=ts, severity="alarm", origin="conn:1", message="x", payload={}).model_dump()

@@ -30,6 +30,9 @@ addopts = "-m 'not e2e' --import-mode=importlib"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# docs/ guarda documentos normativos e planos (artefatos históricos), não código-fonte:
+# o ruff não deve reformatar os blocos Python embutidos neles.
+extend-exclude = ["docs/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]

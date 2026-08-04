@@ -35,8 +35,11 @@ async def test_cria_lista_filtra(client, admin_headers, operator_headers):
 async def test_nome_duplicado_na_conexao_409(client, admin_headers):
     cid = await _conexao(client, admin_headers)
     corpo = {
-        "connection_id": cid, "name": "TI-100", "node_id": "ns=2;i=1",
-        "direction": "r", "data_type": "float",
+        "connection_id": cid,
+        "name": "TI-100",
+        "node_id": "ns=2;i=1",
+        "direction": "r",
+        "data_type": "float",
     }
     assert (await client.post("/api/tags", json=corpo, headers=admin_headers)).status_code == 201
     r = await client.post("/api/tags", json=corpo, headers=admin_headers)
@@ -48,15 +51,25 @@ async def test_validacoes_e_papeis(client, admin_headers, operator_headers):
     cid = await _conexao(client, admin_headers)
     r = await client.post(
         "/api/tags",
-        json={"connection_id": cid, "name": "X", "node_id": "n",
-              "direction": "z", "data_type": "float"},
+        json={
+            "connection_id": cid,
+            "name": "X",
+            "node_id": "n",
+            "direction": "z",
+            "data_type": "float",
+        },
         headers=admin_headers,
     )
     assert r.status_code == 422  # direction inválida
     r = await client.post(
         "/api/tags",
-        json={"connection_id": cid, "name": "X", "node_id": "n",
-              "direction": "r", "data_type": "float"},
+        json={
+            "connection_id": cid,
+            "name": "X",
+            "node_id": "n",
+            "direction": "r",
+            "data_type": "float",
+        },
         headers=operator_headers,
     )
     assert r.status_code == 403
@@ -68,8 +81,13 @@ async def test_patch_e_delete(client, admin_headers):
     t = (
         await client.post(
             "/api/tags",
-            json={"connection_id": cid, "name": "PT-1", "node_id": "ns=2;i=9",
-                  "direction": "r", "data_type": "float"},
+            json={
+                "connection_id": cid,
+                "name": "PT-1",
+                "node_id": "ns=2;i=9",
+                "direction": "r",
+                "data_type": "float",
+            },
             headers=admin_headers,
         )
     ).json()

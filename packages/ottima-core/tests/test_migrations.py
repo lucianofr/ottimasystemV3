@@ -15,9 +15,7 @@ async def test_tabelas_relacionais_existem(db_engine):
 async def test_apenas_um_projeto_ativo(db_session):
     await db_session.execute(text("INSERT INTO projects (name, is_active) VALUES ('p1', true)"))
     with pytest.raises(IntegrityError):
-        await db_session.execute(
-            text("INSERT INTO projects (name, is_active) VALUES ('p2', true)")
-        )
+        await db_session.execute(text("INSERT INTO projects (name, is_active) VALUES ('p2', true)"))
 
 
 async def test_ts_fora_da_lista_rejeitado(db_session):

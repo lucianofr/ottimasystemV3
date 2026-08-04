@@ -31,7 +31,7 @@ class Flow(TimestampMixin, Base):
         Text, nullable=False, server_default=text("'stopped'")
     )
     graph_json: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{\"nodes\": [], \"edges\": []}'::jsonb")
+        JSONB, nullable=False, server_default=text('\'{"nodes": [], "edges": []}\'::jsonb')
     )
 
     __table_args__ = (

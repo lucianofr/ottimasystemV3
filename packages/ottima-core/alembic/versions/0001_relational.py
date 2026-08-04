@@ -83,9 +83,7 @@ def upgrade() -> None:
         sa.Column("server_cert_file", sa.Text),
         sa.Column("watchdog_read_node_id", sa.Text),
         sa.Column("watchdog_write_node_id", sa.Text),
-        sa.Column(
-            "watchdog_period_ms", sa.Integer, nullable=False, server_default=sa.text("1500")
-        ),
+        sa.Column("watchdog_period_ms", sa.Integer, nullable=False, server_default=sa.text("1500")),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -167,7 +165,7 @@ def upgrade() -> None:
             "graph_json",
             postgresql.JSONB,
             nullable=False,
-            server_default=sa.text("'{\"nodes\": [], \"edges\": []}'::jsonb"),
+            server_default=sa.text('\'{"nodes": [], "edges": []}\'::jsonb'),
         ),
         sa.Column(
             "created_at",

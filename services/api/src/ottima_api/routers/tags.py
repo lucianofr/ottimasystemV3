@@ -44,9 +44,7 @@ async def create_tag(body: TagCreate, db: AsyncSession = Depends(get_db)) -> Tag
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(
-            status_code=409, detail="Nome de tag já em uso nesta conexão"
-        ) from None
+        raise HTTPException(status_code=409, detail="Nome de tag já em uso nesta conexão") from None
     await db.refresh(tag)
     return tag
 
@@ -65,9 +63,7 @@ async def update_tag(tag_id: int, body: TagUpdate, db: AsyncSession = Depends(ge
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(
-            status_code=409, detail="Nome de tag já em uso nesta conexão"
-        ) from None
+        raise HTTPException(status_code=409, detail="Nome de tag já em uso nesta conexão") from None
     await db.refresh(tag)
     return tag
 
