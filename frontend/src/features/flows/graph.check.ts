@@ -10,6 +10,7 @@ import {
   handlesSaida,
   motivoRecusa,
   paraGraphJson,
+  podarArestasDoBloco,
   proximoExecOrder,
   tipoPorta,
   type BlocoEdge,
@@ -313,4 +314,43 @@ test("nó de tipo desconhecido é descartado junto com as arestas que o citam", 
   });
   expect(grafo.nodes.map((no) => no.id)).toEqual(["s"]);
   expect(grafo.edges.map((a) => a.id)).toEqual(["e2"]);
+});
+
+// --------------------------------------------------------------------------------------
+// Poda de arestas ao reconfigurar o bloco
+// --------------------------------------------------------------------------------------
+
+test("encolher o Script derruba as arestas das portas que sumiram e mantém as que ficaram", () => {
+  const edges = [
+    aresta("e1", "a", "OUT1", "s", "IN1"),
+    aresta("e2", "b", "OUT1", "s", "IN2"),
+    aresta("e3", "c", "OUT1", "s", "IN3"),
+  ];
+  const encolhido = script("s", 1, 1, 1);
+  expect(podarArestasDoBloco(edges, encolhido).map((a) => a.id)).toEqual(["e1"]);
+});
+
+test("reduzir n_outputs derruba as arestas que saíam das portas removidas", () => {
+  const edges = [
+    aresta("e1", "s", "OUT1", "w1", "in"),
+    aresta("e2", "s", "OUT2", "w2", "in"),
+  ];
+  expect(podarArestasDoBloco(edges, script("s", 1, 1, 1)).map((a) => a.id)).toEqual(["e1"]);
+});
+
+test("arestas que não tocam o bloco reconfigurado passam intactas", () => {
+  const edges = [
+    aresta("e1", "x", "out", "y", "u1"),
+    aresta("e2", "z", "OUT1", "s", "IN2"),
+  ];
+  const podadas = podarArestasDoBloco(edges, script("s", 1, 1, 1));
+  expect(podadas.map((a) => a.id)).toEqual(["e1"]);
+  expect(podadas[0]).toBe(edges[0]);
+});
+
+test("reconfigurar sem mexer nas portas não derruba nada", () => {
+  const edges = [aresta("e1", "r", "out", "t", "u1"), aresta("e2", "t", "y1", "w", "in")];
+  expect(podarArestasDoBloco(edges, tfs("t", 1))).toEqual(edges);
+  expect(podarArestasDoBloco(edges, escrita("w", 2, 42))).toEqual(edges);
+  expect(podarArestasDoBloco(edges, leitura("r", 3, 41))).toEqual(edges);
 });

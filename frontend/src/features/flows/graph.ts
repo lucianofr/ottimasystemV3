@@ -274,6 +274,23 @@ function renumerar(nodes: readonly BlocoNode[], ordenados: readonly string[]): B
   });
 }
 
+/**
+ * Descarta as arestas que ficaram penduradas em portas que o bloco não tem mais.
+ *
+ * Encolher o Script de 3 para 1 entrada apaga `IN2`/`IN3`, e uma aresta apontando para porta
+ * inexistente é 422 no save ("'targetHandle' não é uma entrada de..."). Arestas que não
+ * tocam o bloco reconfigurado passam intactas.
+ */
+export function podarArestasDoBloco(edges: readonly BlocoEdge[], no: BlocoNode): BlocoEdge[] {
+  const entradas = handlesEntrada(no);
+  const saidas = handlesSaida(no);
+  return edges.filter((aresta) => {
+    if (aresta.source === no.id && !saidas.includes(aresta.sourceHandle)) return false;
+    if (aresta.target === no.id && !entradas.includes(aresta.targetHandle)) return false;
+    return true;
+  });
+}
+
 /** Compactação automática ao excluir (ADR-024): o conjunto volta a ser contíguo 1..N. */
 export function compactarExecOrder(nodes: readonly BlocoNode[]): BlocoNode[] {
   return renumerar(nodes, ordemVigente(nodes));

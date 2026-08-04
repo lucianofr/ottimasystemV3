@@ -40,10 +40,9 @@ import {
   criarBloco,
   deGraphJson,
   definirExecOrder,
-  handlesEntrada,
-  handlesSaida,
   motivoRecusa,
   paraGraphJson,
+  podarArestasDoBloco,
   proximoExecOrder,
   TIPOS_BLOCO,
   type BlocoEdge,
@@ -354,8 +353,6 @@ function Editor({ flowId }: { flowId: number }) {
   }
 
   function aplicarConfig(atualizado: BlocoNode, execOrder: number): void {
-    const entradas = handlesEntrada(atualizado);
-    const saidas = handlesSaida(atualizado);
     setNodes((atuais) =>
       definirExecOrder(
         atuais.map((no) => (no.id === atualizado.id ? atualizado : no)),
@@ -364,13 +361,7 @@ function Editor({ flowId }: { flowId: number }) {
       ),
     );
     // Encolher o Script deixaria arestas em portas que não existem mais (422 no save).
-    setEdges((atuais) =>
-      atuais.filter((aresta) => {
-        if (aresta.source === atualizado.id && !saidas.includes(aresta.sourceHandle)) return false;
-        if (aresta.target === atualizado.id && !entradas.includes(aresta.targetHandle)) return false;
-        return true;
-      }),
-    );
+    setEdges((atuais) => podarArestasDoBloco(atuais, atualizado));
     setAvisosServidor(null);
   }
 

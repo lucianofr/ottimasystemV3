@@ -136,8 +136,11 @@ export function ModalConfigBloco({
   const dialogo = useRef<HTMLDialogElement>(null);
   const [matrizTfs, setMatrizTfs] = useState<DadosTfs | null>(no.type === "tfs" ? no.data : null);
 
+  // `main.tsx` monta sob <StrictMode>: em dev o efeito roda duas vezes e `showModal()` num
+  // <dialog> já aberto levanta InvalidStateError, que sem error boundary derruba a árvore.
   useEffect(() => {
-    dialogo.current?.showModal();
+    const elemento = dialogo.current;
+    if (elemento !== null && !elemento.open) elemento.showModal();
   }, []);
 
   function aplicar(evento: FormEvent<HTMLFormElement>): void {
