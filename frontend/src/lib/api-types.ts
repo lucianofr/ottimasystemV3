@@ -268,6 +268,86 @@ export interface paths {
         patch: operations["update_tag_api_tags__tag_id__patch"];
         trace?: never;
     };
+    "/api/flows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Flows
+         * @description Lista leve (spec §5.1): `graph_json` só sai no detalhe.
+         */
+        get: operations["list_flows_api_flows_get"];
+        put?: never;
+        /**
+         * Create Flow
+         * @description Flow nasce parado (ADR-017) e com grafo vazio; o desenho chega pelo PUT.
+         */
+        post: operations["create_flow_api_flows_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/flows/{flow_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Flow */
+        get: operations["get_flow_api_flows__flow_id__get"];
+        /**
+         * Update Flow
+         * @description Valida o grafo antes de gravar (spec §5.2); avisos de inversão não bloqueiam (RF-307).
+         */
+        put: operations["update_flow_api_flows__flow_id__put"];
+        post?: never;
+        /** Delete Flow */
+        delete: operations["delete_flow_api_flows__flow_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/flows/{flow_id}/deploy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Deploy Flow */
+        post: operations["deploy_flow_api_flows__flow_id__deploy_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/flows/{flow_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Flow */
+        post: operations["stop_flow_api_flows__flow_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/events": {
         parameters: {
             query?: never;
@@ -558,6 +638,85 @@ export interface components {
             message: string;
             /** Payload */
             payload: {
+                [key: string]: unknown;
+            };
+        };
+        /** FlowCreate */
+        FlowCreate: {
+            /** Project Id */
+            project_id: number;
+            /** Name */
+            name: string;
+            /**
+             * Ts Seconds
+             * @enum {unknown}
+             */
+            ts_seconds: 0.5 | 1 | 2 | 5 | 10 | 30 | 60;
+        };
+        /** FlowDetail */
+        FlowDetail: {
+            /** Id */
+            id: number;
+            /** Project Id */
+            project_id: number;
+            /** Name */
+            name: string;
+            /** Ts Seconds */
+            ts_seconds: number;
+            /**
+             * Desired State
+             * @enum {string}
+             */
+            desired_state: "running" | "stopped";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Graph Json */
+            graph_json: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * FlowOut
+         * @description Linha da lista (spec §5.1): sem `graph_json`, que por flow pode ser grande.
+         */
+        FlowOut: {
+            /** Id */
+            id: number;
+            /** Project Id */
+            project_id: number;
+            /** Name */
+            name: string;
+            /** Ts Seconds */
+            ts_seconds: number;
+            /**
+             * Desired State
+             * @enum {string}
+             */
+            desired_state: "running" | "stopped";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * FlowSaved
+         * @description Resposta do PUT (spec §5.2): avisos de inversão acompanham o flow gravado.
+         */
+        FlowSaved: {
+            flow: components["schemas"]["FlowDetail"];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** FlowUpdate */
+        FlowUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Graph Json */
+            graph_json: {
                 [key: string]: unknown;
             };
         };
@@ -1592,6 +1751,227 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TagOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_flows_api_flows_get: {
+        parameters: {
+            query?: {
+                project_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlowOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_flow_api_flows_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlowCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlowDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_flow_api_flows__flow_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlowDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_flow_api_flows__flow_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlowUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlowSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_flow_api_flows__flow_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deploy_flow_api_flows__flow_id__deploy_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_flow_api_flows__flow_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
