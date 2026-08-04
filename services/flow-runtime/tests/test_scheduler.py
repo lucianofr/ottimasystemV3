@@ -478,3 +478,69 @@ async def test_ts_publicado_e_o_instante_de_disparo(flow, subscribe):
     assert status.ts == EPOCH + timedelta(seconds=1.0)  # 1.4 seria o fim da varredura
     assert status.scan_ms == pytest.approx(400.0)
     assert task.last_scan_ts == EPOCH + timedelta(seconds=1.0)
+
+
+async def test_varredura_estourada_publica_o_overrun_da_propria_varredura(flow, subscribe):
+    """O contador tem de subir ANTES da publicação: é o campo que o E2E-F3-03 lê.
+
+    Publicar o valor antigo esconderia o estouro até a varredura seguinte — que, justamente
+    por causa do salto de fronteiras, pode estar vários Ts à frente.
+    """
+    clock = FakeClock()
+    block = SpyBlock("a", clock, outputs=("out",), cost=2.5)
+    raw = await subscribe(channel_flow_status(FLOW_ID))
+    await flow(clock, [block])
+
+    await run_scan(clock)
+    await await_until(lambda: len(raw) >= 2)
+
+    status = FlowStatus.model_validate_json(raw[-1])
+    assert status.scan_ms == pytest.approx(2500.0)  # é a publicação da varredura que estourou
+    assert status.overruns == 1
+
+
+async def test_hot_swap_preserva_porta_que_sobrevive_e_esquece_a_que_saiu(flow, subscribe):
+    """A tabela de portas é privada da FlowTask, então a herança na troca é contrato daqui.
+
+    Três destinos numa só troca: porta que sobrevive mantém o valor (senão a aresta invertida
+    perderia a varredura anterior por causa de uma edição em outro canto do flow), bloco que
+    saiu do grafo desaparece da publicação, e porta nova nasce fria (§3.0).
+    """
+    clock = FakeClock()
+    source = SpyBlock("a", clock, outputs=("out",))
+    gone = SpyBlock("g", clock, outputs=("out",))
+    sink = SpyBlock("b", clock, inputs=("in",), outputs=("out",))
+    fresh = SpyBlock("f", clock, inputs=("solta",), outputs=("out",))
+    raw = await subscribe(channel_flow_status(FLOW_ID))
+    task = await flow(clock, [source, gone])
+
+    await run_scan(clock)  # a.out e g.out valem 1.0 na tabela
+    task.stage(
+        FlowDefinition(
+            flow_id=FLOW_ID,
+            ts_seconds=TS_SECONDS,
+            # `b` antes de `a`: aresta invertida, logo `b` só pode ler o valor herdado.
+            blocks=(sink, source, fresh),
+            wiring={"b": {"in": ("a", "out")}},
+        )
+    )
+    await run_scan(clock)
+    await await_until(lambda: len(raw) >= 3)
+
+    assert sink.seen[0]["in"].v == 1.0  # herdado da varredura anterior à troca
+    status = FlowStatus.model_validate_json(raw[-1])
+    assert "g" not in status.ports  # bloco que saiu do grafo não publica mais
+    assert status.ports["f"]["solta"] == PortValue(v=None, ok=False)  # porta nova nasce fria
+
+
+async def test_inputs_leva_somente_as_portas_com_aresta(flow):
+    """Contrato da 1.2: porta declarada e sem aresta não entra no dict entregue ao `step`."""
+    clock = FakeClock()
+    source = SpyBlock("a", clock, outputs=("out",))
+    sink = SpyBlock("b", clock, inputs=("ligada", "solta"), outputs=("out",))
+    await flow(clock, [source, sink], wiring={"b": {"ligada": ("a", "out")}})
+
+    await run_scan(clock)
+
+    assert set(sink.seen[0]) == {"ligada"}
+    assert sink.seen[0]["ligada"].v == 1.0

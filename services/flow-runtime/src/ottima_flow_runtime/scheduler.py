@@ -196,8 +196,10 @@ class FlowTask:
                 await self._scan()
                 self._scan_ms = (self._clock.monotonic() - fired_at) * 1000.0
                 self._last_scan_ts = fired_ts
-                await self._publish_status(ts=fired_ts, ports=self._port_values())
+                # A grade se acerta ANTES de publicar: a varredura que estourou tem de levar o
+                # próprio `overruns`, e não o da anterior — é o campo que o aceite mede.
                 index = await self._settle_grid(index)
+                await self._publish_status(ts=fired_ts, ports=self._port_values())
         except asyncio.CancelledError:
             raise
         except Exception:
