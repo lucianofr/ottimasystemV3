@@ -11,16 +11,19 @@ from contextlib import suppress
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
 
 from asyncua import Client
 from redis.asyncio import Redis
 
 from ottima_core.bus import KIND_COMM_FAILURE, KIND_COMM_RESTORED, publish_event
-from ottima_core.certs import APPLICATION_URI
-from ottima_core.security import decrypt_secret
 
 from .heartbeat import HEARTBEAT_INTERVAL_S, ValueHeartbeat
+from .security import (
+    FailureReason,
+    configure_client,
+    describe_exception,
+    map_connect_exception,
+)
 from .state import ConnectionConfig, ConnectionSnapshot, ConnectionState, TagConfig
 from .subscriptions import ValueSubscription
 from .watchdog import FREEZE_THRESHOLD_S, WatchdogTask
@@ -35,14 +38,6 @@ SESSION_CHECK_INTERVAL_S = 1.0
 # algumas horas de conexão fora do ar.
 _MAX_BACKOFF_EXPONENT = 32
 
-SECURITY_POLICY_NONE = "none"
-AUTH_ANONYMOUS = "anonymous"
-AUTH_USER_PASSWORD = "user_password"
-
-FailureReason = Literal[
-    "connect_failed", "session_lost", "watchdog_timeout", "cert_mismatch", "cert_missing"
-]
-
 # Texto pt-BR para humanos; consumidores fazem match por `kind`/`reason` (spec §7.3).
 _REASON_TEXT: dict[str, str] = {
     "connect_failed": "falha ao conectar",
@@ -51,10 +46,6 @@ _REASON_TEXT: dict[str, str] = {
     "cert_mismatch": "certificado do servidor não confere",
     "cert_missing": "certificado do servidor ausente",
 }
-
-
-class SecurityNotAvailableError(RuntimeError):
-    """Combinação de segurança ainda não montada (montagem completa: tarefa 2.4/§5.1)."""
 
 
 class _SupersededAttemptError(RuntimeError):
@@ -67,49 +58,9 @@ def backoff_delay(attempt: int, *, initial: float, maximum: float) -> float:
     return random.uniform(0.0, top)
 
 
-def build_client(config: ConnectionConfig, *, certs_dir: Path, fernet_key: str) -> Client:
-    """Constrói o Client asyncua da conexão.
-
-    Nesta tarefa apenas `security_policy == "none"` é montado; as políticas
-    Basic256Sha256 (Sign/SignAndEncrypt) e a identidade por certificado chegam na
-    tarefa 2.4 (spec §5.1) — até lá, levantam SecurityNotAvailableError, que o
-    runtime trata como falha dura `connect_failed`.
-    """
-    if config.security_policy != SECURITY_POLICY_NONE:
-        raise SecurityNotAvailableError(
-            f"política de segurança {config.security_policy!r} ainda não suportada"
-        )
-    if config.auth_mode not in (AUTH_ANONYMOUS, AUTH_USER_PASSWORD):
-        raise SecurityNotAvailableError(f"modo de autenticação {config.auth_mode!r} não suportado")
-
-    client = Client(config.endpoint)
-    # Precisa casar com a SAN URI do certificado de aplicação (tarefa 2.4/ADR-021).
-    client.application_uri = APPLICATION_URI
-
-    if config.auth_mode == AUTH_USER_PASSWORD:
-        if not config.auth_username or not config.auth_password_enc:
-            raise SecurityNotAvailableError("credenciais de usuário incompletas na configuração")
-        client.set_user(config.auth_username)
-        # A senha em claro vive só nesta variável local: nada de atributo, log ou snapshot.
-        client.set_password(_decrypt_password(config.auth_password_enc, fernet_key))
-    return client
-
-
-def _decrypt_password(token: str, fernet_key: str) -> str:
-    """Decifra a senha (spec F1 §5.4) trocando qualquer erro por mensagem fixa.
-
-    O texto da exceção original poderia carregar token ou senha para dentro do evento.
-    """
-    try:
-        return decrypt_secret(token, key=fernet_key)
-    except Exception as exc:
-        raise RuntimeError("falha ao decifrar a senha da conexão") from exc
-
-
-def describe_exception(exc: BaseException) -> str:
-    """Detalhe curto e sem segredo para o payload do evento."""
-    text = str(exc).strip()
-    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+def build_client(config: ConnectionConfig) -> Client:
+    """Constrói o Client asyncua da conexão; a segurança é montada por `configure_client`."""
+    return Client(config.endpoint)
 
 
 class ConnectionRuntime:
@@ -355,7 +306,7 @@ class ConnectionRuntime:
             try:
                 await self._open_session()
             except Exception as exc:
-                await self.fail("connect_failed", describe_exception(exc))
+                await self.fail(*map_connect_exception(exc))
             else:
                 attempt = 0
                 await self._watch_session()
@@ -365,10 +316,13 @@ class ConnectionRuntime:
             attempt += 1
 
     async def _open_session(self) -> None:
-        """Conecta e sobe para `up`; qualquer exceção deixa a conexão sem cliente."""
+        """Conecta e sobe para `up`; qualquer exceção deixa a conexão sem cliente nem peças."""
         generation = self._generation
-        client = build_client(self._config, certs_dir=self._certs_dir, fernet_key=self._fernet_key)
+        client = build_client(self._config)
         try:
+            await configure_client(
+                client, self._config, certs_dir=self._certs_dir, fernet_key=self._fernet_key
+            )
             # auto_reconnect=False: a reconexão e o backoff são nossos (spec §2.2-2).
             await client.connect(auto_reconnect=False)
             self._raise_if_superseded(generation)
@@ -377,6 +331,14 @@ class ConnectionRuntime:
             self._raise_if_superseded(generation)
         except BaseException:
             self._client = None
+            # `_session_open` ainda é False aqui, então nem `fail()` nem `stop()` chegam ao
+            # gancho de saída por este caminho: sem parar as peças agora, a subscription e
+            # a task de watchdog que `on_session_up` acabou de criar ficam vivas sem dono,
+            # e a próxima tentativa sobrescreve as referências sem pará-las. Erro de
+            # limpeza é engolido — o objetivo é não deixar task viva —, mas
+            # `CancelledError` não, para `stop()` seguir cancelável.
+            with suppress(Exception):
+                await self.on_session_down()
             await _disconnect_quiet(client)
             raise
         self._session_open = True
