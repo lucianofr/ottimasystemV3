@@ -31,6 +31,7 @@ samples_1m = table(
 )
 
 MAX_TAG_ID = 2**63 - 1  # tag_id é BIGINT no banco
+MAX_TAG_ID_DIGITOS = len(str(MAX_TAG_ID))  # 19
 
 ERRO_VAZIO = "tag_ids não pode ser vazio"
 ERRO_NAO_INTEIRO = "tag_ids deve conter apenas inteiros separados por vírgula"
@@ -48,11 +49,17 @@ def _as_utc(value: datetime | None) -> datetime | None:
 def _e_tag_id(bruto: str) -> bool:
     """Nenhuma entrada de tag_ids pode virar 5xx: o que o banco não aceitaria é 422 aqui.
 
-    `isdecimal` e não `isdigit` porque "²"/"①" são isdigit mas `int()` os rejeita
-    (ValueError ⇒ 500). O teto é o do BIGINT: um decimal maior passa pelo `int()` do Python
-    e só estoura no bind do asyncpg (⇒ 500). O piso é 1 porque a coluna é BIGSERIAL.
+    Três guardas, nesta ordem, porque cada uma protege a seguinte:
+
+    1. `isdecimal` e não `isdigit`: "²"/"①" são isdigit mas `int()` os rejeita (ValueError).
+    2. Comprimento **antes** de converter: o CPython recusa str→int acima de
+       `sys.get_int_max_str_digits()` (4300), também com ValueError. Como o BIGINT tem 19
+       dígitos, cortar em 19 já é exigido pelo domínio e torna o limite do interpretador
+       inalcançável por construção, em vez de depender de capturar a exceção.
+    3. Faixa do BIGINT: acima do teto o `int()` do Python passa e o estouro só apareceria no
+       bind do asyncpg. O piso é 1 porque a coluna é BIGSERIAL.
     """
-    return bruto.isdecimal() and 1 <= int(bruto) <= MAX_TAG_ID
+    return bruto.isdecimal() and len(bruto) <= MAX_TAG_ID_DIGITOS and 1 <= int(bruto) <= MAX_TAG_ID
 
 
 def _parse_tag_ids(bruto: str) -> list[int]:

@@ -188,14 +188,24 @@ async def test_validacoes_de_janela_422_em_pt_br(client, operator_headers):
         ("\u00b2", ERRO_NAO_INTEIRO),  # isdigit True, int() levanta ValueError
         ("1,\u2460", ERRO_NAO_INTEIRO),  # idem, dentro de uma lista válida
         ("9" * 25, ERRO_NAO_INTEIRO),  # decimal válido, mas estoura o BIGINT no bind
+        # >4300 dígitos: int() do CPython levanta ValueError (sys.get_int_max_str_digits)
+        ("9" * 5000, ERRO_NAO_INTEIRO),
+        (str(2**63), ERRO_NAO_INTEIRO),  # primeiro valor acima do BIGINT
+        (str(2**63 - 1), None),  # fronteira: maior BIGINT ainda é id válido
+        ("\u0663", None),  # decimal árabe: isdecimal e int() o converte para 3
     ],
 )
-async def test_tag_ids_degenerado_da_422_pt_br_e_nunca_5xx(
+async def test_tag_ids_nunca_5xx_e_422_pt_br_quando_invalido(
     client, operator_headers, tag_ids, detalhe
 ):
+    """`detalhe=None` marca entrada aceita; a regra dura vale para todos: nunca 5xx."""
     r = await _get(client, operator_headers, tag_ids)
-    assert r.status_code == 422
-    assert r.json()["detail"] == detalhe
+    assert r.status_code < 500
+    if detalhe is None:
+        assert r.status_code == 200
+    else:
+        assert r.status_code == 422
+        assert r.json()["detail"] == detalhe
 
 
 async def test_ids_repetidos_sao_deduplicados(client, operator_headers):
