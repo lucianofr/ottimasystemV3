@@ -42,4 +42,4 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Security"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["ottima_core", "ottima_api", "ottima_opc_worker", "ottima_flow_runtime", "ottima_recorder"]
+known-first-party = ["ottima_core", "ottima_api", "ottima_opc_worker", "ottima_flow_runtime", "ottima_recorder", "opcsim"]

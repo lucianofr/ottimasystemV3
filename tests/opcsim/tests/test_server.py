@@ -14,6 +14,7 @@ from asyncua.crypto.cert_gen import setup_self_signed_certificate
 from asyncua.crypto.security_policies import SecurityPolicyBasic256Sha256
 from cryptography import x509
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
 from opcsim import (
     NODE_COUNTER,
     NODE_MIRROR_BOOL,

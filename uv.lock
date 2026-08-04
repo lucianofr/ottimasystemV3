@@ -405,7 +405,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "asyncua" }]
+requires-dist = [{ name = "asyncua", specifier = ">=2.0" }]
 
 [[package]]
 name = "ottima-api"
@@ -488,7 +488,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "asyncua" },
+    { name = "asyncua", specifier = ">=2.0" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "ottima-core", editable = "packages/ottima-core" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },

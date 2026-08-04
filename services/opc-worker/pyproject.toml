@@ -7,7 +7,7 @@ dependencies = [
   "ottima-core",
   "fastapi>=0.115",
   "uvicorn[standard]>=0.32",
-  "asyncua",
+  "asyncua>=2.0",
 ]
 
 [dependency-groups]

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "OttimaSystem: servidor OPC-UA de simulação para testes do opc-worker (dev-only)"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "asyncua",
+  "asyncua>=2.0",
 ]
 
 [build-system]
