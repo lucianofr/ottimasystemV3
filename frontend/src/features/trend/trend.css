@@ -1,0 +1,22 @@
+/* Re-vestimento do que o uPlot desenha em DOM, não em canvas: o CSS que vem na lib traz
+   cores próprias e largura `min-content` (DESIGN.md §Don'ts: nada com cara default). */
+
+.uplot {
+  width: 100%;
+  font-family: var(--font-sans);
+}
+
+.u-hz .u-cursor-x,
+.u-vt .u-cursor-y {
+  border-right-color: var(--color-hairline);
+}
+
+.u-hz .u-cursor-y,
+.u-vt .u-cursor-x {
+  border-bottom-color: var(--color-hairline);
+}
+
+/* Seleção de zoom: azul único de interação, translúcido (DESIGN.md §Colors). */
+.u-select {
+  background: color-mix(in oklab, var(--color-accent) 22%, transparent);
+}
