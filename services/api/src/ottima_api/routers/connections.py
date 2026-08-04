@@ -1,13 +1,20 @@
 """CRUD de conexões OPC-UA (RF-201, ADR-009/021): leitura para operador, escrita para admin."""
 
 from fastapi import APIRouter, Depends, HTTPException
+from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ottima_api.deps import get_app_settings, get_db, require_admin, require_operator
+from ottima_api.deps import get_app_settings, get_db, get_redis, require_admin, require_operator
+from ottima_core.bus import (
+    KIND_CONNECTION_CREATED,
+    KIND_CONNECTION_DELETED,
+    KIND_CONNECTION_UPDATED,
+    publish_event,
+)
 from ottima_core.config import Settings
-from ottima_core.models import OpcConnection, Project
+from ottima_core.models import OpcConnection, Project, User
 from ottima_core.schemas.connections import ConnectionCreate, ConnectionOut, ConnectionUpdate
 from ottima_core.security import encrypt_secret
 
@@ -50,6 +57,20 @@ async def _carregar(db: AsyncSession, connection_id: int) -> OpcConnection:
     return conn
 
 
+async def _publicar(
+    redis_client: Redis, user: User, conn: OpcConnection, kind: str, acao: str
+) -> None:
+    """Auditoria da mutação (ADR-020) — sempre depois do commit, nunca antes."""
+    await publish_event(
+        redis_client,
+        severity="info",
+        origin=f"user:{user.id}",
+        message=f"Conexão '{conn.name}' {acao}",
+        kind=kind,
+        payload={"conn_id": conn.id, "project_id": conn.project_id, "name": conn.name},
+    )
+
+
 @router.get("", response_model=list[ConnectionOut], dependencies=[Depends(require_operator)])
 async def list_connections(
     project_id: int | None = None, db: AsyncSession = Depends(get_db)
@@ -60,13 +81,13 @@ async def list_connections(
     return [_to_out(c) for c in await db.scalars(stmt)]
 
 
-@router.post(
-    "", response_model=ConnectionOut, status_code=201, dependencies=[Depends(require_admin)]
-)
+@router.post("", response_model=ConnectionOut, status_code=201)
 async def create_connection(
     body: ConnectionCreate,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
+    user: User = Depends(require_admin),
+    redis_client: Redis = Depends(get_redis),
 ) -> ConnectionOut:
     if await db.get(Project, body.project_id) is None:
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
@@ -104,6 +125,7 @@ async def create_connection(
             status_code=409, detail="Nome de conexão já em uso neste projeto"
         ) from None
     await db.refresh(conn)
+    await _publicar(redis_client, user, conn, KIND_CONNECTION_CREATED, "criada")
     return _to_out(conn)
 
 
@@ -114,14 +136,14 @@ async def get_connection(connection_id: int, db: AsyncSession = Depends(get_db))
     return _to_out(await _carregar(db, connection_id))
 
 
-@router.patch(
-    "/{connection_id}", response_model=ConnectionOut, dependencies=[Depends(require_admin)]
-)
+@router.patch("/{connection_id}", response_model=ConnectionOut)
 async def update_connection(
     connection_id: int,
     body: ConnectionUpdate,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
+    user: User = Depends(require_admin),
+    redis_client: Redis = Depends(get_redis),
 ) -> ConnectionOut:
     conn = await _carregar(db, connection_id)
     # auth_password fora do dump: ausente ou None significa manter a senha atual
@@ -144,11 +166,27 @@ async def update_connection(
             status_code=409, detail="Nome de conexão já em uso neste projeto"
         ) from None
     await db.refresh(conn)
+    await _publicar(redis_client, user, conn, KIND_CONNECTION_UPDATED, "atualizada")
     return _to_out(conn)
 
 
-@router.delete("/{connection_id}", status_code=204, dependencies=[Depends(require_admin)])
-async def delete_connection(connection_id: int, db: AsyncSession = Depends(get_db)) -> None:
+@router.delete("/{connection_id}", status_code=204)
+async def delete_connection(
+    connection_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+    redis_client: Redis = Depends(get_redis),
+) -> None:
     conn = await _carregar(db, connection_id)
+    # Identidade capturada antes do delete: depois o objeto não é mais legível
+    project_id, name = conn.project_id, conn.name
     await db.delete(conn)
     await db.commit()
+    await publish_event(
+        redis_client,
+        severity="info",
+        origin=f"user:{user.id}",
+        message=f"Conexão '{name}' excluída",
+        kind=KIND_CONNECTION_DELETED,
+        payload={"conn_id": connection_id, "project_id": project_id, "name": name},
+    )

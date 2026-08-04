@@ -1,10 +1,11 @@
-"""Dependências base da API: settings do app, sessão de banco e usuário autenticado."""
+"""Dependências base da API: settings do app, sessão de banco, Redis e usuário autenticado."""
 
 from collections.abc import AsyncIterator
 
 import jwt
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_core.config import Settings
@@ -21,6 +22,11 @@ async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
     """Sessão por request, da factory criada no lifespan; sobrescrita nos testes."""
     async with request.app.state.session_factory() as session:
         yield session
+
+
+def get_redis(request: Request) -> Redis:
+    """Cliente Redis do lifespan; sobrescrito nos testes."""
+    return request.app.state.redis
 
 
 _bearer = HTTPBearer(auto_error=False)

@@ -3,6 +3,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import redis.asyncio as redis
 from fastapi import FastAPI
 
 from ottima_api import API_VERSION
@@ -13,12 +14,15 @@ from ottima_core.logging import setup_logging
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Cria engine e session factory na subida e descarta o pool na descida."""
+    """Cria engine, session factory e cliente Redis na subida; descarta tudo na descida."""
     settings: Settings = app.state.settings
     engine = create_engine(settings.database_url)
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
+    # decode_responses=True é contrato do barramento na F2: consumidor recebe str
+    app.state.redis = redis.from_url(settings.redis_url, decode_responses=True)
     yield
+    await app.state.redis.aclose()
     await engine.dispose()
 
 

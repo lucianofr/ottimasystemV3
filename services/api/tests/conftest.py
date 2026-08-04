@@ -1,11 +1,11 @@
-"""Fixtures da API: settings de teste, app com get_db sobrescrito, cliente ASGI e usuários."""
+"""Fixtures da API: settings de teste, app com get_db/get_redis sobrescritos, cliente e usuários."""
 
 import pytest
 from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
 
 from ottima_api.app import create_app
-from ottima_api.deps import get_db
+from ottima_api.deps import get_db, get_redis
 from ottima_core.config import Settings
 from ottima_core.models import User
 from ottima_core.security import hash_password
@@ -26,14 +26,15 @@ def test_settings() -> Settings:
 
 
 @pytest.fixture
-async def app(db_session, test_settings):
-    """App real com get_db apontando para a sessão em SAVEPOINT dos testes."""
+async def app(db_session, redis_client, test_settings):
+    """App real com get_db na sessão em SAVEPOINT e get_redis no Redis efêmero dos testes."""
     application = create_app(test_settings)
 
     async def _get_db():
         yield db_session
 
     application.dependency_overrides[get_db] = _get_db
+    application.dependency_overrides[get_redis] = lambda: redis_client
     return application
 
 
