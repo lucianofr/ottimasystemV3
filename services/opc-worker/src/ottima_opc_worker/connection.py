@@ -8,6 +8,7 @@ import asyncio
 import logging
 import random
 from contextlib import suppress
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -19,7 +20,8 @@ from ottima_core.bus import KIND_COMM_FAILURE, KIND_COMM_RESTORED, publish_event
 from ottima_core.certs import APPLICATION_URI
 from ottima_core.security import decrypt_secret
 
-from .state import ConnectionConfig, ConnectionSnapshot, ConnectionState
+from .state import ConnectionConfig, ConnectionSnapshot, ConnectionState, TagConfig
+from .subscriptions import ValueSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +133,7 @@ class ConnectionRuntime:
         # Sessão aberta com o gancho de subida já executado: garante que on_session_down
         # rode uma vez só, mesmo com stop() repetido.
         self._session_open = False
+        self._subscription: ValueSubscription | None = None
         # Edge-trigger dos eventos: só há `comm_restored` depois de um `comm_failure`.
         self._failure_pending = False
 
@@ -150,6 +153,11 @@ class ConnectionRuntime:
     def client(self) -> Client | None:
         """Client asyncua vivo; None fora do estado `up`."""
         return self._client if self._state is ConnectionState.UP else None
+
+    @property
+    def subscription(self) -> ValueSubscription | None:
+        """Subscription de valores viva; None fora de `up`."""
+        return self._subscription
 
     async def start(self) -> None:
         """Cria a task supervisora da conexão e retorna já."""
@@ -171,13 +179,49 @@ class ConnectionRuntime:
         await self._close_session()
 
     async def on_session_up(self) -> None:
-        """Gancho pós-connect, antes de marcar `up`. Base: no-op.
+        """Gancho pós-connect, antes de marcar `up`: cria a subscription de valores.
 
-        Plugam aqui a subscription (1.2), o watchdog (2.1) e o cache de DataType (2.3).
+        Falha ao criar a subscription inteira é falha de sessão, não de tag: emite
+        `comm_failure` com `session_lost` e devolve a exceção ao supervisor, que fecha o
+        cliente e reconecta em backoff.
         """
+        client = self._client  # invariante do _open_session; `self.client` só existe em `up`
+        if client is None:
+            return
+        try:
+            await self._replace_subscription(client)
+        except Exception as exc:
+            await self.fail("session_lost", describe_exception(exc))
+            raise
 
     async def on_session_down(self) -> None:
-        """Gancho simétrico, ao sair de `up`. Base: no-op."""
+        """Gancho simétrico, ao sair de `up`: derruba a subscription."""
+        subscription, self._subscription = self._subscription, None
+        if subscription is not None:
+            await subscription.stop()
+
+    async def apply_tags(self, tags: tuple[TagConfig, ...]) -> None:
+        """Troca o conjunto de tags SEM derrubar a sessão (reconciliação, tarefa 1.4).
+
+        Fora de `up` apenas guarda a configuração nova: a próxima subida a usa.
+        """
+        self._config = replace(self._config, tags=tags)
+        client = self._client
+        if self._state is not ConnectionState.UP or client is None:
+            return
+        try:
+            await self._replace_subscription(client)
+        except Exception as exc:
+            await self.fail("session_lost", describe_exception(exc))
+
+    async def _replace_subscription(self, client: Client) -> None:
+        """Para a subscription atual (se houver) e sobe outra com a configuração corrente."""
+        old, self._subscription = self._subscription, None
+        if old is not None:
+            await old.stop()
+        subscription = ValueSubscription(self._config, client, self._redis, self._snapshot)
+        await subscription.start()
+        self._subscription = subscription
 
     async def fail(self, reason: FailureReason, detail: str) -> None:
         """Leva a conexão a `failed` e emite `comm_failure`. Idempotente em `failed`."""

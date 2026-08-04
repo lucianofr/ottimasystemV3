@@ -71,6 +71,9 @@ class TagSnapshot:
     ts: datetime
     value: float
     quality: int
+    # Relógio de parede da publicação, distinto de `ts` (timestamp da fonte): o heartbeat
+    # de valor (tarefa 1.3) decide por ele, senão um servidor adiantado o silenciaria.
+    published_at: datetime
 
 
 @dataclass(slots=True)
