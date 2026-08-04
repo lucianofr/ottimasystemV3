@@ -16,18 +16,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any
 
 import jwt
 from fastapi import APIRouter, WebSocket
 from redis.asyncio import Redis
-from redis.asyncio.client import PubSub
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_core.config import Settings
 from ottima_core.models import User
+from ottima_core.pubsub import PatternListener
 from ottima_core.security import decode_access_token
 
 logger = logging.getLogger(__name__)
@@ -42,12 +41,6 @@ QUEUE_MAX = 8
 de folga por flow inscrito — cobre soluço de rede sem deixar um cliente travado acumular
 memória. Cheia, descarta-se a **mais antiga**: o canvas mostra estado publicado, não
 histórico (RNF-05, fire-and-forget)."""
-
-RESUBSCRIBE_RETRY_S = 1.0
-"""Freio entre reassinaturas: queda do Redis não pode virar rajada de PSUBSCRIBE."""
-
-SUBSCRIBE_TIMEOUT_S = 5.0
-"""Teto do PSUBSCRIBE: o Redis é local ao stack, não confirmar em 5 s é falha real."""
 
 
 class Subscriber:
@@ -103,10 +96,10 @@ class FlowStatusHub:
     """Assinatura única de `flow.status.*` roteando para os sockets inscritos (§5.3)."""
 
     def __init__(self, redis_client: Redis) -> None:
-        self._redis = redis_client
         self._subs: set[Subscriber] = set()
-        self._pubsub: PubSub | None = None
-        self._task: asyncio.Task[None] | None = None
+        self._listener = PatternListener(
+            redis_client, STATUS_PATTERN, self._dispatch, name="api-flow-status-hub"
+        )
 
     async def start(self) -> None:
         """Assina o padrão e sobe a task de leitura; retorna já. Idempotente.
@@ -114,19 +107,11 @@ class FlowStatusHub:
         O PSUBSCRIBE acontece aqui, e não dentro da task: quem chamou `start()` precisa poder
         contar com a inscrição ativa em seguida.
         """
-        if self._task is not None and not self._task.done():
-            return
-        self._pubsub = await self._subscribe()
-        self._task = asyncio.create_task(self._read_loop(), name="api-flow-status-hub")
+        await self._listener.start()
 
     async def stop(self) -> None:
         """Para o laço, encerra a inscrição e fecha os sockets restantes. Nunca levanta."""
-        task, self._task = self._task, None
-        if task is not None and not task.done():
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
-        await self._close_pubsub()
+        await self._listener.stop()
         subs, self._subs = self._subs, set()
         for sub in subs:
             await sub.close()
@@ -141,44 +126,15 @@ class FlowStatusHub:
         self._subs.discard(sub)
         await sub.stop()
 
-    async def _read_loop(self) -> None:
-        """Laço do padrão; reassina depois de qualquer queda do Redis.
+    async def _dispatch(self, channel: str, raw: str) -> None:
+        """Roteia uma publicação para quem pediu aquele flow.
 
-        O que foi publicado durante a queda se perde — é o mesmo contrato de sempre: sem
-        replay, a varredura seguinte repõe o estado.
+        Não aguarda nenhum socket (`offer()` é síncrono): um cliente lento não pode congelar
+        os demais.
         """
-        while True:
-            try:
-                if self._pubsub is None:
-                    self._pubsub = await self._subscribe()
-                async for message in self._pubsub.listen():
-                    self._dispatch(message)
-                logger.warning(
-                    "Escuta de %s terminou sem erro; reassinando em %.1fs",
-                    STATUS_PATTERN,
-                    RESUBSCRIBE_RETRY_S,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.warning(
-                    "Assinante de %s caiu; reassinando em %.1fs",
-                    STATUS_PATTERN,
-                    RESUBSCRIBE_RETRY_S,
-                    exc_info=True,
-                )
-            await self._close_pubsub()
-            await asyncio.sleep(RESUBSCRIBE_RETRY_S)
-
-    def _dispatch(self, message: Mapping[str, Any]) -> None:
-        """Roteia uma publicação para quem pediu aquele flow. Sem `await`, por contrato."""
-        if message["type"] != "pmessage":
-            return
-        channel = message["channel"]
         flow_id = _flow_id_of(channel)
         if flow_id is None:
             return
-        raw = message["data"]
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
@@ -191,42 +147,6 @@ class FlowStatusHub:
         for sub in self._subs:
             if flow_id in sub.flow_ids:
                 sub.offer(text)
-
-    async def _subscribe(self) -> PubSub:
-        pubsub = self._redis.pubsub()
-        try:
-            await pubsub.psubscribe(STATUS_PATTERN)
-            await self._await_confirmation(pubsub)
-        except BaseException:
-            # Falhou antes de virar `self._pubsub`, onde nem `stop()` o alcançaria: sem este
-            # fechamento, cada start() que falha vaza conexão e inscrição no servidor.
-            await _close(pubsub)
-            raise
-        return pubsub
-
-    async def _close_pubsub(self) -> None:
-        pubsub, self._pubsub = self._pubsub, None
-        if pubsub is not None:
-            await _close(pubsub)
-
-    async def _await_confirmation(self, pubsub: PubSub) -> None:
-        """Só volta com o PSUBSCRIBE confirmado: a publicação seguinte não se perde."""
-        async with asyncio.timeout(SUBSCRIBE_TIMEOUT_S):
-            while True:
-                message = await pubsub.get_message(timeout=SUBSCRIBE_TIMEOUT_S)
-                if message is None:
-                    continue
-                if message["type"] == "psubscribe":
-                    return
-                self._dispatch(message)
-
-
-async def _close(pubsub: PubSub) -> None:
-    """Fecha o assinante sem nunca levantar: é caminho de desmonte."""
-    try:
-        await pubsub.aclose()  # aclose desfaz a inscrição e devolve a conexão
-    except Exception:
-        logger.warning("Falha ao fechar o assinante de %s", STATUS_PATTERN, exc_info=True)
 
 
 def _flow_id_of(channel: str) -> int | None:
