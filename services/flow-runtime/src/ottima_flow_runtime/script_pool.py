@@ -140,6 +140,17 @@ class _PoolState:
     booting: set[asyncio.Task[None]] = field(default_factory=set)
 
 
+def _spawn_worker(ctx: SpawnContext) -> _Worker:
+    """Sobe um worker. Roda **numa thread** — nunca no event loop (ADR-004)."""
+    parent_conn, child_conn = ctx.Pipe(duplex=True)
+    proc = ctx.Process(target=_worker_main, args=(child_conn,), daemon=True)
+    proc.start()
+    # A ponta do filho tem de ser fechada aqui: enquanto o pai a mantiver aberta, a morte do
+    # worker nunca vira EOF neste lado.
+    child_conn.close()
+    return _Worker(proc, parent_conn)
+
+
 def _receive(conn: Connection, timeout_s: float) -> Any:
     """Espera um resultado no pipe. Roda **numa thread** — nunca no event loop (ADR-004).
 
@@ -190,8 +201,7 @@ class ScriptPool:
         if self._running:
             return
         self._running = True
-        for _ in range(self._size):
-            self._spawn()
+        await asyncio.gather(*(self._spawn() for _ in range(self._size)))
         # Devolver com o pool quente: senão a primeira varredura pagaria o boot dentro do
         # próprio orçamento de 0,7xTs e viraria um timeout espúrio.
         await asyncio.gather(*self._state.booting)
@@ -255,14 +265,12 @@ class ScriptPool:
         self._idle.put_nowait(worker)
         return result
 
-    def _spawn(self) -> None:
-        parent_conn, child_conn = self._ctx.Pipe(duplex=True)
-        proc = self._ctx.Process(target=_worker_main, args=(child_conn,), daemon=True)
-        proc.start()
-        # A ponta do filho tem de ser fechada aqui: enquanto o pai a mantiver aberta, a morte
-        # do worker nunca vira EOF neste lado.
-        child_conn.close()
-        worker = _Worker(proc, parent_conn)
+    async def _spawn(self) -> None:
+        # A criação do processo sai do loop (ADR-004): `Process.start()` é uma syscall de
+        # custo variável — e este caminho roda no respawn, ou seja, dentro da varredura de um
+        # flow que acabou de estourar. Bloquear aqui atrasaria a fronteira de TODOS os flows
+        # do processo, não só a do que falhou.
+        worker = await asyncio.to_thread(_spawn_worker, self._ctx)
         self._state.workers.append(worker)
         task = asyncio.create_task(self._enqueue_when_ready(worker))
         self._state.booting.add(task)
@@ -289,4 +297,4 @@ class ScriptPool:
             self._state.workers.remove(worker)
         await asyncio.to_thread(_shutdown, worker, hard=hard)
         if self._running:
-            self._spawn()
+            await self._spawn()

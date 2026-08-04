@@ -9,6 +9,7 @@ que o laço continuou girando.
 import asyncio
 import json
 import os
+import time
 
 import pytest
 from redis.asyncio import Redis
@@ -16,6 +17,7 @@ from redis.asyncio.client import PubSub
 
 from conftest import await_until
 from ottima_core.bus import CHANNEL_EVENTS, KIND_SCRIPT_ERROR, KIND_SCRIPT_TIMEOUT
+from ottima_flow_runtime import script_pool
 from ottima_flow_runtime.blocks.base import PortSample
 from ottima_flow_runtime.blocks.script import ScriptBlock
 from ottima_flow_runtime.script_pool import ScriptPool
@@ -172,6 +174,56 @@ async def test_busy_loop_nao_trava_o_event_loop(pool):
     finally:
         parar = True
         await tarefa_ticker
+
+
+async def test_respawn_nao_trava_o_event_loop(pool, monkeypatch):
+    """ADR-004: a subida do processo do respawn também roda fora do loop.
+
+    `Process.start()` custa ~0,6 ms nesta máquina (medido), curto demais para um teste de
+    folga distinguir do ruído do escalonador. Por isso o custo é **amplificado**: o
+    `_spawn_worker` real continua criando o processo de verdade — o pool segue real, o
+    worker é morto de verdade — e só é embrulhado num atraso conhecido. Se a subida rodasse
+    no event loop, esse atraso apareceria inteiro como uma lacuna entre dois ticks.
+    """
+    atraso_s = 0.2
+    original = script_pool._spawn_worker
+    subidas = 0
+
+    def subida_lenta(ctx):
+        nonlocal subidas
+        subidas += 1
+        time.sleep(atraso_s)
+        return original(ctx)
+
+    monkeypatch.setattr(script_pool, "_spawn_worker", subida_lenta)
+
+    maior_lacuna = 0.0
+    parar = False
+
+    async def ticker() -> None:
+        nonlocal maior_lacuna
+        loop = asyncio.get_running_loop()
+        anterior = loop.time()
+        while not parar:
+            await asyncio.sleep(0)
+            agora = loop.time()
+            maior_lacuna = max(maior_lacuna, agora - anterior)
+            anterior = agora
+
+    tarefa_ticker = asyncio.create_task(ticker())
+    try:
+        result = await pool.run(
+            code=BUSY_FOREVER, inputs={}, state=None, n_outputs=0, timeout_s=0.3
+        )
+    finally:
+        parar = True
+        await tarefa_ticker
+
+    assert result.status == "timeout"
+    assert subidas == 1, "não houve respawn: o teste não mediu o que promete"
+    assert maior_lacuna < atraso_s / 2, (
+        f"o event loop ficou parado {maior_lacuna:.3f} s durante o respawn"
+    )
 
 
 async def test_import_esta_bloqueado_no_escopo(pool):
