@@ -47,7 +47,8 @@ from ottima_core.flowgraph import (
     parse_graph,
     validate_graph,
 )
-from ottima_core.models import Flow, OpcConnection, Project, Tag
+from ottima_core.models import Flow, Project
+from ottima_core.tags import project_tags
 
 from .blocks.base import Block
 from .blocks.opc_read import OpcReadBlock
@@ -348,7 +349,7 @@ class Supervisor:
             graph = parse_graph(flow.graph_json)
         except GraphParseError as erro:
             raise _Rejected(erro.errors) from None
-        tags = await _project_tags(session, flow.project_id)
+        tags = await project_tags(session, flow.project_id)
         # `Flow.ts_seconds` é Numeric(4,1) e chega como Decimal: `Decimal * float` levanta
         # TypeError na aritmética de fronteira (armadilha herdada da F1).
         ts_seconds = float(flow.ts_seconds)
@@ -576,27 +577,6 @@ class Supervisor:
         finally:
             self._runtimes.pop(flow_id, None)
             self._state.forget(flow_id)
-
-
-async def _project_tags(session: AsyncSession, project_id: int) -> dict[int, TagRef]:
-    """Tags visíveis ao flow: as do projeto dele, via conexão (o `graph_json` não tem FK).
-
-    Uma consulta para o grafo inteiro — o número de nós não pode virar número de queries.
-    """
-    stmt = (
-        select(Tag.id, Tag.connection_id, Tag.direction, Tag.data_type)
-        .join(OpcConnection, OpcConnection.id == Tag.connection_id)
-        .where(OpcConnection.project_id == project_id)
-    )
-    return {
-        row.id: TagRef(
-            id=row.id,
-            conn_id=row.connection_id,
-            direction=row.direction,
-            data_type=row.data_type,
-        )
-        for row in await session.execute(stmt)
-    }
 
 
 def _wiring(graph: FlowGraph) -> dict[str, dict[str, tuple[str, str]]]:
