@@ -1,5 +1,6 @@
 import logging
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     admin_password: str | None = None
     admin_name: str = "Administrador"
     log_level: str = "INFO"
+    certs_dir: Path = Path("/certs")  # volume `certs` do compose (spec F2 §5.4)
 
 
 @lru_cache

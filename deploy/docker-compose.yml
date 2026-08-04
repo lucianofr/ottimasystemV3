@@ -60,10 +60,13 @@ services:
     command: ["uvicorn", "ottima_opc_worker.main:app", "--host", "0.0.0.0", "--port", "8001"]
     env_file: [.env]
     environment:
+      OTTIMA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
       OTTIMA_REDIS_URL: redis://redis:6379/0
     volumes:
       - certs:/certs:ro
     depends_on:
+      timescaledb:
+        condition: service_healthy
       redis:
         condition: service_healthy
       api:

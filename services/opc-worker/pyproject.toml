@@ -7,10 +7,17 @@ dependencies = [
   "ottima-core",
   "fastapi>=0.115",
   "uvicorn[standard]>=0.32",
+  "asyncua>=2.0",
+]
+
+[dependency-groups]
+dev = [
+  "opcsim",
 ]
 
 [tool.uv.sources]
 ottima-core = { workspace = true }
+opcsim = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

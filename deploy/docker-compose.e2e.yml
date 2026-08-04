@@ -1,0 +1,38 @@
+# Override de teste (spec F2 §10.4): acrescenta o simulador OPC-UA à rede do compose e
+# publica em 127.0.0.1 as portas que a suite L2 precisa alcancar a partir do host.
+# Producao continua com 7 servicos e uma unica porta (ADR-023) — este arquivo nunca sobe
+# sem ser pedido explicitamente.
+services:
+  opcsim:
+    build:
+      context: ..
+      dockerfile: tests/opcsim/Dockerfile
+    # basic256sha256 tambem publica o endpoint sem seguranca: um unico container serve aos
+    # tres modos que o E2E-F2-07 exercita.
+    command:
+      ["python", "-m", "opcsim", "--host", "0.0.0.0", "--port", "4840",
+       "--security", "basic256sha256", "--cert-dir", "/certs-sim"]
+    volumes:
+      # O certificado gerado no boot precisa chegar ao host: a L2 faz o pinning com ele.
+      - ./e2e-certs:/certs-sim
+    # Lado do host parametrizado (default = o valor canonico): a maquina de desenvolvimento
+    # pode ja ter 4840/6379 ocupados por outro projeto. O bind em 127.0.0.1 nao e opcional.
+    ports:
+      - "127.0.0.1:${OTTIMA_E2E_OPCSIM_PORT:-4840}:4840"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',4840),timeout=2).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    # A suite L2 publica em opc.writes e assina events a partir do host.
+    ports:
+      - "127.0.0.1:${OTTIMA_E2E_REDIS_PORT:-6379}:6379"
+
+  opc-worker:
+    depends_on:
+      opcsim:
+        condition: service_healthy

@@ -3,6 +3,15 @@ import type { components } from "./api-types";
 export type LoginOut = components["schemas"]["LoginOut"];
 export type UserOut = components["schemas"]["UserOut"];
 export type ProjectOut = components["schemas"]["ProjectOut"];
+export type ConnectionOut = components["schemas"]["ConnectionOut"];
+export type ConnectionCreate = components["schemas"]["ConnectionCreate"];
+export type ConnectionUpdate = components["schemas"]["ConnectionUpdate"];
+export type TagOut = components["schemas"]["TagOut"];
+export type TagCreate = components["schemas"]["TagCreate"];
+export type TagUpdate = components["schemas"]["TagUpdate"];
+export type EventOut = components["schemas"]["EventOut"];
+export type HistoryResponse = components["schemas"]["HistoryResponse"];
+export type HistorySeries = components["schemas"]["HistorySeries"];
 
 const TOKEN_KEY = "ottima.token";
 

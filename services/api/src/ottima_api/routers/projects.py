@@ -1,12 +1,14 @@
 """CRUD de projetos (RF-101, ADR-017): leitura para operador, escrita e ativação para admin."""
 
 from fastapi import APIRouter, Depends, HTTPException
+from redis.asyncio import Redis
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ottima_api.deps import get_db, require_admin, require_operator
-from ottima_core.models import Project
+from ottima_api.deps import get_db, get_redis, require_admin, require_operator
+from ottima_core.bus import KIND_PROJECT_ACTIVATED, publish_event
+from ottima_core.models import Project, User
 from ottima_core.schemas.projects import ProjectCreate, ProjectOut, ProjectUpdate
 
 # Sem dependência no router: os papéis variam por rota (ADR-015)
@@ -72,10 +74,13 @@ async def delete_project(project_id: int, db: AsyncSession = Depends(get_db)) ->
     await db.commit()
 
 
-@router.post(
-    "/{project_id}/activate", response_model=ProjectOut, dependencies=[Depends(require_admin)]
-)
-async def activate_project(project_id: int, db: AsyncSession = Depends(get_db)) -> Project:
+@router.post("/{project_id}/activate", response_model=ProjectOut)
+async def activate_project(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+    redis_client: Redis = Depends(get_redis),
+) -> Project:
     """Transação única: desativa o atual e ativa o alvo (ADR-017; índice parcial garante 1 ativo).
 
     F1 apenas persiste; a partir da F3 este endpoint também encerra a execução do projeto
@@ -87,4 +92,13 @@ async def activate_project(project_id: int, db: AsyncSession = Depends(get_db)) 
     project.is_active = True
     await db.commit()
     await db.refresh(project)
+    # Depois do commit: evento sobre ativação que falhou envenenaria a reconciliação do worker
+    await publish_event(
+        redis_client,
+        severity="info",
+        origin=f"user:{user.id}",
+        message=f"Projeto '{project.name}' ativado",
+        kind=KIND_PROJECT_ACTIVATED,
+        payload={"project_id": project.id, "name": project.name},
+    )
     return project
