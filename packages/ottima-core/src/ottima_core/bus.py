@@ -44,11 +44,23 @@ class OpcWrite(BaseModel):
     ts: datetime
 
 
+class PortValue(BaseModel):
+    """Valor de uma porta de bloco numa varredura (spec F3 §4.2, decisão A-3)."""
+
+    # União em modo smart do Pydantic v2: `True` continua bool e `42.5` continua float no
+    # round-trip. O canvas desenha lâmpada para bool e número para float; coerção seria defeito.
+    v: float | bool | None
+    ok: bool  # False = valor inválido; o canvas dessatura e rotula (decisão #6)
+
+
 class FlowStatus(BaseModel):
     state: Literal["running", "stopped", "failed"]
     scan_ms: float
     overruns: int
     ts: datetime
+    # Default vazio serve só à publicação imediata de transição de estado (§2.2-5), que não
+    # tem varredura atrás; toda publicação de varredura preenche `ports` (§4.2).
+    ports: dict[str, dict[str, PortValue]] = {}
 
 
 class FlowCommand(BaseModel):
@@ -97,6 +109,19 @@ KIND_CONNECTION_DELETED = "connection_deleted"
 KIND_TAG_CREATED = "tag_created"
 KIND_TAG_UPDATED = "tag_updated"
 KIND_TAG_DELETED = "tag_deleted"
+
+# Vocabulário `kind` novo da F3 (spec F3 §4.3).
+KIND_FLOW_DEPLOYED = "flow_deployed"
+KIND_FLOW_STOPPED = "flow_stopped"
+KIND_FLOW_FAILED = "flow_failed"
+KIND_FLOW_OVERRUN = "flow_overrun"
+KIND_SCRIPT_TIMEOUT = "script_timeout"
+KIND_SCRIPT_ERROR = "script_error"
+KIND_WRITE_SUPPRESSED = "write_suppressed"
+KIND_RELOAD_REJECTED = "reload_rejected"
+KIND_FLOW_CREATED = "flow_created"
+KIND_FLOW_UPDATED = "flow_updated"
+KIND_FLOW_DELETED = "flow_deleted"
 
 
 async def publish_event(
