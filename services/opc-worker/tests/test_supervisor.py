@@ -11,6 +11,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
 import pytest
 from redis.asyncio import Redis
@@ -21,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from conftest import await_until, collecting
 from opcsim import NODE_SINE, NODE_STATIC, OpcSimServer
 from ottima_core.bus import (
+    CHANNEL_EVENTS,
     KIND_CONNECTION_CREATED,
     KIND_OPC_WRITE,
     channel_opc_values,
@@ -292,6 +294,55 @@ class ClosingRedis:
     def pubsub(self) -> PubSub:
         self.pubsub_calls += 1
         return _EmptyPubSub(self._inner.pubsub())  # type: ignore[return-value]
+
+
+@dataclass
+class Contador:
+    """Contador observável, para provar (ou negar) um efeito sem esperar tempo."""
+
+    total: int = 0
+
+
+def contar_passadas(monkeypatch: pytest.MonkeyPatch) -> Contador:
+    """Conta passadas de reconciliação CONCLUÍDAS, inclusive as que saem no watermark.
+
+    Incrementar só no fim é o que torna o contador utilizável como barreira: `total >= n`
+    garante que a passada terminou, não que ela começou.
+    """
+    contador = Contador()
+    original = Supervisor._pass
+
+    async def _contando(self: Supervisor, *, force: bool) -> None:
+        await original(self, force=force)
+        contador.total += 1
+
+    monkeypatch.setattr(Supervisor, "_pass", _contando)
+    return contador
+
+
+def contar_mensagens_vistas(monkeypatch: pytest.MonkeyPatch) -> Contador:
+    """Conta mensagens do canal já classificadas pelo assinante."""
+    contador = Contador()
+    original = supervisor_module._is_hint
+
+    def _contando(data: str) -> bool:
+        contador.total += 1
+        return original(data)
+
+    monkeypatch.setattr(supervisor_module, "_is_hint", _contando)
+    return contador
+
+
+async def publicar_dica(redis_client: Redis, kind: str, conn_id: int) -> None:
+    """Publica no canal `events` um evento de auditoria com o `kind` pedido."""
+    await publish_event(
+        redis_client,
+        severity="info",
+        origin="api",
+        message=f"Evento {kind}",
+        kind=kind,
+        payload={"conn_id": conn_id},
+    )
 
 
 # --- watermark ---------------------------------------------------------------------
@@ -645,9 +696,18 @@ async def test_assinante_sobrevive_a_queda_do_redis(
 
 
 async def test_dica_dispara_reconcile_imediato(
-    session_factory: async_sessionmaker[AsyncSession], redis_client: Redis, sim: OpcSimServer
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    sim: OpcSimServer,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Kind de auditoria antecipa o reconcile; kind fora da lista não mexe em nada."""
+    """Kind de auditoria antecipa o reconcile, sem esperar o poll (spec §2.2-1).
+
+    A conexão só é criada DEPOIS da passada inicial ter terminado (contador de passadas
+    concluídas): com poll de 60 s, o runtime nascer prova que a dica foi o gatilho, e não
+    uma passada que já estava em voo.
+    """
+    passadas = contar_passadas(monkeypatch)
     project_id = await create_project(session_factory)
     state = WorkerState()
     supervisor = make_supervisor(
@@ -655,31 +715,54 @@ async def test_dica_dispara_reconcile_imediato(
     )
 
     async with started(supervisor):
-        await await_until(lambda: supervisor.runtimes == {}, timeout_s=1.0)
+        await await_until(lambda: passadas.total >= 1)
+        assert supervisor.runtimes == {}
 
         conn_id = await create_connection(session_factory, project_id, sim.endpoint, name="A")
-        await publish_event(
-            redis_client,
-            severity="info",
-            origin="api",
-            message="Conexão criada",
-            kind=KIND_CONNECTION_CREATED,
-            payload={"conn_id": conn_id},
-        )
+        await publicar_dica(redis_client, KIND_CONNECTION_CREATED, conn_id)
         await await_until(lambda: conn_id in supervisor.runtimes, timeout_s=HINT_TIMEOUT_S)
 
-        outro_id = await create_connection(session_factory, project_id, sim.endpoint, name="B")
-        await publish_event(
-            redis_client,
-            severity="info",
-            origin="api",
-            message="Escrita OPC",
-            kind=KIND_OPC_WRITE,
-            payload={"conn_id": outro_id},
-        )
-        await redis_client.publish("events", "isto nao e um EventMessage")
-        await asyncio.sleep(QUIET_WINDOW_S)
-        assert outro_id not in supervisor.runtimes, "kind fora de HINT_KINDS não é dica"
+
+async def test_kind_fora_de_hint_kinds_nao_dispara_reconcile(
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    sim: OpcSimServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mensagem fora de HINT_KINDS não reconcilia — provado sem janela de tempo.
+
+    A prova é por contadores, não por espera: `vistas` confirma que o assinante processou
+    as mensagens (senão o teste não teria observado nada) e `passadas` confirma que nenhuma
+    reconciliação rodou. Nenhuma dica é publicada antes disso, então não existe passada
+    pendente que possa subir a conexão por outro caminho — foi exatamente essa corrida que
+    avermelhou a versão anterior deste teste.
+    """
+    passadas = contar_passadas(monkeypatch)
+    vistas = contar_mensagens_vistas(monkeypatch)
+    project_id = await create_project(session_factory)
+    state = WorkerState()
+    supervisor = make_supervisor(
+        session_factory, redis_client, state, poll_interval_s=SLOW_POLL_INTERVAL_S
+    )
+
+    async with started(supervisor):
+        # Passada inicial concluída: daqui em diante só uma dica pode disparar outra.
+        await await_until(lambda: passadas.total >= 1)
+        conn_id = await create_connection(session_factory, project_id, sim.endpoint, name="A")
+        passadas_antes = passadas.total
+
+        await publicar_dica(redis_client, KIND_OPC_WRITE, conn_id)
+        await redis_client.publish(CHANNEL_EVENTS, "isto nao e um EventMessage")
+        await await_until(lambda: vistas.total >= 2)
+
+        assert passadas.total == passadas_antes, "kind fora de HINT_KINDS não pode reconciliar"
+        assert conn_id not in supervisor.runtimes
+        assert state.connections == {}
+
+        # Controle positivo: o mesmo aparato detecta o reconcile quando o kind É dica.
+        await publicar_dica(redis_client, KIND_CONNECTION_CREATED, conn_id)
+        await await_until(lambda: conn_id in supervisor.runtimes, timeout_s=HINT_TIMEOUT_S)
+        assert passadas.total > passadas_antes
 
 
 async def test_reconcile_direto_e_idempotente(
