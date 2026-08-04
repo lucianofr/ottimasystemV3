@@ -5,6 +5,7 @@ __pycache__/
 .ruff_cache/
 uv.lock.orig
 deploy/.env
+deploy/e2e-certs/
 frontend/node_modules/
 frontend/dist/
 frontend/playwright-report/
