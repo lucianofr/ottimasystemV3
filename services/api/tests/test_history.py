@@ -12,6 +12,11 @@ from ottima_core.models import samples_table
 BASE = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
 TAG_1M = 990101  # fora do alcance dos testes que rodam em SAVEPOINT
 
+# literais de propósito: o texto pt-BR é o contrato, importá-lo do router tornaria o teste
+# tautológico (passaria mesmo se a mensagem mudasse)
+ERRO_VAZIO = "tag_ids não pode ser vazio"
+ERRO_NAO_INTEIRO = "tag_ids deve conter apenas inteiros separados por vírgula"
+
 # O CAgg só materializa fora de transação; os limites vão bindados (nunca interpolados).
 # CAST(...) em vez de `::`: o `::` cola no nome do bind e o text() deixa de reconhecê-lo.
 _REFRESH = text(
@@ -157,21 +162,40 @@ async def test_janela_maxima_de_31_dias(client, operator_headers):
     assert excesso.json()["detail"] == "janela não pode exceder 31 dias"
 
 
-async def test_validacoes_422_em_pt_br(client, operator_headers):
+async def test_validacoes_de_janela_422_em_pt_br(client, operator_headers):
     invertido = await _get(client, operator_headers, "1", BASE + timedelta(hours=1), BASE)
     assert invertido.status_code == 422
     assert invertido.json()["detail"] == "start deve ser anterior a end"
 
     igual = await _get(client, operator_headers, "1", BASE, BASE)
     assert igual.status_code == 422
+    assert igual.json()["detail"] == "start deve ser anterior a end"
 
-    lixo = await _get(client, operator_headers, "1,a")
-    assert lixo.status_code == 422
-    assert lixo.json()["detail"] == "tag_ids deve conter apenas inteiros separados por vírgula"
 
-    vazio = await _get(client, operator_headers, "")
-    assert vazio.status_code == 422
-    assert vazio.json()["detail"] == "tag_ids não pode ser vazio"
+@pytest.mark.parametrize(
+    ("tag_ids", "detalhe"),
+    [
+        ("", ERRO_VAZIO),
+        ("   ", ERRO_VAZIO),
+        (",", ERRO_NAO_INTEIRO),
+        ("1,", ERRO_NAO_INTEIRO),
+        (",1", ERRO_NAO_INTEIRO),
+        ("1,,2", ERRO_NAO_INTEIRO),
+        ("-1", ERRO_NAO_INTEIRO),
+        ("0", ERRO_NAO_INTEIRO),
+        ("1.5", ERRO_NAO_INTEIRO),
+        ("1,a", ERRO_NAO_INTEIRO),
+        ("\u00b2", ERRO_NAO_INTEIRO),  # isdigit True, int() levanta ValueError
+        ("1,\u2460", ERRO_NAO_INTEIRO),  # idem, dentro de uma lista válida
+        ("9" * 25, ERRO_NAO_INTEIRO),  # decimal válido, mas estoura o BIGINT no bind
+    ],
+)
+async def test_tag_ids_degenerado_da_422_pt_br_e_nunca_5xx(
+    client, operator_headers, tag_ids, detalhe
+):
+    r = await _get(client, operator_headers, tag_ids)
+    assert r.status_code == 422
+    assert r.json()["detail"] == detalhe
 
 
 async def test_ids_repetidos_sao_deduplicados(client, operator_headers):

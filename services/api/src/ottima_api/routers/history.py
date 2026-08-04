@@ -30,6 +30,11 @@ samples_1m = table(
     column("worst_quality"),
 )
 
+MAX_TAG_ID = 2**63 - 1  # tag_id é BIGINT no banco
+
+ERRO_VAZIO = "tag_ids não pode ser vazio"
+ERRO_NAO_INTEIRO = "tag_ids deve conter apenas inteiros separados por vírgula"
+
 router = APIRouter()
 
 
@@ -40,15 +45,24 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value.replace(tzinfo=UTC)
 
 
+def _e_tag_id(bruto: str) -> bool:
+    """Nenhuma entrada de tag_ids pode virar 5xx: o que o banco não aceitaria é 422 aqui.
+
+    `isdecimal` e não `isdigit` porque "²"/"①" são isdigit mas `int()` os rejeita
+    (ValueError ⇒ 500). O teto é o do BIGINT: um decimal maior passa pelo `int()` do Python
+    e só estoura no bind do asyncpg (⇒ 500). O piso é 1 porque a coluna é BIGSERIAL.
+    """
+    return bruto.isdecimal() and 1 <= int(bruto) <= MAX_TAG_ID
+
+
 def _parse_tag_ids(bruto: str) -> list[int]:
     """Lista separada por vírgula, deduplicada preservando a ordem de entrada."""
-    itens = [p.strip() for p in bruto.split(",") if p.strip()]
-    if not itens:
-        raise HTTPException(status_code=422, detail="tag_ids não pode ser vazio")
-    if any(not p.isdigit() for p in itens):
-        raise HTTPException(
-            status_code=422, detail="tag_ids deve conter apenas inteiros separados por vírgula"
-        )
+    if not bruto.strip():
+        raise HTTPException(status_code=422, detail=ERRO_VAZIO)
+    # sem descartar itens vazios: "1," e "1,,2" são entrada malformada, não lista de um id
+    itens = [p.strip() for p in bruto.split(",")]
+    if any(not _e_tag_id(p) for p in itens):
+        raise HTTPException(status_code=422, detail=ERRO_NAO_INTEIRO)
     ids = list(dict.fromkeys(int(p) for p in itens))
     if len(ids) > MAX_TAGS:
         raise HTTPException(status_code=422, detail=f"no máximo {MAX_TAGS} tags por consulta")
