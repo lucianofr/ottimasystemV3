@@ -99,10 +99,15 @@ async def _salvar(client, headers, flow_id: int, graph: dict, nome: str | None =
 
 
 def _mensagens(resposta) -> str:
-    """Todos os erros do 422 num texto só, para asseverar conteúdo sem depender da ordem."""
+    """Texto do 422 de domínio.
+
+    O `detail` tem de ser **string**: o cliente descarta `detail` que não seja
+    (`frontend/src/lib/api.ts`) e o engenheiro veria "Erro inesperado" no lugar da
+    reprovação. Cada teste desta mesa passa por aqui, então a forma é asseverada em todos.
+    """
     detail = resposta.json()["detail"]
-    assert isinstance(detail, list), detail
-    return " | ".join(detail)
+    assert isinstance(detail, str), detail
+    return detail
 
 
 # ---------------------------------------------------------------------------------- CRUD
@@ -366,6 +371,30 @@ async def test_put_grafo_malformado_422_sem_500(client, admin_headers):
         r = await _salvar(client, admin_headers, flow["id"], graph)
         assert r.status_code == 422, r.text
         assert "nodes" in _mensagens(r)
+
+
+async def test_put_junta_todas_as_reprovacoes_num_detail_so(client, admin_headers):
+    """O `detail` string não pode custar defeitos: quem corrige precisa ver todos de uma vez.
+
+    Três reprovações independentes (duas tags desconhecidas e uma entrada obrigatória solta)
+    têm de aparecer no mesmo texto, separadas de forma legível.
+    """
+    flow, _, _ = await _cenario(client, admin_headers, "Junta")
+    graph = {
+        "nodes": [
+            _no("r1", "opc_read", 1, tag_id=987654),
+            _no("w1", "opc_write", 2, tag_id=987655),
+        ],
+        "edges": [],
+    }
+    r = await _salvar(client, admin_headers, flow["id"], graph)
+    assert r.status_code == 422
+    texto = _mensagens(r)
+    assert "a tag 987654 não existe" in texto
+    assert "a tag 987655 não existe" in texto
+    assert "a entrada 'in' é obrigatória e está desconectada" in texto
+    # O separador entre reprovações não pode ser o "; " que as próprias mensagens usam
+    assert texto.count(" | ") == 2
 
 
 async def test_put_entradas_hostis_nao_viram_5xx(client, admin_headers):

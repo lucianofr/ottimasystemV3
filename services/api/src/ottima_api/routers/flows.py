@@ -30,12 +30,25 @@ MSG_NAO_ENCONTRADO = "Flow não encontrado"
 MSG_NOME_EM_USO = "Nome de flow já em uso neste projeto"
 MSG_RODANDO = "Flow em execução; pare o flow antes de excluir"
 
+# As mensagens do flowgraph já usam "; " internamente (a de ciclo, por exemplo), então o
+# separador entre reprovações precisa ser outro para o engenheiro ver onde uma termina.
+SEPARADOR_REPROVACOES = " | "
+
 
 async def _carregar(db: AsyncSession, flow_id: int) -> Flow:
     flow = await db.get(Flow, flow_id)
     if flow is None:
         raise HTTPException(status_code=404, detail=MSG_NAO_ENCONTRADO)
     return flow
+
+
+def _reprovado(mensagens: list[str]) -> HTTPException:
+    """422 de domínio com `detail` string, como no resto da API.
+
+    Lista aqui seria invisível na tela: o cliente descarta `detail` que não seja string
+    (frontend/src/lib/api.ts) e mostraria "Erro inesperado" no lugar da reprovação.
+    """
+    return HTTPException(status_code=422, detail=SEPARADOR_REPROVACOES.join(mensagens))
 
 
 async def _tags_do_projeto(db: AsyncSession, project_id: int) -> dict[int, TagRef]:
@@ -100,7 +113,7 @@ async def update_flow(
     try:
         graph = parse_graph(body.graph_json)
     except GraphParseError as erro:
-        raise HTTPException(status_code=422, detail=erro.errors) from None
+        raise _reprovado(erro.errors) from None
 
     # `ts_seconds` é Numeric(4,1): SQLAlchemy devolve Decimal e a validação faz aritmética
     # com o Ts (teto de atraso do TFS), onde Decimal com float levanta TypeError.
@@ -108,7 +121,7 @@ async def update_flow(
         graph, await _tags_do_projeto(db, flow.project_id), float(flow.ts_seconds)
     )
     if resultado.errors:
-        raise HTTPException(status_code=422, detail=resultado.errors)
+        raise _reprovado(resultado.errors)
 
     if body.name is not None:
         flow.name = body.name
