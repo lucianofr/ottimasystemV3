@@ -291,8 +291,11 @@ def test_e2e_f3_04_aceite_hot_swap_sem_parar_o_flow(
 
     # Só o `code` do Script muda; a matriz do TFS é a mesma, então o bloco é "não alterado"
     # (§4.1-3) e o acumulador tem de sobreviver ao swap.
+    # Marcador ANTES de emitir o PUT: o critério da spec conta do momento em que a edição é
+    # submetida, então o round-trip do próprio PUT pertence à latência. Marcar no retorno
+    # subestimaria o número justamente no cenário que decide o aceite.
+    instante_da_submissao = datetime.now(UTC)
     salvar(admin, flow_id, grafo_script_tfs(10.0))
-    instante_do_put = datetime.now(UTC)
     passo_depois = KI * TS * 10.0
 
     depois = status.coletar(
@@ -317,16 +320,18 @@ def test_e2e_f3_04_aceite_hot_swap_sem_parar_o_flow(
         anterior = amostra
 
     assert adocao is not None, "a edição não entrou em vigor em 8 varreduras"
-    atraso = (datetime.fromisoformat(adocao["ts"]) - instante_do_put).total_seconds()
+    atraso = (datetime.fromisoformat(adocao["ts"]) - instante_da_submissao).total_seconds()
     y1_adocao = float(valor(adocao, "planta", "y1"))
     y1_anterior = float(valor(anterior, "planta", "y1"))
     print(
-        f"\nE2E-F3-04: edição em vigor {atraso * 1000:.0f}ms após o PUT"
+        f"\nE2E-F3-04: edição em vigor {atraso * 1000:.0f}ms após submeter o PUT"
         f" (teto {2 * TS * 1000:.0f}ms)"
         f" | y1 {y1_anterior:.2f} -> {y1_adocao:.2f} | estados observados={sorted(set(sequencia))}"
     )
 
-    assert atraso <= 2 * TS, f"hot-swap levou {atraso:.3f}s, acima de 2×Ts ({2 * TS}s)"
+    assert atraso <= 2 * TS, (
+        f"hot-swap levou {atraso:.3f}s desde a submissão do PUT, acima de 2×Ts ({2 * TS}s)"
+    )
     assert y1_adocao == pytest.approx(y1_anterior + passo_depois), (
         "o estado do TFS não foi preservado no swap"
     )
