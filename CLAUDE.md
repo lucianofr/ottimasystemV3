@@ -78,28 +78,36 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 - Um **git worktree por fase**; branch limpa; revisão em duas etapas antes de merge.
 - Contratos do PRD §7 entram **verbatim** nos planos (payloads dos canais, JSON de projeto).
 
-## Comandos (materializam na F1, estendidos na F2 — manter esta seção atualizada)
+## Comandos (materializam na F1, estendidos na F2 e na F3 — manter esta seção atualizada)
 
 ```bash
 uv sync --all-packages                              # ambiente do workspace
 uv run pytest                                       # testes do workspace (sobe Timescale efêmero)
 uv run ruff check . && uv run ruff format --check . # lint + formato
-cd frontend && npm run dev                          # frontend (Vite, 127.0.0.1:5173, proxy /api->8080)
+cd frontend && npm run build                        # tsc --noEmit strict + bundle
+cd frontend && npm run dev                          # frontend (Vite, 127.0.0.1:5173, proxy /api e /ws -> 8080)
 cd frontend && npm run test:unit                    # checks puros do frontend (sem browser, sem backend)
+cd frontend && npm run generate:api                 # tipos do OpenAPI; exige frontend/openapi.json (gitignored)
 
 # Stack. A F2 acrescentou o opcsim e as portas de host do gate: use SEMPRE os dois arquivos.
 cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 8 serviços
 # Sem o override e2e sobem 7 (sem opcsim) e o opcsim/redis não ficam acessíveis do host.
-# deploy/.env é obrigatório. Se a 6379 já estiver ocupada por outro projeto da máquina,
-# defina OTTIMA_E2E_REDIS_PORT (ex.: 6399) — senão a L2 fala com o Redis do vizinho.
+# deploy/.env é obrigatório e gitignored. Se a 6379 já estiver ocupada por outro projeto da
+# máquina, defina OTTIMA_E2E_REDIS_PORT (ex.: 6399) — senão a L2 fala com o Redis do vizinho.
+# Rebuild de um serviço só: use --no-deps, senão `--build frontend` arrasta o `api` junto.
 
-# Gate E2E — 3 camadas (docs/specs/F1-testes-e2e.md; cenários da F2 em docs/specs/F2-aquisicao.md §11.2):
-bash deploy/smoke.sh                                # L1 — stack + retenção + login + conexão up/watchdog_alive
-uv run pytest -m e2e tests/e2e -v                   # L2 — 14 cenários de API (5 F1 + 9 F2) contra o compose
+# Gate E2E — 3 camadas (docs/specs/F1-testes-e2e.md; F2 §11.2; F3 §7.2):
+OTTIMA_E2E=1 bash deploy/smoke.sh                   # L1 — stack, retenção, login, conexão up, boot parado
+uv run pytest -m e2e tests/e2e -v                   # L2 — 24 cenários (5 F1 + 9 F2 + 10 F3)
 cd frontend && npm run e2e                          # regressão Playwright da F1 (specs novas não)
-# L3 das superfícies novas da F2 = roteiro browser-tool B-01..B-07 (spec §11.2), executado pelo
+# A L2 e o Playwright NÃO podem rodar juntos: o E2E-16 publica project_activated duas vezes e
+# derruba os cenários E2E-F3-03/04/08. Serialize.
+# Playwright e a L2 da F1 exigem E2E_ADMIN_USERNAME/E2E_ADMIN_PASSWORD exportados; passe-os
+# inline (`env VAR=... comando`) para não vazar OTTIMA_DATABASE_URL no shell e quebrar os
+# testcontainers da regressão unitária.
+# L3 das superfícies novas da F3 = roteiro browser-tool B-F3-01..08 (spec §7.2), executado pelo
 # agente com a tool `browser`, screenshot por passo. Exige o bundle novo dentro do container:
-cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build frontend
+cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build --no-deps frontend
 ```
 
 ## Proibições rápidas para agentes
