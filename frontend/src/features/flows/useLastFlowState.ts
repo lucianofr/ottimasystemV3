@@ -1,13 +1,23 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 
 import { api, type EventOut, type FlowOut } from "../../lib/api";
 
-/** Uma única chamada por ciclo cobre todos os flows do projeto (~10 — RNF-01). Filtrar por
- *  `origin=flow:<id>` no servidor não serviria: o mesmo `origin` também carrega `flow_overrun`
- *  e `reload_rejected`, então o evento mais recente daquele `origin` frequentemente NÃO é de
- *  estado. Filtrar por `kind` no cliente é o que garante o estado correto. Paliativo até o WS
- *  da F5 (spec F2 §9.1); o estado vivo contínuo do canvas é do editor, via `/ws` (§5.3). */
-const LIMITE_EVENTOS = 200;
+/**
+ * Uma consulta por flow, escopada por `?origin=flow:<id>` — `GET /api/events` compara `origin`
+ * por **igualdade** (`routers/events.py:43-44`), então eventos de bloco
+ * (`flow:<id>/block:<bid>`) e de auditoria (`user:<id>`) não entram nem no servidor.
+ *
+ * A F2 rejeitou este desenho para conexões por um motivo que **não** vale aqui: lá o mesmo
+ * `origin=conn:<id>` também carrega eventos de subscription e de escrita rejeitada, então
+ * filtrar por origin não discriminava nada. A convenção de `origin` da F3 (spec §4.3) separa
+ * flow de bloco, então aqui discrimina. O ganho é eliminar a contenção da janela: com uma
+ * consulta única, um flow ruidoso ocuparia as vagas mais recentes e empurraria o
+ * `flow_deployed` de OUTRO flow para fora dela antes de qualquer filtro de cliente.
+ *
+ * Custo: ~10 requisições por ciclo (RNF-01 dimensiona ~10 flows) contra a API local.
+ * Paliativo até o WS da F5 (spec F2 §9.1); o estado vivo contínuo do canvas é do editor (§5.3).
+ */
+const LIMITE_EVENTOS = 20;
 const POLLING_MS = 5000;
 
 const KIND_RODANDO = "flow_deployed";
@@ -38,7 +48,8 @@ function texto(payload: EventOut["payload"], chave: string): string | null {
   return typeof valor === "string" ? valor : null;
 }
 
-/** Igualdade exata, nunca prefixo: `flow:12/block:x` é evento de bloco (`script_error`,
+/** Igualdade exata, nunca prefixo. O servidor já filtra por `origin` exato, mas a derivação é
+ *  a fonte da verdade testada: `flow:12/block:x` é evento de bloco (`script_error`,
  *  `write_suppressed`) e `user:3` é auditoria de CRUD — nenhum dos dois é estado de flow. */
 function idDaOrigem(origin: string): number | null {
   const casamento = /^flow:(\d+)$/.exec(origin);
@@ -89,14 +100,29 @@ export function aguardandoConfirmacao(
   return publicado.estado !== (desejado === "running" ? "rodando" : "parado");
 }
 
-/** Último `flow_deployed`/`flow_stopped`/`flow_failed` por flow, por polling de 5 s.
- *  `refetchIntervalInBackground` fica no default (false): aba oculta não faz polling. */
-export function useLastFlowState(): ReadonlyMap<number, UltimoEstadoFlow> {
-  const { data } = useQuery({
-    queryKey: ["events", "estado-flows"],
-    queryFn: () => api<EventOut[]>(`/api/events?limit=${String(LIMITE_EVENTOS)}`),
-    refetchInterval: POLLING_MS,
-    select: derivarUltimoEstado,
+/** Último `flow_deployed`/`flow_stopped`/`flow_failed` de cada flow, por polling de 5 s.
+ *  `refetchIntervalInBackground` fica no default (false): aba oculta não faz polling.
+ *  Flow cuja janela não traz evento de estado nenhum fica **fora** do mapa: "sem estado
+ *  publicado" e "parado" são coisas diferentes (Regra do Estado Publicado). */
+export function useLastFlowState(
+  flowIds: readonly number[],
+): ReadonlyMap<number, UltimoEstadoFlow> {
+  return useQueries({
+    queries: flowIds.map((id) => ({
+      queryKey: ["events", "estado-flow", id],
+      queryFn: () =>
+        api<EventOut[]>(
+          `/api/events?origin=flow:${String(id)}&limit=${String(LIMITE_EVENTOS)}`,
+        ),
+      refetchInterval: POLLING_MS,
+      select: derivarUltimoEstado,
+    })),
+    combine: (resultados) => {
+      const porFlow = new Map<number, UltimoEstadoFlow>();
+      for (const resultado of resultados) {
+        for (const [id, estado] of resultado.data ?? VAZIO) porFlow.set(id, estado);
+      }
+      return porFlow;
+    },
   });
-  return data ?? VAZIO;
 }

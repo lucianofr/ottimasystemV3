@@ -163,11 +163,51 @@ function CelulaUltimoEstado({ estado }: { estado: UltimoEstadoFlow | undefined }
   );
 }
 
+/**
+ * Comutador de posição: o comando que corresponde ao `desired_state` vigente fica discreto e
+ * ganha o quadrado de posição; o outro fica primário. Três canais além da cor — preenchimento
+ * do botão, presença do marcador e `aria-pressed` — porque a leitura de "o que está comandado"
+ * não pode depender de matiz (DESIGN.md, Regra do Canal Redundante).
+ */
+function BotaoComando({
+  rotulo,
+  testid,
+  posicaoAtual,
+  ocupado,
+  onClick,
+}: {
+  rotulo: string;
+  testid: string;
+  posicaoAtual: boolean;
+  ocupado: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      variant={posicaoAtual ? "outline" : "primary"}
+      size="sm"
+      data-testid={testid}
+      aria-pressed={posicaoAtual}
+      title={posicaoAtual ? "Posição comandada atual" : undefined}
+      disabled={ocupado}
+      onClick={onClick}
+    >
+      {posicaoAtual && (
+        <svg aria-hidden="true" width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
+          <rect width="8" height="8" />
+        </svg>
+      )}
+      {rotulo}
+    </Button>
+  );
+}
+
 export function FlowsPage() {
   const projeto = useActiveProject();
   const projectId = projeto.data?.id ?? null;
   const flows = useFlows(projectId);
-  const estados = useLastFlowState();
+  const linhas = flows.data ?? [];
+  const estados = useLastFlowState(linhas.map((flow) => flow.id));
   const excluir = useDeleteFlow();
   const deploy = useComandarFlow("deploy");
   const parar = useComandarFlow("stop");
@@ -198,7 +238,6 @@ export function FlowsPage() {
   }
 
   const podeMutar = useCanMutate();
-  const linhas = flows.data ?? [];
   const totalColunas = COLUNAS.length + (podeMutar ? 1 : 0);
   const comandando = deploy.isPending || parar.isPending;
 
@@ -315,25 +354,24 @@ export function FlowsPage() {
                     ) : (
                       <div className="flex items-center justify-end gap-2">
                         {/* Os dois comandos ficam sempre disponíveis: divergência entre desejado
-                            e publicado só se resolve o operador recomandando (ADR-017). */}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          data-testid="flow-deploy"
-                          disabled={comandando}
+                            e publicado só se resolve o operador recomandando (ADR-017). O que
+                            corresponde ao desejado vigente é o discreto e leva o marcador de
+                            posição — a leitura não depende só da cor (Regra do Canal
+                            Redundante). */}
+                        <BotaoComando
+                          rotulo="Deploy"
+                          testid="flow-deploy"
+                          posicaoAtual={flow.desired_state === "running"}
+                          ocupado={comandando}
                           onClick={() => void comandar(deploy.mutateAsync(flow.id))}
-                        >
-                          Deploy
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          data-testid="flow-stop"
-                          disabled={comandando}
+                        />
+                        <BotaoComando
+                          rotulo="Parar"
+                          testid="flow-stop"
+                          posicaoAtual={flow.desired_state === "stopped"}
+                          ocupado={comandando}
                           onClick={() => void comandar(parar.mutateAsync(flow.id))}
-                        >
-                          Parar
-                        </Button>
+                        />
                         <Button
                           variant="outline"
                           size="sm"

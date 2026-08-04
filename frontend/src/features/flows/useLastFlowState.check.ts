@@ -78,6 +78,21 @@ test("auditoria de CRUD e eventos de outros domínios não entram", () => {
   expect(mapa.size).toBe(0);
 });
 
+test("janela só com ruído do próprio flow não inventa estado", () => {
+  // A consulta é escopada por `origin=flow:5`, mas dentro do próprio origin ainda cabem
+  // `flow_overrun` e `reload_rejected`. Sem evento de estado, o flow fica FORA do mapa: a
+  // coluna mostra "—", não um "parado" inventado.
+  const mapa = derivarUltimoEstado(
+    desc([
+      evento(0, "flow:5", "flow_overrun"),
+      evento(10, "flow:5", "reload_rejected"),
+    ]),
+  );
+
+  expect(mapa.has(5)).toBe(false);
+  expect(mapa.size).toBe(0);
+});
+
 test("flow_failed vira estado de falha com motivo em pt-BR; motivo ausente não vira vazio", () => {
   const mapa = derivarUltimoEstado(
     desc([
