@@ -1,11 +1,9 @@
 # PRD — OttimaSystem (reescrita, v1)
 
 **Produto:** OttimaSystem — plataforma on-premise de Controle Avançado de Processos (APC) com MPC
-**Versão do documento:** 1.2 · 2026-08-04 · **Status:** aprovado para implementação (F1 e F2 concluídas)
-**Changelog 1.1:** adicionado o requisito de **ordem de execução explícita por bloco** (`exec_order`) — RF-307 e RF-401 revisados, ADR-024 criado (altera ADR-007). Sem impacto retroativo em F1/F2; efetivo a partir da F3.
-**Changelog 1.2:** payload do canal `flow.status.<flow_id>` estendido com `ports` (valores de porta por varredura, para o canvas ao vivo) — resolve a lacuna do RF-404, que exigia publicar valores de portas sem definir onde. Decisão aprovada no brainstorm da F3 (2026-08-04, `docs/specs/F3-motor-canvas.md` Anexo A-3).
+**Versão do documento:** 1.0 · 2026-08-03 · **Status:** aprovado para início de implementação
 **Autor:** Luciano França Rocha (LFR Automação), consolidado em sessão de grilling
-**Documentos-irmãos (normativos):** `adr/ADR-001 … ADR-024` · `GLOSSARY.md`
+**Documentos-irmãos (normativos):** `adr/ADR-001 … ADR-023` · `GLOSSARY.md`
 
 > Convenção: itens `RF-xxx` são requisitos funcionais; `RNF-xxx`, não-funcionais. Referências `(ADR-nnn)` apontam a decisão de arquitetura que governa o requisito. Em conflito entre este PRD e um ADR, **o ADR prevalece** e o PRD deve ser corrigido.
 
@@ -64,7 +62,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 - **OpcConnection** (id, project_id, nome, endpoint, security_policy, security_mode, auth[anon|userpass|cert], credenciais/refs de certificado, tags de watchdog {read_bit, write_bit}, período de toggle) (ADR-009, 021)
 - **Tag** (id, connection_id, nome lógico, node_id OPC, direção[R|W], tipo de dado, EU, descrição)
 - **Flow** (id, project_id, nome, Ts∈{0.5,1,2,5,10,30,60}, estado_desejado[rodando|parado], graph_json) (ADR-007, 011, 017)
-- **Block/Edge** — dentro de `graph_json` (React Flow): nós tipados {opc_read, opc_write, mpc, script, tfs} com `config` própria — incluindo **`exec_order`** (int, 1..N, único no flow; ADR-024); arestas ligam portas tipadas (ADR-005)
+- **Block/Edge** — dentro de `graph_json` (React Flow): nós tipados {opc_read, opc_write, mpc, script, tfs} com `config` própria; arestas ligam portas tipadas (ADR-005)
 - **Event** — hypertable (ts, severidade, origem, mensagem, payload JSON), retenção 1 mês (ADR-020)
 - **Sample** — hypertable (ts, tag_id, valor, qualidade), retenção 1 mês + continuous aggregate 1 min (ADR-003)
 
@@ -97,10 +95,9 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 - **RF-304** **Hot-swap**: salvar um flow em execução aplica a nova definição **atomicamente na próxima varredura**, sem interrupção; blocos não alterados preservam estado; bloco MPC alterado é re-instanciado com partida bumpless (das MVs atuais). Sem versionamento. (ADR-011)
 - **RF-305** O canvas em modo visualização mostra os **valores ao vivo** nas portas/blocos (via WebSocket) para admin e operador.
 - **RF-306** Deploy/parar por flow (admin); estado desejado persistido, **não** auto-aplicado no boot. (ADR-017)
-- **RF-307** Todo bloco possui **`exec_order`**: inteiro único de **1 a N** (N = total de blocos do flow). O editor auto-numera na inserção (próximo livre), permite edição manual, exibe o número como badge no nó, valida no salvamento (unicidade + sequência contígua 1..N), compacta a numeração ao excluir blocos e emite **aviso não-bloqueante** quando a ordem manual inverte o sentido de uma aresta. (ADR-024)
 
 ### 5.5 Motor de execução (flow-runtime)
-- **RF-401** Execução por **scan cycle**: a cada Ts, avaliação de todos os blocos **em ordem crescente de `exec_order`** com os últimos valores conhecidos (snapshot do barramento). A ordenação topológica não é usada para execução (apenas como validação no editor). Se uma aresta A→B tiver `exec_order(B) < exec_order(A)`, B consome o valor de A da **varredura anterior** (atraso de 1 scan, determinístico). (ADR-007, 024)
+- **RF-401** Execução por **scan cycle**: a cada Ts, avaliação de todos os blocos em ordem topológica com os últimos valores conhecidos (snapshot do barramento). (ADR-007)
 - **RF-402** ~10 flows simultâneos como tasks asyncio independentes; falha de um flow não afeta os demais. (ADR-004, 006)
 - **RF-403** Trabalho CPU-bound (solve do MPC, `exec` de script) roda via executor; o event loop nunca bloqueia. (ADR-004)
 - **RF-404** Publica por varredura: `flow.status.<flow_id>` (rodando/parado/falha, duração do scan, overruns) e valores de portas para o canvas ao vivo.
@@ -169,7 +166,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 |---|---|---|---|
 | `opc.values.<conn_id>` | opc-worker | flow-runtime, recorder, api(WS) | {tag_id, ts, value, quality} |
 | `opc.writes` | flow-runtime, api | opc-worker | {conn_id, tag_id, value, source, ts} |
-| `flow.status.<flow_id>` | flow-runtime | api(WS) | {state, scan_ms, overruns, ts, ports{block_id→{porta:{v, ok}}}} |
+| `flow.status.<flow_id>` | flow-runtime | api(WS) | {state, scan_ms, overruns, ts} |
 | `flow.commands` | api | flow-runtime | {flow_id, cmd, args, user, ts} |
 | `mpc.state.<flow_id>.<block_id>` | flow-runtime | api(WS) | {modes, status, vars, cost, prediction{t[], cv[][], mv[][]}} |
 | `events` | todos | api(WS→banner), gravação | {ts, severity, origin, message, payload} |
@@ -206,11 +203,10 @@ Sem segredos; credenciais re-informadas no import (RF-102/103).
 2. **Explosão de estados por tempo morto** (θ≫Ts_mpc) — validação no formulário com alerta e teto (RF-608).
 3. **Pub/sub sem garantia de entrega** — aceitável para dados cíclicos; comandos usam canal próprio + UI orientada a estado publicado (RNF-05).
 4. **Hot-swap concorrente** — troca atômica de definição entre varreduras com preservação de estado por id de bloco (RF-304); testes dedicados na F3.
-6. **`exec_order` incoerente com o fluxo de dados** — usuário pode ordenar um consumidor antes do produtor (atraso de 1 scan não intencional); mitigado pelo aviso de inversão no editor (RF-307) e pela auto-numeração na inserção.
 5. **Bumpless dependente do PLC** — exige SP/OUT-tracking configurado no PID do PLC; documentar pré-requisitos de comissionamento por malha (guia de integração, F6).
 
 ## 10. Referências
 
-- `adr/ADR-001…024` — decisões de arquitetura (normativas)
+- `adr/ADR-001…023` — decisões de arquitetura (normativas)
 - `GLOSSARY.md` — vocabulário do domínio
 - do-mpc · asyncua · React Flow (@xyflow/react) · TimescaleDB · uPlot

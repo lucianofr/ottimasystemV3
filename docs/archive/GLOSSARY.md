@@ -6,8 +6,7 @@
 |---|---|
 | **Projeto** | Unidade que agrupa flows + configurações do sistema (servidores OPC etc.). Exportável/importável em JSON, sem dados históricos. N projetos armazenados, **um ativo por vez**. |
 | **Flow** | Grafo de blocos criado no canvas que implementa uma lógica/estratégia APC. Executa em scan cycle com Ts próprio. Pertence a um projeto. |
-| **Scan cycle** | Semântica de execução: a cada Ts, todos os blocos do flow são avaliados **em ordem crescente de `exec_order`** com os últimos valores conhecidos. |
-| **exec_order** | Parâmetro de todo bloco: inteiro único de 1 a N que define a ordem de execução na varredura (leituras < Script/MPC < escritas). Auto-numerado na inserção, editável, com badge no nó. Ordem invertida em relação a uma aresta ⇒ consumo do valor da varredura anterior (1 scan de atraso). |
+| **Scan cycle** | Semântica de execução: a cada Ts, todos os blocos do flow são avaliados em ordem topológica com os últimos valores conhecidos. |
 | **Ts (tempo de amostragem)** | Período do scan de um flow. Valores permitidos: 0.5, 1, 2, 5, 10, 30, 60 s. Definido individualmente por flow. |
 | **Bloco** | Nó do flow com entradas/saídas tipadas. Tipos da v1: OPC-Read, OPC-Write, MPC, Python-Script, TFS. |
 | **opc-worker** | Processo asyncio que mantém as sessões OPC-UA (asyncua), publica leituras no barramento, executa escritas e opera o watchdog. Único processo que fala com PLC/DCS. |

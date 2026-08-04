@@ -1,6 +1,6 @@
 # ADR-007 — Execução por scan cycle com Ts individual por flow
 
-**Status:** Aceito · 2026-08-03 · **Alterado pelo ADR-024** (2026-08-04): a execução passa a seguir `exec_order` explícito por bloco; a ordenação topológica vira apenas validação de editor
+**Status:** Aceito · 2026-08-03
 
 ## Contexto
 Era preciso definir a semântica de execução do grafo: reativa (event-driven) ou cíclica (scan estilo PLC).

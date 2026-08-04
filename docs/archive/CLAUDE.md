@@ -53,7 +53,6 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 - **Script block:** escopo restrito a `math` + `numpy`; timeout ≈70% do Ts; `state` dict persistente. (ADR-018)
 - **Frontend nunca executa lógica de flow** — o canvas só edita o grafo; execução é 100% no flow-runtime. (ADR-005)
 - **Hot-swap:** troca de definição de flow é atômica entre varreduras, preservando estado dos blocos não alterados. (ADR-011)
-- **Ordem de execução:** blocos executam estritamente em ordem crescente de `exec_order` (1..N, único por flow) — nunca por ordenação topológica; aresta com ordem invertida ⇒ valor da varredura anterior. (ADR-024)
 - Predições do MPC **não são persistidas** — só publicadas no barramento. (ADR-016)
 
 ## Convenções de código
@@ -66,7 +65,7 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 
 ## Testes
 
-- **TDD estrito (RED→GREEN→REFACTOR)** em lógica pura: motor de scan (execução por `exec_order`, hot-swap), discretização SOPDT/IOPDT, montagem do do-mpc, precedência Restrição>CV, bumpless, TFS.
+- **TDD estrito (RED→GREEN→REFACTOR)** em lógica pura: motor de scan (ordenação topológica, hot-swap), discretização SOPDT/IOPDT, montagem do do-mpc, precedência Restrição>CV, bumpless, TFS.
 - **opc-worker:** testar contra **servidor OPC-UA de teste in-process do asyncua** (sem PLC real) — subscriptions, escrita, watchdog, reconexão.
 - **Malha fechada MPC↔TFS** é a suíte de aceitação do sistema (RNF-09): assume/devolve sem salto de MV, restrição vence CV, overrun mantém MV + alarme.
 - Infra (compose, schema): testes de integração; não faça teatro de TDD unitário aqui.
@@ -81,10 +80,15 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 ## Comandos (materializam na F1 — manter esta seção atualizada)
 
 ```bash
-uv sync                                   # ambiente do workspace
-docker compose -f deploy/docker-compose.yml up -d   # sobe o sistema completo
-uv run pytest                             # testes do workspace
-cd frontend && npm run dev                # frontend (Vite, host/porta explícitos)
+uv sync --all-packages                              # ambiente do workspace
+docker compose -f deploy/docker-compose.yml up -d   # sobe o sistema completo (deploy/.env necessário)
+uv run pytest                                       # testes do workspace (sobe Timescale efêmero)
+uv run ruff check . && uv run ruff format --check . # lint + formato
+cd frontend && npm run dev                          # frontend (Vite, 127.0.0.1:5173, proxy /api->8000)
+# Gate E2E da F1 (docs/specs/F1-testes-e2e.md):
+bash deploy/smoke.sh                                # L1 — stack + retenção + login do seed
+uv run pytest -m e2e tests/e2e -v                   # L2 — API contra o compose (exporte E2E_*)
+cd frontend && npm run e2e                          # L3 — Playwright
 ```
 
 ## Proibições rápidas para agentes
