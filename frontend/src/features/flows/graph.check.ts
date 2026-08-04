@@ -1,0 +1,316 @@
+import { expect, test } from "@playwright/test";
+
+import {
+  avisosInversao,
+  compactarExecOrder,
+  criarBloco,
+  deGraphJson,
+  definirExecOrder,
+  handlesEntrada,
+  handlesSaida,
+  motivoRecusa,
+  paraGraphJson,
+  proximoExecOrder,
+  tipoPorta,
+  type BlocoEdge,
+  type BlocoNode,
+  type MapaTags,
+} from "./graph";
+
+const POS = { x: 0, y: 0 };
+
+/** Tags do projeto do flow, como o editor as monta a partir de `useTags`. */
+const TAGS: MapaTags = new Map([
+  [10, "float"],
+  [11, "bool"],
+  [20, "float"],
+  [21, "bool"],
+]);
+
+function leitura(id: string, ordem: number, tag: number | null): BlocoNode {
+  return { id, type: "opc_read", position: POS, data: { exec_order: ordem, label: "", tag_id: tag } };
+}
+
+function escrita(id: string, ordem: number, tag: number | null): BlocoNode {
+  return {
+    id,
+    type: "opc_write",
+    position: POS,
+    data: { exec_order: ordem, label: "", tag_id: tag },
+  };
+}
+
+function script(id: string, ordem: number, entradas = 1, saidas = 1): BlocoNode {
+  return {
+    id,
+    type: "script",
+    position: POS,
+    data: { exec_order: ordem, label: "", n_inputs: entradas, n_outputs: saidas, code: "" },
+  };
+}
+
+function tfs(id: string, ordem: number): BlocoNode {
+  return criarBloco("tfs", id, POS, ordem);
+}
+
+function aresta(
+  id: string,
+  source: string,
+  sourceHandle: string,
+  target: string,
+  targetHandle: string,
+): BlocoEdge {
+  return { id, source, sourceHandle, target, targetHandle };
+}
+
+function ordens(nodes: readonly BlocoNode[]): Record<string, number> {
+  return Object.fromEntries(nodes.map((no) => [no.id, no.data.exec_order]));
+}
+
+// --------------------------------------------------------------------------------------
+// Portas
+// --------------------------------------------------------------------------------------
+
+test("os handles de cada tipo são exatamente os que o servidor reconhece", () => {
+  expect(handlesSaida(leitura("r", 1, 10))).toEqual(["out"]);
+  expect(handlesEntrada(leitura("r", 1, 10))).toEqual([]);
+  expect(handlesEntrada(escrita("w", 1, 20))).toEqual(["in"]);
+  expect(handlesSaida(escrita("w", 1, 20))).toEqual([]);
+  expect(handlesEntrada(tfs("t", 1))).toEqual(["u1", "u2"]);
+  expect(handlesSaida(tfs("t", 1))).toEqual(["y1", "y2"]);
+});
+
+test("as portas do Script acompanham n_inputs/n_outputs, inclusive em zero", () => {
+  expect(handlesEntrada(script("s", 1, 3, 2))).toEqual(["IN1", "IN2", "IN3"]);
+  expect(handlesSaida(script("s", 1, 3, 2))).toEqual(["OUT1", "OUT2"]);
+  expect(handlesEntrada(script("s", 1, 0, 0))).toEqual([]);
+  expect(handlesSaida(script("s", 1, 0, 0))).toEqual([]);
+});
+
+test("tipo da porta herda a tag; sem tag configurada o tipo é desconhecido", () => {
+  expect(tipoPorta(leitura("r", 1, 10), TAGS)).toBe("num");
+  expect(tipoPorta(leitura("r", 1, 11), TAGS)).toBe("bool");
+  expect(tipoPorta(leitura("r", 1, null), TAGS)).toBe("desconhecido");
+  // tag de outro projeto (fora do mapa) também é desconhecida: quem reprova é o save
+  expect(tipoPorta(leitura("r", 1, 999), TAGS)).toBe("desconhecido");
+  expect(tipoPorta(script("s", 1), TAGS)).toBe("bivalente");
+  expect(tipoPorta(tfs("t", 1), TAGS)).toBe("num");
+});
+
+// --------------------------------------------------------------------------------------
+// Validação de conexão no arraste (decisão A-5, RF-302)
+// --------------------------------------------------------------------------------------
+
+test("saída booleana em entrada numérica é recusada com o motivo em pt-BR", () => {
+  const nodes = [leitura("r", 1, 11), tfs("t", 2)];
+  const motivo = motivoRecusa(
+    { source: "r", sourceHandle: "out", target: "t", targetHandle: "u1" },
+    nodes,
+    [],
+    TAGS,
+  );
+  expect(motivo).toContain("booleana");
+  expect(motivo).toContain("numérica");
+  expect(motivo).toContain("bivalentes");
+});
+
+test("tipos iguais passam e as portas do Script aceitam os dois lados", () => {
+  const nodes = [leitura("num", 1, 10), leitura("bool", 2, 11), script("s", 3), escrita("w", 4, 21), tfs("t", 5)];
+  const liga = (source: string, sourceHandle: string, target: string, targetHandle: string) =>
+    motivoRecusa({ source, sourceHandle, target, targetHandle }, nodes, [], TAGS);
+
+  expect(liga("num", "out", "t", "u1")).toBeNull();
+  expect(liga("bool", "out", "s", "IN1")).toBeNull(); // bivalente do lado da entrada
+  expect(liga("s", "OUT1", "w", "in")).toBeNull(); // bivalente do lado da saída (tag bool)
+  expect(liga("t", "y1", "s", "IN1")).toBeNull();
+});
+
+test("bloco sem tag configurada não trava a ligação: o 422 do save resolve", () => {
+  const nodes = [leitura("r", 1, null), tfs("t", 2)];
+  expect(
+    motivoRecusa({ source: "r", sourceHandle: "out", target: "t", targetHandle: "u1" }, nodes, [], TAGS),
+  ).toBeNull();
+});
+
+test("ciclo é recusado, direto ou por caminho longo", () => {
+  const nodes = [script("a", 1), script("b", 2), script("c", 3, 2, 1)];
+  const edges = [aresta("e1", "a", "OUT1", "b", "IN1"), aresta("e2", "b", "OUT1", "c", "IN1")];
+
+  expect(
+    motivoRecusa({ source: "c", sourceHandle: "OUT1", target: "a", targetHandle: "IN1" }, nodes, edges, TAGS),
+  ).toContain("ciclo");
+  expect(
+    motivoRecusa({ source: "a", sourceHandle: "OUT1", target: "a", targetHandle: "IN1" }, nodes, edges, TAGS),
+  ).toContain("a si mesmo");
+  // o sentido que não fecha ciclo segue livre (IN2 de 'c' ainda está vaga)
+  expect(
+    motivoRecusa({ source: "a", sourceHandle: "OUT1", target: "c", targetHandle: "IN2" }, nodes, edges, TAGS),
+  ).toBeNull();
+});
+
+test("porta de entrada aceita no máximo uma aresta; saída pode alimentar várias", () => {
+  const nodes = [script("a", 1, 1, 2), script("b", 2, 2, 1), script("c", 3, 1, 1)];
+  const edges = [aresta("e1", "a", "OUT1", "b", "IN1")];
+
+  expect(
+    motivoRecusa({ source: "c", sourceHandle: "OUT1", target: "b", targetHandle: "IN1" }, nodes, edges, TAGS),
+  ).toContain("no máximo uma");
+  // outra entrada do mesmo bloco continua livre
+  expect(
+    motivoRecusa({ source: "c", sourceHandle: "OUT1", target: "b", targetHandle: "IN2" }, nodes, edges, TAGS),
+  ).toBeNull();
+  // a mesma saída alimentando um segundo destino é legítima (fan-out)
+  expect(
+    motivoRecusa({ source: "a", sourceHandle: "OUT1", target: "c", targetHandle: "IN1" }, nodes, edges, TAGS),
+  ).toBeNull();
+});
+
+// --------------------------------------------------------------------------------------
+// exec_order (ADR-024)
+// --------------------------------------------------------------------------------------
+
+test("próximo exec_order livre: começa em 1, segue N+1 e tampa buraco", () => {
+  expect(proximoExecOrder([])).toBe(1);
+  expect(proximoExecOrder([script("a", 1), script("b", 2)])).toBe(3);
+  expect(proximoExecOrder([script("a", 1), script("b", 3)])).toBe(2);
+});
+
+test("excluir compacta para 1..N mantendo a ordem relativa", () => {
+  const restantes = [script("a", 1), script("c", 3), script("d", 5)];
+  expect(ordens(compactarExecOrder(restantes))).toEqual({ a: 1, c: 2, d: 3 });
+});
+
+test("compactar não altera id, posição nem config do bloco", () => {
+  const antes = criarBloco("script", "s", { x: 120, y: 40 }, 7);
+  const [depois] = compactarExecOrder([antes]);
+  expect(depois.id).toBe("s");
+  expect(depois.position).toEqual({ x: 120, y: 40 });
+  expect(depois.data.exec_order).toBe(1);
+  if (depois.type !== "script") throw new Error("tipo preservado");
+  expect(depois.data.code).toBe("OUT1 = IN1\n");
+  expect(depois.data.n_inputs).toBe(1);
+});
+
+test("edição manual reinsere o bloco na posição pedida e renumera a fila", () => {
+  const nodes = [script("a", 1), script("b", 2), script("c", 3), script("d", 4)];
+  // "d passa a rodar primeiro": os demais deslizam, ninguém vai para o fim
+  expect(ordens(definirExecOrder(nodes, "d", 1))).toEqual({ d: 1, a: 2, b: 3, c: 4 });
+  // e o caminho de volta
+  expect(ordens(definirExecOrder(nodes, "a", 4))).toEqual({ b: 1, c: 2, d: 3, a: 4 });
+});
+
+test("exec_order manual fora de 1..N é preso na faixa, nunca quebra a contiguidade", () => {
+  const nodes = [script("a", 1), script("b", 2), script("c", 3)];
+  expect(ordens(definirExecOrder(nodes, "c", 0))).toEqual({ c: 1, a: 2, b: 3 });
+  expect(ordens(definirExecOrder(nodes, "a", 99))).toEqual({ b: 1, c: 2, a: 3 });
+});
+
+// --------------------------------------------------------------------------------------
+// Aviso de inversão (RF-307)
+// --------------------------------------------------------------------------------------
+
+test("aresta invertida avisa; aresta na ordem normal não", () => {
+  const nodes = [script("produtor", 2), script("consumidor", 1)];
+  const invertida = avisosInversao(nodes, [aresta("e1", "produtor", "OUT1", "consumidor", "IN1")]);
+  expect(invertida).toHaveLength(1);
+  expect(invertida[0]).toContain("varredura anterior");
+
+  const normal = [script("produtor", 1), script("consumidor", 2)];
+  expect(avisosInversao(normal, [aresta("e1", "produtor", "OUT1", "consumidor", "IN1")])).toEqual([]);
+});
+
+test("o aviso usa o rótulo do bloco quando ele existe", () => {
+  const produtor = script("p", 2);
+  const consumidor = script("c", 1);
+  produtor.data.label = "Vazão bruta";
+  const avisos = avisosInversao(
+    [produtor, consumidor],
+    [aresta("e1", "p", "OUT1", "c", "IN1")],
+  );
+  expect(avisos[0]).toContain("Vazão bruta");
+  expect(avisos[0]).toContain("Script"); // consumidor sem rótulo cai no nome do tipo
+});
+
+// --------------------------------------------------------------------------------------
+// Serialização — o contrato duro (chave desconhecida em `data` é 422)
+// --------------------------------------------------------------------------------------
+
+test("data sai com exatamente as chaves do contrato, uma lista por tipo", () => {
+  const nodes: BlocoNode[] = [
+    criarBloco("opc_read", "r", POS, 1),
+    criarBloco("opc_write", "w", POS, 2),
+    criarBloco("script", "s", POS, 3),
+    criarBloco("tfs", "t", POS, 4),
+  ];
+  const chaves = paraGraphJson(nodes, []).nodes.map((no) => Object.keys(no.data).sort());
+  expect(chaves).toEqual([
+    ["exec_order", "label", "tag_id"],
+    ["exec_order", "label", "tag_id"],
+    ["code", "exec_order", "label", "n_inputs", "n_outputs"],
+    ["exec_order", "label", "matrix"],
+  ]);
+});
+
+test("estado de interface do React Flow no topo do nó não vai para o graph_json", () => {
+  const no: BlocoNode = { ...criarBloco("opc_read", "r", { x: 5, y: 6 }, 1), selected: true, dragging: true, measured: { width: 220, height: 96 } };
+  const emitido = paraGraphJson([no], []).nodes[0];
+  expect(Object.keys(emitido).sort()).toEqual(["data", "id", "position", "type"]);
+  expect(emitido.position).toEqual({ x: 5, y: 6 });
+});
+
+test("aresta sai em camelCase, sem os campos de desenho do React Flow", () => {
+  const emitida = paraGraphJson([], [{ ...aresta("e1", "r", "out", "t", "u1"), selected: true, animated: true }]).edges[0];
+  expect(emitida).toEqual({ id: "e1", source: "r", sourceHandle: "out", target: "t", targetHandle: "u1" });
+});
+
+test("o elemento TFS carrega só os params do seu kind", () => {
+  const no = criarBloco("tfs", "t", POS, 1);
+  if (no.type !== "tfs") throw new Error("tipo preservado");
+  no.data.matrix[0][1] = { enabled: true, kind: "iopdt", params: { Ki: 0.4, theta: 2 } };
+  const dados = paraGraphJson([no], []).nodes[0].data;
+  if (!("matrix" in dados)) throw new Error("matriz emitida");
+  expect(Object.keys(dados.matrix[0][1].params).sort()).toEqual(["Ki", "theta"]);
+  expect(Object.keys(dados.matrix[0][0].params).sort()).toEqual(["K", "tau1", "tau2", "theta"]);
+  expect(dados.matrix).toHaveLength(2);
+  expect(dados.matrix[1]).toHaveLength(2);
+});
+
+// --------------------------------------------------------------------------------------
+// Leitura do graph_json do servidor
+// --------------------------------------------------------------------------------------
+
+test("ida e volta pelo graph_json preserva o grafo", () => {
+  const nodes: BlocoNode[] = [
+    {
+      id: "r",
+      type: "opc_read",
+      position: { x: 10, y: 20 },
+      data: { exec_order: 1, label: "PV", tag_id: 10 },
+    },
+    criarBloco("tfs", "t", { x: 300, y: 20 }, 2),
+  ];
+  const edges = [aresta("e1", "r", "out", "t", "u1")];
+  const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson(nodes, edges))));
+  expect(volta.nodes).toEqual(nodes);
+  expect(volta.edges).toEqual(edges);
+});
+
+test("grafo vazio do flow recém-criado abre sem nó nem aresta", () => {
+  expect(deGraphJson({ nodes: [], edges: [] })).toEqual({ nodes: [], edges: [] });
+  expect(deGraphJson(null)).toEqual({ nodes: [], edges: [] });
+});
+
+test("nó de tipo desconhecido é descartado junto com as arestas que o citam", () => {
+  const grafo = deGraphJson({
+    nodes: [
+      { id: "m", type: "mpc", position: { x: 0, y: 0 }, data: { exec_order: 1 } },
+      { id: "s", type: "script", position: { x: 0, y: 0 }, data: { exec_order: 2, n_inputs: 1, n_outputs: 1, code: "" } },
+    ],
+    edges: [
+      { id: "e1", source: "m", target: "s", sourceHandle: "out", targetHandle: "IN1" },
+      { id: "e2", source: "s", target: "s", sourceHandle: "OUT1", targetHandle: "IN1" },
+    ],
+  });
+  expect(grafo.nodes.map((no) => no.id)).toEqual(["s"]);
+  expect(grafo.edges.map((a) => a.id)).toEqual(["e2"]);
+});

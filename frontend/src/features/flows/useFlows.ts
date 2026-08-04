@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 
-import { api, type FlowCreate, type FlowDetail, type FlowOut } from "../../lib/api";
+import { api, type FlowCreate, type FlowDetail, type FlowOut, type FlowSaved } from "../../lib/api";
+import type { GraphJson } from "./graph";
 
 const CHAVE = ["flows"] as const;
 
@@ -28,6 +29,27 @@ export function useFlows(projectId: number | null): UseQueryResult<FlowOut[]> {
     queryKey: [...CHAVE, projectId],
     queryFn: () => api<FlowOut[]>(`/api/flows?project_id=${String(projectId)}`),
     enabled: projectId !== null,
+  });
+}
+
+/** Detalhe com `graph_json` (spec F3 §5.1) — a lista não o traz. */
+export function useFlow(flowId: number): UseQueryResult<FlowDetail> {
+  return useQuery({
+    queryKey: [...CHAVE, "detalhe", flowId],
+    queryFn: () => api<FlowDetail>(`/api/flows/${String(flowId)}`),
+  });
+}
+
+/** PUT do grafo: 200 com `warnings[]` não-bloqueantes (RF-307), 422 com `detail` em pt-BR. */
+export function useSaveFlow(flowId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (graph_json: GraphJson) =>
+      api<FlowSaved>(`/api/flows/${String(flowId)}`, {
+        method: "PUT",
+        body: JSON.stringify({ graph_json }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: CHAVE }),
   });
 }
 

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router";
 
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
@@ -317,7 +318,16 @@ export function FlowsPage() {
             )}
             {linhas.map((flow) => (
               <tr key={flow.id} data-testid="flow-row" className="border-b border-hairline">
-                <td className="px-3 py-2">{flow.name}</td>
+                <td className="px-3 py-2">
+                  {/* O nome é o caminho para o canvas: operador abre em leitura, admin edita */}
+                  <Link
+                    to={`/engenharia/flows/${String(flow.id)}`}
+                    data-testid="flow-abrir"
+                    className="text-accent hover:underline"
+                  >
+                    {flow.name}
+                  </Link>
+                </td>
                 <td className="px-3 py-2">
                   <span className="process-value">{formatarTs(flow.ts_seconds)}</span>{" "}
                   <span className="text-xs text-fg-muted">s</span>
