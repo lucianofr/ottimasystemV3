@@ -55,6 +55,10 @@ class SecurityNotAvailableError(RuntimeError):
     """Combinação de segurança ainda não montada (montagem completa: tarefa 2.4/§5.1)."""
 
 
+class _SupersededAttemptError(RuntimeError):
+    """Tentativa de conexão invalidada por um fail() concorrente."""
+
+
 def backoff_delay(attempt: int, *, initial: float, maximum: float) -> float:
     """Backoff exponencial com teto e full jitter (spec §2.2-2), `attempt` 0-based."""
     top = min(maximum, initial * 2 ** min(attempt, _MAX_BACKOFF_EXPONENT))
@@ -136,6 +140,9 @@ class ConnectionRuntime:
         self._subscription: ValueSubscription | None = None
         # Edge-trigger dos eventos: só há `comm_restored` depois de um `comm_failure`.
         self._failure_pending = False
+        # Geração da tentativa de conexão: fail() a incrementa para invalidar um connect
+        # que ainda esteja em voo (ele não pode subir a conexão depois do alarme).
+        self._generation = 0
 
     @property
     def config(self) -> ConnectionConfig:
@@ -230,6 +237,8 @@ class ConnectionRuntime:
         self._state = ConnectionState.FAILED
         self._snapshot.state = ConnectionState.FAILED
         self._failure_pending = True
+        # Invalida connect em voo: não pode ressuscitar a conexão depois do alarme.
+        self._generation += 1
         await self._close_session()
         logger.warning(
             "Conexão %s (%s) em falha: %s — %s", self._config.id, self._config.name, reason, detail
@@ -265,31 +274,37 @@ class ConnectionRuntime:
         return f"conn:{self._config.id}"
 
     async def _supervise(self) -> None:
-        """Laço de vida da conexão: conecta, vigia a sessão, reconecta em backoff."""
+        """Laço de vida da conexão: conecta, vigia a sessão, reconecta em backoff.
+
+        O backoff governa todo o ciclo de reconexão (spec §2.2-2), não só a falha de
+        connect: sem ele, a primeira retomada depois de uma queda de sessão viva iria
+        sem throttle nenhum. O contador só zera quando uma sessão chega a `up`.
+        """
         attempt = 0
         while True:
             try:
                 await self._open_session()
             except Exception as exc:
                 await self.fail("connect_failed", describe_exception(exc))
-                await asyncio.sleep(
-                    backoff_delay(
-                        attempt, initial=self._backoff_initial_s, maximum=self._backoff_max_s
-                    )
-                )
-                attempt += 1
-                continue
-            attempt = 0
-            await self._watch_session()
+            else:
+                attempt = 0
+                await self._watch_session()
+            await asyncio.sleep(
+                backoff_delay(attempt, initial=self._backoff_initial_s, maximum=self._backoff_max_s)
+            )
+            attempt += 1
 
     async def _open_session(self) -> None:
         """Conecta e sobe para `up`; qualquer exceção deixa a conexão sem cliente."""
+        generation = self._generation
         client = build_client(self._config, certs_dir=self._certs_dir, fernet_key=self._fernet_key)
         try:
             # auto_reconnect=False: a reconexão e o backoff são nossos (spec §2.2-2).
             await client.connect(auto_reconnect=False)
+            self._raise_if_superseded(generation)
             self._client = client
             await self.on_session_up()
+            self._raise_if_superseded(generation)
         except BaseException:
             self._client = None
             await _disconnect_quiet(client)
@@ -302,6 +317,15 @@ class ConnectionRuntime:
         if not self._config.has_watchdog:
             # Com watchdog quem restabelece é a alternância do bit (tarefa 2.1, spec §3.6).
             await self.mark_restored()
+
+    def _raise_if_superseded(self, generation: int) -> None:
+        """Aborta a tentativa se um fail() ocorreu enquanto o connect estava em voo.
+
+        Sem isso, um connect que termina depois do alarme levaria a conexão de volta a
+        `up` — e, sem watchdog, ainda emitiria `comm_restored` sem nada ter se recuperado.
+        """
+        if generation != self._generation:
+            raise _SupersededAttemptError("tentativa de conexão invalidada por falha concorrente")
 
     async def _watch_session(self) -> None:
         """Verifica periodicamente se a sessão continua viva; sai ao deixar de estar `up`."""

@@ -15,6 +15,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
+from asyncua import Client
+from asyncua.client.ua_client import UaClientState
 from cryptography.fernet import Fernet
 from redis.asyncio import Redis
 
@@ -374,3 +376,101 @@ async def test_fail_e_idempotente(sim: OpcSimServer, redis_client: Redis) -> Non
         await asyncio.sleep(0.2)
         assert len(of_kind(events, KIND_COMM_FAILURE)) == 1
         assert runtime.state is ConnectionState.FAILED
+
+
+async def test_reconexao_apos_session_lost_respeita_o_backoff(
+    sim: OpcSimServer, redis_client: Redis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """O backoff vale para o ciclo inteiro (spec §2.2-2), não só para falha de connect."""
+    from ottima_opc_worker import connection as connection_module
+
+    # uniform devolvendo o topo torna o atraso determinístico: initial == max == 0.4 s.
+    monkeypatch.setattr(random, "uniform", lambda _low, high: high)
+    atraso_s = 0.4
+    linha_do_tempo: list[tuple[str, float]] = []
+    real_build_client = connection_module.build_client
+    real_backoff_delay = connection_module.backoff_delay
+
+    def build_marcado(*args, **kwargs):
+        linha_do_tempo.append(("connect", asyncio.get_running_loop().time()))
+        return real_build_client(*args, **kwargs)
+
+    def backoff_marcado(attempt: int, **kwargs) -> float:
+        linha_do_tempo.append(("backoff", asyncio.get_running_loop().time()))
+        return real_backoff_delay(attempt, **kwargs)
+
+    monkeypatch.setattr(connection_module, "build_client", build_marcado)
+    monkeypatch.setattr(connection_module, "backoff_delay", backoff_marcado)
+
+    config = make_config(sim.endpoint)
+    snapshot = ConnectionSnapshot(name=config.name)
+    runtime = ConnectionRuntime(
+        config,
+        redis_client,
+        snapshot,
+        backoff_initial_s=atraso_s,
+        backoff_max_s=atraso_s,
+    )
+    async with running(runtime):
+        await await_until(lambda: runtime.state is ConnectionState.UP)
+        assert [passo for passo, _ in linha_do_tempo] == ["connect"]
+        await sim.stop()
+        await await_until(lambda: len(linha_do_tempo) >= 3)
+
+    # Sem o backoff no caminho da queda a ordem seria connect, connect, backoff.
+    assert [passo for passo, _ in linha_do_tempo[:3]] == ["connect", "backoff", "connect"]
+    intervalo = linha_do_tempo[2][1] - linha_do_tempo[1][1]
+    assert intervalo >= atraso_s * 0.9, f"reconexão sem throttle: {intervalo:.3f}s"
+
+
+async def test_fail_concorrente_aborta_o_connect_em_voo(
+    sim: OpcSimServer, redis_client: Redis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Connect que termina depois do alarme não pode ressuscitar a conexão (spec §3.6)."""
+    from ottima_opc_worker import connection as connection_module
+
+    real_build_client = connection_module.build_client
+    clientes: list[Client] = []
+    conectando = asyncio.Event()
+    liberar = asyncio.Event()
+    segunda_tentativa = asyncio.Event()
+
+    def build_lento(*args, **kwargs) -> Client:
+        client = real_build_client(*args, **kwargs)
+        clientes.append(client)
+        primeira = len(clientes) == 1
+        real_connect = client.connect
+
+        async def connect_lento(**connect_kwargs) -> None:
+            if not primeira:
+                # A reconexão legítima não interessa aqui: travá-la mantém a janela de
+                # observação estável até o stop() cancelar a supervisão.
+                segunda_tentativa.set()
+                await asyncio.sleep(3600)
+            conectando.set()
+            await liberar.wait()
+            await real_connect(**connect_kwargs)
+
+        client.connect = connect_lento
+        return client
+
+    monkeypatch.setattr(connection_module, "build_client", build_lento)
+
+    config = make_config(sim.endpoint)  # sem watchdog: seria o caso que emite restored
+    snapshot = ConnectionSnapshot(name=config.name)
+    runtime = make_runtime(config, redis_client, snapshot)
+    async with collect_events(redis_client) as events:
+        async with running(runtime):
+            await asyncio.wait_for(conectando.wait(), timeout=5.0)
+            await runtime.fail("watchdog_timeout", "alarme durante o connect")
+            liberar.set()
+            # Sai também se a conexão subir: aí o assert seguinte aponta o defeito.
+            await await_until(
+                lambda: segunda_tentativa.is_set() or runtime.state is ConnectionState.UP
+            )
+
+            assert runtime.state is ConnectionState.FAILED
+            assert runtime.client is None
+            assert clientes[0].uaclient.state is UaClientState.DISCONNECTED
+            assert len(of_kind(events, KIND_COMM_FAILURE)) == 1
+            assert of_kind(events, KIND_COMM_RESTORED) == []
