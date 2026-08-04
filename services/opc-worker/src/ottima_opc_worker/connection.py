@@ -23,6 +23,7 @@ from ottima_core.security import decrypt_secret
 from .heartbeat import HEARTBEAT_INTERVAL_S, ValueHeartbeat
 from .state import ConnectionConfig, ConnectionSnapshot, ConnectionState, TagConfig
 from .subscriptions import ValueSubscription
+from .watchdog import FREEZE_THRESHOLD_S, WatchdogTask
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,7 @@ class ConnectionRuntime:
         backoff_initial_s: float = BACKOFF_INITIAL_S,
         backoff_max_s: float = BACKOFF_MAX_S,
         heartbeat_interval_s: float = HEARTBEAT_INTERVAL_S,
+        watchdog_freeze_threshold_s: float = FREEZE_THRESHOLD_S,
     ) -> None:
         self._config = config
         self._redis = redis_client
@@ -140,6 +142,8 @@ class ConnectionRuntime:
         # rode uma vez só, mesmo com stop() repetido.
         self._session_open = False
         self._subscription: ValueSubscription | None = None
+        self._watchdog: WatchdogTask | None = None
+        self._watchdog_freeze_threshold_s = watchdog_freeze_threshold_s
         # Edge-trigger dos eventos: só há `comm_restored` depois de um `comm_failure`.
         self._failure_pending = False
         # Geração da tentativa de conexão: fail() a incrementa para invalidar um connect
@@ -174,6 +178,11 @@ class ConnectionRuntime:
         return self._subscription
 
     @property
+    def watchdog(self) -> WatchdogTask | None:
+        """Task de watchdog viva; None fora de `up` ou em conexão sem o par de node_ids."""
+        return self._watchdog
+
+    @property
     def heartbeat(self) -> ValueHeartbeat:
         """Heartbeat de valor da conexão; vive fora da sessão (spec §2.2-6)."""
         return self._heartbeat
@@ -200,7 +209,7 @@ class ConnectionRuntime:
         await self._close_session()
 
     async def on_session_up(self) -> None:
-        """Gancho pós-connect, antes de marcar `up`: cria a subscription de valores.
+        """Gancho pós-connect, antes de marcar `up`: sobe subscription e watchdog.
 
         Falha ao criar a subscription inteira é falha de sessão, não de tag: emite
         `comm_failure` com `session_lost` e devolve a exceção ao supervisor, que fecha o
@@ -214,12 +223,39 @@ class ConnectionRuntime:
         except Exception as exc:
             await self.fail("session_lost", describe_exception(exc))
             raise
+        await self._start_watchdog(client)
 
     async def on_session_down(self) -> None:
-        """Gancho simétrico, ao sair de `up`: derruba a subscription."""
+        """Gancho simétrico, ao sair de `up`: derruba watchdog e subscription.
+
+        Quem zera `snapshot.watchdog_alive` é `_close_session`, único caminho até aqui.
+        """
+        watchdog, self._watchdog = self._watchdog, None
+        if watchdog is not None:
+            await watchdog.stop()
         subscription, self._subscription = self._subscription, None
         if subscription is not None:
             await subscription.stop()
+
+    async def _start_watchdog(self, client: Client) -> None:
+        """Sobe o watchdog da sessão, se a conexão tiver o par de node_ids (spec §3.1).
+
+        Sem watchdog a conexão é read-only de fato (spec §3.5): nenhuma task é criada e
+        `watchdog_alive` fica `False` para sempre.
+        """
+        if not self._config.has_watchdog:
+            return
+        watchdog = WatchdogTask(
+            self._config,
+            client,
+            self._snapshot,
+            on_freeze=lambda detail: self.fail("watchdog_timeout", detail),
+            on_alive=self.mark_restored,
+            on_hard_failure=lambda detail: self.fail("session_lost", detail),
+            freeze_threshold_s=self._watchdog_freeze_threshold_s,
+        )
+        self._watchdog = watchdog
+        await watchdog.start()
 
     async def apply_tags(self, tags: tuple[TagConfig, ...]) -> None:
         """Troca o conjunto de tags SEM derrubar a sessão (reconciliação, tarefa 1.4).
