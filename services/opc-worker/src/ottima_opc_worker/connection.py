@@ -20,6 +20,7 @@ from ottima_core.bus import KIND_COMM_FAILURE, KIND_COMM_RESTORED, publish_event
 from ottima_core.certs import APPLICATION_URI
 from ottima_core.security import decrypt_secret
 
+from .heartbeat import HEARTBEAT_INTERVAL_S, ValueHeartbeat
 from .state import ConnectionConfig, ConnectionSnapshot, ConnectionState, TagConfig
 from .subscriptions import ValueSubscription
 
@@ -123,6 +124,7 @@ class ConnectionRuntime:
         fernet_key: str = "",
         backoff_initial_s: float = BACKOFF_INITIAL_S,
         backoff_max_s: float = BACKOFF_MAX_S,
+        heartbeat_interval_s: float = HEARTBEAT_INTERVAL_S,
     ) -> None:
         self._config = config
         self._redis = redis_client
@@ -143,6 +145,11 @@ class ConnectionRuntime:
         # Geração da tentativa de conexão: fail() a incrementa para invalidar um connect
         # que ainda esteja em voo (ele não pode subir a conexão depois do alarme).
         self._generation = 0
+        # O heartbeat é do runtime, não da sessão: segue publicando quality=2 com a
+        # conexão em falha (spec §2.2-6).
+        self._heartbeat = ValueHeartbeat(
+            config, redis_client, snapshot, interval_s=heartbeat_interval_s
+        )
 
     @property
     def config(self) -> ConnectionConfig:
@@ -166,11 +173,17 @@ class ConnectionRuntime:
         """Subscription de valores viva; None fora de `up`."""
         return self._subscription
 
+    @property
+    def heartbeat(self) -> ValueHeartbeat:
+        """Heartbeat de valor da conexão; vive fora da sessão (spec §2.2-6)."""
+        return self._heartbeat
+
     async def start(self) -> None:
         """Cria a task supervisora da conexão e retorna já."""
         if self._task is not None and not self._task.done():
             return
         self._task = asyncio.create_task(self._supervise(), name=f"opc-conn-{self._config.id}")
+        await self._heartbeat.start()
 
     async def stop(self) -> None:
         """Cancela a supervisão e desconecta. Idempotente.
@@ -183,6 +196,7 @@ class ConnectionRuntime:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+        await self._heartbeat.stop()
         await self._close_session()
 
     async def on_session_up(self) -> None:
@@ -213,6 +227,7 @@ class ConnectionRuntime:
         Fora de `up` apenas guarda a configuração nova: a próxima subida a usa.
         """
         self._config = replace(self._config, tags=tags)
+        self._heartbeat.apply_tags(tags)
         client = self._client
         if self._state is not ConnectionState.UP or client is None:
             return
