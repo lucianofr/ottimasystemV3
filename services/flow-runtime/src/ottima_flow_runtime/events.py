@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 # Espera antes de reassinar um canal depois de uma queda do Redis (padrão do opc-worker).
 RESUBSCRIBE_RETRY_S = 1.0
 
+# Teto do SUBSCRIBE: o Redis é local ao stack, não confirmar em 5 s é falha real.
+SUBSCRIBE_TIMEOUT_S = 5.0
+
 
 class ChannelListener:
     """Assinante resiliente de um canal do barramento.
@@ -124,9 +127,32 @@ class ChannelListener:
 
     async def _subscribe(self) -> PubSub:
         pubsub = self._redis.pubsub()
-        await pubsub.subscribe(self._channel)
+        try:
+            await pubsub.subscribe(self._channel)
+            await self._await_confirmation(pubsub)
+        except BaseException:
+            # Falhou antes de virar `self._pubsub`, onde nem `stop()` o alcançaria: sem este
+            # fechamento, cada start() que falha vaza conexão e inscrição no servidor.
+            await _close(pubsub, self._channel)
+            raise
         self._pubsub = pubsub
         return pubsub
+
+    async def _await_confirmation(self, pubsub: PubSub) -> None:
+        """Só volta com o SUBSCRIBE confirmado: a publicação seguinte não se perde.
+
+        Mensagem que chega na janela da confirmação é despachada como qualquer outra, em vez
+        de virar evento perdido no start.
+        """
+        async with asyncio.timeout(SUBSCRIBE_TIMEOUT_S):
+            while True:
+                message = await pubsub.get_message(timeout=SUBSCRIBE_TIMEOUT_S)
+                if message is None:
+                    continue
+                if message["type"] == "subscribe":
+                    return
+                if message["type"] == "message":
+                    await self._dispatch(message["data"])
 
     async def _drop_pubsub(self) -> None:
         pubsub, self._pubsub = self._pubsub, None
@@ -231,6 +257,14 @@ async def publish_rejected(
         kind=kind,
         payload=payload,
     )
+
+
+async def _close(pubsub: PubSub, channel: str) -> None:
+    """Fecha o assinante sem nunca levantar: é caminho de desmonte."""
+    try:
+        await pubsub.aclose()  # aclose desfaz a inscrição e devolve a conexão
+    except Exception:
+        logger.warning("Falha ao fechar o assinante do canal %s", channel, exc_info=True)
 
 
 __all__ = [

@@ -5,9 +5,10 @@ que ele alimenta é a fonte única do `/health`.
 
 Duas regras herdadas do opc-worker, e as duas existem por causa do compose:
 
-- **`status` reflete só as dependências do serviço** (Redis/banco). Flow em falha é condição
-  operacional — alarme, não unhealth: o healthcheck não pode reiniciar o processo por causa de
-  um flow (§2.2-10).
+- **`status` reflete as dependências (Redis/banco) e a liveness do runtime.** Flow em falha
+  é condição operacional — alarme, não unhealth: o healthcheck não pode reiniciar o processo
+  por causa de um flow (§2.2-10). Mas um runtime que não subiu o supervisor está surdo a
+  todo `deploy`, e isso é degradação do serviço, não de um flow.
 - **A subida do runtime não derruba o serviço.** Com Redis ou banco fora, o `/health` precisa
   responder `degraded` em lugar de o processo entrar em crash-loop. Por isso o `start()` é
   absorvido aqui: o `ValueSnapshot.start()` (tarefa 1.1) propaga falha de assinatura de
@@ -93,12 +94,16 @@ async def lifespan(app: FastAPI):
         on_project_activated=supervisor.on_project_activated,
     )
     app.state.events = events
+    app.state.runtime_up = False
     try:
         # O espelho antes do supervisor: bloco OPC-Read instanciado por um deploy já encontra
         # a assinatura de `opc.values.*` em pé.
         await snapshot.start()
         await supervisor.start()
         await events.start()
+        # Só vira `up` com os três em pé: supervisor ou listener morto deixa o runtime surdo
+        # a todo `deploy`, e o `/health` não pode dizer `ok` disso (spec §2.2-10).
+        app.state.runtime_up = True
     except Exception:
         logger.exception("falha ao iniciar o runtime; o serviço sobe sem flows")
     task = asyncio.create_task(_heartbeat_loop(client, session_factory, app))
@@ -130,10 +135,13 @@ async def health() -> dict:
     """
     redis_ok = getattr(app.state, "redis_ok", False)
     db_ok = getattr(app.state, "db_ok", False)
+    # Sem supervisor e listeners o runtime está surdo a todo `deploy` — degradação do
+    # serviço, não condição operacional de flow.
+    runtime_up = getattr(app.state, "runtime_up", False)
     runtime_state = getattr(app.state, "runtime_state", None)
     flows = {} if runtime_state is None else runtime_state.flows
     return {
-        "status": "ok" if redis_ok and db_ok else "degraded",
+        "status": "ok" if redis_ok and db_ok and runtime_up else "degraded",
         "service": SERVICE_NAME,
         "version": VERSION,
         # Chave string porque JSON não tem chave inteira; o corpo por flow vem inteiro do

@@ -527,6 +527,36 @@ async def test_stop_encerra_varreduras_antes_de_parar_o_pool(
     assert events.events(KIND_SCRIPT_TIMEOUT) == []
 
 
+async def test_desmonte_do_supervisor_publica_flow_stopped_de_shutdown(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    """Restart do runtime: o flow que estava rodando ganha `flow_stopped` com `shutdown`.
+
+    Sem o evento, o último estado conhecido segue `flow_deployed` e a lista do frontend
+    mostra "Rodando" enquanto o `/health` mostra `flows={}` (achado I3).
+    """
+    project_id = await create_project(session_factory)
+    flow_id = await create_flow(session_factory, project_id, graph=counter_graph())
+    events = await collect(CHANNEL_EVENTS)
+    harness = await harness_factory()
+
+    await harness.command("deploy", flow_id)
+    await harness.await_state(flow_id, "running")
+    await await_until(lambda: len(events.events(KIND_FLOW_DEPLOYED)) == 1)
+
+    await harness.supervisor.stop()
+
+    await await_until(lambda: len(events.events(KIND_FLOW_STOPPED)) == 1)
+    parado = events.events(KIND_FLOW_STOPPED)[0]
+    assert parado.origin == f"flow:{flow_id}"
+    assert parado.payload["flow_id"] == flow_id
+    # String literal de propósito: `shutdown` é contrato com o mapa de tradução de `reason`
+    # do frontend, como o `flow_deleted` do teste do watermark.
+    assert parado.payload["reason"] == "shutdown"
+    # Desligamento sem comando de usuário atrás: a chave `user` não existe.
+    assert "user" not in parado.payload
+
+
 # --------------------------------------------------------------------------------------
 # 15: /health (spec §2.2-10)
 # --------------------------------------------------------------------------------------
@@ -547,6 +577,7 @@ async def test_health_reporta_dependencias_e_flows(
     app.state.runtime_state = harness.state
     app.state.redis_ok = True
     app.state.db_ok = False
+    app.state.runtime_up = True
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
         degradado = await client.get("/health")
         app.state.db_ok = True

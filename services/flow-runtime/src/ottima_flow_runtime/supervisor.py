@@ -78,6 +78,8 @@ REASON_COMM_FAILURE = "comm_failure"
 REASON_FLOW_DELETED = "flow_deleted"
 REASON_PROJECT_INACTIVE = "project_inactive"
 REASON_INVALID_GRAPH = "invalid_graph"
+# Desligamento do runtime: contrato com o mapa de tradução de `reason` do frontend (§6.1).
+REASON_SHUTDOWN = "shutdown"
 
 # Ator do log de desmonte do serviço. NUNCA entra em payload de auditoria: parada sem comando
 # de usuário atrás omite a chave `user` (ver `events.publish_flow_stopped`).
@@ -552,11 +554,20 @@ class Supervisor:
         A entrada sai do mapa mesmo quando o `stop()` falha, e só depois da tentativa: manter
         um flow quebrado no mapa travaria todo comando seguinte, e removê-lo antes de tentar
         deixaria a task viva e inalcançável.
+
+        O flow que estava rodando ganha `flow_stopped` com `reason="shutdown"`: sem ele o
+        último evento de estado continuaria `flow_deployed`, e depois de um restart a lista
+        mostraria "Rodando" enquanto o `/health` mostra `flows={}`.
         """
         runtime = self._runtimes.get(flow_id)
         try:
             if runtime is not None:
-                await runtime.task.stop(user=SYSTEM_ACTOR, reason="shutdown")
+                was_running = runtime.task.state == "running"
+                await runtime.task.stop(user=SYSTEM_ACTOR, reason=REASON_SHUTDOWN)
+                if was_running:
+                    # Sem usuário comandando um desligamento: a chave `user` é omitida, como
+                    # nos demais caminhos de parada sem comando (ruling do controlador).
+                    await publish_flow_stopped(self._redis, flow_id=flow_id, reason=REASON_SHUTDOWN)
         except Exception:
             logger.exception("Falha ao parar o flow %s; a entrada é removida assim mesmo", flow_id)
         finally:
