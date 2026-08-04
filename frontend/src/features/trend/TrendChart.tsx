@@ -27,7 +27,6 @@ export function TrendChart({ dados, ids, rotulos, janelaSegundos }: TrendChartPr
   // `useHistory()`, e trocar o fallback `String(id)` pelo nome real recriaria a instância —
   // e o zoom do engenheiro iria junto — sem que nada de estrutural tivesse mudado.
   const estrutura = `${String(janelaSegundos)}|${ids.join(",")}`;
-  const chaveRotulos = rotulos.join("\u0000");
   const estruturaAtual = useRef({ rotulos, janelaSegundos });
   estruturaAtual.current = { rotulos, janelaSegundos };
 
@@ -56,16 +55,6 @@ export function TrendChart({ dados, ids, rotulos, janelaSegundos }: TrendChartPr
       grafico.current = null;
     };
   }, [estrutura]);
-
-  useEffect(() => {
-    const instancia = grafico.current;
-    if (!instancia) return;
-    // Rótulo é texto: trocar o nome vivo, sem destruir a instância. A série 0 é o eixo x.
-    estruturaAtual.current.rotulos.forEach((rotulo, indice) => {
-      const serie = instancia.series[indice + 1];
-      if (serie) serie.label = rotulo;
-    });
-  }, [chaveRotulos]);
 
   useEffect(() => {
     const instancia = grafico.current;
