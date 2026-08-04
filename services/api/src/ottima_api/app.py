@@ -39,7 +39,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings  # lido pelo lifespan; precisa existir antes da subida
 
-    from ottima_api.routers import auth, connections, events, health, projects, tags, users
+    from ottima_api.routers import (
+        auth,
+        connections,
+        events,
+        health,
+        history,
+        projects,
+        tags,
+        users,
+    )
 
     app.include_router(health.router, prefix="/api", tags=["health"])
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
@@ -48,4 +57,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(connections.router, prefix="/api/connections", tags=["connections"])
     app.include_router(tags.router, prefix="/api/tags", tags=["tags"])
     app.include_router(events.router, prefix="/api/events", tags=["events"])
+    app.include_router(history.router, prefix="/api/history", tags=["history"])
     return app
