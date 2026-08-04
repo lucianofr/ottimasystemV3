@@ -136,14 +136,23 @@ class RecorderPipeline:
         self._flush_task = asyncio.create_task(self._flush_loop())
 
     async def stop(self) -> None:
-        """Cancela as tasks, encerra as inscrições e faz o flush final. Idempotente."""
-        for task in (self._read_task, self._flush_task):
+        """Cancela as tasks, encerra as inscrições e faz o flush final. Idempotente.
+
+        Nenhuma etapa pode abortar o desmonte, e nenhuma falha pode sumir: cancelamento é
+        o caminho normal e não vira log de erro; qualquer outra exceção é registrada com a
+        etapa que falhou e o desmonte segue.
+        """
+        stages = (("task de leitura", self._read_task), ("task de flush", self._flush_task))
+        for stage, task in stages:
             if task is None:
                 continue
             task.cancel()
-            # Task já morta por exceção não pode impedir o encerramento nem o flush final.
-            with suppress(asyncio.CancelledError, Exception):
+            try:
                 await task
+            except asyncio.CancelledError:
+                pass  # cancelamento é o desmonte normal, não é falha
+            except Exception:
+                logger.exception("Desmonte do recorder: %s terminou com erro", stage)
         self._read_task = None
         self._flush_task = None
         await self._close_pubsub()
@@ -152,7 +161,7 @@ class RecorderPipeline:
         except Exception:
             # Banco fora do ar no shutdown: o buffer morre com o processo, mas o encerramento
             # não pode falhar por isso.
-            logger.exception("Flush final falhou; lote perdido no encerramento")
+            logger.exception("Desmonte do recorder: flush final falhou; lote perdido")
 
     async def flush(self) -> None:
         """Um ciclo de gravação: eventos primeiro, samples depois.
@@ -314,9 +323,12 @@ class RecorderPipeline:
     async def _close_pubsub(self) -> None:
         if self._pubsub is None:
             return
-        with suppress(Exception):
+        try:
             await self._pubsub.aclose()  # aclose desfaz as inscrições e devolve a conexão
-        self._pubsub = None
+        except Exception:
+            logger.exception("Desmonte do recorder: fechamento do pubsub falhou")
+        finally:
+            self._pubsub = None
 
     @staticmethod
     async def _await_confirmations(pubsub: PubSub) -> None:
