@@ -1,4 +1,5 @@
 import type { Edge, Node, XYPosition } from "@xyflow/react";
+import { PORT_CONTRACTS, type DirecaoPorta } from "../../lib/contracts.gen";
 
 /**
  * Modelo do grafo do editor + as regras que o editor espelha do servidor.
@@ -79,33 +80,24 @@ export function portasScript(prefixo: "IN" | "OUT", quantidade: number): string[
   return Array.from({ length: quantidade }, (_, i) => `${prefixo}${String(i + 1)}`);
 }
 
-export const PORTAS_TFS_ENTRADA = ["u1", "u2"];
-export const PORTAS_TFS_SAIDA = ["y1", "y2"];
+/** Portas fixas do tipo (nome só, na direção pedida) — vem de `PORT_CONTRACTS`
+ *  (`contracts.gen.ts`), fonte única com `flowgraph.py` (débito 2+4, plano F4a). Tipo
+ *  dinâmico (Script) devolve `[]` aqui: quem resolve é `portasScript`, com a contagem da
+ *  config do bloco. */
+export function portasFixas(tipo: TipoBloco, direcao: DirecaoPorta): string[] {
+  const contrato = PORT_CONTRACTS[tipo];
+  if (contrato.dynamic) return [];
+  return contrato.ports.filter((porta) => porta.direction === direcao).map((porta) => porta.name);
+}
 
 export function handlesEntrada(no: BlocoNode): string[] {
-  switch (no.type) {
-    case "opc_write":
-      return ["in"];
-    case "script":
-      return portasScript("IN", no.data.n_inputs);
-    case "tfs":
-      return [...PORTAS_TFS_ENTRADA];
-    default:
-      return [];
-  }
+  if (no.type === "script") return portasScript("IN", no.data.n_inputs);
+  return portasFixas(no.type, "input");
 }
 
 export function handlesSaida(no: BlocoNode): string[] {
-  switch (no.type) {
-    case "opc_read":
-      return ["out"];
-    case "script":
-      return portasScript("OUT", no.data.n_outputs);
-    case "tfs":
-      return [...PORTAS_TFS_SAIDA];
-    default:
-      return [];
-  }
+  if (no.type === "script") return portasScript("OUT", no.data.n_outputs);
+  return portasFixas(no.type, "output");
 }
 
 export type TipoPorta = "num" | "bool" | "bivalente" | "desconhecido";

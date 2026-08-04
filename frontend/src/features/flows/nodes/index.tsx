@@ -3,8 +3,7 @@ import type { NodeProps, NodeTypes } from "@xyflow/react";
 import type { TagOut } from "../../../lib/api";
 import { ROTULO_TIPO } from "../../tags/useTags";
 import {
-  PORTAS_TFS_ENTRADA,
-  PORTAS_TFS_SAIDA,
+  portasFixas,
   portasScript,
   type NoEscrita,
   type NoLeitura,
@@ -48,7 +47,7 @@ export function NoLeituraOpc({ id, data, selected }: NodeProps<NoLeitura>) {
       execOrder={data.exec_order}
       selecionado={selected}
       entradas={[]}
-      saidas={portas(["out"])}
+      saidas={portas(portasFixas("opc_read", "output"))}
       blockId={id}
       eu={tag?.eu}
     >
@@ -66,7 +65,7 @@ export function NoEscritaOpc({ id, data, selected }: NodeProps<NoEscrita>) {
       label={data.label}
       execOrder={data.exec_order}
       selecionado={selected}
-      entradas={portas(["in"])}
+      entradas={portas(portasFixas("opc_write", "input"))}
       saidas={[]}
       blockId={id}
       eu={tag?.eu}
@@ -108,8 +107,8 @@ export function NoTfsMatriz({ id, data, selected }: NodeProps<NoTfs>) {
       label={data.label}
       execOrder={data.exec_order}
       selecionado={selected}
-      entradas={portas(PORTAS_TFS_ENTRADA)}
-      saidas={portas(PORTAS_TFS_SAIDA)}
+      entradas={portas(portasFixas("tfs", "input"))}
+      saidas={portas(portasFixas("tfs", "output"))}
       blockId={id}
     >
       <div className="flex items-center justify-between gap-3">
