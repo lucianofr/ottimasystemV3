@@ -9,6 +9,7 @@ import { AnnunciatorBar } from "./AnnunciatorBar";
 const NAV_ENGENHARIA = [
   { rotulo: "Conexões", para: "/engenharia/conexoes", testid: "nav-conexoes" },
   { rotulo: "Tags", para: "/engenharia/tags", testid: "nav-tags" },
+  { rotulo: "Flows", para: "/engenharia/flows", testid: "nav-flows" },
   { rotulo: "Trend", para: "/engenharia/trend", testid: "nav-trend" },
 ] as const;
 

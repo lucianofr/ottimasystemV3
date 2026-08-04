@@ -55,3 +55,36 @@ async def test_nome_duplicado_409_e_404(client, admin_headers):
     r = await client.post("/api/projects", json={"name": "Unico"}, headers=admin_headers)
     assert r.status_code == 409
     assert (await client.get("/api/projects/99999", headers=admin_headers)).status_code == 404
+
+
+async def test_ativacao_de_projeto_diferente_publica_o_evento(client, admin_headers, eventos):
+    """A troca real é a dica de reconciliação que o worker e o runtime consomem (RF-101)."""
+    a = await _criar(client, admin_headers, "EvtA")
+    b = await _criar(client, admin_headers, "EvtB")
+    assert (
+        await client.post(f"/api/projects/{a['id']}/activate", headers=admin_headers)
+    ).status_code == 200
+    await eventos()  # consome o evento da primeira ativação
+
+    r = await client.post(f"/api/projects/{b['id']}/activate", headers=admin_headers)
+    assert r.status_code == 200
+    (ev,) = await eventos()
+    assert ev["payload"] == {"kind": "project_activated", "project_id": b["id"], "name": "EvtB"}
+
+
+async def test_reativar_o_projeto_ja_ativo_nao_publica_evento(client, admin_headers, eventos):
+    """Desde a F3 este evento é destrutivo: o supervisor do flow-runtime para TODOS os flows
+    rodando ao recebê-lo (spec §2.2-8, gancho RF-101). Reativar quem já é o ativo não é
+    transição, então não pode republicar — senão um clique redundante em "ativar" derruba a
+    planta em silêncio. A rota segue idempotente no contrato HTTP.
+    """
+    p = await _criar(client, admin_headers, "JaAtivo")
+    assert (
+        await client.post(f"/api/projects/{p['id']}/activate", headers=admin_headers)
+    ).status_code == 200
+    await eventos()  # consome o evento da ativação real
+
+    r = await client.post(f"/api/projects/{p['id']}/activate", headers=admin_headers)
+    assert r.status_code == 200
+    assert r.json()["is_active"] is True
+    assert await eventos() == []

@@ -9,6 +9,11 @@ export type ConnectionUpdate = components["schemas"]["ConnectionUpdate"];
 export type TagOut = components["schemas"]["TagOut"];
 export type TagCreate = components["schemas"]["TagCreate"];
 export type TagUpdate = components["schemas"]["TagUpdate"];
+export type FlowOut = components["schemas"]["FlowOut"];
+export type FlowDetail = components["schemas"]["FlowDetail"];
+export type FlowCreate = components["schemas"]["FlowCreate"];
+export type FlowUpdate = components["schemas"]["FlowUpdate"];
+export type FlowSaved = components["schemas"]["FlowSaved"];
 export type EventOut = components["schemas"]["EventOut"];
 export type HistoryResponse = components["schemas"]["HistoryResponse"];
 export type HistorySeries = components["schemas"]["HistorySeries"];
@@ -53,6 +58,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     const detail = typeof body?.detail === "string" ? body.detail : "Erro inesperado";
     throw new ApiError(res.status, detail);
   }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  // 204 (DELETE) e 202 sem corpo (deploy/parar, spec F3 §5.1) não trazem JSON para parsear.
+  const corpo = await res.text();
+  if (!corpo) return undefined as T;
+  return JSON.parse(corpo) as T;
 }

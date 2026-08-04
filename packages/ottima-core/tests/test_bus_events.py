@@ -13,7 +13,31 @@ from redis.asyncio import Redis
 from ottima_core.bus import (
     CHANNEL_EVENTS,
     KIND_COMM_FAILURE,
+    KIND_COMM_RESTORED,
+    KIND_CONNECTION_CREATED,
+    KIND_CONNECTION_DELETED,
+    KIND_CONNECTION_UPDATED,
+    KIND_DEPLOY_REJECTED,
+    KIND_FLOW_CREATED,
+    KIND_FLOW_DELETED,
+    KIND_FLOW_DEPLOYED,
+    KIND_FLOW_FAILED,
+    KIND_FLOW_OVERRUN,
+    KIND_FLOW_STOPPED,
+    KIND_FLOW_UPDATED,
     KIND_OPC_WRITE,
+    KIND_PROJECT_ACTIVATED,
+    KIND_RECORDER_BACKPRESSURE,
+    KIND_RELOAD_REJECTED,
+    KIND_SCRIPT_ERROR,
+    KIND_SCRIPT_TIMEOUT,
+    KIND_TAG_CREATED,
+    KIND_TAG_DELETED,
+    KIND_TAG_SUBSCRIBE_ERROR,
+    KIND_TAG_UPDATED,
+    KIND_WRITE_BLOCKED,
+    KIND_WRITE_REJECTED,
+    KIND_WRITE_SUPPRESSED,
     EventMessage,
     publish_event,
 )
@@ -165,3 +189,50 @@ async def test_fixture_redis_sobe_e_responde(redis_client):
 
 async def test_fixture_redis_isola_entre_testes(redis_client):
     assert await redis_client.get("chave-de-isolamento") is None
+
+
+# Consumidores (recorder, API) fazem match por string de `kind`. Trocar um valor é quebra de
+# contrato silenciosa; as duas tabelas abaixo travam o vocabulário nas strings normativas.
+VOCABULARIO_F3 = [
+    (KIND_FLOW_DEPLOYED, "flow_deployed"),
+    (KIND_FLOW_STOPPED, "flow_stopped"),
+    (KIND_FLOW_FAILED, "flow_failed"),
+    (KIND_FLOW_OVERRUN, "flow_overrun"),
+    (KIND_SCRIPT_TIMEOUT, "script_timeout"),
+    (KIND_SCRIPT_ERROR, "script_error"),
+    (KIND_WRITE_SUPPRESSED, "write_suppressed"),
+    (KIND_RELOAD_REJECTED, "reload_rejected"),
+    (KIND_DEPLOY_REJECTED, "deploy_rejected"),
+    (KIND_FLOW_CREATED, "flow_created"),
+    (KIND_FLOW_UPDATED, "flow_updated"),
+    (KIND_FLOW_DELETED, "flow_deleted"),
+]
+
+VOCABULARIO_F2 = [
+    (KIND_COMM_FAILURE, "comm_failure"),
+    (KIND_COMM_RESTORED, "comm_restored"),
+    (KIND_OPC_WRITE, "opc_write"),
+    (KIND_WRITE_BLOCKED, "write_blocked"),
+    (KIND_WRITE_REJECTED, "write_rejected"),
+    (KIND_TAG_SUBSCRIBE_ERROR, "tag_subscribe_error"),
+    (KIND_RECORDER_BACKPRESSURE, "recorder_backpressure"),
+    (KIND_PROJECT_ACTIVATED, "project_activated"),
+    (KIND_CONNECTION_CREATED, "connection_created"),
+    (KIND_CONNECTION_UPDATED, "connection_updated"),
+    (KIND_CONNECTION_DELETED, "connection_deleted"),
+    (KIND_TAG_CREATED, "tag_created"),
+    (KIND_TAG_UPDATED, "tag_updated"),
+    (KIND_TAG_DELETED, "tag_deleted"),
+]
+
+
+def test_vocabulario_kind_novo_da_f3_spec_43():
+    assert [constante for constante, _ in VOCABULARIO_F3] == [
+        esperado for _, esperado in VOCABULARIO_F3
+    ]
+
+
+def test_vocabulario_kind_da_f2_nao_mudou_spec_f2_73():
+    assert [constante for constante, _ in VOCABULARIO_F2] == [
+        esperado for _, esperado in VOCABULARIO_F2
+    ]
