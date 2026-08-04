@@ -64,6 +64,10 @@ FAST_HEARTBEAT_S = 1.0
 
 # Janela para provar que algo NÃO acontece (vários ciclos de reconexão em backoff).
 QUIET_WINDOW_S = 1.5
+# Período longo de propósito no ensaio da tentativa superada: alarga a janela em que uma
+# task de watchdog órfã ainda estaria viva antes de morrer sozinha no primeiro read contra
+# o cliente já desconectado. Sem isso a asserção viraria uma corrida.
+SLOW_PERIOD_MS = 1000
 
 TAG_SINE = TagConfig(
     id=101, name="Temperatura", node_id=NODE_SINE, direction="r", data_type="float"
@@ -82,7 +86,9 @@ READ_TAG_IDS = frozenset({TAG_SINE.id, TAG_COUNTER.id, TAG_STATIC.id})
 BusTrail = list[tuple[str, dict]]
 
 
-def make_config(endpoint: str, *, with_watchdog: bool = False) -> ConnectionConfig:
+def make_config(
+    endpoint: str, *, with_watchdog: bool = False, watchdog_period_ms: int = WATCHDOG_PERIOD_MS
+) -> ConnectionConfig:
     return ConnectionConfig(
         id=CONN_ID,
         project_id=1,
@@ -96,7 +102,7 @@ def make_config(endpoint: str, *, with_watchdog: bool = False) -> ConnectionConf
         server_cert_file=None,
         watchdog_read_node_id=NODE_WD_TO_SYSTEM if with_watchdog else None,
         watchdog_write_node_id=NODE_WD_FROM_SYSTEM if with_watchdog else None,
-        watchdog_period_ms=WATCHDOG_PERIOD_MS,
+        watchdog_period_ms=watchdog_period_ms,
         tags=TAGS,
     )
 
@@ -178,6 +184,22 @@ def index_of_first(trail: BusTrail, kind: str) -> int:
 
 def bad_tag_ids_before(trail: BusTrail, position: int) -> set[int]:
     return {message["tag_id"] for message in bad_values(list(trail)[:position])}
+
+
+def watchdog_tasks(conn_id: int) -> list[asyncio.Task]:
+    """Tasks de watchdog vivas, achadas pelo nome que `WatchdogTask.start()` dá a elas."""
+    nome = f"opc-watchdog-{conn_id}"
+    return [task for task in asyncio.all_tasks() if task.get_name() == nome and not task.done()]
+
+
+async def assert_bit_estavel(sim: OpcSimServer, node_id: str, janela_s: float) -> None:
+    """Prova que ninguém mais escreve no rung: o bit lido não muda durante a janela."""
+    baseline = await sim.read(node_id)
+    loop = asyncio.get_running_loop()
+    limite = loop.time() + janela_s
+    while loop.time() < limite:
+        await asyncio.sleep(0.02)
+        assert await sim.read(node_id) == baseline, f"{node_id} mudou: sobrou quem escreve nele"
 
 
 @asynccontextmanager
@@ -332,6 +354,68 @@ async def test_heartbeat_segue_publicando_bad_durante_a_falha(
             assert runtime.state is ConnectionState.FAILED
             batidas = Counter(message["tag_id"] for message in bad_values(trail)[apos_rajada:])
             assert set(batidas) == set(READ_TAG_IDS)
+
+
+@pytest.mark.parametrize("falha_antes_do_watchdog", [True, False])
+async def test_tentativa_superada_nao_deixa_watchdog_orfao(
+    sim: OpcSimServer,
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+    falha_antes_do_watchdog: bool,
+) -> None:
+    """`fail()` concorrente durante `on_session_up` não pode deixar task viva sem dono.
+
+    Os dois momentos importam e vazam por caminhos distintos: com `fail()` ANTES de o
+    watchdog nascer, o `_close_session()` dele já correu e a limpeza só pode vir da saída
+    de `_open_session`; DEPOIS, a sessão nunca chegou a `up`, e a guarda de `_session_open`
+    impede o gancho de saída de rodar. Nos dois, a próxima tentativa sobrescreveria
+    `_watchdog` sem parar o anterior.
+    """
+    start_watchdog_real = ConnectionRuntime._start_watchdog
+    open_session_real = ConnectionRuntime._open_session
+    forcado = False
+    tentativas_encerradas = 0
+
+    async def start_watchdog_com_fail(runtime_self, client):
+        nonlocal forcado
+        if forcado:
+            await start_watchdog_real(runtime_self, client)
+            return
+        forcado = True
+        if falha_antes_do_watchdog:
+            await runtime_self.fail("session_lost", "corrida forçada no teste")
+            await start_watchdog_real(runtime_self, client)
+        else:
+            await start_watchdog_real(runtime_self, client)
+            await runtime_self.fail("session_lost", "corrida forçada no teste")
+
+    async def open_session_contado(runtime_self):
+        nonlocal tentativas_encerradas
+        try:
+            await open_session_real(runtime_self)
+        finally:
+            tentativas_encerradas += 1
+
+    monkeypatch.setattr(ConnectionRuntime, "_start_watchdog", start_watchdog_com_fail)
+    monkeypatch.setattr(ConnectionRuntime, "_open_session", open_session_contado)
+    # Sem reconexão dentro do ensaio: um watchdog novo e legítimo confundiria a contagem.
+    monkeypatch.setattr(connection_module, "backoff_delay", lambda *args, **kwargs: 60.0)
+
+    config = make_config(sim.endpoint, with_watchdog=True, watchdog_period_ms=SLOW_PERIOD_MS)
+    snapshot = ConnectionSnapshot(name=config.name)
+    async with collect_bus(redis_client, config.id) as trail:
+        async with running(make_runtime(config, redis_client, snapshot)) as runtime:
+            await await_until(lambda: len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1)
+            # Marcador determinístico: a tentativa superada já desenrolou por completo.
+            await await_until(lambda: tentativas_encerradas >= 1)
+
+            assert forcado, "a corrida não foi forçada: o ensaio não provaria nada"
+            assert runtime.state is ConnectionState.FAILED
+            assert watchdog_tasks(config.id) == [], "sobrou task de watchdog órfã"
+            assert runtime.watchdog is None
+            assert runtime.subscription is None
+            # Sem ninguém escrevendo em `from_system`, o rung do opcsim para de alternar.
+            await assert_bit_estavel(sim, NODE_WD_TO_SYSTEM, SLOW_PERIOD_MS / 1000 * 1.5)
 
 
 # --- restauração ---------------------------------------------------------------------
