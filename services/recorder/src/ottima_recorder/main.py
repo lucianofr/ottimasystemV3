@@ -1,7 +1,7 @@
 """Serviço recorder: /health + heartbeat de Redis (F1) e o pipeline de gravação (RF-801).
 
-O pipeline é o único escritor de `samples`/`events` (spec F2 §6); o /health estendido com
-as métricas do buffer chega na tarefa 3.2.
+O pipeline é o único escritor de `samples`/`events` (spec F2 §6); o /health expõe as
+métricas de buffer e o estado do banco (spec F2 §6.6).
 """
 
 import asyncio
@@ -65,10 +65,21 @@ app = FastAPI(title=f"OttimaSystem {SERVICE_NAME}", lifespan=lifespan)
 
 @app.get("/health")
 async def health() -> dict:
-    """Sempre responde 200: 'degraded' quando o Redis não respondeu ao último ping."""
+    """Sempre 200: a degradação vai no corpo (spec F2 §2.2-8/§6.6).
+
+    Sem pipeline montado (app cru), os campos caem nos defaults via `getattr`.
+    """
     redis_ok = getattr(app.state, "redis_ok", False)
+    pipeline = getattr(app.state, "pipeline", None)
+    db_ok = getattr(pipeline, "db_ok", False)
+    last_flush_ts = getattr(pipeline, "last_flush_ts", None)
     return {
-        "status": "ok" if redis_ok else "degraded",
+        "status": "ok" if redis_ok and db_ok else "degraded",
         "service": SERVICE_NAME,
         "version": VERSION,
+        "buffered_samples": getattr(pipeline, "buffered_samples", 0),
+        "buffered_events": getattr(pipeline, "buffered_events", 0),
+        "dropped_total": getattr(pipeline, "dropped_total", 0),
+        "last_flush_ts": last_flush_ts.isoformat() if last_flush_ts is not None else None,
+        "db_ok": db_ok,
     }
