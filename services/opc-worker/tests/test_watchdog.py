@@ -9,20 +9,19 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-import pytest
 from asyncua import Client
 from redis.asyncio import Redis
 
-from opcsim import NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM, OpcSimServer, free_port
+from conftest import AWAIT_TIMEOUT_S, await_until
+from opcsim import NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM, OpcSimServer
 from ottima_opc_worker.connection import ConnectionRuntime
 from ottima_opc_worker.state import ConnectionConfig, ConnectionSnapshot, ConnectionState
 from ottima_opc_worker.watchdog import FREEZE_THRESHOLD_S, WatchdogTask
 
 CONN_ID = 9
-AWAIT_TIMEOUT_S = 20.0
 POLL_INTERVAL_S = 0.01
 MISSING_NODE = "ns=2;s=nao.existe"
 
@@ -34,21 +33,6 @@ FREEZE_PERIOD_MS = 300
 TEST_FREEZE_THRESHOLD_S = 1.0
 # Janela para provar que algo NÃO acontece: três ciclos do watchdog.
 QUIET_WINDOW_S = 3 * FAST_PERIOD_MS / 1000
-
-
-async def await_until(
-    condition: Callable[[], bool],
-    timeout_s: float = AWAIT_TIMEOUT_S,
-    interval: float = 0.02,
-) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
-        if condition():
-            return
-        await asyncio.sleep(interval)
-    raise AssertionError(f"condição não satisfeita em {timeout_s}s")
 
 
 async def await_bit(
@@ -137,16 +121,6 @@ class Recorder:
 
     async def on_hard_failure(self, detail: str) -> None:
         self.hard_failures.append(detail)
-
-
-@pytest.fixture
-async def sim() -> AsyncIterator[OpcSimServer]:
-    server = OpcSimServer(port=free_port())
-    await server.start()
-    try:
-        yield server
-    finally:
-        await server.stop()
 
 
 @asynccontextmanager

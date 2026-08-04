@@ -9,8 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import random
-from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager, suppress
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -20,6 +20,7 @@ from asyncua.client.ua_client import UaClientState
 from cryptography.fernet import Fernet
 from redis.asyncio import Redis
 
+from conftest import await_until, collecting
 from opcsim import NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM, OpcSimServer, free_port
 from ottima_core.bus import CHANNEL_EVENTS, KIND_COMM_FAILURE, KIND_COMM_RESTORED
 from ottima_core.security import encrypt_secret
@@ -34,23 +35,8 @@ from ottima_opc_worker.state import (
 # Backoff curto: os testes não podem esperar o 1→2→4 s de produção.
 TEST_BACKOFF_INITIAL_S = 0.05
 TEST_BACKOFF_MAX_S = 0.2
-# A checagem de sessão roda a cada 1 s; a espera precisa cobrir queda + backoff + reconexão.
-AWAIT_TIMEOUT_S = 20.0
 # Janela para provar que algo NÃO acontece (várias tentativas de reconexão em backoff).
 QUIET_WINDOW_S = 1.0
-
-
-async def await_until(
-    condition: Callable[[], bool], timeout_s: float = AWAIT_TIMEOUT_S, interval: float = 0.02
-) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
-        if condition():
-            return
-        await asyncio.sleep(interval)
-    raise AssertionError(f"condição não satisfeita em {timeout_s}s")
 
 
 def make_config(
@@ -93,30 +79,8 @@ def make_runtime(
     )
 
 
-@asynccontextmanager
-async def collect_events(redis_client: Redis) -> AsyncIterator[list[dict]]:
-    """Assinante de teste do canal `events`; só devolve depois do SUBSCRIBE confirmado."""
-    pubsub = redis_client.pubsub()
-    await pubsub.subscribe(CHANNEL_EVENTS)
-    received: list[dict] = []
-    subscribed = asyncio.Event()
-
-    async def _reader() -> None:
-        async for message in pubsub.listen():
-            if message["type"] == "subscribe":
-                subscribed.set()
-            elif message["type"] == "message":
-                received.append(json.loads(message["data"]))
-
-    task = asyncio.create_task(_reader(), name="test-events-reader")
-    try:
-        await asyncio.wait_for(subscribed.wait(), timeout=5.0)
-        yield received
-    finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
-        await pubsub.aclose()
+def collect_events(redis_client: Redis) -> AsyncIterator[list[dict]]:
+    return collecting(redis_client, CHANNEL_EVENTS)
 
 
 def of_kind(events: list[dict], kind: str) -> list[dict]:
@@ -130,16 +94,6 @@ async def running(runtime: ConnectionRuntime) -> AsyncIterator[ConnectionRuntime
         yield runtime
     finally:
         await runtime.stop()
-
-
-@pytest.fixture
-async def sim() -> AsyncIterator[OpcSimServer]:
-    server = OpcSimServer(port=free_port())
-    await server.start()
-    try:
-        yield server
-    finally:
-        await server.stop()
 
 
 # --- lógica pura -------------------------------------------------------------------

@@ -8,14 +8,14 @@ tempo real.
 from __future__ import annotations
 
 import asyncio
-import json
-from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager, suppress
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import pytest
 from redis.asyncio import Redis
 
+from conftest import await_until, collecting
 from opcsim import NODE_SINE, NODE_STATIC, NODE_W_FLOAT, OpcSimServer, free_port
 from ottima_core.bus import channel_opc_values
 from ottima_opc_worker import heartbeat as heartbeat_module
@@ -31,7 +31,6 @@ from ottima_opc_worker.state import (
 from ottima_opc_worker.subscriptions import QUALITY_BAD, QUALITY_GOOD
 
 CONN_ID = 9
-AWAIT_TIMEOUT_S = 20.0
 # Janela para provar que algo NÃO acontece; cobre várias batidas do heartbeat de teste.
 QUIET_WINDOW_S = 0.6
 
@@ -56,19 +55,6 @@ TAG_SINE = TagConfig(id=22, name="Temperatura", node_id=NODE_SINE, direction="r"
 TAG_WRITE = TagConfig(
     id=23, name="Setpoint", node_id=NODE_W_FLOAT, direction="w", data_type="float"
 )
-
-
-async def await_until(
-    condition: Callable[[], bool], timeout_s: float = AWAIT_TIMEOUT_S, interval: float = 0.02
-) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
-        if condition():
-            return
-        await asyncio.sleep(interval)
-    raise AssertionError(f"condição não satisfeita em {timeout_s}s")
 
 
 def make_config(endpoint: str, *, tags: tuple[TagConfig, ...]) -> ConnectionConfig:
@@ -107,31 +93,8 @@ def make_runtime(
     )
 
 
-@asynccontextmanager
-async def collect_values(redis_client: Redis) -> AsyncIterator[list[dict]]:
-    """Assinante de teste do canal de valores; só devolve depois do SUBSCRIBE confirmado."""
-    channel = channel_opc_values(CONN_ID)
-    pubsub = redis_client.pubsub()
-    await pubsub.subscribe(channel)
-    received: list[dict] = []
-    subscribed = asyncio.Event()
-
-    async def _reader() -> None:
-        async for message in pubsub.listen():
-            if message["type"] == "subscribe":
-                subscribed.set()
-            elif message["type"] == "message":
-                received.append(json.loads(message["data"]))
-
-    task = asyncio.create_task(_reader(), name=f"test-reader-{channel}")
-    try:
-        await asyncio.wait_for(subscribed.wait(), timeout=5.0)
-        yield received
-    finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
-        await pubsub.aclose()
+def collect_values(redis_client: Redis) -> AsyncIterator[list[dict]]:
+    return collecting(redis_client, channel_opc_values(CONN_ID))
 
 
 def of_tag(values: list[dict], tag_id: int) -> list[dict]:
@@ -154,16 +117,6 @@ async def beating(hb: ValueHeartbeat) -> AsyncIterator[ValueHeartbeat]:
         yield hb
     finally:
         await hb.stop()
-
-
-@pytest.fixture
-async def sim() -> AsyncIterator[OpcSimServer]:
-    server = OpcSimServer(port=free_port())
-    await server.start()
-    try:
-        yield server
-    finally:
-        await server.stop()
 
 
 @pytest.fixture

@@ -12,12 +12,13 @@ import asyncio
 import json
 import time
 from collections import Counter
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
 import pytest
 from redis.asyncio import Redis
 
+from conftest import await_until
 from opcsim import (
     NODE_COUNTER,
     NODE_SINE,
@@ -61,7 +62,6 @@ QUIET_HEARTBEAT_S = 30.0
 # Heartbeat rápido, para o ensaio que exige republicação bad DEPOIS da rajada.
 FAST_HEARTBEAT_S = 1.0
 
-AWAIT_TIMEOUT_S = 20.0
 # Janela para provar que algo NÃO acontece (vários ciclos de reconexão em backoff).
 QUIET_WINDOW_S = 1.5
 
@@ -80,19 +80,6 @@ TAGS = (TAG_SINE, TAG_COUNTER, TAG_STATIC, TAG_WRITE)
 READ_TAG_IDS = frozenset({TAG_SINE.id, TAG_COUNTER.id, TAG_STATIC.id})
 
 BusTrail = list[tuple[str, dict]]
-
-
-async def await_until(
-    condition: Callable[[], bool], timeout_s: float = AWAIT_TIMEOUT_S, interval: float = 0.02
-) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
-        if condition():
-            return
-        await asyncio.sleep(interval)
-    raise AssertionError(f"condição não satisfeita em {timeout_s}s")
 
 
 def make_config(endpoint: str, *, with_watchdog: bool = False) -> ConnectionConfig:
@@ -200,16 +187,6 @@ async def running(runtime: ConnectionRuntime) -> AsyncIterator[ConnectionRuntime
         yield runtime
     finally:
         await runtime.stop()
-
-
-@pytest.fixture
-async def sim() -> AsyncIterator[OpcSimServer]:
-    server = OpcSimServer(port=free_port())
-    await server.start()
-    try:
-        yield server
-    finally:
-        await server.stop()
 
 
 # --- transição de falha: alarme e rajada bad ---------------------------------------
