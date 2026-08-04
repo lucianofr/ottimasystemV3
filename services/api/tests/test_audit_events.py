@@ -5,36 +5,12 @@ errado ou evento sobre mutação que falhou envenenaria a reconciliação, por i
 assere o payload inteiro e não só a chegada da mensagem.
 """
 
-import json
-
-import pytest
 from redis.asyncio import Redis
 
 from ottima_api.deps import get_redis
-from ottima_core.bus import CHANNEL_EVENTS
 
 CONEXAO = {"name": "CLP 1", "endpoint": "opc.tcp://10.0.0.5:4840"}
 TAG = {"name": "TI-101", "node_id": "ns=2;s=TI-101", "direction": "r", "data_type": "float"}
-
-
-@pytest.fixture
-async def eventos(redis_url):
-    """Assinante do canal `events` num segundo cliente, como faz o worker."""
-    sub = Redis.from_url(redis_url, decode_responses=True)
-    pubsub = sub.pubsub()
-    await pubsub.subscribe(CHANNEL_EVENTS)
-    await pubsub.get_message(timeout=5)  # confirmação do SUBSCRIBE: só então o servidor entrega
-    yield pubsub
-    await pubsub.aclose()
-    await sub.aclose()
-
-
-async def _recebidos(pubsub) -> list[dict]:
-    """Drena o canal na ordem de chegada; o timeout cobre o trânsito pelo Redis real."""
-    msgs = []
-    while (m := await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5)) is not None:
-        msgs.append(json.loads(m["data"]))
-    return msgs
 
 
 async def _admin_id(client, headers) -> int:
@@ -62,7 +38,7 @@ async def test_ativacao_de_projeto_emite_project_activated(client, admin_headers
     r = await client.post(f"/api/projects/{pid}/activate", headers=admin_headers)
     assert r.status_code == 200
 
-    (ev,) = await _recebidos(eventos)  # criar o projeto não emite; só a ativação
+    (ev,) = await eventos()  # criar o projeto não emite; só a ativação
     assert ev["severity"] == "info"
     assert ev["origin"] == f"user:{uid}"
     assert ev["payload"] == {"kind": "project_activated", "project_id": pid, "name": "Forno"}
@@ -78,7 +54,7 @@ async def test_ciclo_de_conexao_emite_created_updated_deleted(client, admin_head
     exclusao = await client.delete(f"/api/connections/{cid}", headers=admin_headers)
     assert exclusao.status_code == 204
 
-    criado, atualizado, excluido = await _recebidos(eventos)
+    criado, atualizado, excluido = await eventos()
     assert [e["severity"] for e in (criado, atualizado, excluido)] == ["info"] * 3
     assert [e["origin"] for e in (criado, atualizado, excluido)] == [f"user:{uid}"] * 3
     assert criado["payload"] == {
@@ -106,7 +82,7 @@ async def test_ciclo_de_tag_emite_created_updated_deleted(client, admin_headers,
     uid = await _admin_id(client, admin_headers)
     pid = await _projeto(client, admin_headers, "ProjTag")
     cid = await _conexao(client, admin_headers, pid)
-    assert [e["payload"]["kind"] for e in await _recebidos(eventos)] == ["connection_created"]
+    assert [e["payload"]["kind"] for e in await eventos()] == ["connection_created"]
 
     criacao = await client.post(
         "/api/tags", json={"connection_id": cid, **TAG}, headers=admin_headers
@@ -117,7 +93,7 @@ async def test_ciclo_de_tag_emite_created_updated_deleted(client, admin_headers,
     assert r.status_code == 200
     assert (await client.delete(f"/api/tags/{tid}", headers=admin_headers)).status_code == 204
 
-    criado, atualizado, excluido = await _recebidos(eventos)
+    criado, atualizado, excluido = await eventos()
     assert [e["severity"] for e in (criado, atualizado, excluido)] == ["info"] * 3
     assert [e["origin"] for e in (criado, atualizado, excluido)] == [f"user:{uid}"] * 3
     assert criado["payload"] == {
@@ -170,7 +146,7 @@ async def test_sem_efeito_operacional_nao_emite(client, admin_headers, eventos):
     for rota in ("/api/projects", "/api/connections", "/api/tags", "/api/users", "/api/events"):
         assert (await client.get(rota, headers=admin_headers)).status_code == 200
 
-    assert await _recebidos(eventos) == []
+    assert await eventos() == []
 
 
 async def test_mutacao_que_falha_nao_emite(client, admin_headers, eventos):
@@ -184,7 +160,7 @@ async def test_mutacao_que_falha_nao_emite(client, admin_headers, eventos):
     inexistente = await client.patch("/api/tags/99999", json={"eu": "bar"}, headers=admin_headers)
     assert inexistente.status_code == 404
 
-    kinds = [e["payload"]["kind"] for e in await _recebidos(eventos)]
+    kinds = [e["payload"]["kind"] for e in await eventos()]
     assert kinds == ["connection_created"]  # só a mutação que chegou ao commit
 
 
@@ -232,7 +208,7 @@ async def test_rbac_intacto_nas_rotas_que_auditam(client, admin_headers, operato
     )
     assert [r.status_code for r in leituras] == [200] * 5
 
-    kinds = [e["payload"]["kind"] for e in await _recebidos(eventos)]
+    kinds = [e["payload"]["kind"] for e in await eventos()]
     assert kinds == ["connection_created", "tag_created"]  # nada do operador emitiu
 
 

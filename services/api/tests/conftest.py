@@ -1,11 +1,16 @@
-"""Fixtures da API: settings de teste, app com get_db/get_redis sobrescritos, cliente e usuários."""
+"""Fixtures da API: settings de teste, app com get_db/get_redis sobrescritos, cliente,
+usuários e assinante do canal `events`."""
+
+import json
 
 import pytest
 from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
+from redis.asyncio import Redis
 
 from ottima_api.app import create_app
 from ottima_api.deps import get_db, get_redis
+from ottima_core.bus import CHANNEL_EVENTS
 from ottima_core.config import Settings
 from ottima_core.models import User
 from ottima_core.security import hash_password
@@ -88,3 +93,28 @@ async def operator_headers(client, make_user):
         "/api/auth/login", json={"username": "oper-fx", "password": "oper-123456"}
     )
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+@pytest.fixture
+async def eventos(redis_url):
+    """Assinante do canal `events` num segundo cliente, como faz o worker (ADR-020).
+
+    Entrega um callable que drena, na ordem de chegada, o que foi publicado desde a chamada
+    anterior; o timeout cobre o trânsito pelo Redis real.
+    """
+    sub = Redis.from_url(redis_url, decode_responses=True)
+    pubsub = sub.pubsub()
+    await pubsub.subscribe(CHANNEL_EVENTS)
+    await pubsub.get_message(timeout=5)  # confirmação do SUBSCRIBE: só então o servidor entrega
+
+    async def recebidos() -> list[dict]:
+        msgs = []
+        while (
+            m := await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5)
+        ) is not None:
+            msgs.append(json.loads(m["data"]))
+        return msgs
+
+    yield recebidos
+    await pubsub.aclose()
+    await sub.aclose()

@@ -1,14 +1,11 @@
 """API de certificados (RF-202, ADR-021): app cert de instância e trust por conexão."""
 
 import hashlib
-import json
 
 import pytest
 from cryptography import x509
-from redis.asyncio import Redis
 from sqlalchemy import event, select
 
-from ottima_core.bus import CHANNEL_EVENTS
 from ottima_core.certs import APPLICATION_URI, app_cert_paths, generate_app_certificate
 from ottima_core.certs import trusted_cert_path as caminho_confiado
 from ottima_core.models import OpcConnection
@@ -23,18 +20,6 @@ LIMITE = 64 * 1024
 def certs_dir(test_settings):
     """Mesmo diretório temporário que o app enxerga (conftest aponta certs_dir p/ tmp_path)."""
     return test_settings.certs_dir
-
-
-@pytest.fixture
-async def eventos(redis_url):
-    """Assinante do canal `events` num segundo cliente, como faz o worker (padrão da 4.2)."""
-    sub = Redis.from_url(redis_url, decode_responses=True)
-    pubsub = sub.pubsub()
-    await pubsub.subscribe(CHANNEL_EVENTS)
-    await pubsub.get_message(timeout=5)  # confirmação do SUBSCRIBE
-    yield pubsub
-    await pubsub.aclose()
-    await sub.aclose()
 
 
 @pytest.fixture
@@ -54,13 +39,6 @@ async def updates_na_conexao(db_session):
     event.listen(sync_conn, "before_cursor_execute", _spy)
     yield vistos
     event.remove(sync_conn, "before_cursor_execute", _spy)
-
-
-async def _recebidos(pubsub) -> list[dict]:
-    msgs = []
-    while (m := await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5)) is not None:
-        msgs.append(json.loads(m["data"]))
-    return msgs
 
 
 async def _admin_id(client, headers) -> int:
@@ -348,13 +326,13 @@ async def test_upload_emite_connection_updated(client, admin_headers, eventos, c
     uid = await _admin_id(client, admin_headers)
     cid = await _conexao(client, admin_headers, "plc-evento")
     pid = await _projeto_da(client, admin_headers, cid)
-    await _recebidos(eventos)  # descarta o connection_created do setup
+    await eventos()  # descarta o connection_created do setup
 
     r = await client.post(
         f"/api/connections/{cid}/server-certificate", content=der, headers=_bruto(admin_headers)
     )
     assert r.status_code == 200
-    (evento,) = await _recebidos(eventos)
+    (evento,) = await eventos()
     assert evento["severity"] == "info"
     assert evento["origin"] == f"user:{uid}"
     assert evento["payload"] == {
@@ -375,11 +353,11 @@ async def test_delete_emite_connection_updated_so_quando_muda_estado(
     await client.post(
         f"/api/connections/{cid}/server-certificate", content=der, headers=_bruto(admin_headers)
     )
-    await _recebidos(eventos)  # descarta created + updated do setup
+    await eventos()  # descarta created + updated do setup
 
     r = await client.delete(f"/api/connections/{cid}/server-certificate", headers=admin_headers)
     assert r.status_code == 204
-    (evento,) = await _recebidos(eventos)
+    (evento,) = await eventos()
     assert evento["severity"] == "info"
     assert evento["origin"] == f"user:{uid}"
     assert evento["payload"] == {
@@ -392,19 +370,19 @@ async def test_delete_emite_connection_updated_so_quando_muda_estado(
     # Segundo DELETE não muda nem arquivo nem coluna: 204, mas no-op não é evento
     r = await client.delete(f"/api/connections/{cid}/server-certificate", headers=admin_headers)
     assert r.status_code == 204
-    assert await _recebidos(eventos) == []
+    assert await eventos() == []
 
 
 async def test_upload_que_falha_nao_emite(client, admin_headers, eventos):
     cid = await _conexao(client, admin_headers, "plc-falha-ev")
-    await _recebidos(eventos)
+    await eventos()
     r = await client.post(
         f"/api/connections/{cid}/server-certificate",
         content=b"isto nao e um certificado",
         headers=_bruto(admin_headers),
     )
     assert r.status_code == 422
-    assert await _recebidos(eventos) == []
+    assert await eventos() == []
 
 
 async def test_substituir_certificado_emite_update_de_updated_at(
