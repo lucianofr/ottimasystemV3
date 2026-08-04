@@ -1,12 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 
-import {
-  api,
-  type ConnectionOut,
-  type TagCreate,
-  type TagOut,
-  type TagUpdate,
-} from "../../lib/api";
+import { api, type TagCreate, type TagOut, type TagUpdate } from "../../lib/api";
 
 const CHAVE = ["tags"] as const;
 
@@ -42,19 +36,12 @@ function querystring(filtros: FiltrosTags): string {
   return qs ? `?${qs}` : "";
 }
 
+/** Filtros de conexão/direção são server-side. O escopo por projeto ativo é aplicado na página:
+ *  `GET /api/tags` não aceita `project_id` (API da F1 congelada). */
 export function useTags(filtros: FiltrosTags): UseQueryResult<TagOut[]> {
   return useQuery({
     queryKey: [...CHAVE, filtros.connectionId, filtros.direction],
     queryFn: () => api<TagOut[]>(`/api/tags${querystring(filtros)}`),
-  });
-}
-
-/** Tags não são escopadas por projeto na API; a lista completa de conexões resolve o nome de
- *  qualquer `connection_id` que apareça na tabela. */
-export function useAllConnections(): UseQueryResult<ConnectionOut[]> {
-  return useQuery({
-    queryKey: ["connections", null],
-    queryFn: () => api<ConnectionOut[]>("/api/connections"),
   });
 }
 

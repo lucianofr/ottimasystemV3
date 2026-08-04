@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Card } from "../../components/ui/card";
 import { Select } from "../../components/ui/select";
 import { cn } from "../../lib/cn";
+import { useActiveProject, useConnections } from "../connections/useConnections";
 import { TrendChart } from "./TrendChart";
 import { FORMATO_VALOR, LIMITE_PENAS } from "./trendTheme";
 import { montarMatriz, resumirSeries, useHistory, useTags } from "./useHistory";
@@ -36,6 +37,8 @@ export function TrendPage() {
   const [aviso, setAviso] = useState<string | null>(null);
 
   const janela = JANELAS.find((item) => item.id === janelaId) ?? JANELAS[0];
+  const projeto = useActiveProject();
+  const conexoes = useConnections(projeto.data?.id ?? null);
   const tags = useTags();
   const historico = useHistory(selecionadas, janela.segundos);
 
@@ -47,8 +50,24 @@ export function TrendPage() {
   );
   const resumos = historico.data ? resumirSeries(historico.data, selecionadas) : [];
 
-  const porId = new Map((tags.data ?? []).map((tag) => [tag.id, tag]));
+  // Escopo por projeto ativo: o worker só reconcilia o projeto ativo (ADR-017), então uma pena
+  // de tag fora dele desenharia vazia para sempre. `GET /api/tags` não aceita `project_id`.
+  const idsConexao = new Set((conexoes.data ?? []).map((conexao) => conexao.id));
+  const listaTags = (tags.data ?? []).filter((tag) => idsConexao.has(tag.connection_id));
+
+  const porId = new Map(listaTags.map((tag) => [tag.id, tag]));
   const rotulos = selecionadas.map((id) => porId.get(id)?.name ?? String(id));
+
+  if (projeto.data === null && projeto.isSuccess) {
+    return (
+      <section className="space-y-4">
+        <h1 className="plaqueta text-sm">Trend</h1>
+        <p data-testid="trend-no-project" className="text-sm text-fg-muted">
+          Nenhum projeto ativo: ative um projeto para exibir tendências.
+        </p>
+      </section>
+    );
+  }
 
   function alternar(tagId: number): void {
     if (selecionadas.includes(tagId)) {
@@ -100,17 +119,19 @@ export function TrendPage() {
           <p className="plaqueta text-xs text-fg-muted">
             Tags ({String(selecionadas.length)}/{String(LIMITE_PENAS)})
           </p>
-          {tags.isPending && <p className="mt-2 text-sm text-fg-muted">Carregando…</p>}
+          {(tags.isPending || conexoes.isPending) && (
+            <p className="mt-2 text-sm text-fg-muted">Carregando…</p>
+          )}
           {tags.isError && (
             <p role="alert" className="mt-2 text-sm text-alarm">
               Falha ao consultar tags
             </p>
           )}
-          {tags.isSuccess && tags.data.length === 0 && (
+          {tags.isSuccess && conexoes.isSuccess && listaTags.length === 0 && (
             <p className="mt-2 text-sm text-fg-muted">Nenhuma tag cadastrada</p>
           )}
           <div data-testid="trend-tag-selector" className="mt-2 max-h-96 overflow-y-auto">
-            {(tags.data ?? []).map((tag) => (
+            {listaTags.map((tag) => (
               <label
                 key={tag.id}
                 data-testid="trend-tag-option"

@@ -5,11 +5,11 @@ import { Card } from "../../components/ui/card";
 import { Label } from "../../components/ui/label";
 import { Select } from "../../components/ui/select";
 import { ApiError, type TagOut } from "../../lib/api";
+import { useActiveProject, useConnections } from "../connections/useConnections";
 import { TagForm } from "./TagForm";
 import {
   ROTULO_DIRECAO,
   ROTULO_TIPO,
-  useAllConnections,
   useDeleteTag,
   useTags,
   type Direcao,
@@ -28,7 +28,8 @@ const COLUNAS = [
 
 export function TagsPage() {
   const [filtros, setFiltros] = useState<FiltrosTags>({ connectionId: null, direction: null });
-  const conexoes = useAllConnections();
+  const projeto = useActiveProject();
+  const conexoes = useConnections(projeto.data?.id ?? null);
   const tags = useTags(filtros);
   const excluir = useDeleteTag();
   const [formAberto, setFormAberto] = useState(false);
@@ -38,8 +39,20 @@ export function TagsPage() {
 
   const listaConexoes = conexoes.data ?? [];
   const nomePorConexao = new Map(listaConexoes.map((conexao) => [conexao.id, conexao.name]));
-  const linhas = tags.data ?? [];
+  // Escopo por projeto ativo em memória: `GET /api/tags` não aceita `project_id` (API da F1).
+  const linhas = (tags.data ?? []).filter((tag) => nomePorConexao.has(tag.connection_id));
   const filtrando = filtros.connectionId !== null || filtros.direction !== null;
+
+  if (projeto.data === null && projeto.isSuccess) {
+    return (
+      <section className="space-y-4">
+        <h1 className="plaqueta text-sm">Tags</h1>
+        <p data-testid="tag-no-project" className="text-sm text-fg-muted">
+          Nenhum projeto ativo: ative um projeto para gerenciar tags.
+        </p>
+      </section>
+    );
+  }
 
   function abrirCriacao(): void {
     setEmEdicao(null);

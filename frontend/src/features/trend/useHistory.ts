@@ -8,7 +8,8 @@ const QUALIDADE_BAD = 2;
 
 const INTERVALO_POLLING_MS = 5000;
 
-/** Tags de todas as conexões, ordenadas por conexão e nome (brief 6.4: não filtrar direção). */
+/** Tags ordenadas por conexão e nome (brief 6.4: não filtrar direção). `GET /api/tags` não aceita
+ *  `project_id`: o escopo por projeto ativo é aplicado na página. */
 export function useTags(): UseQueryResult<TagOut[]> {
   return useQuery({
     queryKey: ["tags"],
