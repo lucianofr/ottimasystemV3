@@ -8,6 +8,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID
 
+from ottima_core import certs
 from ottima_core.certs import (
     APP_CERT_COMMON_NAME,
     APP_CERT_KEY_SIZE,
@@ -190,3 +191,66 @@ def test_settings_certs_dir_default_e_override(monkeypatch):
     assert Settings(_env_file=None).certs_dir == Path("/certs")
     monkeypatch.setenv("OTTIMA_CERTS_DIR", "/tmp/ottima-certs")
     assert Settings(_env_file=None).certs_dir == Path("/tmp/ottima-certs")
+
+
+def _falha_na_gravacao(_path, _data, _mode):
+    raise OSError("disco cheio")
+
+
+def test_falha_na_gravacao_preserva_o_certificado_anterior(tmp_path, monkeypatch):
+    antes = generate_app_certificate(tmp_path)
+    paths = app_cert_paths(tmp_path)
+    conteudo_antes = {p: p.read_bytes() for p in (paths.pem, paths.key, paths.der)}
+    original = certs._write_file
+    chamadas = {"n": 0}
+
+    def falha_na_terceira(path, data, mode):
+        chamadas["n"] += 1
+        if chamadas["n"] == 3:
+            raise OSError("disco cheio")
+        original(path, data, mode)
+
+    monkeypatch.setattr(certs, "_write_file", falha_na_terceira)
+    with pytest.raises(OSError):
+        generate_app_certificate(tmp_path, force=True)
+
+    assert {p: p.read_bytes() for p in conteudo_antes} == conteudo_antes
+    assert read_app_certificate(tmp_path).fingerprint_sha256 == antes.fingerprint_sha256
+    # Nenhum temporário sobrou no diretório.
+    assert sorted(p.name for p in (tmp_path / "app").iterdir()) == [
+        "ottima.der",
+        "ottima.key",
+        "ottima.pem",
+    ]
+
+
+def test_falha_na_gravacao_nao_deixa_arquivo_meio_gravado(tmp_path, monkeypatch):
+    monkeypatch.setattr(certs, "_write_file", _falha_na_gravacao)
+    with pytest.raises(OSError):
+        generate_app_certificate(tmp_path)
+    assert list((tmp_path / "app").iterdir()) == []
+    assert read_app_certificate(tmp_path).exists is False
+
+
+@pytest.mark.parametrize("conn_id", ["../../etc/x", -1, 1.0, True])
+def test_conn_id_invalido_e_rejeitado_sem_escrever_nada(tmp_path, conn_id):
+    with pytest.raises(ValueError, match="Identificador de conexão inválido"):
+        trusted_cert_path(tmp_path, conn_id)
+    with pytest.raises(ValueError, match="Identificador de conexão inválido"):
+        store_server_certificate(tmp_path, conn_id, b"qualquer coisa")
+    with pytest.raises(ValueError, match="Identificador de conexão inválido"):
+        remove_server_certificate(tmp_path, conn_id)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_store_server_certificate_rejeita_pem_com_varios_certificados(tmp_path):
+    origem = tmp_path / "origem"
+    generate_app_certificate(origem)
+    pem_bytes = app_cert_paths(origem).pem.read_bytes()
+    generate_app_certificate(origem, force=True)
+    outro_pem = app_cert_paths(origem).pem.read_bytes()
+
+    destino = tmp_path / "certs"
+    with pytest.raises(ValueError, match="um único certificado"):
+        store_server_certificate(destino, 5, pem_bytes + outro_pem)
+    assert not trusted_cert_path(destino, 5).exists()

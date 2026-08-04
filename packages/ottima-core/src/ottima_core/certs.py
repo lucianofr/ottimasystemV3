@@ -77,7 +77,13 @@ def app_cert_paths(certs_dir: Path) -> AppCertPaths:
 
 
 def trusted_cert_path(certs_dir: Path, conn_id: int) -> Path:
-    """Caminho do certificado confiado de um servidor OPC-UA."""
+    """Caminho do certificado confiado de um servidor OPC-UA.
+
+    Valida `conn_id` em runtime: ele vem de um path param HTTP na tarefa 4.4, e um valor
+    fora do contrato de tipos viraria um nome de arquivo arbitrário fora de `trusted/`.
+    """
+    if isinstance(conn_id, bool) or not isinstance(conn_id, int) or conn_id < 0:
+        raise ValueError(f"Identificador de conexão inválido: {conn_id!r} (esperado inteiro >= 0).")
     return certs_dir / TRUSTED_DIR_NAME / f"conn-{conn_id}.der"
 
 
@@ -158,16 +164,20 @@ def generate_app_certificate(certs_dir: Path, *, force: bool = False) -> AppCert
         .sign(key, hashes.SHA256())
     )
 
-    _write_file(paths.pem, cert.public_bytes(serialization.Encoding.PEM), _CERT_MODE)
-    _write_file(paths.der, cert.public_bytes(serialization.Encoding.DER), _CERT_MODE)
-    _write_file(
-        paths.key,
-        key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
-        ),
-        _KEY_MODE,
+    _write_all_atomically(
+        [
+            (paths.pem, cert.public_bytes(serialization.Encoding.PEM), _CERT_MODE),
+            (paths.der, cert.public_bytes(serialization.Encoding.DER), _CERT_MODE),
+            (
+                paths.key,
+                key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption(),
+                ),
+                _KEY_MODE,
+            ),
+        ]
     )
     return _info_from_certificate(cert)
 
@@ -175,12 +185,16 @@ def generate_app_certificate(certs_dir: Path, *, force: bool = False) -> AppCert
 def store_server_certificate(certs_dir: Path, conn_id: int, data: bytes) -> str:
     """Confia no certificado de um servidor OPC-UA, normalizando PEM ou DER para DER.
 
+    Aceita exatamente um certificado: o pinning de ADR-021 é de "seu certificado",
+    singular, e escolher silenciosamente um de vários seria ambíguo demais para um
+    arquivo de confiança.
+
     Devolve o nome do arquivo gravado (`conn-<id>.der`), que é o valor da coluna
-    `server_cert_file`. Levanta ValueError se `data` não for um certificado.
+    `server_cert_file`. Levanta ValueError se `data` não for um único certificado.
     """
+    path = trusted_cert_path(certs_dir, conn_id)  # valida conn_id antes de qualquer I/O
     cert = _load_certificate(data)
     _ensure_dir(certs_dir / TRUSTED_DIR_NAME)
-    path = trusted_cert_path(certs_dir, conn_id)
     _write_file(path, cert.public_bytes(serialization.Encoding.DER), _CERT_MODE)
     return path.name
 
@@ -195,12 +209,21 @@ def remove_server_certificate(certs_dir: Path, conn_id: int) -> bool:
 
 
 def _load_certificate(data: bytes) -> x509.Certificate:
-    for loader in (x509.load_der_x509_certificate, x509.load_pem_x509_certificate):
-        try:
-            return loader(data)
-        except Exception:
-            continue
-    raise ValueError("Conteúdo enviado não é um certificado X.509 válido em formato PEM ou DER.")
+    try:
+        return x509.load_der_x509_certificate(data)
+    except Exception:
+        pass
+    try:
+        certificates = x509.load_pem_x509_certificates(data)
+    except Exception as exc:
+        raise ValueError(
+            "Conteúdo enviado não é um certificado X.509 válido em formato PEM ou DER."
+        ) from exc
+    if len(certificates) != 1:
+        raise ValueError(
+            f"Conteúdo enviado tem {len(certificates)} certificados; informe um único certificado."
+        )
+    return certificates[0]
 
 
 def _info_from_certificate(cert: x509.Certificate) -> AppCertificateInfo:
@@ -235,3 +258,25 @@ def _write_file(path: Path, data: bytes, mode: int) -> None:
     with os.fdopen(fd, "wb") as handle:
         handle.write(data)
     path.chmod(mode)
+
+
+def _write_all_atomically(entries: list[tuple[Path, bytes, int]]) -> None:
+    """Grava um conjunto de arquivos em tudo-ou-nada.
+
+    Certificado e chave só valem em par: uma falha no meio da gravação deixaria o volume
+    com um par incompatível, e o worker falharia o handshake OPC-UA com um erro que não
+    aponta para a causa. Grava tudo em temporários no mesmo diretório e só promove com
+    os.replace depois que todos estiverem no disco.
+    """
+    promoted: list[tuple[Path, Path]] = []
+    try:
+        for path, data, mode in entries:
+            tmp = path.with_name(f".{path.name}.tmp")
+            _write_file(tmp, data, mode)
+            promoted.append((tmp, path))
+        for tmp, path in promoted:
+            os.replace(tmp, path)
+    except BaseException:
+        for tmp, _ in promoted:
+            tmp.unlink(missing_ok=True)
+        raise
