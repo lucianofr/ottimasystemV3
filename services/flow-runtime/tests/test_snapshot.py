@@ -44,6 +44,11 @@ async def publish(
     return await redis_client.publish(channel_opc_values(conn_id), payload.model_dump_json())
 
 
+async def pubsub_client_ids(redis_client: Redis) -> set[str]:
+    """Ids das conexões em modo pubsub do servidor — permite matar só a do espelho."""
+    return {client["id"] for client in await redis_client.client_list(_type="pubsub")}
+
+
 @pytest.fixture
 async def snapshot(redis_client: Redis):
     snap = ValueSnapshot(redis_client)
@@ -127,20 +132,34 @@ async def test_start_duas_vezes_nao_cria_dois_assinantes(redis_client, snapshot)
     assert snapshot.get(7).value == 5.0
 
 
-async def test_queda_do_assinante_e_reassinada(redis_client, snapshot):
-    """Exceção no laço vira reassinatura com espera, não perda permanente do espelho."""
-    assert await redis_client.execute_command("CLIENT", "KILL", "TYPE", "pubsub") >= 1
+async def test_queda_do_assinante_e_reassinada(redis_client):
+    """Exceção no laço vira reassinatura com espera, não perda permanente do espelho.
 
-    # Republica até o espelho absorver: a reassinatura é provada pelo efeito, sem sleep
-    # calibrado no atraso do laço (o que foi publicado durante a queda se perde).
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + AWAIT_TIMEOUT_S
-    while loop.time() < deadline:
-        await publish(redis_client, conn_id=1, tag_id=7, value=7.0)
-        if snapshot.get(7) is not None:
-            break
-        await asyncio.sleep(0.1)
-    else:
-        raise AssertionError("espelho não voltou a absorver depois da queda da conexão")
+    Espelho instanciado aqui, e não pela fixture: identificar a conexão dele exige comparar
+    os assinantes do servidor antes e depois do `start()`.
+    """
+    others = await pubsub_client_ids(redis_client)
+    snap = ValueSnapshot(redis_client)
+    await snap.start()
+    try:
+        own = await pubsub_client_ids(redis_client) - others
+        assert len(own) == 1  # o espelho abre uma conexão de assinatura, e só uma
+        # Mata só a conexão do espelho: `KILL TYPE pubsub` derrubaria assinantes de outros
+        # arquivos de teste, que compartilham o container de escopo de sessão.
+        assert await redis_client.execute_command("CLIENT", "KILL", "ID", own.pop()) == 1
 
-    assert snapshot.get(7).value == 7.0
+        # Republica até o espelho absorver: a reassinatura é provada pelo efeito, sem sleep
+        # calibrado no atraso do laço (o que foi publicado durante a queda se perde).
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + AWAIT_TIMEOUT_S
+        while loop.time() < deadline:
+            await publish(redis_client, conn_id=1, tag_id=7, value=7.0)
+            if snap.get(7) is not None:
+                break
+            await asyncio.sleep(0.1)
+        else:
+            raise AssertionError("espelho não voltou a absorver depois da queda da conexão")
+
+        assert snap.get(7).value == 7.0
+    finally:
+        await snap.stop()
