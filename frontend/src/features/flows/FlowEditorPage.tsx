@@ -415,7 +415,7 @@ function Editor({ flowId }: { flowId: number }) {
 
         {(recusa !== null || erroSave !== null || inversoes.length > 0 || avisosServidor !== null) && (
           <Card className="px-3 py-2">
-            <ul className="space-y-1 text-xs" data-testid="editor-mensagens">
+            <ul className="space-y-1 text-xs" role="alert" data-testid="editor-mensagens">
               {erroSave !== null && <Aviso texto={erroSave} tom="alarm" />}
               {recusa !== null && <Aviso texto={recusa} tom="alarm" />}
               {/* Listas recriadas inteiras a cada render: índice é chave estável o bastante,

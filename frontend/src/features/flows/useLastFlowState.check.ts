@@ -111,8 +111,8 @@ test("flow_failed vira estado de falha com motivo em pt-BR; motivo ausente não 
   expect(mapa.get(3)?.rotulo).toBe("Parado: projeto ativado");
 });
 
-/** Vocabulário fechado de `reason` de parada: `supervisor.py` só emite estes quatro
- *  (`user`, `project_activated`, `comm_failure`, `flow_deleted`). Nenhum pode cair em
+/** Vocabulário fechado de `reason` de parada: `supervisor.py` só emite estes cinco
+ *  (`user`, `project_activated`, `comm_failure`, `flow_deleted`, `shutdown`). Nenhum pode cair em
  *  "motivo desconhecido" — esse texto é para o que ainda não existe. */
 test("flow_deleted é o motivo do watermark e tem tradução própria", () => {
   const mapa = derivarUltimoEstado(
@@ -125,6 +125,18 @@ test("flow_deleted é o motivo do watermark e tem tradução própria", () => {
   expect(mapa.get(1)?.rotulo).toBe("Parado: flow excluído");
   expect(mapa.get(1)?.estado).toBe("parado");
   expect(mapa.get(2)?.rotulo).toBe("Parado: comandado pelo usuário");
+});
+
+/** `shutdown` é o motivo do desmonte do serviço: o flow-runtime publica `flow_stopped` com
+ *  essa `reason` para todo flow que estava rodando ao desligar. Não pode cair em
+ *  "motivo desconhecido" — o operador precisa distinguir desligamento do runtime de parada
+ *  comandada. */
+test("shutdown é o motivo do desmonte do runtime e tem tradução própria", () => {
+  const mapa = derivarUltimoEstado(desc([evento(0, "flow:1", "flow_stopped", "shutdown")]));
+
+  expect(mapa.get(1)?.rotulo).toBe("Parado: parado no desligamento do runtime");
+  expect(mapa.get(1)?.estado).toBe("parado");
+  expect(mapa.get(1)?.falha).toBe(false);
 });
 
 test("pendente é exatamente a divergência entre desejado e publicado", () => {

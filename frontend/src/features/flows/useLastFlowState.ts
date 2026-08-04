@@ -32,6 +32,7 @@ const MOTIVOS: Record<string, string> = {
   project_activated: "projeto ativado",
   comm_failure: "falha de comunicação",
   flow_deleted: "flow excluído",
+  shutdown: "parado no desligamento do runtime",
 };
 
 export type EstadoPublicado = "rodando" | "parado" | "falha";
