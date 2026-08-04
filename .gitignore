@@ -5,7 +5,10 @@ __pycache__/
 .ruff_cache/
 uv.lock.orig
 deploy/.env
-deploy/e2e-certs/
+# O diretorio precisa existir no checkout: e bind mount do opcsim (docker-compose.e2e.yml),
+# e o Docker cria como root o que falta, quebrando o container que roda como UID 1000.
+deploy/e2e-certs/*
+!deploy/e2e-certs/.gitkeep
 frontend/node_modules/
 frontend/dist/
 frontend/playwright-report/
