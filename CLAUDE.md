@@ -98,6 +98,9 @@ cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -
 
 # Gate E2E — 3 camadas (docs/specs/F1-testes-e2e.md; F2 §11.2; F3 §7.2):
 OTTIMA_E2E=1 bash deploy/smoke.sh                   # L1 — stack, retenção, login, conexão up, boot parado
+# O check de boot parado exige flow-runtime recem-subido: ele assere flows={}, e um deploy/stop
+# deixa o flow no mapa como stopped. Re-rodar o L1 depois da L2 da vermelho falso; nesse caso
+# `docker compose ... restart flow-runtime` antes.
 uv run pytest -m e2e tests/e2e -v                   # L2 — 24 cenários (5 F1 + 9 F2 + 10 F3)
 cd frontend && npm run e2e                          # regressão Playwright da F1 (specs novas não)
 # A L2 e o Playwright NÃO podem rodar juntos: o E2E-16 publica project_activated duas vezes e
