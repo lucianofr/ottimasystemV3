@@ -18,6 +18,7 @@ from ottima_core.bus import (
     KIND_COMM_FAILURE,
     KIND_PROJECT_ACTIVATED,
     KIND_TAG_CREATED,
+    EventMessage,
     OpcValue,
     channel_opc_values,
     publish_event,
@@ -303,3 +304,68 @@ async def test_flush_com_buffer_vazio_nao_abre_sessao(instrumented, make_pipelin
     pipeline.ingest_sample(sample(12).model_dump_json())
     await pipeline.flush()
     assert (opens, writes) == (["session"], ["samples"])
+
+
+class _StubPubSub:
+    """PubSub que entrega dado ANTES da última confirmação.
+
+    Contra Redis real essa ordem é uma corrida entre conexões; com o stub ela é exata, que é
+    o ponto do teste: provar que a janela entre as duas inscrições não perde mensagem.
+    """
+
+    def __init__(self, messages: list[dict[str, Any]]) -> None:
+        self._messages = list(messages)
+
+    async def get_message(self, **_kwargs: Any) -> dict[str, Any] | None:
+        """Assinatura por kwargs: o pipeline chama com `timeout=` nomeado."""
+        return self._messages.pop(0) if self._messages else None
+
+
+async def test_dado_na_janela_das_confirmacoes_nao_e_descartado(redis_client, session_factory):
+    pipeline = RecorderPipeline(redis_client, session_factory)
+    valor = sample(31, value=7.5)
+    evento = EventMessage(
+        ts=BASE_TS,
+        severity="info",
+        origin="api",
+        message="Tag criada",
+        payload={"kind": KIND_TAG_CREATED},
+    )
+    stub = _StubPubSub(
+        [
+            {"type": "psubscribe", "data": 1},
+            {"type": "pmessage", "data": valor.model_dump_json()},
+            {"type": "message", "data": evento.model_dump_json()},
+            {"type": "subscribe", "data": 2},
+        ]
+    )
+
+    await pipeline._await_confirmations(stub)
+
+    assert (pipeline.buffered_samples, pipeline.buffered_events) == (1, 1)
+
+
+async def test_falha_ao_assinar_nao_vaza_inscricao_nem_conexao(
+    redis_client, session_factory, monkeypatch
+):
+    """`start()` que falha na confirmação não pode deixar inscrição pendurada no servidor."""
+
+    async def explode(self, pubsub) -> None:
+        raise TimeoutError("confirmação de inscrição não chegou")
+
+    monkeypatch.setattr(RecorderPipeline, "_await_confirmations", explode)
+    pipeline = RecorderPipeline(redis_client, session_factory)
+    numpat_antes = await redis_client.pubsub_numpat()
+    canais_antes = await redis_client.pubsub_channels()
+
+    with pytest.raises(TimeoutError):
+        await pipeline.start()
+
+    async def liberou() -> bool:
+        return (
+            await redis_client.pubsub_numpat() == numpat_antes
+            and await redis_client.pubsub_channels() == canais_antes
+        )
+
+    await await_until(liberou)
+    await pipeline.stop()  # sem task nem pubsub pendentes, o desmonte é no-op

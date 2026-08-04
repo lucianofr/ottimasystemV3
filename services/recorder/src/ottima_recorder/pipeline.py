@@ -230,6 +230,17 @@ class RecorderPipeline:
         if len(self._events) >= EVENTS_FLUSH_ROWS:
             self._flush_now.set()
 
+    def _dispatch(self, message: dict[str, Any]) -> None:
+        """O tipo decide o buffer: `pmessage` vem do padrão, `message` do canal `events`.
+
+        Compartilhado com `_await_confirmations`: os dois caminhos de leitura não podem
+        divergir sobre o que é dado e o que é confirmação de inscrição.
+        """
+        if message["type"] == "pmessage":
+            self.ingest_sample(message["data"])
+        elif message["type"] == "message":
+            self.ingest_event(message["data"])
+
     async def _read_loop(self) -> None:
         """Uma task para as duas inscrições: o tipo da mensagem decide o buffer.
 
@@ -241,10 +252,7 @@ class RecorderPipeline:
                 if self._pubsub is None:
                     self._pubsub = await self._subscribe()
                 async for message in self._pubsub.listen():
-                    if message["type"] == "pmessage":
-                        self.ingest_sample(message["data"])
-                    elif message["type"] == "message":
-                        self.ingest_event(message["data"])
+                    self._dispatch(message)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -315,9 +323,17 @@ class RecorderPipeline:
 
     async def _subscribe(self) -> PubSub:
         pubsub = self._redis.pubsub()
-        await pubsub.psubscribe(VALUES_PATTERN)
-        await pubsub.subscribe(CHANNEL_EVENTS)
-        await self._await_confirmations(pubsub)
+        try:
+            await pubsub.psubscribe(VALUES_PATTERN)
+            await pubsub.subscribe(CHANNEL_EVENTS)
+            await self._await_confirmations(pubsub)
+        except BaseException:
+            # Falhou antes de virar `self._pubsub`, onde nem `stop()` o alcançaria: sem este
+            # fechamento, cada start() que falha vaza conexão e inscrição no servidor.
+            # Entregar ao fechamento padrão reaproveita o log de etapa e zera `_pubsub`.
+            self._pubsub = pubsub
+            await self._close_pubsub()
+            raise
         return pubsub
 
     async def _close_pubsub(self) -> None:
@@ -330,12 +346,17 @@ class RecorderPipeline:
         finally:
             self._pubsub = None
 
-    @staticmethod
-    async def _await_confirmations(pubsub: PubSub) -> None:
-        """Só volta com as duas inscrições confirmadas: publicação seguinte não se perde."""
+    async def _await_confirmations(self, pubsub: PubSub) -> None:
+        """Só volta com as duas inscrições confirmadas: publicação seguinte não se perde.
+
+        O padrão já entrega dado enquanto o `subscribe` é confirmado; essa janela vai para os
+        buffers como qualquer outra mensagem, em vez de virar amostra perdida no start.
+        """
         pending = {"psubscribe", "subscribe"}
         async with asyncio.timeout(SUBSCRIBE_TIMEOUT_S):
             while pending:
                 message = await pubsub.get_message(timeout=SUBSCRIBE_TIMEOUT_S)
-                if message is not None:
-                    pending.discard(message["type"])
+                if message is None:
+                    continue
+                pending.discard(message["type"])
+                self._dispatch(message)
