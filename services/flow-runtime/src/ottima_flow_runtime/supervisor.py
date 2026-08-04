@@ -141,7 +141,10 @@ class Supervisor:
         # Nunca dois comandos (ou comando e watermark) mexendo no mesmo mapa em paralelo.
         self._lock = asyncio.Lock()
         self._commands = ChannelListener(
-            redis_client, CHANNEL_FLOW_COMMANDS, self._on_command_payload
+            redis_client,
+            CHANNEL_FLOW_COMMANDS,
+            self._on_command_payload,
+            name=f"listener-{CHANNEL_FLOW_COMMANDS}",
         )
         self._poll_task: asyncio.Task[None] | None = None
 

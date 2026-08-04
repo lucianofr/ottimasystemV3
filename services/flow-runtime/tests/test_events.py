@@ -28,7 +28,7 @@ async def test_falha_ao_assinar_nao_vaza_inscricao_nem_conexao(
         raise TimeoutError("confirmação de inscrição não chegou")
 
     monkeypatch.setattr(ChannelListener, "_await_confirmation", explode)
-    listener = ChannelListener(redis_client, CHANNEL_EVENTS, _handler)
+    listener = ChannelListener(redis_client, CHANNEL_EVENTS, _handler, name="test-events-listener")
     canais_antes = await redis_client.pubsub_channels()
 
     with pytest.raises(TimeoutError):

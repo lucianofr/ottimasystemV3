@@ -14,12 +14,10 @@ frontend filtra por igualdade nesse campo (§6.1); o `user` do comando viaja no 
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
 from redis.asyncio import Redis
-from redis.asyncio.client import PubSub
 
 from ottima_core.bus import (
     CHANNEL_EVENTS,
@@ -32,136 +30,9 @@ from ottima_core.bus import (
     EventMessage,
     publish_event,
 )
+from ottima_core.pubsub import ChannelListener
 
 logger = logging.getLogger(__name__)
-
-# Espera antes de reassinar um canal depois de uma queda do Redis (padrão do opc-worker).
-RESUBSCRIBE_RETRY_S = 1.0
-
-# Teto do SUBSCRIBE: o Redis é local ao stack, não confirmar em 5 s é falha real.
-SUBSCRIBE_TIMEOUT_S = 5.0
-
-
-class ChannelListener:
-    """Assinante resiliente de um canal do barramento.
-
-    Mesma forma e mesmas garantias do `_listen_hints` do opc-worker: o SUBSCRIBE acontece no
-    `start()` (mensagem publicada logo depois não se perde), a escuta reassina depois de
-    qualquer queda — inclusive de um `listen()` que termina sem erro, porque o Redis pode
-    fechar a conexão calado —, `CancelledError` é re-levantado e `stop()` nunca levanta,
-    porque é caminho de desmonte.
-
-    O freio vale para todo recomeço, não só para o caminho de exceção: sem ele um `listen()`
-    que retorna na hora vira rajada de reassinatura queimando CPU.
-    """
-
-    def __init__(
-        self,
-        redis_client: Redis,
-        channel: str,
-        handler: Callable[[str], Awaitable[None]],
-        *,
-        retry_s: float = RESUBSCRIBE_RETRY_S,
-    ) -> None:
-        self._redis = redis_client
-        self._channel = channel
-        self._handler = handler
-        self._retry_s = retry_s
-        self._pubsub: PubSub | None = None
-        self._task: asyncio.Task[None] | None = None
-
-    async def start(self) -> None:
-        """Assina o canal e sobe a escuta. Idempotente."""
-        if self._task is not None and not self._task.done():
-            return
-        await self._subscribe()
-        self._task = asyncio.create_task(self._listen(), name=f"listener-{self._channel}")
-
-    async def stop(self) -> None:
-        """Cancela a escuta e fecha a inscrição. Idempotente e nunca levanta."""
-        task, self._task = self._task, None
-        if task is not None:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.exception("Falha ao encerrar a escuta do canal %s", self._channel)
-        await self._drop_pubsub()
-
-    async def _listen(self) -> None:
-        while True:
-            try:
-                pubsub = self._pubsub
-                if pubsub is None:
-                    pubsub = await self._subscribe()
-                async for message in pubsub.listen():
-                    if message["type"] == "message":
-                        await self._dispatch(message["data"])
-                logger.warning(
-                    "Escuta do canal %s terminou sem erro; reassinando em %.1fs",
-                    self._channel,
-                    self._retry_s,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.warning(
-                    "Assinante do canal %s caiu; reassinando em %.1fs",
-                    self._channel,
-                    self._retry_s,
-                    exc_info=True,
-                )
-            await self._drop_pubsub()
-            await asyncio.sleep(self._retry_s)
-
-    async def _dispatch(self, data: str) -> None:
-        """Falha de um payload não pode derrubar a escuta do canal inteiro."""
-        try:
-            await self._handler(data)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Falha ao tratar mensagem do canal %s", self._channel)
-
-    async def _subscribe(self) -> PubSub:
-        pubsub = self._redis.pubsub()
-        try:
-            await pubsub.subscribe(self._channel)
-            await self._await_confirmation(pubsub)
-        except BaseException:
-            # Falhou antes de virar `self._pubsub`, onde nem `stop()` o alcançaria: sem este
-            # fechamento, cada start() que falha vaza conexão e inscrição no servidor.
-            await _close(pubsub, self._channel)
-            raise
-        self._pubsub = pubsub
-        return pubsub
-
-    async def _await_confirmation(self, pubsub: PubSub) -> None:
-        """Só volta com o SUBSCRIBE confirmado: a publicação seguinte não se perde.
-
-        Mensagem que chega na janela da confirmação é despachada como qualquer outra, em vez
-        de virar evento perdido no start.
-        """
-        async with asyncio.timeout(SUBSCRIBE_TIMEOUT_S):
-            while True:
-                message = await pubsub.get_message(timeout=SUBSCRIBE_TIMEOUT_S)
-                if message is None:
-                    continue
-                if message["type"] == "subscribe":
-                    return
-                if message["type"] == "message":
-                    await self._dispatch(message["data"])
-
-    async def _drop_pubsub(self) -> None:
-        pubsub, self._pubsub = self._pubsub, None
-        if pubsub is None:
-            return
-        try:
-            await pubsub.aclose()
-        except Exception:
-            logger.warning("Falha ao fechar o assinante do canal %s", self._channel, exc_info=True)
 
 
 def build_event_listener(
@@ -192,7 +63,9 @@ def build_event_listener(
             if isinstance(project_id, int):
                 await on_project_activated(project_id)
 
-    return ChannelListener(redis_client, CHANNEL_EVENTS, handle)
+    return ChannelListener(
+        redis_client, CHANNEL_EVENTS, handle, name=f"listener-{CHANNEL_EVENTS}"
+    )
 
 
 def flow_origin(flow_id: int) -> str:
@@ -259,18 +132,9 @@ async def publish_rejected(
     )
 
 
-async def _close(pubsub: PubSub, channel: str) -> None:
-    """Fecha o assinante sem nunca levantar: é caminho de desmonte."""
-    try:
-        await pubsub.aclose()  # aclose desfaz a inscrição e devolve a conexão
-    except Exception:
-        logger.warning("Falha ao fechar o assinante do canal %s", channel, exc_info=True)
-
-
 __all__ = [
     "KIND_DEPLOY_REJECTED",
     "KIND_RELOAD_REJECTED",
-    "RESUBSCRIBE_RETRY_S",
     "ChannelListener",
     "build_event_listener",
     "flow_origin",
