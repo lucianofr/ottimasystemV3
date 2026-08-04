@@ -1,10 +1,13 @@
 """CRUD de conexões OPC-UA (RF-201, ADR-009/021): leitura para operador, escrita para admin."""
 
-from fastapi import APIRouter, Depends, HTTPException
+import hashlib
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from ottima_api.deps import get_app_settings, get_db, get_redis, require_admin, require_operator
 from ottima_core.bus import (
@@ -13,8 +16,14 @@ from ottima_core.bus import (
     KIND_CONNECTION_UPDATED,
     publish_event,
 )
+from ottima_core.certs import (
+    remove_server_certificate,
+    store_server_certificate,
+    trusted_cert_path,
+)
 from ottima_core.config import Settings
 from ottima_core.models import OpcConnection, Project, User
+from ottima_core.schemas.certificates import ServerCertificateOut
 from ottima_core.schemas.connections import ConnectionCreate, ConnectionOut, ConnectionUpdate
 from ottima_core.security import encrypt_secret
 
@@ -27,6 +36,11 @@ MAX_CONNECTIONS_PER_PROJECT = 5  # RF-201
 _MSG_POLICY_MODE = (
     "SecurityPolicy None exige modo None; Basic256Sha256 exige Sign ou SignAndEncrypt"
 )
+
+# Um certificado X.509 não chega perto disso; sem teto, qualquer corpo enviado viraria
+# gravação em disco.
+MAX_SERVER_CERT_BYTES = 64 * 1024
+_MSG_CERT_GRANDE = "Certificado enviado excede o limite de 64 KiB."
 
 
 def _to_out(conn: OpcConnection) -> ConnectionOut:
@@ -69,6 +83,24 @@ async def _publicar(
         kind=kind,
         payload={"conn_id": conn.id, "project_id": conn.project_id, "name": conn.name},
     )
+
+
+async def _ler_certificado(request: Request) -> bytes:
+    """Corpo bruto do upload, com teto de tamanho.
+
+    O Content-Length é só a primeira barreira, barata e antes de materializar qualquer coisa;
+    a checagem que vale é sobre os bytes efetivamente lidos, porque o header pode faltar
+    (transfer-encoding chunked) ou simplesmente mentir.
+    """
+    declarado = request.headers.get("content-length")
+    # isdecimal, não isdigit: "²".isdigit() é True mas int("²") levanta ValueError, o que
+    # transformaria um header malformado em 500 (mesmo buraco achado na 4.3 no /api/history).
+    if declarado is not None and declarado.isdecimal() and int(declarado) > MAX_SERVER_CERT_BYTES:
+        raise HTTPException(status_code=413, detail=_MSG_CERT_GRANDE)
+    data = await request.body()
+    if len(data) > MAX_SERVER_CERT_BYTES:
+        raise HTTPException(status_code=413, detail=_MSG_CERT_GRANDE)
+    return data
 
 
 @router.get("", response_model=list[ConnectionOut], dependencies=[Depends(require_operator)])
@@ -189,4 +221,80 @@ async def delete_connection(
         message=f"Conexão '{name}' excluída",
         kind=KIND_CONNECTION_DELETED,
         payload={"conn_id": connection_id, "project_id": project_id, "name": name},
+    )
+
+
+@router.post("/{connection_id}/server-certificate", response_model=ServerCertificateOut)
+async def set_server_certificate(
+    connection_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+    user: User = Depends(require_admin),
+    redis_client: Redis = Depends(get_redis),
+) -> ServerCertificateOut:
+    """Confia no certificado do servidor (ADR-021): corpo bruto DER ou PEM, gravado como DER.
+
+    O certificado vem no corpo da request (`application/octet-stream`,
+    `application/x-pem-file` ou `application/pkix-cert`), não em multipart: um upload de
+    campo único não justifica a dependência extra de parsing de formulário.
+
+    Emite `connection_updated` porque `server_cert_file` também é campo do PATCH: a mesma
+    mudança de estado não pode ser auditada por uma rota e silenciosa pela outra. O evento é
+    ainda a dica de reconciliação do worker (spec §2.2-1), e trocar o certificado confiado é
+    justamente o que derruba o canal seguro.
+    """
+    conn = await _carregar(db, connection_id)
+    data = await _ler_certificado(request)
+    # Síncrono e de poucos KB, como todo o ottima_core.certs (spec §5.3, decisão da tarefa 0.4).
+    try:
+        nome = store_server_certificate(settings.certs_dir, connection_id, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    conn.server_cert_file = nome
+    # O nome é sempre `conn-<id>.der`, então SUBSTITUIR o certificado não muda o valor da
+    # coluna: sem atributo sujo o ORM não emite UPDATE, o `onupdate` do TimestampMixin não
+    # dispara e o watermark de reconciliação do supervisor (spec §2.2-1) fica parado — a
+    # sessão OPC seguiria indefinidamente com o certificado antigo em memória. O bump é
+    # forçado de propósito; não remover.
+    flag_modified(conn, "server_cert_file")
+    await db.commit()
+    await _publicar(
+        redis_client,
+        user,
+        conn,
+        KIND_CONNECTION_UPDATED,
+        "com o certificado do servidor atualizado",
+    )
+    # Fingerprint do que foi de fato gravado (já normalizado para DER), não do que chegou.
+    der = trusted_cert_path(settings.certs_dir, connection_id).read_bytes()
+    return ServerCertificateOut(
+        conn_id=connection_id,
+        server_cert_file=nome,
+        fingerprint_sha256=hashlib.sha256(der).hexdigest(),
+    )
+
+
+@router.delete("/{connection_id}/server-certificate", status_code=204)
+async def clear_server_certificate(
+    connection_id: int,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+    user: User = Depends(require_admin),
+    redis_client: Redis = Depends(get_redis),
+) -> None:
+    """Deixa de confiar no certificado do servidor. Idempotente: 204 mesmo sem o arquivo.
+
+    Só emite quando houve mudança de estado — arquivo removido ou coluna limpa. Repetir o
+    DELETE numa conexão que já não confia em nada é no-op, e no-op não é evento.
+    """
+    conn = await _carregar(db, connection_id)
+    removeu_arquivo = remove_server_certificate(settings.certs_dir, connection_id)
+    limpou_coluna = conn.server_cert_file is not None
+    if not (removeu_arquivo or limpou_coluna):
+        return
+    conn.server_cert_file = None
+    await db.commit()
+    await _publicar(
+        redis_client, user, conn, KIND_CONNECTION_UPDATED, "sem o certificado do servidor"
     )

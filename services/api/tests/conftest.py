@@ -12,7 +12,7 @@ from ottima_core.security import hash_password
 
 
 @pytest.fixture
-def test_settings() -> Settings:
+def test_settings(tmp_path) -> Settings:
     """Settings isoladas do .env local, com segredos determinísticos de teste."""
     return Settings(
         _env_file=None,
@@ -22,6 +22,8 @@ def test_settings() -> Settings:
         admin_username="admin",
         admin_password="admin-123456",
         admin_name="Administrador",
+        # Nenhum teste pode escrever no volume real /certs (default de Settings)
+        certs_dir=tmp_path / "certs",
     )
 
 

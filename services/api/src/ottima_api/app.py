@@ -41,6 +41,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     from ottima_api.routers import (
         auth,
+        certificates,
         connections,
         events,
         health,
@@ -58,4 +59,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tags.router, prefix="/api/tags", tags=["tags"])
     app.include_router(events.router, prefix="/api/events", tags=["events"])
     app.include_router(history.router, prefix="/api/history", tags=["history"])
+    app.include_router(certificates.router, prefix="/api/certificates", tags=["certificates"])
     return app
