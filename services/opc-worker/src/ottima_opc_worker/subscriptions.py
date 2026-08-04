@@ -8,6 +8,7 @@ payload §7.1 (`OpcValue`) e a publicação tem um ponto único, porque as taref
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -80,15 +81,21 @@ async def publish_value(
 
     É função de módulo, não método, porque o heartbeat de valor (tarefa 1.3) e a rajada de
     quality=bad (tarefa 2.2) publicam com a sessão CAÍDA, quando não existe subscription.
-    `published_at` é o relógio de parede da publicação, distinto de `ts` (timestamp da
-    fonte): o heartbeat decide por ele para que servidor com relógio adiantado não o cale.
+    A publicação registra dois relógios: `published_at` (parede, para exibição e
+    diagnóstico) e `published_monotonic`, o único que mede decurso — o heartbeat decide
+    por ele, imune a servidor adiantado e a ajuste de NTP para trás.
     """
     ts = _as_utc(ts) if ts is not None else datetime.now(UTC)
     published_at = datetime.now(UTC)
+    published_monotonic = time.monotonic()
     payload = OpcValue(tag_id=tag_id, ts=ts, value=value, quality=quality)
     await redis_client.publish(channel_opc_values(conn_id), payload.model_dump_json())
     snapshot.last_values[tag_id] = TagSnapshot(
-        ts=ts, value=value, quality=quality, published_at=published_at
+        ts=ts,
+        value=value,
+        quality=quality,
+        published_at=published_at,
+        published_monotonic=published_monotonic,
     )
     snapshot.last_publish_ts = published_at
 

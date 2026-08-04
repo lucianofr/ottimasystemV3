@@ -11,6 +11,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 
 import pytest
 from redis.asyncio import Redis
@@ -18,6 +19,7 @@ from redis.asyncio import Redis
 from opcsim import NODE_SINE, NODE_STATIC, NODE_W_FLOAT, OpcSimServer, free_port
 from ottima_core.bus import channel_opc_values
 from ottima_opc_worker import heartbeat as heartbeat_module
+from ottima_opc_worker import subscriptions
 from ottima_opc_worker.connection import ConnectionRuntime
 from ottima_opc_worker.heartbeat import ValueHeartbeat
 from ottima_opc_worker.state import (
@@ -26,6 +28,7 @@ from ottima_opc_worker.state import (
     ConnectionState,
     TagConfig,
 )
+from ottima_opc_worker.subscriptions import QUALITY_BAD, QUALITY_GOOD
 
 CONN_ID = 9
 AWAIT_TIMEOUT_S = 20.0
@@ -43,8 +46,8 @@ IDLE_INTERVAL_S = 30.0
 TEST_BACKOFF_INITIAL_S = 0.05
 TEST_BACKOFF_MAX_S = 0.2
 
-QUALITY_GOOD = 0
-QUALITY_BAD = 2
+# Relógio de parede fixo no passado: prova que a decisão do heartbeat não depende dele.
+RELOGIO_PARA_TRAS = datetime(2020, 1, 1, tzinfo=UTC)
 
 TAG_STATIC = TagConfig(
     id=21, name="Nível fixo", node_id=NODE_STATIC, direction="r", data_type="float"
@@ -325,3 +328,32 @@ async def test_stop_e_idempotente_e_cessa_as_publicacoes(redis_client: Redis) ->
         await asyncio.sleep(QUIET_WINDOW_S)
 
         assert len(values) == antes
+
+
+async def test_republica_com_o_relogio_de_parede_andando_para_tras(
+    redis_client: Redis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ajuste de NTP para trás não pode calar a série: a decisão é monotônica.
+
+    O relógio de parede fica travado no passado; `time.monotonic()` segue real.
+    """
+
+    class _RelogioTravado:
+        """Substitui `datetime` em `publish_value`: só `now()` importa aqui."""
+
+        @staticmethod
+        def now(tz: object = None) -> datetime:
+            return RELOGIO_PARA_TRAS
+
+    monkeypatch.setattr(subscriptions, "datetime", _RelogioTravado)
+
+    config = make_config("opc.tcp://127.0.0.1:1/x", tags=(TAG_STATIC,))
+    snapshot = ConnectionSnapshot(name=config.name, state=ConnectionState.FAILED)
+    hb = ValueHeartbeat(config, redis_client, snapshot, interval_s=FAST_INTERVAL_S)
+    async with collect_values(redis_client) as values:
+        async with beating(hb):
+            await await_until(lambda: len(of_tag(values, TAG_STATIC.id)) >= 3)
+
+    # O `ts` do payload continua sendo o relógio de parede (PRD §7.1 não muda); o que
+    # deixou de depender dele é a decisão de republicar.
+    assert {datetime.fromisoformat(item["ts"]) for item in values} == {RELOGIO_PARA_TRAS}

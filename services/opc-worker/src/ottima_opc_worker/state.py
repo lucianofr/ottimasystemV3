@@ -71,9 +71,12 @@ class TagSnapshot:
     ts: datetime
     value: float
     quality: int
-    # Relógio de parede da publicação, distinto de `ts` (timestamp da fonte): o heartbeat
-    # de valor (tarefa 1.3) decide por ele, senão um servidor adiantado o silenciaria.
+    # Relógio de parede da publicação, distinto de `ts` (timestamp da fonte): existe para
+    # exibição e diagnóstico, nunca para medir decurso.
     published_at: datetime
+    # `time.monotonic()` da publicação: é o ÚNICO campo usado para medir decurso (o
+    # heartbeat, tarefa 1.3, decide por ele). Ajuste de NTP para trás não o afeta.
+    published_monotonic: float
 
 
 @dataclass(slots=True)

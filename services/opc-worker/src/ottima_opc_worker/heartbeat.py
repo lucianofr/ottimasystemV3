@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Iterator
 from contextlib import suppress
 from dataclasses import replace
-from datetime import UTC, datetime
 
 from redis.asyncio import Redis
 
@@ -79,12 +79,14 @@ class ValueHeartbeat:
                 logger.exception("Erro na batida do heartbeat da conexão %s", self._config.id)
 
     async def _beat(self) -> None:
-        now = datetime.now(UTC)
+        # Decurso medido no relógio monotônico: ajuste de NTP para trás no servidor
+        # industrial não pode travar a republicação (o `ts` do payload segue sendo parede).
+        now = time.monotonic()
         session_up = self._snapshot.state is ConnectionState.UP
         for tag in self._read_tags():
             last = self._snapshot.last_values.get(tag.id)
             # Tag que nunca publicou conta como publicada há muito tempo: entra na batida.
-            if last is not None and (now - last.published_at).total_seconds() < self._interval_s:
+            if last is not None and now - last.published_monotonic < self._interval_s:
                 continue
             # Fora de `up` o dado é ruim por definição; sem último valor não há qualidade
             # boa a repetir.
