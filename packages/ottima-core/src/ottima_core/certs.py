@@ -16,6 +16,7 @@ handlers async (tarefa 4.4) é aceito e não caracteriza bloqueio.
 """
 
 import hashlib
+import logging
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+logger = logging.getLogger(__name__)
 
 # ApplicationUri usado pelo Client asyncua (tarefa 2.4). Precisa casar byte a byte com a
 # SAN URI do certificado, senão o servidor recusa o handshake com BadCertificateUriInvalid.
@@ -268,15 +271,36 @@ def _write_all_atomically(entries: list[tuple[Path, bytes, int]]) -> None:
     aponta para a causa. Grava tudo em temporários no mesmo diretório e só promove com
     os.replace depois que todos estiverem no disco.
     """
-    promoted: list[tuple[Path, Path]] = []
+    # Os temporários entram na lista de limpeza ANTES da escrita: um write interrompido no
+    # meio (ENOSPC) deixa o arquivo criado e parcial, e ele também precisa ser removido.
+    targets = [(path.with_name(f".{path.name}.tmp"), path) for path, _, _ in entries]
     try:
-        for path, data, mode in entries:
-            tmp = path.with_name(f".{path.name}.tmp")
+        for (tmp, _), (_, data, mode) in zip(targets, entries, strict=True):
             _write_file(tmp, data, mode)
-            promoted.append((tmp, path))
-        for tmp, path in promoted:
-            os.replace(tmp, path)
     except BaseException:
-        for tmp, _ in promoted:
-            tmp.unlink(missing_ok=True)
+        _discard(targets)
         raise
+
+    for index, (tmp, path) in enumerate(targets):
+        try:
+            os.replace(tmp, path)
+        except OSError:
+            # os.replace é atômico por arquivo, mas não como grupo: se o segundo ou o
+            # terceiro rename falhar, o volume fica com um par misto. Rollback de três
+            # arquivos não é confiável em POSIX (a reversão pode falhar pelo mesmo motivo),
+            # então a decisão é não tentar rollback e sim gritar no log com a remediação.
+            logger.critical(
+                "Falha ao promover os arquivos do certificado de aplicação em %s: %s. "
+                "O volume pode ter ficado com certificado e chave de gerações diferentes, "
+                "o que faz o handshake OPC-UA falhar. Regenere o certificado com "
+                "force=true e refaça o trust nos servidores.",
+                path.parent,
+                ", ".join(destino.name for _, destino in targets),
+            )
+            _discard(targets[index:])
+            raise
+
+
+def _discard(targets: list[tuple[Path, Path]]) -> None:
+    for tmp, _ in targets:
+        tmp.unlink(missing_ok=True)

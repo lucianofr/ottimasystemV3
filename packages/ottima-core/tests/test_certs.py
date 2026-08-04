@@ -1,4 +1,6 @@
 import hashlib
+import logging
+import os
 import stat
 from datetime import timedelta
 from pathlib import Path
@@ -254,3 +256,68 @@ def test_store_server_certificate_rejeita_pem_com_varios_certificados(tmp_path):
     with pytest.raises(ValueError, match="um único certificado"):
         store_server_certificate(destino, 5, pem_bytes + outro_pem)
     assert not trusted_cert_path(destino, 5).exists()
+
+
+def test_escrita_parcial_nao_deixa_temporario_orfao(tmp_path, monkeypatch):
+    # ENOSPC real: o arquivo temporário chega a ser criado e fica pela metade.
+    def cria_e_falha(path, data, mode):
+        path.write_bytes(data[: len(data) // 2])
+        raise OSError("disco cheio")
+
+    monkeypatch.setattr(certs, "_write_file", cria_e_falha)
+    with pytest.raises(OSError):
+        generate_app_certificate(tmp_path)
+
+    assert list((tmp_path / "app").iterdir()) == []
+    assert read_app_certificate(tmp_path).exists is False
+
+
+def test_escrita_parcial_no_ultimo_arquivo_limpa_todos_os_temporarios(tmp_path, monkeypatch):
+    antes = generate_app_certificate(tmp_path)
+    original = certs._write_file
+    chamadas = {"n": 0}
+
+    def falha_no_meio(path, data, mode):
+        chamadas["n"] += 1
+        if chamadas["n"] == 3:
+            path.write_bytes(data[:10])
+            raise OSError("disco cheio")
+        original(path, data, mode)
+
+    monkeypatch.setattr(certs, "_write_file", falha_no_meio)
+    with pytest.raises(OSError):
+        generate_app_certificate(tmp_path, force=True)
+
+    assert sorted(p.name for p in (tmp_path / "app").iterdir()) == [
+        "ottima.der",
+        "ottima.key",
+        "ottima.pem",
+    ]
+    assert read_app_certificate(tmp_path).fingerprint_sha256 == antes.fingerprint_sha256
+
+
+def test_falha_na_promocao_registra_critico_com_remediacao(tmp_path, monkeypatch, caplog):
+    generate_app_certificate(tmp_path)
+    original = os.replace
+    chamadas = {"n": 0}
+
+    def falha_no_segundo_rename(src, dst):
+        chamadas["n"] += 1
+        if chamadas["n"] == 2:
+            raise OSError("rename falhou")
+        original(src, dst)
+
+    monkeypatch.setattr(os, "replace", falha_no_segundo_rename)
+    with caplog.at_level(logging.CRITICAL):
+        with pytest.raises(OSError):
+            generate_app_certificate(tmp_path, force=True)
+
+    mensagem = next(r.getMessage() for r in caplog.records if r.levelno == logging.CRITICAL)
+    assert "ottima.pem" in mensagem and "ottima.key" in mensagem
+    assert "force=true" in mensagem
+    # Sem rollback (decisão registrada), mas nada de temporário sobra no diretório.
+    assert sorted(p.name for p in (tmp_path / "app").iterdir()) == [
+        "ottima.der",
+        "ottima.key",
+        "ottima.pem",
+    ]
