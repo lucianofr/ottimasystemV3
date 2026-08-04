@@ -6,6 +6,7 @@ import pytest
 from cryptography import x509
 from sqlalchemy import event, select
 
+from ottima_api.routers.connections import _excede_o_declarado
 from ottima_core.certs import APPLICATION_URI, app_cert_paths, generate_app_certificate
 from ottima_core.certs import trusted_cert_path as caminho_confiado
 from ottima_core.models import OpcConnection
@@ -444,3 +445,96 @@ async def test_delete_emite_update_de_updated_at(
     updates_na_conexao.clear()
     assert (await client.delete(url, headers=admin_headers)).status_code == 204
     assert updates_na_conexao == []
+
+
+async def test_get_app_com_pem_corrompido_devolve_500_em_pt_br(client, admin_headers, certs_dir):
+    """Arquivo presente mas ilegível é falha de infra: 500, mas mapeado e em pt-BR.
+
+    Sem o mapeamento o ValueError do core sobe cru e vira o 500 genérico do framework, em
+    inglês e sem dizer o que fazer.
+    """
+    pem = app_cert_paths(certs_dir).pem
+    pem.parent.mkdir(parents=True, exist_ok=True)
+    pem.write_bytes(b"isto nao e um PEM")
+
+    r = await client.get(APP, headers=admin_headers)
+    assert r.status_code == 500
+    detail = r.json()["detail"]
+    assert "ilegível" in detail or "corrompido" in detail
+    assert "force=true" in detail  # diz qual é a saída
+
+
+async def test_upload_sem_content_length_confiavel_413_e_para_de_ler_cedo(
+    client, admin_headers, db_session, certs_dir
+):
+    """Corpo grande sem Content-Length honesto: 413 sem materializar o corpo inteiro.
+
+    O corpo vai por um gerador (httpx manda chunked, sem Content-Length), então a única
+    barreira é a contagem dos bytes lidos. Provar o 413 não basta: `await request.body()`
+    também daria 413, depois de bufferizar tudo. O que se afirma aqui é que o gerador NÃO foi
+    drenado — a leitura parou no primeiro chunk que cruzou o teto.
+    """
+    cid = await _conexao(client, admin_headers, "plc-stream")
+    chunk = 8192
+    total_chunks = 64  # 512 KiB, oito vezes o teto
+    enviados = 0
+
+    async def corpo():
+        nonlocal enviados
+        for _ in range(total_chunks):
+            enviados += 1
+            yield b"x" * chunk
+
+    r = await client.post(
+        f"/api/connections/{cid}/server-certificate",
+        content=corpo(),
+        headers={**admin_headers, "Content-Type": "application/octet-stream"},
+    )
+    assert r.status_code == 413
+    assert enviados < total_chunks  # não drenou o corpo
+    assert enviados <= LIMITE // chunk + 1  # teto mais um chunk, nada além
+    assert not caminho_confiado(certs_dir, cid).exists()
+    assert await _coluna(db_session, cid) is None
+
+
+async def test_content_length_com_digitos_demais_nao_vira_500(
+    client, admin_headers, db_session, certs_dir, cert_servidor
+):
+    """Header é entrada de usuário: o CPython recusa int() acima de 4300 dígitos (achado da 4.3).
+
+    Sem a contagem de dígitos antes da conversão, este header vira ValueError não tratado = 500.
+    """
+    _, der = cert_servidor
+    cid = await _conexao(client, admin_headers, "plc-cl-absurdo")
+    r = await client.post(
+        f"/api/connections/{cid}/server-certificate",
+        content=der,
+        headers={
+            **admin_headers,
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "9" * 4301,
+        },
+    )
+    assert r.status_code == 413
+    assert not caminho_confiado(certs_dir, cid).exists()
+    assert await _coluna(db_session, cid) is None
+
+
+@pytest.mark.parametrize(
+    ("declarado", "excede"),
+    [
+        ("1200", False),
+        ("65536", False),  # exatamente o teto passa
+        ("65537", True),
+        ("0000065536", False),  # zeros à esquerda não inflam a contagem de dígitos
+        ("0", False),
+        ("999999", True),  # mais dígitos que o teto: barrado sem converter
+        ("9" * 4301, True),  # acima do limite de 4300 dígitos do int()
+        ("²", False),  # isdigit() é True, isdecimal() é False
+        ("abc", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_guard_de_content_length_classifica_sem_nunca_levantar(declarado, excede):
+    assert _excede_o_declarado(declarado) is excede

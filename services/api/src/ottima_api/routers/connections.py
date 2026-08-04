@@ -40,6 +40,7 @@ _MSG_POLICY_MODE = (
 # Um certificado X.509 não chega perto disso; sem teto, qualquer corpo enviado viraria
 # gravação em disco.
 MAX_SERVER_CERT_BYTES = 64 * 1024
+_MAX_DIGITOS_TETO = len(str(MAX_SERVER_CERT_BYTES))
 _MSG_CERT_GRANDE = "Certificado enviado excede o limite de 64 KiB."
 
 
@@ -85,22 +86,44 @@ async def _publicar(
     )
 
 
+def _excede_o_declarado(declarado: str | None) -> bool:
+    """Diz se o `Content-Length` já denuncia um corpo grande demais, sem nunca levantar.
+
+    Duas armadilhas do `int()`, as duas achadas pela 4.3 e as duas capazes de virar 500 num
+    header que é entrada de usuário: `"²".isdigit()` é True mas `int("²")` levanta, e o
+    CPython recusa converter string com mais de `sys.get_int_max_str_digits()` (4300) dígitos.
+    Por isso: `isdecimal()` filtra o alfabeto, a contagem de dígitos significativos resolve
+    sozinha o caso "grande demais", e só sobra para o `int()` o que cabe no teto.
+    """
+    if declarado is None or not declarado.isdecimal():
+        return False  # header ausente ou malformado: quem decide é a contagem real
+    significativos = declarado.lstrip("0")
+    if len(significativos) > _MAX_DIGITOS_TETO:
+        return True  # mais dígitos que o teto ⇒ maior que o teto, sem precisar converter
+    return int(significativos or "0") > MAX_SERVER_CERT_BYTES
+
+
 async def _ler_certificado(request: Request) -> bytes:
     """Corpo bruto do upload, com teto de tamanho.
 
-    O Content-Length é só a primeira barreira, barata e antes de materializar qualquer coisa;
-    a checagem que vale é sobre os bytes efetivamente lidos, porque o header pode faltar
-    (transfer-encoding chunked) ou simplesmente mentir.
+    Lê em fluxo e aborta no primeiro chunk que cruza o teto: `await request.body()` bufferiza
+    o corpo inteiro ANTES de qualquer comparação, então sem Content-Length honesto (ausente,
+    chunked ou mentindo baixo) um corpo arbitrariamente grande já teria sido materializado
+    quando o 413 saísse. Aqui nunca se acumula mais que o teto mais um chunk.
+
+    O Content-Length continua como barreira barata de primeira linha, mas é só otimização: a
+    garantia vem da contagem dos bytes efetivamente lidos.
     """
-    declarado = request.headers.get("content-length")
-    # isdecimal, não isdigit: "²".isdigit() é True mas int("²") levanta ValueError, o que
-    # transformaria um header malformado em 500 (mesmo buraco achado na 4.3 no /api/history).
-    if declarado is not None and declarado.isdecimal() and int(declarado) > MAX_SERVER_CERT_BYTES:
+    if _excede_o_declarado(request.headers.get("content-length")):
         raise HTTPException(status_code=413, detail=_MSG_CERT_GRANDE)
-    data = await request.body()
-    if len(data) > MAX_SERVER_CERT_BYTES:
-        raise HTTPException(status_code=413, detail=_MSG_CERT_GRANDE)
-    return data
+    partes: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_SERVER_CERT_BYTES:
+            raise HTTPException(status_code=413, detail=_MSG_CERT_GRANDE)
+        partes.append(chunk)
+    return b"".join(partes)
 
 
 @router.get("", response_model=list[ConnectionOut], dependencies=[Depends(require_operator)])

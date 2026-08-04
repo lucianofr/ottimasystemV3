@@ -30,6 +30,10 @@ _MSG_RE_TRUST = (
     "anterior precisam confiar no novo manualmente (re-trust) antes de aceitarem a conexão."
 )
 _MSG_SEM_CERTIFICADO = "Certificado de aplicação ainda não foi gerado."
+_MSG_ILEGIVEL = (
+    "Certificado de aplicação existe no volume mas está ilegível ou corrompido. "
+    "Gere um novo com force=true e refaça o trust nos servidores OPC-UA."
+)
 
 
 @router.post("/app/generate", response_model=AppCertificateGenerateOut, status_code=201)
@@ -50,8 +54,17 @@ async def generate_app_cert(
 
 @router.get("/app", response_model=AppCertificateOut)
 async def get_app_cert(settings: Settings = Depends(get_app_settings)) -> AppCertificateOut:
-    """Metadados do certificado. Ausência não é erro: devolve `exists=false`, nunca 404."""
-    return AppCertificateOut(**asdict(read_app_certificate(settings.certs_dir)))
+    """Metadados do certificado. Ausência não é erro: devolve `exists=false`, nunca 404.
+
+    Arquivo presente mas ilegível é outra coisa: falha de infraestrutura no volume, não
+    entrada do usuário. Continua 500, mas mapeado — com mensagem em pt-BR dizendo qual é a
+    saída — em vez de subir cru como erro genérico do framework.
+    """
+    try:
+        info = read_app_certificate(settings.certs_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=_MSG_ILEGIVEL) from exc
+    return AppCertificateOut(**asdict(info))
 
 
 @router.get("/app/export")
