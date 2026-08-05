@@ -5,6 +5,7 @@ import {
   type DirecaoPorta,
   type RegraPortaDinamica,
 } from "../../lib/contracts.gen";
+import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
 
 /**
  * Modelo do grafo do editor + as regras que o editor espelha do servidor.
@@ -543,13 +544,13 @@ export function paraGraphJson(nodes: readonly BlocoNode[], edges: readonly Bloco
   };
 }
 
-function objeto(valor: unknown): Record<string, unknown> | null {
+export function objeto(valor: unknown): Record<string, unknown> | null {
   return typeof valor === "object" && valor !== null && !Array.isArray(valor)
     ? (valor as Record<string, unknown>)
     : null;
 }
 
-function numero(valor: unknown, padrao: number): number {
+export function numero(valor: unknown, padrao: number): number {
   return typeof valor === "number" && Number.isFinite(valor) ? valor : padrao;
 }
 
@@ -557,11 +558,11 @@ function inteiro(valor: unknown, padrao: number, minimo: number, maximo: number)
   return Math.min(Math.max(Math.trunc(numero(valor, padrao)), minimo), maximo);
 }
 
-function inteiroSimples(valor: unknown, padrao: number): number {
+export function inteiroSimples(valor: unknown, padrao: number): number {
   return Number.isInteger(valor) ? (valor as number) : padrao;
 }
 
-function texto(valor: unknown, padrao: string): string {
+export function texto(valor: unknown, padrao: string): string {
   return typeof valor === "string" ? valor : padrao;
 }
 
@@ -597,136 +598,6 @@ function lerMatriz(bruto: unknown): MatrizTfs {
     return [lerElemento(colunas[0]), lerElemento(colunas[1])];
   };
   return [linha(0), linha(1)];
-}
-
-// --------------------------------------------------------------------------------------
-// Leitura do config MPC (espelha o esqueleto normativo da spec F4 §2.1)
-// --------------------------------------------------------------------------------------
-
-function lerLimitesMpc(bruto: unknown): LimitesMpc {
-  const cru = objeto(bruto) ?? {};
-  return { min: numero(cru.min, 0), max: numero(cru.max, 0) };
-}
-
-function lerFaixaMpc(bruto: unknown): FaixaMpc {
-  const cru = objeto(bruto) ?? {};
-  return { low: numero(cru.low, 0), high: numero(cru.high, 0) };
-}
-
-function lerModoValoresMpc(bruto: unknown): ValoresModoPid {
-  const cru = objeto(bruto) ?? {};
-  return { auto: inteiroSimples(cru.auto, 0), target: inteiroSimples(cru.target, 0) };
-}
-
-function lerPidMv(bruto: unknown): PidMv | null {
-  const cru = objeto(bruto);
-  if (cru === null) return null;
-  return {
-    write_tag_id: inteiroSimples(cru.write_tag_id, 0),
-    target_mode:
-      cru.target_mode === "cas" || cru.target_mode === "rout" ? cru.target_mode : "rcas",
-    mode_cmd_tag_id: inteiroSimples(cru.mode_cmd_tag_id, 0),
-    mode_read_tag_id: Number.isInteger(cru.mode_read_tag_id) ? (cru.mode_read_tag_id as number) : null,
-    readback_tag_id: inteiroSimples(cru.readback_tag_id, 0),
-    mode_values: lerModoValoresMpc(cru.mode_values),
-  };
-}
-
-function lerTipoLinhaMpc(bruto: unknown): TipoLinhaMpc {
-  return bruto === "integrating" ? "integrating" : "selfreg";
-}
-
-function lerVariavelMv(bruto: unknown): VariavelMv | null {
-  const cru = objeto(bruto);
-  if (cru === null) return null;
-  const id = texto(cru.id, "");
-  if (id === "") return null;
-  return {
-    id,
-    name: texto(cru.name, ""),
-    eu: texto(cru.eu, ""),
-    limits: lerLimitesMpc(cru.limits),
-    du_max: numero(cru.du_max, 0),
-    initial_value: numero(cru.initial_value, 0),
-    pid: lerPidMv(cru.pid),
-  };
-}
-
-function lerVariavelCv(bruto: unknown): VariavelCv | null {
-  const cru = objeto(bruto);
-  if (cru === null) return null;
-  const id = texto(cru.id, "");
-  if (id === "") return null;
-  return {
-    id,
-    name: texto(cru.name, ""),
-    eu: texto(cru.eu, ""),
-    kind: lerTipoLinhaMpc(cru.kind),
-    tss: numero(cru.tss, 0),
-    weight: numero(cru.weight, 0),
-    sp_limits: lerLimitesMpc(cru.sp_limits),
-  };
-}
-
-function lerVariavelRestricao(bruto: unknown): VariavelRestricao | null {
-  const cru = objeto(bruto);
-  if (cru === null) return null;
-  const id = texto(cru.id, "");
-  if (id === "") return null;
-  return {
-    id,
-    name: texto(cru.name, ""),
-    eu: texto(cru.eu, ""),
-    kind: lerTipoLinhaMpc(cru.kind),
-    tss: numero(cru.tss, 0),
-    range: lerFaixaMpc(cru.range),
-    priority: inteiroSimples(cru.priority, 1),
-  };
-}
-
-function lerVariavelDv(bruto: unknown): VariavelDv | null {
-  const cru = objeto(bruto);
-  if (cru === null) return null;
-  const id = texto(cru.id, "");
-  if (id === "") return null;
-  return { id, name: texto(cru.name, ""), eu: texto(cru.eu, "") };
-}
-
-function lerListaMpc<T>(bruto: unknown, ler: (item: unknown) => T | null): T[] {
-  const itens: unknown[] = Array.isArray(bruto) ? bruto : [];
-  return itens.map(ler).filter((item): item is T => item !== null);
-}
-
-function lerVariaveisMpc(bruto: unknown): VariaveisMpc {
-  const cru = objeto(bruto) ?? {};
-  return {
-    mvs: lerListaMpc(cru.mvs, lerVariavelMv),
-    cvs: lerListaMpc(cru.cvs, lerVariavelCv),
-    constraints: lerListaMpc(cru.constraints, lerVariavelRestricao),
-    dvs: lerListaMpc(cru.dvs, lerVariavelDv),
-  };
-}
-
-function lerParModeloMpc(bruto: unknown): ParModeloMpc {
-  const cru = objeto(bruto) ?? {};
-  const paramsBrutos = objeto(cru.params) ?? {};
-  const params: Record<string, number> = {};
-  for (const [chave, valor] of Object.entries(paramsBrutos)) {
-    if (typeof valor === "number" && Number.isFinite(valor)) params[chave] = valor;
-  }
-  return { enabled: cru.enabled === true, params };
-}
-
-function lerModelosMpc(bruto: unknown): Record<string, Record<string, ParModeloMpc>> {
-  const linhas = objeto(bruto) ?? {};
-  const modelos: Record<string, Record<string, ParModeloMpc>> = {};
-  for (const [idLinha, colunasBrutas] of Object.entries(linhas)) {
-    const colunas = objeto(colunasBrutas) ?? {};
-    const lidas: Record<string, ParModeloMpc> = {};
-    for (const [idColuna, par] of Object.entries(colunas)) lidas[idColuna] = lerParModeloMpc(par);
-    modelos[idLinha] = lidas;
-  }
-  return modelos;
 }
 
 function lerNo(bruto: unknown, indice: number): BlocoNode | null {
