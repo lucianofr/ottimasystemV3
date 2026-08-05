@@ -5,9 +5,7 @@ por conta própria e o teste precisa ver o dado commitado.
 """
 
 import asyncio
-import inspect
 import logging
-from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -29,6 +27,7 @@ from ottima_core.bus import (
 from ottima_core.models import events_table, samples_table
 from ottima_recorder import main as main_module
 from ottima_recorder.pipeline import RecorderPipeline
+from testkit.await_until import await_until
 
 WAIT_TIMEOUT_S = 5.0
 POLL_S = 0.02
@@ -51,24 +50,6 @@ def sample(tag_id: int, *, offset: int = 0, value: float = 1.5, quality: int = 0
     return OpcValue(
         tag_id=tag_id, ts=BASE_TS + timedelta(seconds=offset), value=value, quality=quality
     )
-
-
-async def await_until(
-    condition: Callable[[], bool | Awaitable[bool]],
-    timeout_s: float = WAIT_TIMEOUT_S,
-    interval: float = POLL_S,
-) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
-        result = condition()
-        if inspect.isawaitable(result):
-            result = await result
-        if result:
-            return
-        await asyncio.sleep(interval)
-    raise AssertionError(f"condição não satisfeita em {timeout_s}s")
 
 
 async def count_rows(factory: Any, table: Table) -> int:

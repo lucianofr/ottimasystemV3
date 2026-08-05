@@ -12,6 +12,7 @@ import asyncio
 from redis.asyncio import Redis
 
 from ottima_core.pubsub import ChannelListener, PatternListener
+from testkit.await_until import await_until
 
 AWAIT_TIMEOUT_S = 5.0
 CHANNEL = "test.pubsub.channel"
@@ -20,17 +21,6 @@ PATTERN = "test.pubsub.pattern.*"
 
 async def _noop(*_args: object) -> None:
     """Handler vazio: o que está sob teste não é o despacho."""
-
-
-async def await_until(condition, timeout_s: float = AWAIT_TIMEOUT_S) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
-        if condition():
-            return
-        await asyncio.sleep(0.02)
-    raise AssertionError(f"condição não satisfeita em {timeout_s}s")
 
 
 async def pubsub_client_ids(redis_client: Redis) -> set[str]:

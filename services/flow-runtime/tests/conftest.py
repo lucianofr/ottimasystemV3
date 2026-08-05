@@ -43,6 +43,7 @@ from ottima_flow_runtime.script_pool import ScriptResult
 from ottima_flow_runtime.snapshot import ValueSnapshot
 from ottima_flow_runtime.state import RuntimeState
 from ottima_flow_runtime.supervisor import Supervisor
+from testkit.await_until import await_until
 
 # A suíte roda com --import-mode=importlib, que não põe o diretório dos testes no
 # sys.path: sem isto os arquivos de teste não conseguem `from conftest import ...`.
@@ -53,19 +54,6 @@ if _TESTS_DIR not in sys.path:
 # Teto das esperas do flow-runtime: o Redis dos testes é local e o laço de reassinatura tem
 # freio de 1 s, então não satisfazer a condição em 5 s é falha real, não lentidão.
 AWAIT_TIMEOUT_S = 5.0
-
-
-async def await_until(
-    condition: Callable[[], bool], timeout_s: float = AWAIT_TIMEOUT_S, interval: float = 0.02
-) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
-        if condition():
-            return
-        await asyncio.sleep(interval)
-    raise AssertionError(f"condição não satisfeita em {timeout_s}s")
 
 
 # --------------------------------------------------------------------------------------

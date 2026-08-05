@@ -4,9 +4,6 @@ Engine e `session_factory` dedicados (não as fixtures em SAVEPOINT): o pipeline
 por conta própria e o teste precisa ver o dado commitado.
 """
 
-import asyncio
-import inspect
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -26,6 +23,7 @@ from ottima_core.models import events_table, samples_table
 from ottima_core.pubsub import PatternListener
 from ottima_recorder import pipeline as pipeline_module
 from ottima_recorder.pipeline import RecorderPipeline
+from testkit.await_until import await_until
 
 WAIT_TIMEOUT_S = 5.0
 POLL_S = 0.02
@@ -50,24 +48,6 @@ async def purge(factory: Any) -> None:
 async def count_rows(factory: Any, table: Table) -> int:
     async with factory() as session:
         return await session.scalar(select(func.count()).select_from(table))
-
-
-async def await_until(
-    condition: Callable[[], bool | Awaitable[bool]],
-    timeout_s: float = WAIT_TIMEOUT_S,
-    interval: float = POLL_S,
-) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
-        result = condition()
-        if inspect.isawaitable(result):
-            result = await result
-        if result:
-            return
-        await asyncio.sleep(interval)
-    raise AssertionError(f"condição não satisfeita em {timeout_s}s")
 
 
 async def wait_rows(factory: Any, table: Table, expected: int) -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -30,24 +30,11 @@ from opcsim import (
     OpcSimServer,
     free_port,
 )
+from testkit.await_until import await_until
 
 # Cobre vários ciclos do rung (50 ms) e do loop de valores (200 ms): é o tempo mínimo
 # para provar que algo NÃO acontece (freeze). Onde há condição a esperar, use await_until.
 QUIET_WINDOW = 0.6
-
-
-async def await_until(
-    condition: Callable[[], Awaitable[bool]], timeout_s: float = 5.0, interval: float = 0.02
-) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while True:
-        if await condition():
-            return
-        if loop.time() >= deadline:
-            raise AssertionError(f"condição não satisfeita em {timeout_s}s")
-        await asyncio.sleep(interval)
 
 
 @pytest.fixture

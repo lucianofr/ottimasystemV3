@@ -1,6 +1,9 @@
 """Fixtures compartilhadas (spec F1 §9): Timescale real via testcontainers,
 migrations Alembic e isolamento por SAVEPOINT."""
 
+import sys
+from pathlib import Path
+
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -8,6 +11,12 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from testcontainers.community.redis import RedisContainer
 from testcontainers.postgres import PostgresContainer
+
+# A suíte roda com --import-mode=importlib, que não põe o workspace no sys.path: sem isto
+# `testkit.await_until` (tests/testkit/) não é importável pelas suítes dos serviços.
+_TESTS_DIR = str(Path(__file__).parent / "tests")
+if _TESTS_DIR not in sys.path:
+    sys.path.insert(0, _TESTS_DIR)
 
 TIMESCALE_IMAGE = "timescale/timescaledb:2.17.2-pg17"  # mesma imagem do compose (paridade)
 REDIS_IMAGE = "redis:7.4-alpine"  # mesma imagem do compose (paridade)

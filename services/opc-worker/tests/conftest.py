@@ -10,14 +10,16 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from functools import partial
 from pathlib import Path
 
 import pytest
 from redis.asyncio import Redis
 
 from opcsim import OpcSimServer, free_port
+from testkit.await_until import await_until as _await_until
 
 # A suíte roda com --import-mode=importlib, que não põe o diretório dos testes no
 # sys.path: sem isto os arquivos de teste não conseguem `from conftest import ...`.
@@ -32,17 +34,7 @@ AWAIT_TIMEOUT_S = 20.0
 SUBSCRIBE_TIMEOUT_S = 5.0
 
 
-async def await_until(
-    condition: Callable[[], bool], timeout_s: float = AWAIT_TIMEOUT_S, interval: float = 0.02
-) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
-        if condition():
-            return
-        await asyncio.sleep(interval)
-    raise AssertionError(f"condição não satisfeita em {timeout_s}s")
+await_until = partial(_await_until, timeout_s=AWAIT_TIMEOUT_S)
 
 
 @asynccontextmanager
