@@ -1,0 +1,449 @@
+"""Bloco MPC: cadência, modos e write-back do runtime (spec F4 §4.2/§4.3/§4.6/§4.9/§5;
+plano F4b, tarefa 2.1).
+
+Bloco "fino" (brief da tarefa): TODA a matemática do MPC mora em `mpc/worker.py`
+(montagem + solve) e `mpc/host.py` (processo, orçamento, kill/respawn) — nada disso é
+redefinido aqui. Este módulo só decide QUANDO disparar um `SolveRequest` (cadência do
+`multiplier`, spec §4.2), COMO aplicar o `SolveResult` (na fronteira de varredura seguinte
+à conclusão, nunca no meio — determinismo RF-401) e QUAL valor de MV sai por modo
+(LOCAL/REMOTO×MAN/AUTO, spec §4.3).
+
+Fronteira de cadência: `n mod multiplier == 0`, `n` contado desde o deploy (`reset()` zera
+o contador — hot-swap/stop reinicia a fase, igual aos demais blocos F3). `n=0` já É
+fronteira, então a primeira varredura após o deploy dispara.
+
+Cold start (`v=None` em qualquer CV/Restrição/DV) segue o padrão universal do F3 §3.0
+(`has_cold_input`/`null_outputs`, o mesmo gate de TFS/Script): saídas nulas, nada mais
+avaliado nessa varredura. Invalidez (`ok=False`, valor conhecido) é mais branda — decisão
+A-6 da F3: o bloco segue rodando, mas pula o solve na fronteira, mantém as saídas com a
+flag ruim e suprime as escritas do `pid` (spec §4.6); dedupe por período, mesmo padrão de
+`write_suppressed`/`flow_overrun`.
+
+CONTRATO VINCULANTE herdado do host (docstring de `mpc/host.py`, achado da revisão 1.1):
+um `SolveResult` com `status="no_convergence"` chega com `u_plan`/predição/`cost`
+POPULADOS — nunca aplicados à planta. O gate é sempre `status == "ok"`, tanto aqui quanto
+em qualquer lugar que decida repetir essa checagem.
+
+Escopo desta tarefa (2.1) — o que NÃO mora aqui: escrita de `mode_cmd` no PID nas
+transições LOCAL<->REMOTO, confirmação por `mode_read` (2×Ts_mpc), shed por divergência de
+`mode_read` (§4.5) e hot-swap (§4.7) são orquestração do supervisor (plano F4b, tarefa 2.2,
+conforme a própria brief dessa tarefa) — o bloco só materializa o campo de modo e audita,
+via `command()`, respeitando as regras §4.8 (idempotência, `man_auto` em LOCAL ignorado,
+clamps, e materialização condicionada ao modo vigente).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable, Mapping
+from datetime import UTC, datetime
+from typing import Literal
+
+from ottima_core.bus import (
+    KIND_MPC_INPUT_INVALID,
+    KIND_MPC_MODE_CHANGED,
+    KIND_MPC_MV_WRITTEN,
+    KIND_MPC_OVERRUN,
+    KIND_MPC_SOLVER_ERROR,
+    KIND_MPC_SP_WRITTEN,
+    MpcModes,
+    MpcPrediction,
+    MpcState,
+    MpcStatus,
+    MpcVarState,
+    OpcWrite,
+)
+from ottima_core.flowgraph import CvVar, MpcConfig, MvVar, derive_horizons
+
+from ..mpc.host import MpcHost
+from ..mpc.worker import SolveRequest, SolveResult
+from ..snapshot import ValueSnapshot
+from .base import Block, PortSample, has_cold_input, null_outputs
+
+_LocalRemote = Literal["local", "remote"]
+_ManAuto = Literal["man", "auto"]
+_SolverStatus = Literal["ok", "overrun", "error"]
+
+_EMPTY_PREDICTION = MpcPrediction(t=[], cv=[], mv=[])
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+class MpcBlock(Block):
+    """Entradas: uma por CV/Restrição/DV (ordem do config, spec §2.1-5). Saídas: uma por MV.
+
+    `host` já é dono do processo do worker (spec F4 §3.6/§4.2) — este bloco só chama
+    `dispatch()`/`poll()`/`stats()`/`ready`, nunca sobe/mata processo. `snapshot` é o
+    espelho do barramento (F3) usado só para o readback do PID em LOCAL (spec §4.3);
+    `publish`/`write_opc`/`emit_event` são os pontos de saída para o barramento, injetados
+    para o bloco nunca falar com Redis diretamente (testável em processo, sem I/O).
+    """
+
+    def __init__(
+        self,
+        block_id: str,
+        *,
+        config: MpcConfig,
+        ts_flow: float,
+        snapshot: ValueSnapshot,
+        host: MpcHost,
+        publish: Callable[[MpcState], Awaitable[None]],
+        write_opc: Callable[[OpcWrite], Awaitable[None]],
+        emit_event: Callable[..., Awaitable[None]],
+    ) -> None:
+        super().__init__(block_id)
+        self._snapshot = snapshot
+        self._host = host
+        self._publish = publish
+        self._write_opc = write_opc
+        self._emit_event = emit_event
+        self._source = f"block:{block_id}"
+
+        tss = [v.tss for v in (*config.variables.cvs, *config.variables.constraints)]
+        self._multiplier = config.multiplier
+        self._ts_mpc = derive_horizons(config.multiplier, ts_flow, tss).ts_mpc
+
+        self._mvs: dict[str, MvVar] = {v.id: v for v in config.variables.mvs}
+        self._cvs: dict[str, CvVar] = {v.id: v for v in config.variables.cvs}
+        self._mv_ids = tuple(self._mvs)
+        self._cv_ids = tuple(self._cvs)
+        self._co_ids = tuple(v.id for v in config.variables.constraints)
+        self._dv_ids = tuple(v.id for v in config.variables.dvs)
+        self._row_ids = self._cv_ids + self._co_ids
+        self._entrada_ids = self._row_ids + self._dv_ids
+
+        self.reset()
+
+    @property
+    def input_ports(self) -> tuple[str, ...]:
+        return self._entrada_ids
+
+    @property
+    def output_ports(self) -> tuple[str, ...]:
+        return self._mv_ids
+
+    def reset(self) -> None:
+        self._n = 0
+        self._local_remote: _LocalRemote = "local"
+        self._man_auto: _ManAuto = "man"
+        self._mv_manual: dict[str, float] = {mv.id: mv.initial_value for mv in self._mvs.values()}
+        self._mv_last: dict[str, float] = {mv.id: mv.initial_value for mv in self._mvs.values()}
+        self._plan: dict[str, float] | None = None
+        self._sp: dict[str, float] = dict.fromkeys(self._cv_ids, 0.0)
+        self._last_measured: dict[str, float] = {}
+        self._last_prediction = _EMPTY_PREDICTION
+        self._solver_status: _SolverStatus = "ok"
+        self._cost = 0.0
+        self._overruns = 0
+        self._reinit_pending = False
+        self._overrun_reported = False
+        self._input_invalid_reported = False
+        self._input_ok = True
+
+    # ------------------------------------------------------------------------------
+    # Varredura
+    # ------------------------------------------------------------------------------
+
+    async def step(self, inputs: Mapping[str, PortSample]) -> dict[str, PortSample]:
+        is_frontier = self._n % self._multiplier == 0
+        self._n += 1
+
+        samples = {pid: inputs.get(pid, PortSample(None, False)) for pid in self._entrada_ids}
+        if has_cold_input(samples):
+            return null_outputs(self._mv_ids)
+
+        valid = all(sample.ok for sample in samples.values())
+        self._input_ok = valid
+        if valid:
+            self._input_invalid_reported = False
+            for var_id, sample in samples.items():
+                self._last_measured[var_id] = float(sample.v)  # type: ignore[arg-type]
+            if self._man_auto != "auto":
+                for cv_id in self._cv_ids:
+                    self._sp[cv_id] = self._last_measured[cv_id]
+        else:
+            await self._report_input_invalid()
+
+        if is_frontier and valid:
+            await self._run_frontier()
+
+        outputs = self._compute_outputs(ok=valid)
+        self._mv_last = {mv_id: float(sample.v) for mv_id, sample in outputs.items()}  # type: ignore[arg-type]
+        await self._write_pid(outputs, ok=valid)
+        return outputs
+
+    async def _run_frontier(self) -> None:
+        """Consome um resultado pendente (se houver) e dispara o próximo, se em AUTO.
+
+        `host.poll()` só é chamado aqui — nunca fora de fronteira — então um resultado que
+        o worker termina "no meio" de um ciclo do multiplicador fica retido no buffer de
+        uma posição do próprio `host` até a PRÓXIMA fronteira: é assim que a porta nunca
+        muda no meio da varredura (RF-401) sem o bloco precisar de um buffer próprio.
+        """
+        result = self._host.poll()
+        if result is not None:
+            await self._apply_result(result)
+
+        if self._man_auto == "auto" and self._local_remote == "remote":
+            request = SolveRequest(
+                y={row_id: self._last_measured[row_id] for row_id in self._row_ids},
+                u_applied=dict(self._mv_last),
+                d={dv_id: self._last_measured[dv_id] for dv_id in self._dv_ids},
+                sp=dict(self._sp),
+                reinit=self._reinit_pending,
+            )
+            self._reinit_pending = False
+            if not self._host.dispatch(request):
+                # Worker indisponível na fronteira (não pronto/ocupado/morto): conta e
+                # pula, sem novo evento (spec §4.2) — o `mpc_overrun` já saiu (ou sairá)
+                # pelo caminho de `poll()` quando o host sintetizar o resultado.
+                self._overruns += 1
+
+        await self._publish(self._build_state())
+
+    async def _apply_result(self, result: SolveResult) -> None:
+        if result.status != "overrun":
+            self._overrun_reported = False
+
+        if result.status == "ok":
+            self._plan = dict(result.u_plan)
+            self._cost = result.cost
+            self._last_prediction = MpcPrediction(
+                t=result.prediction_t, cv=result.prediction_cv, mv=result.prediction_mv
+            )
+            self._solver_status = "ok"
+        elif result.status == "overrun":
+            self._overruns += 1
+            self._solver_status = "overrun"
+            await self._report_overrun()
+        else:
+            # `error` (crash) ou `no_convergence`: falha de solver != overrun (RF-624).
+            # `u_plan` chega POPULADO (carryover 1.1/1.2) e NUNCA é aplicado — só o ramo
+            # `status == "ok"` acima toca `self._plan`.
+            self._solver_status = "error"
+            reason = "crash" if result.status == "error" else "no_convergence"
+            await self._report_solver_error(reason)
+
+    # ------------------------------------------------------------------------------
+    # Saída por modo (spec §4.3)
+    # ------------------------------------------------------------------------------
+
+    def _compute_outputs(self, *, ok: bool) -> dict[str, PortSample]:
+        outputs: dict[str, PortSample] = {}
+        for mv in self._mvs.values():
+            if self._local_remote == "local":
+                v = self._local_value(mv)
+            elif self._man_auto == "man":
+                v = _clamp(self._mv_manual[mv.id], mv.limits.min, mv.limits.max)
+            else:
+                v = self._plan[mv.id] if self._plan is not None else self._mv_last[mv.id]
+            outputs[mv.id] = PortSample(v, ok)
+        return outputs
+
+    def _local_value(self, mv: MvVar) -> float:
+        """Tracking do readback (com `pid`) ou hold do último valor/`initial_value` (sem
+        `pid`, ou com `pid` mas ainda sem readback desde o deploy)."""
+        if mv.pid is not None:
+            tag = self._snapshot.get(mv.pid.readback_tag_id)
+            if tag is not None:
+                return float(tag.value)
+        return self._mv_last[mv.id]
+
+    async def _write_pid(self, outputs: Mapping[str, PortSample], *, ok: bool) -> None:
+        """Publica `OpcWrite` por MV com `pid`, a cada varredura, só em REMOTO com entrada
+        válida (spec §4.3/§4.6) — em LOCAL não escreve nada, RF-621.
+
+        `conn_id` sai como `0`: `PidBinding` não carrega a conexão da tag (só o
+        `write_tag_id`) — a resolução tag->conexão é de quem monta o `write_opc` real (a
+        mesma consulta de `_project_tags`, débito #3 da spec F4 §8), tarefa 2.2. Documentado
+        no relatório desta tarefa como decisão explícita, sem teste dedicado aqui.
+        """
+        if self._local_remote != "remote" or not ok:
+            return
+        for mv in self._mvs.values():
+            if mv.pid is None:
+                continue
+            await self._write_opc(
+                OpcWrite(
+                    conn_id=0,
+                    tag_id=mv.pid.write_tag_id,
+                    value=float(outputs[mv.id].v),  # type: ignore[arg-type]
+                    source=self._source,
+                    ts=datetime.now(UTC),
+                )
+            )
+
+    # ------------------------------------------------------------------------------
+    # Eventos (spec §5.3) — dedupe por período nos que a spec pede (overrun/invalidez)
+    # ------------------------------------------------------------------------------
+
+    async def _report_overrun(self) -> None:
+        if self._overrun_reported:
+            return
+        self._overrun_reported = True
+        await self._emit_event(
+            severity="warning",
+            message=f"MPC '{self.block_id}': orçamento do solve estourado",
+            kind=KIND_MPC_OVERRUN,
+            payload={},
+        )
+
+    async def _report_solver_error(self, reason: str) -> None:
+        await self._emit_event(
+            severity="alarm",
+            message=f"MPC '{self.block_id}': falha do solver ({reason})",
+            kind=KIND_MPC_SOLVER_ERROR,
+            payload={"reason": reason},
+        )
+
+    async def _report_input_invalid(self) -> None:
+        if self._input_invalid_reported:
+            return
+        self._input_invalid_reported = True
+        await self._emit_event(
+            severity="warning",
+            message=f"MPC '{self.block_id}': entrada inválida — solve pulado",
+            kind=KIND_MPC_INPUT_INVALID,
+            payload={},
+        )
+
+    # ------------------------------------------------------------------------------
+    # Comandos (spec §4.8) — `flow.commands` já roteado pelo supervisor (tarefa 2.2)
+    # ------------------------------------------------------------------------------
+
+    async def command(self, cmd: str, args: dict, user: str | None) -> None:
+        if cmd == "mpc_mode":
+            await self._command_mode(args, user)
+        elif cmd == "mpc_sp":
+            await self._command_sp(args, user)
+        elif cmd == "mpc_mv":
+            await self._command_mv(args, user)
+        # `cmd` desconhecido: ignora (padrão F3 §2.2-7, comando inválido não derruba nada).
+
+    async def _command_mode(self, args: dict, user: str | None) -> None:
+        axis = args["axis"]
+        value = args["value"]
+        if axis == "local_remote" and value in ("local", "remote"):
+            if value == self._local_remote:
+                return  # idempotente
+            old = self._local_remote
+            self._local_remote = value
+            if value == "remote":
+                # Entra em MAN; MV manual := vigente (spec §4.4, sem salto na transição).
+                self._man_auto = "man"
+                self._mv_manual = dict(self._mv_last)
+            await self._audit_mode_changed("local_remote", old, value, user)
+        elif axis == "man_auto" and value in ("man", "auto"):
+            if self._local_remote == "local":
+                return  # sub-modo só existe em REMOTO (ADR-010)
+            if value == self._man_auto:
+                return  # idempotente
+            old = self._man_auto
+            self._man_auto = value
+            if value == "auto":
+                # Bumpless (spec §3.6): a PRÓXIMA dispatch precisa de `reinit=True` — o host
+                # só força isso sozinho em boot/respawn (docstring de `mpc/host.py`), não em
+                # MAN->AUTO, então o bloco carrega o sinalizador até o próximo `dispatch()`.
+                self._reinit_pending = True
+            else:
+                self._mv_manual = dict(self._mv_last)  # AUTO->MAN: MV manual := MV vigente
+            await self._audit_mode_changed("man_auto", old, value, user)
+
+    async def _audit_mode_changed(self, axis: str, old: str, new: str, user: str | None) -> None:
+        await self._emit_event(
+            severity="info",
+            message=f"MPC '{self.block_id}': modo {axis} {old} -> {new}",
+            kind=KIND_MPC_MODE_CHANGED,
+            payload={"axis": axis, "from": old, "to": new, "user": user},
+        )
+        await self._publish(self._build_state())
+
+    async def _command_sp(self, args: dict, user: str | None) -> None:
+        if self._man_auto != "auto":
+            return  # fora de AUTO o PV-tracking manda (spec §4.8)
+        var_id = args["var_id"]
+        cv = self._cvs.get(var_id)
+        if cv is None:
+            return
+        clamped = _clamp(float(args["value"]), cv.sp_limits.min, cv.sp_limits.max)
+        if self._sp.get(var_id) == clamped:
+            return  # idempotente
+        self._sp[var_id] = clamped
+        await self._emit_event(
+            severity="info",
+            message=f"MPC '{self.block_id}': SP de {var_id} escrito para {clamped}",
+            kind=KIND_MPC_SP_WRITTEN,
+            payload={"var_id": var_id, "value": clamped, "user": user},
+        )
+        await self._publish(self._build_state())
+
+    async def _command_mv(self, args: dict, user: str | None) -> None:
+        if self._local_remote != "remote" or self._man_auto != "man":
+            return  # só materializa em REMOTO+MAN (spec §4.8)
+        var_id = args["var_id"]
+        mv = self._mvs.get(var_id)
+        if mv is None:
+            return
+        clamped = _clamp(float(args["value"]), mv.limits.min, mv.limits.max)
+        if self._mv_manual.get(var_id) == clamped:
+            return  # idempotente
+        self._mv_manual[var_id] = clamped
+        await self._emit_event(
+            severity="info",
+            message=f"MPC '{self.block_id}': MV manual de {var_id} escrita para {clamped}",
+            kind=KIND_MPC_MV_WRITTEN,
+            payload={"var_id": var_id, "value": clamped, "user": user},
+        )
+        await self._publish(self._build_state())
+
+    # ------------------------------------------------------------------------------
+    # Estado publicado (spec §5.1) e `/health` (spec §4.10, tarefa 2.3)
+    # ------------------------------------------------------------------------------
+
+    def _build_state(self) -> MpcState:
+        armed = self._local_remote == "remote"
+        auto = armed and self._man_auto == "auto"
+        cv_id_set = set(self._cv_ids)
+
+        var_state: dict[str, MpcVarState] = {}
+        for row_id in self._row_ids:
+            var_state[row_id] = MpcVarState(
+                v=self._last_measured.get(row_id, 0.0),
+                sp=self._sp.get(row_id) if row_id in cv_id_set else None,
+            )
+        for dv_id in self._dv_ids:
+            var_state[dv_id] = MpcVarState(v=self._last_measured.get(dv_id, 0.0))
+        for mv_id in self._mv_ids:
+            var_state[mv_id] = MpcVarState(v=self._mv_last.get(mv_id, 0.0))
+
+        if not auto:
+            solver: _SolverStatus | Literal["building", "idle"] = "idle"
+        elif not self._host.ready:
+            solver = "building"
+        else:
+            solver = self._solver_status
+
+        stats = self._host.stats()
+        return MpcState(
+            modes=MpcModes(local_remote=self._local_remote, man_auto=self._man_auto),
+            status=MpcStatus(
+                solver=solver,
+                overruns=self._overruns,
+                last_solve_ms=stats["last_solve_ms"] or 0.0,
+                armed=armed,
+                input_valid=self._input_ok,
+            ),
+            vars=var_state,
+            cost=self._cost,
+            prediction=self._last_prediction if auto else _EMPTY_PREDICTION,
+        )
+
+    def health(self) -> dict:
+        stats = self._host.stats()
+        return {
+            "mode": {"local_remote": self._local_remote, "man_auto": self._man_auto},
+            "overruns": self._overruns,
+            "last_solve_ms": stats["last_solve_ms"],
+            "worker": stats,
+        }
