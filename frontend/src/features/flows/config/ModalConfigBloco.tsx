@@ -186,7 +186,10 @@ export function ModalConfigBloco({
         );
         break;
     }
-    onFechar();
+    // `onClose` (linha do <dialog>) chama `onFechar`; fechar via `close()` explícito em vez
+    // de chamar `onFechar()` direto evita que o desmonte (estado -> null) derrube o <dialog>
+    // do DOM ainda marcado como aberto (mesmo caminho que o botão Cancelar já usa).
+    dialogo.current?.close();
   }
 
   return (
