@@ -166,6 +166,25 @@ class Supervisor:
         """Tasks vivas por `flow_id` — inclui as paradas e as em falha, como o `/health`."""
         return {flow_id: runtime.task for flow_id, runtime in self._runtimes.items()}
 
+    def mpc_health(self, flow_id: int) -> dict[str, dict]:
+        """`block_id -> MpcBlock.health()` do flow (spec F4 §4.10, plano F4b tarefa 2.3).
+
+        Vazio se o flow não existe ou não tem bloco `mpc` — o `/health` não distingue as
+        duas causas, igual ao `flows` acima.
+        """
+        runtime = self._runtimes.get(flow_id)
+        if runtime is None:
+            return {}
+        return {
+            block_id: block.health()
+            for block_id, (_, block) in runtime.blocks.items()
+            if isinstance(block, MpcBlock)
+        }
+
+    def script_pool_stats(self) -> dict:
+        """`ScriptPool.stats()` (F4a tarefa 0.6) para o `/health` (débito 5, spec F4 §4.10/§8)."""
+        return self._pool.stats()
+
     async def start(self) -> None:
         """Sobe o pool, o consumidor de comandos e o poll. Idempotente.
 

@@ -131,7 +131,7 @@ async def health() -> dict:
     """Sempre 200: a degradação vai no corpo (spec §2.2-10).
 
     Sem lifespan (app cru dos testes de unidade), os campos caem nos defaults do `getattr` e
-    `flows` fica vazio.
+    `flows`/`script_pool` ficam vazios.
     """
     redis_ok = getattr(app.state, "redis_ok", False)
     db_ok = getattr(app.state, "db_ok", False)
@@ -139,12 +139,20 @@ async def health() -> dict:
     # serviço, não condição operacional de flow.
     runtime_up = getattr(app.state, "runtime_up", False)
     runtime_state = getattr(app.state, "runtime_state", None)
+    supervisor = getattr(app.state, "supervisor", None)
     flows = {} if runtime_state is None else runtime_state.flows
     return {
         "status": "ok" if redis_ok and db_ok and runtime_up else "degraded",
         "service": SERVICE_NAME,
         "version": VERSION,
         # Chave string porque JSON não tem chave inteira; o corpo por flow vem inteiro do
-        # snapshot, sem remontagem aqui.
-        "flows": {str(flow_id): snapshot.to_health() for flow_id, snapshot in flows.items()},
+        # snapshot, sem remontagem aqui. `mpc` é o débito 5 (spec F4 §4.10/§8, F4b 2.3).
+        "flows": {
+            str(flow_id): {
+                **snapshot.to_health(),
+                "mpc": {} if supervisor is None else supervisor.mpc_health(flow_id),
+            }
+            for flow_id, snapshot in flows.items()
+        },
+        "script_pool": {} if supervisor is None else supervisor.script_pool_stats(),
     }
