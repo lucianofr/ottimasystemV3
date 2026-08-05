@@ -8,13 +8,13 @@ de comandos/ciclo de vida (`supervisor.py`); aqui mora só a montagem em si.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from redis.asyncio import Redis
 
-from ottima_core.flowgraph import FlowGraph, FlowNode, TagRef
+from ottima_core.flowgraph import FlowGraph, FlowNode, MpcConfig, TagRef
 
 from .blocks.base import Block
 from .blocks.opc_read import OpcReadBlock
@@ -140,10 +140,35 @@ def _conn_ids(graph: FlowGraph, tags: Mapping[int, TagRef]) -> frozenset[int]:
     """Conexões que o grafo referencia — o conjunto que o `comm_failure` consulta (§2.2-8).
 
     Mora aqui, e não na `FlowDefinition`, porque o laço de varredura não tem nada a fazer
-    com `conn_id`: quem reage à queda de conexão é o supervisor.
+    com `conn_id`: quem reage à queda de conexão é o supervisor. Inclui as tags do `pid` de
+    cada MV de cada bloco `mpc` (spec F4 §2.2-8): um `comm_failure` na conexão derruba o
+    flow do MPC como derruba o de um OPC-Read. O grafo aqui já passou por `validate_graph`
+    (precondição do módulo) — `MpcConfig.model_validate` não deve falhar.
     """
-    return frozenset(
+    tag_conn_ids = (
         tags[node.config.tag_id].conn_id
         for node in graph.nodes
         if node.type in _TAG_TYPES and node.config.tag_id in tags
     )
+    pid_conn_ids = (
+        tags[tag_id].conn_id
+        for node in graph.nodes
+        if node.type == "mpc"
+        for tag_id in _mpc_pid_tag_ids(node)
+        if tag_id in tags
+    )
+    return frozenset((*tag_conn_ids, *pid_conn_ids))
+
+
+def _mpc_pid_tag_ids(node: FlowNode) -> Iterator[int]:
+    """Tags do `pid` de cada MV do bloco `mpc` — MV "direta" (sem `pid`, decisão A-8) não
+    contribui nenhuma."""
+    config = MpcConfig.model_validate(node.config.model_dump())
+    for mv in config.variables.mvs:
+        if mv.pid is None:
+            continue
+        yield mv.pid.write_tag_id
+        yield mv.pid.mode_cmd_tag_id
+        yield mv.pid.readback_tag_id
+        if mv.pid.mode_read_tag_id is not None:
+            yield mv.pid.mode_read_tag_id

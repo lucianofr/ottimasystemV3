@@ -49,41 +49,45 @@ def mpc_node(node_id: str, *, exec_order: int, mvs: list[dict], input_tag_id: in
     """Bloco `mpc` com 1 CV (par válido com toda MV) — grafo já validado (precondição do
     módulo `definition.py`, que não revalida conteúdo)."""
     cv_id = "cv_a"
-    return {
-        "id": node_id,
-        "type": "mpc",
-        "position": {"x": 0.0, "y": 0.0},
-        "data": {
-            "exec_order": exec_order,
-            "name": "MPC teste",
-            "multiplier": 1,
-            "variables": {
-                "mvs": mvs,
-                "cvs": [
-                    {
-                        "id": cv_id,
-                        "name": "CV a",
-                        "eu": "C",
-                        "kind": "selfreg",
-                        "tss": 30.0,
-                        "weight": 1.0,
-                        "sp_limits": {"min": 80.0, "max": 120.0},
+    return (
+        {
+            "id": node_id,
+            "type": "mpc",
+            "position": {"x": 0.0, "y": 0.0},
+            "data": {
+                "exec_order": exec_order,
+                "name": "MPC teste",
+                "multiplier": 1,
+                "variables": {
+                    "mvs": mvs,
+                    "cvs": [
+                        {
+                            "id": cv_id,
+                            "name": "CV a",
+                            "eu": "C",
+                            "kind": "selfreg",
+                            "tss": 30.0,
+                            "weight": 1.0,
+                            "sp_limits": {"min": 80.0, "max": 120.0},
+                        }
+                    ],
+                    "constraints": [],
+                    "dvs": [],
+                },
+                "models": {
+                    cv_id: {
+                        m["id"]: {
+                            "enabled": True,
+                            "params": {"K": 1.2, "tau1": 10.0, "tau2": 2.0, "theta": 15.0},
+                        }
+                        for m in mvs
                     }
-                ],
-                "constraints": [],
-                "dvs": [],
-            },
-            "models": {
-                cv_id: {
-                    m["id"]: {
-                        "enabled": True,
-                        "params": {"K": 1.2, "tau1": 10.0, "tau2": 2.0, "theta": 15.0},
-                    }
-                    for m in mvs
-                }
+                },
             },
         },
-    }, cv_id, input_tag_id
+        cv_id,
+        input_tag_id,
+    )
 
 
 def edge(edge_id: str, *, source: str, target: str, source_handle: str, target_handle: str) -> dict:
