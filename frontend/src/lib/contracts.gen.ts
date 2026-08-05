@@ -132,16 +132,34 @@ export interface FlowStatus {
   ports: Record<string, Record<string, PortValue>>;
 }
 
+export interface MpcModes {
+  local_remote: "local" | "remote";
+  man_auto: "man" | "auto";
+}
+
 export interface MpcPrediction {
   t: number[];
   cv: number[][];
   mv: number[][];
 }
 
+export interface MpcStatus {
+  solver: "ok" | "overrun" | "error" | "building" | "idle";
+  overruns: number;
+  last_solve_ms: number;
+  armed: boolean;
+  input_valid: boolean;
+}
+
+export interface MpcVarState {
+  v: number;
+  sp: number | null;
+}
+
 export interface MpcState {
-  modes: Record<string, string>;
-  status: Record<string, unknown>;
-  vars: Record<string, number>;
+  modes: MpcModes;
+  status: MpcStatus;
+  vars: Record<string, MpcVarState>;
   cost: number;
   prediction: MpcPrediction;
 }
