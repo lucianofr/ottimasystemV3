@@ -200,13 +200,17 @@ def _arm_args(block_id: str = "m1") -> dict:
 
 
 async def _deploy_and_warm(harness: Harness, collect: Collect, scenario: dict) -> Collector:
-    """Sobe o flow e garante ao menos uma varredura com CV válida ("entrada quente") antes
-    de qualquer comando de modo — o gate de MAN->AUTO e a confirmação de armar partem de um
+    """Sobe o flow e garante ao menos uma varredura com CV válida ("entrada quente") e o
+    readback do `pid` no snapshot antes de qualquer comando de modo — o gate de MAN->AUTO
+    e o de LOCAL->REMOTO (`auto_arm_blocked_reason()`, achado 2 da revisão F4) partem de um
     flow já rodando com dado real, não de um deploy ainda frio."""
     mpc_states = await collect(channel_mpc_state(scenario["flow_id"], "m1"))
     await harness.command("deploy", scenario["flow_id"])
     await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
     await publish_tag_value(harness.redis, scenario["connection_id"], scenario["cv_tag_id"], 90.0)
+    await publish_tag_value(
+        harness.redis, scenario["connection_id"], scenario["readback_tag_id"], 10.0
+    )
     await await_until(lambda: len(mpc_states.received) >= 1, timeout_s=AWAIT_TIMEOUT_S)
     return mpc_states
 
@@ -288,6 +292,10 @@ async def test_local_para_remoto_sem_confirmacao_em_2xtsmpc_reverte_e_arm_failed
     await harness.command("deploy", scenario["flow_id"])
     await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
     await publish_tag_value(harness.redis, scenario["connection_id"], scenario["cv_tag_id"], 90.0)
+    await publish_tag_value(
+        harness.redis, scenario["connection_id"], scenario["readback_tag_id"], 10.0
+    )
+    await await_until(lambda: len(mpc_states_collector.received) >= 1, timeout_s=AWAIT_TIMEOUT_S)
 
     # nunca publica mode_read == target: a confirmação nunca bate.
     await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
@@ -406,6 +414,10 @@ async def test_man_para_auto_falha_worker_not_ready(
     session_factory: Sessions,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Achado 2 da revisão F4: `worker_not_ready` bloqueia o PRÓPRIO armar REMOTO (mesmo
+    predicado das duas transições) — não dá mais pra chegar em REMOTO com o host sem
+    responder pra só então testar o gate de `man_auto`; quem falha agora é o axis
+    `local_remote`."""
     import ottima_flow_runtime.mpc.host as host_module
 
     # Sem isto o teste pagaria os 30s de `_BOOT_TIMEOUT_S` esperando um handshake que o
@@ -420,27 +432,22 @@ async def test_man_para_auto_falha_worker_not_ready(
     await publish_tag_value(harness.redis, scenario["connection_id"], scenario["cv_tag_id"], 90.0)
 
     await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
-    await await_until(lambda: len(events.events(KIND_MPC_MODE_CHANGED)) == 1)
-    await harness.command(
-        "mpc_mode",
-        scenario["flow_id"],
-        args={"block_id": "m1", "axis": "man_auto", "value": "auto"},
-    )
 
     await await_until(
         lambda: len(events.events(KIND_MPC_ARM_FAILED)) == 1, timeout_s=AWAIT_TIMEOUT_S
     )
     falha = events.events(KIND_MPC_ARM_FAILED)[0]
-    assert falha.payload["axis"] == "man_auto"
+    assert falha.payload["axis"] == "local_remote"
     assert falha.payload["reason"] == "worker_not_ready"
-    assert events.events(KIND_MPC_MODE_CHANGED)[-1].payload["axis"] == "local_remote", (
-        "nenhum segundo mpc_mode_changed de man_auto deveria ter saído"
-    )
+    assert events.events(KIND_MPC_MODE_CHANGED) == []
 
 
 async def test_man_para_auto_falha_cold_input(
     harness_factory: Factory, collect: Collect, session_factory: Sessions
 ) -> None:
+    """Achado 2 da revisão F4: entrada fria bloqueia o PRÓPRIO armar REMOTO — não dá mais
+    pra chegar lá com a CV nunca publicada. `man_auto` some depois, ignorado de verdade
+    (ADR-010, sub-modo só existe em REMOTO, e o bloco nunca saiu de LOCAL)."""
     scenario = await _scenario(session_factory)
     events = await collect(CHANNEL_EVENTS)
     harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
@@ -449,17 +456,22 @@ async def test_man_para_auto_falha_cold_input(
     # CV NUNCA publicada: entrada fria pra sempre (`_last_measured` nunca populado).
 
     await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
-    await await_until(lambda: len(events.events(KIND_MPC_MODE_CHANGED)) == 1)
+
+    await await_until(
+        lambda: len(events.events(KIND_MPC_ARM_FAILED)) == 1, timeout_s=AWAIT_TIMEOUT_S
+    )
+    falha = events.events(KIND_MPC_ARM_FAILED)[0]
+    assert falha.payload["axis"] == "local_remote"
+    assert falha.payload["reason"] == "cold_input"
+
     await harness.command(
         "mpc_mode",
         scenario["flow_id"],
         args={"block_id": "m1", "axis": "man_auto", "value": "auto"},
     )
-
-    await await_until(
-        lambda: len(events.events(KIND_MPC_ARM_FAILED)) == 1, timeout_s=AWAIT_TIMEOUT_S
-    )
-    assert events.events(KIND_MPC_ARM_FAILED)[0].payload["reason"] == "cold_input"
+    await asyncio.sleep(QUIET_WINDOW_S)
+    assert len(events.events(KIND_MPC_ARM_FAILED)) == 1  # man_auto não gera um 2o falhado
+    assert events.events(KIND_MPC_MODE_CHANGED) == []
 
 
 async def test_man_para_auto_falha_invalid_input(
@@ -470,14 +482,18 @@ async def test_man_para_auto_falha_invalid_input(
     harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
     mpc_states_collector = await _deploy_and_warm(harness, collect, scenario)
 
-    # Quente (já mediu antes, via `_deploy_and_warm`), mas a MEDIDA MAIS RECENTE é inválida.
+    # Arma REMOTO enquanto a entrada ainda está válida — depois do fix (achado 2 da
+    # revisão F4) o próprio armar compartilha o gate com `man_auto`, então isto tem de vir
+    # ANTES de invalidar a entrada, senão o armar em si já falharia.
+    await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
+    await await_until(lambda: len(events.events(KIND_MPC_MODE_CHANGED)) == 1)
+
+    # Quente (já mediu antes), mas a MEDIDA MAIS RECENTE é inválida.
     await publish_tag_value(
         harness.redis, scenario["connection_id"], scenario["cv_tag_id"], 90.0, quality=2
     )
     await await_until(lambda: _last_mpc_state(mpc_states_collector).status.input_valid is False)
 
-    await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
-    await await_until(lambda: len(events.events(KIND_MPC_MODE_CHANGED)) == 1)
     await harness.command(
         "mpc_mode",
         scenario["flow_id"],
@@ -807,8 +823,7 @@ async def test_comando_mpc_para_flow_ou_bloco_desconhecido_e_ignorado(
     scenario = await _scenario(session_factory)
     events = await collect(CHANNEL_EVENTS)
     harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
-    await harness.command("deploy", scenario["flow_id"])
-    await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
+    await _deploy_and_warm(harness, collect, scenario)
 
     await harness.command(
         "mpc_mode",
@@ -827,3 +842,106 @@ async def test_comando_mpc_para_flow_ou_bloco_desconhecido_e_ignorado(
     # O consumidor de comandos segue vivo depois dos dois comandos órfãos.
     await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
     await await_until(lambda: len(events.events(KIND_MPC_MODE_CHANGED)) == 1)
+
+
+# --------------------------------------------------------------------------------------
+# 17: achado 1 da revisão F4 — flow falha por exceção não tratada num bloco QUALQUER com
+#     o MPC ainda armado REMOTO: o watermark (`reconcile()`) devolve o PID sozinho, sem
+#     esperar redeploy nenhum; idempotente, uma segunda passada não reescreve.
+# --------------------------------------------------------------------------------------
+
+
+async def test_flow_falha_com_mpc_armado_remoto_watermark_devolve_o_pid(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    scenario = await _scenario(session_factory)
+    events = await collect(CHANNEL_EVENTS)
+    writes = await collect(CHANNEL_OPC_WRITES)
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+    await _deploy_and_warm(harness, collect, scenario)
+
+    await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
+    await await_until(lambda: len(events.events(KIND_MPC_MODE_CHANGED)) == 1)
+    # Confirma: watchdog fica de pé (não reverte sozinho por `no_confirm`) até a explosão.
+    await publish_tag_value(
+        harness.redis, scenario["connection_id"], scenario["mode_read_tag_id"], float(_MODE_TARGET)
+    )
+    await asyncio.sleep(2.2 * TS_SECONDS)
+    assert events.events(KIND_MPC_ARM_FAILED) == []
+
+    runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    assert "m1" in runtime.mpc_watchdogs  # armado, watchdog vivo — precondição do teste
+    mode_cmd_antes = writes_of(writes, tag_id=scenario["mode_cmd_tag_id"])
+    assert len(mode_cmd_antes) == 1  # só o write de armar até aqui
+
+    # Explode um bloco QUALQUER (o OPC-Read "r1") — scheduler.py `_handle_loop_failure`
+    # leva o flow a `failed` sem o supervisor ter tomado conhecimento nenhum.
+    read_block = runtime.blocks["r1"][1]
+
+    async def boom(inputs: object) -> None:
+        raise RuntimeError("bloco-duplo explodiu de proposito")
+
+    read_block.step = boom
+    await harness.await_state(scenario["flow_id"], "failed", timeout_s=AWAIT_TIMEOUT_S)
+
+    # Antes do watermark: PID ainda esquecido, watchdog ainda no dict.
+    assert writes_of(writes, tag_id=scenario["mode_cmd_tag_id"]) == mode_cmd_antes
+    assert "m1" in runtime.mpc_watchdogs
+
+    await harness.supervisor.reconcile()
+    await await_until(
+        lambda: len(writes_of(writes, tag_id=scenario["mode_cmd_tag_id"])) == 2,
+        timeout_s=AWAIT_TIMEOUT_S,
+    )
+    mode_cmd = writes_of(writes, tag_id=scenario["mode_cmd_tag_id"])
+    assert [w.value for w in mode_cmd] == [float(_MODE_TARGET), float(_MODE_AUTO)]
+    assert "m1" not in runtime.mpc_watchdogs
+
+    # Idempotência: uma segunda passada não escreve `mode_cmd` de novo.
+    await harness.supervisor.reconcile()
+    await asyncio.sleep(QUIET_WINDOW_S)
+    assert writes_of(writes, tag_id=scenario["mode_cmd_tag_id"]) == mode_cmd
+
+
+# --------------------------------------------------------------------------------------
+# 18: achado 2 da revisão F4 — LOCAL->REMOTO com entrada fria é bloqueado pelo MESMO
+#     predicado do MAN->AUTO (`auto_arm_blocked_reason`); o gate não é permanente.
+# --------------------------------------------------------------------------------------
+
+
+async def test_local_para_remoto_com_entrada_fria_e_bloqueado_e_depois_aquecido_arma(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    scenario = await _scenario(session_factory)
+    events = await collect(CHANNEL_EVENTS)
+    writes = await collect(CHANNEL_OPC_WRITES)
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+    await harness.command("deploy", scenario["flow_id"])
+    await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
+    # CV e readback NUNCA publicadas: entrada fria pra sempre.
+
+    await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
+
+    await await_until(
+        lambda: len(events.events(KIND_MPC_ARM_FAILED)) == 1, timeout_s=AWAIT_TIMEOUT_S
+    )
+    falha = events.events(KIND_MPC_ARM_FAILED)[0]
+    assert falha.payload["axis"] == "local_remote"
+    assert falha.payload["reason"] == "cold_input"
+    assert writes_of(writes, tag_id=scenario["mode_cmd_tag_id"]) == []
+    assert events.events(KIND_MPC_MODE_CHANGED) == []
+
+    runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    block = runtime.blocks["m1"][1]
+    assert block.local_remote == "local"  # nunca transicionou (sem salto de MV possível)
+
+    # Aquece e tenta de novo: o gate não é permanente.
+    await publish_tag_value(harness.redis, scenario["connection_id"], scenario["cv_tag_id"], 90.0)
+    await publish_tag_value(
+        harness.redis, scenario["connection_id"], scenario["readback_tag_id"], 10.0
+    )
+    await await_until(lambda: block.auto_arm_blocked_reason() is None, timeout_s=AWAIT_TIMEOUT_S)
+
+    await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
+    await await_until(lambda: len(events.events(KIND_MPC_MODE_CHANGED)) == 1)
+    assert len(writes_of(writes, tag_id=scenario["mode_cmd_tag_id"])) == 1

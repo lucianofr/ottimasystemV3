@@ -73,7 +73,7 @@ class MpcOrchestrator:
     # Comandos do bloco MPC (spec F4 §4.4/§4.8, plano F4b tarefa 2.2)
     # ----------------------------------------------------------------------------------
 
-    async def _mpc_command(self, command: FlowCommand) -> None:
+    async def mpc_command(self, command: FlowCommand) -> None:
         flow_id = command.flow_id
         runtime = self._runtimes.get(flow_id)
         if runtime is None or runtime.task.state != "running":
@@ -138,8 +138,29 @@ class MpcOrchestrator:
         """LOCAL<->REMOTO (spec §4.4): materializa no bloco primeiro (idempotência, MAN e
         MV manual := vigente já são regra do bloco), e só se algo REALMENTE mudou escreve
         `mode_cmd`/arma o watchdog de confirmação — comando repetido não reescreve o PID
-        nem reinicia a janela de confirmação."""
-        await self._cancel_watchdog(runtime, block_id)
+        nem reinicia a janela de confirmação.
+
+        Achado 2 da revisão F4: armar REMOTO só passava pelo predicado que já gateava
+        MAN->AUTO (`auto_arm_blocked_reason()`: host pronto + entradas quentes e válidas +
+        readback de todo `pid`) NA transição de sub-modo — a de eixo `local_remote` não
+        checava nada. Armar com entrada fria escrevia `mode_cmd=target` na hora, mas
+        `MpcBlock.step()` sai cedo no `has_cold_input` ANTES de atualizar `_mv_last`; o MAN
+        manual congelava em `initial_value` até a entrada esquentar — e aí saltava pro
+        valor real (PRD §8-F4). Gate aqui, ANTES de materializar: sem isso, `mpc_arm_failed`
+        sai e a transição nem acontece — o bloco fica LOCAL."""
+        if value == "remote" and block.local_remote != "remote":
+            reason = block.auto_arm_blocked_reason()
+            if reason is not None:
+                await publish_event(
+                    self._redis,
+                    severity="warning",
+                    origin=mpc_block_origin(flow_id, block_id),
+                    message=f"MPC '{block_id}': armar 'local_remote' falhou ({reason})",
+                    kind=KIND_MPC_ARM_FAILED,
+                    payload={"axis": "local_remote", "reason": reason},
+                )
+                return
+        await self.cancel_watchdog(runtime, block_id)
         was_remote = block.local_remote == "remote"
         await block.command("mpc_mode", {"axis": "local_remote", "value": value}, user)
         now_remote = block.local_remote == "remote"
@@ -189,7 +210,7 @@ class MpcOrchestrator:
         )
         runtime.mpc_watchdogs[block_id] = task
 
-    async def _cancel_watchdog(self, runtime: _FlowRuntime, block_id: str) -> None:
+    async def cancel_watchdog(self, runtime: _FlowRuntime, block_id: str) -> None:
         task = runtime.mpc_watchdogs.pop(block_id, None)
         if task is None:
             return
@@ -272,15 +293,21 @@ class MpcOrchestrator:
             payload=payload,
         )
 
-    async def _shutdown_mpc(self, runtime: _FlowRuntime, *, flow_id: int) -> None:
+    async def shutdown_mpc(self, runtime: _FlowRuntime, *, flow_id: int) -> None:
         """Devolve o PID (`mode_cmd=auto`) de todo bloco MPC armado e mata os workers da
         tarefa — chamado ANTES de `task.stop()` em todo caminho de parada exceto
         `on_comm_failure` (ADR-009: a conexão pode estar caída lá, sem como escrever; o
-        watchdog do lado do PLC devolve, documentado no relatório da tarefa 2.2)."""
+        watchdog do lado do PLC devolve, documentado no relatório da tarefa 2.2).
+
+        Idempotente: repetir numa `_FlowRuntime` já tratada não escreve `mode_cmd` de novo
+        (guarda por `block.local_remote`, que a primeira chamada já deixou "local") nem
+        falha ao re-parar host (`MpcHost.stop()` já é idempotente) — é o que deixa o
+        supervisor chamar de novo sem se importar se já rodou antes (achado 1 da revisão
+        F4: falha interna do flow sem handback anunciado, `_handback_failed_mpc`)."""
         for block_id, (_, block) in list(runtime.blocks.items()):
             if not isinstance(block, MpcBlock):
                 continue
-            await self._cancel_watchdog(runtime, block_id)
+            await self.cancel_watchdog(runtime, block_id)
             if block.local_remote == "remote":
                 await block.command(
                     "mpc_mode", {"axis": "local_remote", "value": "local"}, self._system_actor
@@ -298,7 +325,7 @@ class MpcOrchestrator:
     # Hot-swap (spec §4.1, §4.7)
     # ----------------------------------------------------------------------------------
 
-    async def _reconcile_mpc_hosts(
+    async def reconcile_mpc_hosts(
         self, runtime: _FlowRuntime, staged: StagedDefinition, *, flow_id: int
     ) -> list[str]:
         """Hot-swap de host por `MpcHost` (spec §4.7): bloco cujo config não mudou preserva
@@ -306,7 +333,16 @@ class MpcOrchestrator:
         host novo e sheda o antigo a LOCAL antes de matar o processo velho. Devolve os
         `block_id` substituídos (config mudou, ainda presentes no grafo novo) — `_stage`
         publica `mpc_mode_changed{reason: hot_swap}` para eles só DEPOIS de já ter
-        atualizado `runtime.blocks`/`runtime.hosts`, nunca aqui dentro."""
+        atualizado `runtime.blocks`/`runtime.hosts`, nunca aqui dentro.
+
+        Achado 4 da revisão F4 (race contra `_auto_revert` do watchdog, que roda FORA de
+        `self._lock`): `cancel_watchdog` pode achar o dict já vazio — o watchdog se
+        auto-removeu ao disparar `_auto_revert` — e virar no-op sem esperar essa task. Mas
+        `_auto_revert` remove a entrada do dict E muda `block.local_remote` no MESMO trecho
+        síncrono (sem nenhum `await` entre as duas linhas — só depois vem o primeiro I/O,
+        `_audit_mode_changed`). Logo quem acha o dict vazio SEMPRE acha `local_remote` já
+        "local" também: nunca os dois escrevem `mode_cmd=auto` pro mesmo bloco. Provado no
+        relatório desta tarefa (fix-final-supervisor.md); nenhum guard extra entrou aqui."""
         old_hosts = runtime.hosts
         new_hosts = staged.hosts
         for block_id, host in new_hosts.items():
@@ -316,7 +352,7 @@ class MpcOrchestrator:
         for block_id, old_host in old_hosts.items():
             if new_hosts.get(block_id) is old_host:
                 continue  # bloco não mudou: host e estado preservados (§4.1-3)
-            await self._cancel_watchdog(runtime, block_id)
+            await self.cancel_watchdog(runtime, block_id)
             old_entry = runtime.blocks.get(block_id)
             if old_entry is not None and isinstance(old_entry[1], MpcBlock):
                 old_block = old_entry[1]

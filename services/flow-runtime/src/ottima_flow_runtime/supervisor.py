@@ -230,9 +230,9 @@ class Supervisor:
             "deploy": self._deploy,
             "stop": self._stop,
             "reload": self._reload,
-            "mpc_mode": self._mpc._mpc_command,
-            "mpc_sp": self._mpc._mpc_command,
-            "mpc_mv": self._mpc._mpc_command,
+            "mpc_mode": self._mpc.mpc_command,
+            "mpc_sp": self._mpc.mpc_command,
+            "mpc_mv": self._mpc.mpc_command,
         }
         handler = handlers.get(command.cmd)
         if handler is None:
@@ -310,13 +310,14 @@ class Supervisor:
         if old_runtime is not None:
             # Redeploy sobre um runtime anterior (parado ou em falha, nunca "running" — o
             # early-return acima cobre isso): a `StagedDefinition` nova é zerada (`reuse={}`),
-            # então qualquer `MpcHost`/watchdog do runtime velho ficaria órfão sem isto —
-            # falha (`comm_failure`) não desarma nem para host nenhum (ADR-009), então é
-            # aqui, não lá, que o processo do worker antigo finalmente morre.
-            for block_id in list(old_runtime.mpc_watchdogs):
-                await self._mpc._cancel_watchdog(old_runtime, block_id)
-            for host in old_runtime.hosts.values():
-                await host.stop()
+            # então qualquer `MpcHost`/watchdog do runtime velho ficaria órfão sem isto.
+            # `shutdown_mpc` (idempotente) também devolve `mode_cmd=auto` se o bloco velho
+            # ainda estiver armado REMOTO — achado 1 da revisão F4: sem isto, um redeploy
+            # logo após uma falha interna (watermark ainda não passou) matava o worker
+            # antigo mas nunca escrevia a devolução, travando o PID em `target` pra sempre
+            # (comm_failure não conta: `fail()` já reseta o bloco pra LOCAL antes de chegar
+            # aqui, então o guard por `local_remote` é no-op nesse caso).
+            await self._mpc.shutdown_mpc(old_runtime, flow_id=flow_id)
 
     async def _stop(self, command: FlowCommand) -> None:
         flow_id = command.flow_id
@@ -324,7 +325,7 @@ class Supervisor:
         if runtime is None or runtime.task.state != "running":
             # Parado, em falha ou desconhecido: nada a materializar, nenhum evento.
             return
-        await self._mpc._shutdown_mpc(runtime, flow_id=flow_id)
+        await self._mpc.shutdown_mpc(runtime, flow_id=flow_id)
         await runtime.task.stop(user=command.user, reason=REASON_USER)
         await publish_flow_stopped(
             self._redis, flow_id=flow_id, reason=REASON_USER, user=command.user
@@ -382,7 +383,7 @@ class Supervisor:
             runtime.updated_at = flow.updated_at
             return
 
-        swapped_block_ids = await self._mpc._reconcile_mpc_hosts(runtime, staged, flow_id=flow.id)
+        swapped_block_ids = await self._mpc.reconcile_mpc_hosts(runtime, staged, flow_id=flow.id)
         runtime.task.stage(staged.definition)
         runtime.ts_seconds = staged.ts_seconds
         runtime.conn_ids = staged.conn_ids
@@ -453,7 +454,7 @@ class Supervisor:
                 if runtime.task.state != "running" or conn_id not in runtime.conn_ids:
                     continue
                 for block_id in list(runtime.mpc_watchdogs):
-                    await self._mpc._cancel_watchdog(runtime, block_id)
+                    await self._mpc.cancel_watchdog(runtime, block_id)
                 try:
                     await runtime.task.fail(reason=REASON_COMM_FAILURE)
                 except Exception:
@@ -479,12 +480,17 @@ class Supervisor:
             await self._pass()
 
     async def _pass(self) -> None:
-        """Uma passada sobre os flows **rodando**. Absorve toda exceção.
+        """Uma passada sobre os flows **rodando** + a devolução de PID órfã (achado 1 da
+        revisão F4, `_handback_failed_mpc`). Absorve toda exceção.
 
-        O domínio da passada é o conjunto de flows rodando, e é por construção que ela nunca
-        inicia flow nenhum (contrato 1 / ADR-017): não existe caminho daqui para `start()`.
+        O domínio do reconcile de banco é só o conjunto de flows rodando, e é por
+        construção que ela nunca inicia flow nenhum (contrato 1 / ADR-017): não existe
+        caminho daqui para `start()`. A devolução de PID roda pra QUALQUER flow no mapa,
+        rodando ou não — só ela cobre o flow que caiu em `failed` sem passar pelo
+        supervisor.
         """
         async with self._lock:
+            await self._handback_failed_mpc()
             running = [
                 flow_id
                 for flow_id, runtime in self._runtimes.items()
@@ -498,6 +504,23 @@ class Supervisor:
                         await self._reconcile_flow(session, flow_id)
             except Exception:
                 logger.exception("Falha na passada de watermark do supervisor")
+
+    async def _handback_failed_mpc(self) -> None:
+        """Achado 1 da revisão F4: `FlowTask` pode ir a `failed` por exceção não tratada em
+        QUALQUER bloco (scheduler.py `_handle_loop_failure`) sem passar pelo supervisor
+        nenhuma vez — nem watchdog cancelado, nem `mode_cmd` devolvido; um MPC armado
+        REMOTO fica esquecido, travando o PID no PLC em `target` pra sempre.
+
+        Só entra quem tem watchdog ainda vivo no `_FlowRuntime`: toda saída controlada de
+        REMOTO (comando explícito, `_stop`/`_force_stop`/`_teardown`, hot-swap,
+        `on_comm_failure`) já cancela o watchdog ANTES de deixar de rodar — sobreviver até
+        aqui com watchdog em pé só acontece nesta falha interna, não anunciada.
+        `shutdown_mpc` é idempotente (guarda por `local_remote`, `MpcHost.stop()`
+        idempotente): repetir a cada passada até o flow sumir do mapa (redeploy) nunca
+        escreve `mode_cmd` de novo."""
+        for flow_id, runtime in list(self._runtimes.items()):
+            if runtime.task.state == "failed" and runtime.mpc_watchdogs:
+                await self._mpc.shutdown_mpc(runtime, flow_id=flow_id)
 
     async def _reconcile_flow(self, session: AsyncSession, flow_id: int) -> None:
         runtime = self._runtimes.get(flow_id)
@@ -546,7 +569,7 @@ class Supervisor:
         if runtime is None or runtime.task.state != "running":
             return
         try:
-            await self._mpc._shutdown_mpc(runtime, flow_id=flow_id)
+            await self._mpc.shutdown_mpc(runtime, flow_id=flow_id)
             await runtime.task.stop(user=SYSTEM_ACTOR, reason=reason)
         except Exception:
             logger.exception("Falha ao parar o flow %s (motivo=%s)", flow_id, reason)
@@ -583,19 +606,16 @@ class Supervisor:
 
         O flow que estava rodando ganha `flow_stopped` com `reason="shutdown"`: sem ele o
         último evento de estado continuaria `flow_deployed`, e depois de um restart a lista
-        mostraria "Rodando" enquanto o `/health` mostra `flows={}`. Um flow já parado/em
-        falha pode ainda ter `MpcHost` vivo (`comm_failure` não para host nenhum, ADR-009) —
-        mata aqui, sem tentar devolver o PID (o flow não está mais rodando).
-        """
+        mostraria "Rodando" enquanto o `/health` mostra `flows={}`. `shutdown_mpc` roda pra
+        QUALQUER runtime, rodando ou não (achado 1 da revisão F4): um flow já parado/em
+        falha pode ainda ter `MpcHost` vivo (`comm_failure` não para host nenhum, ADR-009)
+        e/ou watchdog esquecido de uma falha interna que o watermark ainda não alcançou —
+        mata o host e devolve o PID aqui, idempotente (no-op se já tratado antes)."""
         runtime = self._runtimes.get(flow_id)
         try:
             if runtime is not None:
                 was_running = runtime.task.state == "running"
-                if was_running:
-                    await self._mpc._shutdown_mpc(runtime, flow_id=flow_id)
-                else:
-                    for host in runtime.hosts.values():
-                        await host.stop()
+                await self._mpc.shutdown_mpc(runtime, flow_id=flow_id)
                 await runtime.task.stop(user=SYSTEM_ACTOR, reason=REASON_SHUTDOWN)
                 if was_running:
                     # Sem usuário comandando um desligamento: a chave `user` é omitida, como
