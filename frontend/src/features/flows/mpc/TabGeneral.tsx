@@ -1,5 +1,6 @@
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
+import { formatarNumero } from "../useFlowStatus";
 import { tsMpcDerivado } from "./mpcLogic";
 
 interface Props {
@@ -50,7 +51,7 @@ export function TabGeneral({ nome, multiplier, tsFlowSegundos, aoMudarMultiplier
             readOnly
             disabled
             className="process-value"
-            value={`${String(tsMpcDerivado(multiplier, tsFlowSegundos))} s`}
+            value={`${formatarNumero(tsMpcDerivado(multiplier, tsFlowSegundos))} s`}
           />
           <p className="text-[10px] text-fg-muted">
             multiplier × Ts_flow — nunca editado diretamente (RF-603).

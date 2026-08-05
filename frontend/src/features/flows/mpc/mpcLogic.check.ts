@@ -15,14 +15,22 @@ import {
   variavelRestricaoDoFormulario,
 } from "./mpcLogic";
 
-test("gerarIdVariavel prefixa por tipo e nunca repete em 1000 gerações", () => {
+test("gerarIdVariavel prefixa por tipo e segue o formato <prefixo>_<4 chars base-36>", () => {
   expect(gerarIdVariavel("mv")).toMatch(/^mv_[a-z0-9]{4}$/);
   expect(gerarIdVariavel("cv")).toMatch(/^cv_[a-z0-9]{4}$/);
   expect(gerarIdVariavel("co")).toMatch(/^co_[a-z0-9]{4}$/);
   expect(gerarIdVariavel("dv")).toMatch(/^dv_[a-z0-9]{4}$/);
+});
 
-  const ids = new Set(Array.from({ length: 1000 }, () => gerarIdVariavel("mv")));
-  expect(ids.size).toBe(1000);
+// O sufixo vem de `Math.random()` (default) — testar unicidade por amostragem estatística
+// seria flaky (1000 sorteios em 36^4 colidem ~26% das vezes). Em vez disso, o RNG é
+// injetável: o teste prova determinismo (mesma entrada -> mesma saída, entradas distintas ->
+// saídas distintas), sem depender de estatística.
+test("gerarIdVariavel é determinístico dado o RNG injetado", () => {
+  const fixo = (): number => 0.123456789;
+  expect(gerarIdVariavel("mv", fixo)).toBe(`mv_${fixo().toString(36).slice(2, 6)}`);
+  expect(gerarIdVariavel("cv", fixo)).toBe(`cv_${fixo().toString(36).slice(2, 6)}`);
+  expect(gerarIdVariavel("mv", () => 0.1)).not.toBe(gerarIdVariavel("mv", () => 0.9));
 });
 
 test("Ts_mpc deriva de multiplier × Ts_flow (spec F4 §2.2-5)", () => {

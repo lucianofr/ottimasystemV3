@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
@@ -70,7 +72,7 @@ function LinhaVariavel({
   varId: string;
   testid: string;
   aoRemover: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <fieldset

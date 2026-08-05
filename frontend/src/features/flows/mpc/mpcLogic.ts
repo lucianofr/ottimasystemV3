@@ -19,9 +19,14 @@ import type {
 const PREFIXOS_VARIAVEL = { mv: "mv", cv: "cv", co: "co", dv: "dv" } as const;
 export type PrefixoVariavel = keyof typeof PREFIXOS_VARIAVEL;
 
-/** Id estável `<prefixo>_<sufixo>` (spec F4 §2.1-1), gerado na criação, imutável depois. */
-export function gerarIdVariavel(prefixo: PrefixoVariavel): string {
-  const sufixo = Math.random().toString(36).slice(2, 6);
+/** Id estável `<prefixo>_<sufixo>` (spec F4 §2.1-1), gerado na criação, imutável depois.
+ *  `aleatorio` é injetável (default `Math.random`) para o teste ser determinístico em vez de
+ *  depender de estatística sobre muitas gerações (revisão 4.2 fix 1). */
+export function gerarIdVariavel(
+  prefixo: PrefixoVariavel,
+  aleatorio: () => number = Math.random,
+): string {
+  const sufixo = aleatorio().toString(36).slice(2, 6);
   return `${PREFIXOS_VARIAVEL[prefixo]}_${sufixo}`;
 }
 
