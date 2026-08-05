@@ -7,18 +7,22 @@ import type { TagOut } from "../../../lib/api";
 import { inteiroDoCampo } from "../config/campos";
 import type { DadosMpc, NoMpc, ParModeloMpc, VariaveisMpc } from "../graph";
 import { TabGeneral } from "./TabGeneral";
+import { TabHorizons } from "./TabHorizons";
+import { TabLimits } from "./TabLimits";
 import { TabModels } from "./TabModels";
+import { TabSummary } from "./TabSummary";
 import { TabVariables } from "./TabVariables";
+import { TabWeights } from "./TabWeights";
 import {
   parModeloDoFormulario,
+  validarConfigMpc,
   variavelCvDoFormulario,
   variavelDvDoFormulario,
   variavelMvDoFormulario,
   variavelRestricaoDoFormulario,
 } from "./mpcLogic";
 
-/** 7 abas do modal MPC, verbatim RF-607 (spec F4 §7.3): as 3 primeiras são a tarefa 4.2; as
- *  4 últimas nascem placeholder aqui e ganham conteúdo na 4.3 — a navegação já cobre as 7. */
+/** 7 abas do modal MPC, verbatim RF-607 (spec F4 §7.3). */
 const ABAS = [
   { slug: "geral", rotulo: "Geral" },
   { slug: "variaveis", rotulo: "Variáveis" },
@@ -29,14 +33,6 @@ const ABAS = [
   { slug: "resumo", rotulo: "Resumo" },
 ] as const;
 type SlugAba = (typeof ABAS)[number]["slug"];
-
-function AbaPlaceholder({ rotulo }: { rotulo: string }) {
-  return (
-    <p className="text-xs text-fg-muted">
-      Aba {rotulo}: conteúdo entra na tarefa 4.3 (spec F4 §7.3).
-    </p>
-  );
-}
 
 /** Reconstrói a matriz `models` a partir do formulário: cada par habilitado lê seus params
  *  pela forma do `kind` vigente da linha; pares não citados nas listas atuais são descartados
@@ -121,6 +117,19 @@ export function MpcModal({
     const execOrder = inteiroDoCampo(campos.get("exec_order"), no.data.exec_order, 1, totalBlocos);
     const name = String(campos.get("mpc_name") ?? "").trim();
     const novasVariaveis = variaveisDoFormulario(variaveis, campos);
+    const novosModelos = modelosDoFormulario(novasVariaveis, modelos, campos);
+
+    // Aba Resumo (spec F4 §7.3-7): erro bloqueante impede o Aplicar — sincroniza o estado com
+    // o que acabou de sair do formulário (para a aba Resumo mostrar exatamente o que bloqueou,
+    // mesmo que os campos numéricos editados não estejam mais montados) e navega para lá em
+    // vez de fechar. Aviso não bloqueia.
+    const { erros } = validarConfigMpc(novasVariaveis, novosModelos, multiplier, tsFlowSegundos);
+    if (erros.length > 0) {
+      setVariaveis(novasVariaveis);
+      setModelos(novosModelos);
+      setAba("resumo");
+      return;
+    }
 
     const dados: DadosMpc = {
       exec_order: no.data.exec_order,
@@ -128,7 +137,7 @@ export function MpcModal({
       name,
       multiplier,
       variables: novasVariaveis,
-      models: modelosDoFormulario(novasVariaveis, modelos, campos),
+      models: novosModelos,
     };
     onAplicar({ ...no, data: dados }, execOrder);
     // `close()` explícito (débito m4, spec F4 §8): `onClose` dispara `onFechar`.
@@ -183,12 +192,20 @@ export function MpcModal({
           </div>
 
           {/* Navegação das 7 abas em botões (comutador de posição, não iOS toggle —
-              DESIGN.md §Shapes/§Don'ts): a aba ativa vira chapa "pressionada". */}
-          <nav className="flex flex-wrap gap-1 border-b border-hairline pb-2" aria-label="Abas MPC">
+              DESIGN.md §Shapes/§Don'ts): a aba ativa vira chapa "pressionada". `role="tablist"`/
+              `role="tab"`/`aria-selected` fecham o minor 4 da revisão 4.2 (semântica ARIA
+              adiada até as 7 abas terem conteúdo real). */}
+          <nav
+            role="tablist"
+            className="flex flex-wrap gap-1 border-b border-hairline pb-2"
+            aria-label="Abas MPC"
+          >
             {ABAS.map((item) => (
               <button
                 key={item.slug}
                 type="button"
+                role="tab"
+                aria-selected={aba === item.slug}
                 data-testid={`mpc-tab-${item.slug}`}
                 onClick={() => {
                   setAba(item.slug);
@@ -204,7 +221,7 @@ export function MpcModal({
             ))}
           </nav>
 
-          <div className="min-h-[280px]">
+          <div role="tabpanel" className="min-h-[280px]">
             {aba === "geral" && (
               <TabGeneral
                 nome={no.data.name}
@@ -219,13 +236,25 @@ export function MpcModal({
             {aba === "modelos" && (
               <TabModels variaveis={variaveis} modelos={modelos} aoMudar={setModelos} />
             )}
-            {aba !== "geral" &&
-              aba !== "variaveis" &&
-              aba !== "modelos" &&
-              (() => {
-                const item = ABAS.find((candidata) => candidata.slug === aba);
-                return item !== undefined && <AbaPlaceholder rotulo={item.rotulo} />;
-              })()}
+            {aba === "horizontes" && (
+              <TabHorizons
+                variaveis={variaveis}
+                aoMudarVariaveis={setVariaveis}
+                modelos={modelos}
+                multiplier={multiplier}
+                tsFlowSegundos={tsFlowSegundos}
+              />
+            )}
+            {aba === "restricoes-limites" && <TabLimits variaveis={variaveis} />}
+            {aba === "pesos" && <TabWeights variaveis={variaveis} />}
+            {aba === "resumo" && (
+              <TabSummary
+                variaveis={variaveis}
+                modelos={modelos}
+                multiplier={multiplier}
+                tsFlowSegundos={tsFlowSegundos}
+              />
+            )}
           </div>
         </fieldset>
 
