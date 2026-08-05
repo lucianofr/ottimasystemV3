@@ -433,9 +433,7 @@ async def test_dupla_cancelacao_durante_replace_nao_encolhe_o_pool(pool, monkeyp
     await await_until(lambda: len(pool._state.workers) == tamanho)
     assert pool.stats()["size"] == len(pool._state.workers) == tamanho
 
-    depois = await pool.run(
-        code="OUT1 = 7.0\n", inputs={}, state=None, n_outputs=1, timeout_s=10.0
-    )
+    depois = await pool.run(code="OUT1 = 7.0\n", inputs={}, state=None, n_outputs=1, timeout_s=10.0)
     assert depois.status == "ok" and depois.outputs == {"OUT1": 7.0}
 
 
@@ -500,15 +498,14 @@ async def test_stats_conta_respawns_e_reflete_ocupacao(pool, monkeypatch):
         with pytest.raises(asyncio.CancelledError):
             await corrida
         await await_until(
-            lambda esperado=ciclo_esperado: pool.stats()
-            == {"size": 2, "busy": 0, "respawns": esperado}
+            lambda esperado=ciclo_esperado: (
+                pool.stats() == {"size": 2, "busy": 0, "respawns": esperado}
+            )
         )
         assert pool.stats() == {"size": 2, "busy": 0, "respawns": ciclo_esperado}
 
 
-async def test_cancelamento_durante_replace_nos_outros_ramos_nao_encolhe_o_pool(
-    pool, monkeypatch
-):
+async def test_cancelamento_durante_replace_nos_outros_ramos_nao_encolhe_o_pool(pool, monkeypatch):
     """Achado 1 do fix round 1 (revisão da tarefa 0.6): a blindagem vive DENTRO de
     `_replace` desde esta correção, então cobre os 4 call-sites de `run()` com o mesmo
     mecanismo — não só o `except CancelledError`. Aqui a cancelação pousa dentro do
@@ -572,9 +569,7 @@ async def test_cancelamento_durante_replace_nos_outros_ramos_nao_encolhe_o_pool(
     # Ramo `if not isinstance(result, ScriptResult):`.
     await executa_com_cancelamento_no_replace(falha_lixo)
 
-    depois = await pool.run(
-        code="OUT1 = 7.0\n", inputs={}, state=None, n_outputs=1, timeout_s=10.0
-    )
+    depois = await pool.run(code="OUT1 = 7.0\n", inputs={}, state=None, n_outputs=1, timeout_s=10.0)
     assert depois.status == "ok" and depois.outputs == {"OUT1": 7.0}
 
 
@@ -615,9 +610,7 @@ async def test_stop_durante_replace_em_voo_nao_deixa_processo_orfao(monkeypatch)
 
     try:
         corrida = asyncio.create_task(
-            pool_local.run(
-                code="OUT1 = 1.0\n", inputs={}, state=None, n_outputs=1, timeout_s=30.0
-            )
+            pool_local.run(code="OUT1 = 1.0\n", inputs={}, state=None, n_outputs=1, timeout_s=30.0)
         )
         # `is_set()` via `await_until` em vez de `to_thread(evento.wait, ...)`: a segunda
         # não consumiria uma thread do executor padrão à toa enquanto `_spawn_worker` já

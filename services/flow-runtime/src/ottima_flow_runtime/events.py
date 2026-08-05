@@ -63,9 +63,7 @@ def build_event_listener(
             if isinstance(project_id, int):
                 await on_project_activated(project_id)
 
-    return ChannelListener(
-        redis_client, CHANNEL_EVENTS, handle, name=f"listener-{CHANNEL_EVENTS}"
-    )
+    return ChannelListener(redis_client, CHANNEL_EVENTS, handle, name=f"listener-{CHANNEL_EVENTS}")
 
 
 def flow_origin(flow_id: int) -> str:
