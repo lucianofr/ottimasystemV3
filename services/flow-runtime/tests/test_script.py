@@ -506,6 +506,153 @@ async def test_stats_conta_respawns_e_reflete_ocupacao(pool, monkeypatch):
         assert pool.stats() == {"size": 2, "busy": 0, "respawns": ciclo_esperado}
 
 
+async def test_cancelamento_durante_replace_nos_outros_ramos_nao_encolhe_o_pool(
+    pool, monkeypatch
+):
+    """Achado 1 do fix round 1 (revisão da tarefa 0.6): a blindagem vive DENTRO de
+    `_replace` desde esta correção, então cobre os 4 call-sites de `run()` com o mesmo
+    mecanismo — não só o `except CancelledError`. Aqui a cancelação pousa dentro do
+    `await self._replace(...)` dos outros 3 ramos (pipe morto, timeout do `_receive`,
+    resultado inválido do worker): sem a blindagem cada um reproduzia o mesmo shrink
+    permanente do débito m3, só que por outra porta. Uma única cancelação já basta —
+    nenhum desses ramos está dentro de um `except CancelledError` que já consumiu a
+    primeira.
+    """
+    tamanho = pool.stats()["size"]
+    shutdown_real = script_pool._shutdown
+    receive_real = script_pool._receive
+
+    def falha_pipe_morto(conn, timeout_s):
+        raise EOFError("pipe fechado")
+
+    def falha_timeout(conn, timeout_s):
+        return None
+
+    def falha_lixo(conn, timeout_s):
+        return "lixo"
+
+    async def executa_com_cancelamento_no_replace(comportamento_falho):
+        # `usado` restringe o comportamento falso à PRIMEIRA chamada (a resposta do
+        # script alvo): sem isso o mesmo `_receive` quebrado também interceptaria o
+        # handshake de boot do worker repositor, derrubando-o como "boot falho" e
+        # mascarando o próprio invariante que este teste prova.
+        usado = threading.Event()
+        entrou_no_shutdown = threading.Event()
+        liberar_shutdown = threading.Event()
+
+        def receive_condicional(conn, timeout_s):
+            if not usado.is_set():
+                usado.set()
+                return comportamento_falho(conn, timeout_s)
+            return receive_real(conn, timeout_s)
+
+        def espiao_shutdown(worker, *, hard):
+            entrou_no_shutdown.set()
+            liberar_shutdown.wait(AWAIT_TIMEOUT_S)
+            shutdown_real(worker, hard=hard)
+
+        monkeypatch.setattr(script_pool, "_receive", receive_condicional)
+        monkeypatch.setattr(script_pool, "_shutdown", espiao_shutdown)
+
+        corrida = asyncio.create_task(
+            pool.run(code="OUT1 = 1.0\n", inputs={}, state=None, n_outputs=1, timeout_s=30.0)
+        )
+        assert await asyncio.to_thread(entrou_no_shutdown.wait, AWAIT_TIMEOUT_S)
+        corrida.cancel()
+        liberar_shutdown.set()
+        with pytest.raises(asyncio.CancelledError):
+            await corrida
+        await await_until(lambda: len(pool._state.workers) == tamanho)
+        assert pool.stats()["size"] == len(pool._state.workers) == tamanho
+
+    # Ramo `except (OSError, EOFError, ValueError)`.
+    await executa_com_cancelamento_no_replace(falha_pipe_morto)
+    # Ramo `if result is None:` (timeout do `_receive`).
+    await executa_com_cancelamento_no_replace(falha_timeout)
+    # Ramo `if not isinstance(result, ScriptResult):`.
+    await executa_com_cancelamento_no_replace(falha_lixo)
+
+    depois = await pool.run(
+        code="OUT1 = 7.0\n", inputs={}, state=None, n_outputs=1, timeout_s=10.0
+    )
+    assert depois.status == "ok" and depois.outputs == {"OUT1": 7.0}
+
+
+async def test_stop_durante_replace_em_voo_nao_deixa_processo_orfao(monkeypatch):
+    """Achado 2 do fix round 1 (revisão da tarefa 0.6): o `_replace` blindado por
+    `asyncio.shield` roda numa `Task` própria que precisa ficar visível a `stop()` (via
+    `_state.replacing`, mesmo padrão de `_state.booting`) — senão `stop()` devolveria com
+    o replacement ainda em voo e o worker novo spawnado por ele nunca seria desligado: um
+    processo órfão de verdade. `_spawn_worker` é travado por um gate controlado pelo
+    teste, exatamente no ponto em que `stop()` precisa esperar para não vazar.
+
+    Usa o ramo `if result is None:` (não o `except CancelledError`) de propósito: aí uma
+    ÚNICA cancelação já interrompe o `await asyncio.shield(task)` na hora — `run()`
+    termina cancelado, mas `_do_replace` continua sozinho em segundo plano, exatamente o
+    estado "em voo" que `stop()` precisa enxergar.
+    """
+    pool_local = ScriptPool(size=1)
+    await pool_local.start()
+    pid_original = pool_local.worker_pids[0]
+
+    entrou_no_spawn = threading.Event()
+    liberar_spawn = threading.Event()
+    spawn_worker_real = script_pool._spawn_worker
+    pids_spawnados: list[int] = []
+
+    def receive_timeout(conn, timeout_s):
+        return None
+
+    def espiao_spawn_worker(ctx):
+        entrou_no_spawn.set()
+        liberar_spawn.wait(AWAIT_TIMEOUT_S)
+        worker = spawn_worker_real(ctx)
+        pids_spawnados.append(worker.proc.pid)
+        return worker
+
+    monkeypatch.setattr(script_pool, "_receive", receive_timeout)
+    monkeypatch.setattr(script_pool, "_spawn_worker", espiao_spawn_worker)
+
+    try:
+        corrida = asyncio.create_task(
+            pool_local.run(
+                code="OUT1 = 1.0\n", inputs={}, state=None, n_outputs=1, timeout_s=30.0
+            )
+        )
+        # `is_set()` via `await_until` em vez de `to_thread(evento.wait, ...)`: a segunda
+        # não consumiria uma thread do executor padrão à toa enquanto `_spawn_worker` já
+        # ocupa a sua própria ali dentro.
+        await await_until(entrou_no_spawn.is_set)
+        corrida.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await corrida
+
+        parar = asyncio.create_task(pool_local.stop())
+        for _ in range(50):  # dá a volta do loop necessária para `stop()` chegar no
+            await asyncio.sleep(0)  # `await asyncio.wait(pendentes, ...)`, sem sleep cego
+        assert not parar.done(), "stop() não deveria terminar com o replacement em voo"
+
+        liberar_spawn.set()
+        await asyncio.wait_for(parar, timeout=AWAIT_TIMEOUT_S)
+
+        assert not processo_vivo(pid_original)
+        assert pids_spawnados, "o respawn não chegou a rodar: o teste não mediu o que promete"
+        assert not any(processo_vivo(pid) for pid in pids_spawnados)
+        assert pool_local.worker_pids == ()
+    finally:
+        # Se o teste falhar no estado vermelho (achado 2 reproduzido), o worker novo
+        # sobrevive: não deixar processo vivo pelo resto da sessão de testes.
+        for pid in pids_spawnados:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        try:
+            os.kill(pid_original, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 async def test_envio_do_job_roda_fora_do_event_loop(pool, monkeypatch):
     """ADR-004: `conn.send` pode bloquear com o buffer do pipe cheio — vai para thread.
 
