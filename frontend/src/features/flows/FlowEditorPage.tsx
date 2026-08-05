@@ -51,6 +51,7 @@ import {
   type MapaTags,
   type TipoBloco,
 } from "./graph";
+import { MpcModal } from "./mpc/MpcModal";
 import { TIPOS_DE_NO } from "./nodes";
 import { ContextoTags, ContextoValores, type ValoresAoVivo } from "./nodes/contexto";
 import { formatarTs, useFlow, useSaveFlow } from "./useFlows";
@@ -477,7 +478,21 @@ function Editor({ flowId }: { flowId: number }) {
           </div>
         </div>
 
-        {noEmConfig !== null && (
+        {noEmConfig !== null && noEmConfig.type === "mpc" && (
+          <MpcModal
+            key={noEmConfig.id}
+            no={noEmConfig}
+            totalBlocos={nodes.length}
+            tags={tagsDoProjeto}
+            tsFlowSegundos={flow.data.ts_seconds}
+            podeMutar={podeMutar}
+            onAplicar={aplicarConfig}
+            onFechar={() => {
+              setEmConfig(null);
+            }}
+          />
+        )}
+        {noEmConfig !== null && noEmConfig.type !== "mpc" && (
           <ModalConfigBloco
             key={noEmConfig.id}
             no={noEmConfig}
