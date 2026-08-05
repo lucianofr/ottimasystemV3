@@ -382,6 +382,130 @@ async def test_cancelamento_no_meio_do_script_mata_o_worker_e_re_poe_o_pool(pool
             pass
 
 
+async def test_dupla_cancelacao_durante_replace_nao_encolhe_o_pool(pool, monkeypatch):
+    """Débito m3: uma SEGUNDA `CancelledError` chegando enquanto `run()` já está dentro do
+    `except CancelledError: await self._replace(...)` (ex.: dois `asyncio.timeout`
+    aninhados estourando em sequência antes do respawn terminar) não pode encolher o
+    pool. Sem a blindagem (`asyncio.shield`), essa segunda cancelação interrompe
+    `_replace` exatamente entre o `remove` (síncrono) e o `await self._spawn()`, e o
+    worker derrubado nunca é reposto — o pool perde 1 worker para sempre. O espião em
+    `_shutdown` trava o `_replace` bem no `to_thread` do desligamento: o ponto exato onde
+    a segunda cancelação precisa pousar para reproduzir a falha, sem sleep cego.
+    """
+    entrou_no_receive = threading.Event()
+    entrou_no_shutdown = threading.Event()
+    liberar_shutdown = threading.Event()
+    receive_real = script_pool._receive
+    shutdown_real = script_pool._shutdown
+
+    def espiao_receive(conn, timeout_s):
+        entrou_no_receive.set()
+        return receive_real(conn, timeout_s)
+
+    def espiao_shutdown(worker, *, hard):
+        entrou_no_shutdown.set()
+        liberar_shutdown.wait(AWAIT_TIMEOUT_S)
+        shutdown_real(worker, hard=hard)
+
+    monkeypatch.setattr(script_pool, "_receive", espiao_receive)
+    monkeypatch.setattr(script_pool, "_shutdown", espiao_shutdown)
+
+    tamanho = pool.stats()["size"]
+    corrida = asyncio.create_task(
+        pool.run(code=BUSY_FOREVER, inputs={}, state=None, n_outputs=0, timeout_s=30.0)
+    )
+    assert await asyncio.to_thread(entrou_no_receive.wait, AWAIT_TIMEOUT_S)
+    corrida.cancel()  # 1a cancelação: pousa no to_thread(_receive), cai no `except`
+
+    assert await asyncio.to_thread(entrou_no_shutdown.wait, AWAIT_TIMEOUT_S)
+    # `_replace` está suspenso aqui em `await asyncio.to_thread(_shutdown, ...)`, travado
+    # em `liberar_shutdown`: ponto exato para a 2a cancelação testar a blindagem.
+    corrida.cancel()  # 2a cancelação: pousa dentro do `_replace` já em andamento
+    liberar_shutdown.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await corrida
+    assert corrida.cancelled()
+
+    # Sem a blindagem o `_replace` foi interrompido entre o `remove` e o `_spawn`: o
+    # déficit é permanente e este `await_until` estoura. Com a blindagem, o respawn
+    # completa em segundo plano assim que `liberar_shutdown` libera a thread.
+    await await_until(lambda: len(pool._state.workers) == tamanho)
+    assert pool.stats()["size"] == len(pool._state.workers) == tamanho
+
+    depois = await pool.run(
+        code="OUT1 = 7.0\n", inputs={}, state=None, n_outputs=1, timeout_s=10.0
+    )
+    assert depois.status == "ok" and depois.outputs == {"OUT1": 7.0}
+
+
+async def test_dez_ciclos_de_cancelamento_preservam_o_tamanho_do_pool(pool, monkeypatch):
+    """Regressão do teto (débito m3): mesmo sob N cancelamentos em sequência, ciclo após
+    ciclo, o pool nunca sai do tamanho configurado e continua servindo scripts com
+    sucesso — sem drift acumulado."""
+    entrou_no_receive = threading.Event()
+    receive_real = script_pool._receive
+
+    def espiao_receive(conn, timeout_s):
+        entrou_no_receive.set()
+        return receive_real(conn, timeout_s)
+
+    monkeypatch.setattr(script_pool, "_receive", espiao_receive)
+    tamanho = pool.stats()["size"]
+
+    for ciclo in range(10):
+        entrou_no_receive.clear()
+        corrida = asyncio.create_task(
+            pool.run(code=BUSY_FOREVER, inputs={}, state=None, n_outputs=0, timeout_s=30.0)
+        )
+        assert await asyncio.to_thread(entrou_no_receive.wait, AWAIT_TIMEOUT_S), (
+            f"ciclo {ciclo}: cancelamento não pousou dentro do script"
+        )
+        corrida.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await corrida
+        await await_until(lambda: len(pool._state.workers) == tamanho)
+        assert pool.stats()["size"] == len(pool._state.workers) == tamanho, f"ciclo {ciclo}"
+
+    resultado = await pool.run(
+        code="OUT1 = 9.0\n", inputs={}, state=None, n_outputs=1, timeout_s=10.0
+    )
+    assert resultado.status == "ok" and resultado.outputs == {"OUT1": 9.0}
+
+
+async def test_stats_conta_respawns_e_reflete_ocupacao(pool, monkeypatch):
+    """`stats()` é a fonte do futuro `/health` (F4b 2.3): `size` fixo, `busy` reflete
+    workers fora da fila livre, `respawns` cresce exatamente com as reposições reais
+    (não com o `start()` inicial)."""
+    assert pool.stats() == {"size": 2, "busy": 0, "respawns": 0}
+
+    entrou_no_receive = threading.Event()
+    receive_real = script_pool._receive
+
+    def espiao_receive(conn, timeout_s):
+        entrou_no_receive.set()
+        return receive_real(conn, timeout_s)
+
+    monkeypatch.setattr(script_pool, "_receive", espiao_receive)
+
+    for ciclo_esperado in (1, 2):
+        entrou_no_receive.clear()
+        corrida = asyncio.create_task(
+            pool.run(code=BUSY_FOREVER, inputs={}, state=None, n_outputs=0, timeout_s=30.0)
+        )
+        assert await asyncio.to_thread(entrou_no_receive.wait, AWAIT_TIMEOUT_S)
+        assert pool.stats()["busy"] == 1  # worker em execução: fora da fila livre
+
+        corrida.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await corrida
+        await await_until(
+            lambda esperado=ciclo_esperado: pool.stats()
+            == {"size": 2, "busy": 0, "respawns": esperado}
+        )
+        assert pool.stats() == {"size": 2, "busy": 0, "respawns": ciclo_esperado}
+
+
 async def test_envio_do_job_roda_fora_do_event_loop(pool, monkeypatch):
     """ADR-004: `conn.send` pode bloquear com o buffer do pipe cheio — vai para thread.
 

@@ -194,11 +194,25 @@ class ScriptPool:
         self._state = _PoolState()
         self._idle: asyncio.Queue[_Worker] = asyncio.Queue()
         self._running = False
+        self._respawns = 0
 
     @property
     def worker_pids(self) -> tuple[int, ...]:
         """Pids vivos do pool — diagnóstico e verificação de respawn."""
         return tuple(w.proc.pid for w in self._state.workers if w.proc.pid is not None)
+
+    def stats(self) -> dict:
+        """Fonte de dados do futuro `/health` (F4b tarefa 2.3): tamanho, ocupação, respawns.
+
+        `busy` conta workers fora da fila de livres (em execução ou ainda subindo o boot);
+        `respawns` acumula desde o `start()`, sem contar os spawns iniciais (só reposições
+        feitas por `_replace`).
+        """
+        return {
+            "size": self._size,
+            "busy": len(self._state.workers) - self._idle.qsize(),
+            "respawns": self._respawns,
+        }
 
     async def start(self) -> None:
         if self._running:
@@ -259,7 +273,17 @@ class ScriptPool:
         except asyncio.CancelledError:
             # O worker pode estar rodando código arbitrário do usuário: devolvê-lo à fila é
             # inaceitável — kill + respawn, e o cancelamento segue propagando.
-            await self._replace(worker, hard=True)
+            #
+            # `shield` fecha o débito m3 (teto teórico sob cancelamento repetido). Sem ele,
+            # uma SEGUNDA `CancelledError` chegando enquanto este `_replace` ainda está em
+            # andamento (dois `asyncio.timeout`/`wait_for` aninhados estourando em
+            # sequência, por exemplo) interrompe a sequência remove→shutdown→spawn no meio
+            # — o worker já removido de `_state.workers` nunca é reposto e o pool encolhe
+            # abaixo de `size` para sempre. Com `shield`, `_replace` roda como task
+            # independente do cancelamento daqui: o `raise` abaixo ainda propaga na hora
+            # (quem chamou `run()` não fica esperando), mas a reposição completa em
+            # segundo plano e `len(_state.workers) == size` volta a valer.
+            await asyncio.shield(self._replace(worker, hard=True))
             raise
         except (OSError, EOFError, ValueError):
             await self._replace(worker, hard=False)
@@ -310,8 +334,16 @@ class ScriptPool:
         await asyncio.to_thread(_shutdown, worker, hard=True)
 
     async def _replace(self, worker: _Worker, *, hard: bool) -> None:
+        """Derruba `worker` e repõe.
+
+        Chamado sob `asyncio.shield` pelo caminho de cancelamento em `run()` — de
+        propósito descolado do cancelamento de quem chama (ver comentário lá): fecha a
+        interleaving em que uma segunda cancelação interrompe esta corrotina entre o
+        `remove` e o `_spawn`, o que encolheria o pool permanentemente.
+        """
         if worker in self._state.workers:
             self._state.workers.remove(worker)
         await asyncio.to_thread(_shutdown, worker, hard=hard)
         if self._running:
             await self._spawn()
+            self._respawns += 1
