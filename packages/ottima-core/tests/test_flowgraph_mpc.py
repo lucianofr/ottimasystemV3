@@ -364,6 +364,18 @@ def test_par_habilitado_integrating_com_ki_zero_e_erro():
     assert has(errors_of(graph, tags), "cv_a", "mv_a", "params inválidos ou incompletos")
 
 
+def test_theta_infinito_no_par_habilitado_e_erro():
+    """Pré-condição da tarefa 1.1: `mpc_state_dimension` faz `round(theta/ts_mpc)` — theta
+    não-finito precisa virar 422, nunca `OverflowError` cru (mesma nota de `parse.py` para
+    o TFS)."""
+    m, c = mv("a"), cv("a")
+    models = {c["id"]: {m["id"]: pair("selfreg", theta=float("inf"))}}
+    node = mpc_node(mvs=[m], cvs=[c], models=models)
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert has(errors_of(graph, tags), "cv_a", "mv_a", "params inválidos ou incompletos")
+
+
 def test_linha_orfa_em_models_e_erro():
     m, c = mv("a"), cv("a")
     models = {c["id"]: {m["id"]: pair("selfreg")}, "cv_fantasma": {m["id"]: pair("selfreg")}}
@@ -399,6 +411,15 @@ def test_tss_zero_na_restricao_e_erro():
     graph = mpc_graph(node)
     tags = mpc_tags(node)
     assert has(errors_of(graph, tags), "co_a", "tss > 0")
+
+
+def test_tss_infinito_e_erro():
+    """Pré-condição da tarefa 1.1: `derive_horizons` faz `math.ceil(max(tss)/ts_mpc)` — TSS
+    não-finito precisa virar 422, nunca `OverflowError` cru."""
+    node = mpc_node(cvs=[cv("a", tss=float("inf"))])
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert has(errors_of(graph, tags), "cv_a", "tss > 0")
 
 
 def test_limits_min_maior_ou_igual_a_max_e_erro():
