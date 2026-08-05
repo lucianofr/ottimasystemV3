@@ -39,22 +39,12 @@ from ottima_core.bus import (
     KIND_RELOAD_REJECTED,
     FlowCommand,
 )
-from ottima_core.flowgraph import (
-    FlowGraph,
-    FlowNode,
-    GraphParseError,
-    TagRef,
-    parse_graph,
-    validate_graph,
-)
+from ottima_core.flowgraph import GraphParseError, parse_graph, validate_graph
 from ottima_core.models import Flow, Project
 from ottima_core.tags import project_tags
 
 from .blocks.base import Block
-from .blocks.opc_read import OpcReadBlock
-from .blocks.opc_write import OpcWriteBlock
-from .blocks.script import ScriptBlock
-from .blocks.tfs import TfsBlock
+from .definition import StagedDefinition, build_definition
 from .events import (
     ChannelListener,
     publish_flow_deployed,
@@ -86,8 +76,6 @@ REASON_SHUTDOWN = "shutdown"
 # de usuário atrás omite a chave `user` (ver `events.publish_flow_stopped`).
 SYSTEM_ACTOR = "runtime"
 
-_TAG_TYPES = frozenset({"opc_read", "opc_write"})
-
 
 class _Rejected(Exception):
     """Grafo do banco recusado na montagem da definição. `messages` traz todas as reprovações."""
@@ -95,17 +83,6 @@ class _Rejected(Exception):
     def __init__(self, messages: list[str]) -> None:
         self.messages = list(messages)
         super().__init__(" | ".join(self.messages))
-
-
-@dataclass(frozen=True, slots=True)
-class _Staged:
-    """Definição pronta para subir ou entrar em hot-swap, com o que o supervisor guarda dela."""
-
-    definition: FlowDefinition
-    ts_seconds: float
-    conn_ids: frozenset[int]
-    blocks: dict[str, tuple[dict[str, Any], Block]]
-    """`block_id -> (config funcional, instância)`: a chave da preservação de estado (§4.1-3)."""
 
 
 @dataclass(slots=True)
@@ -343,7 +320,7 @@ class Supervisor:
         flow: Flow,
         *,
         reuse: Mapping[str, tuple[dict[str, Any], Block]],
-    ) -> _Staged:
+    ) -> StagedDefinition:
         """`graph_json` + tags do projeto -> definição da 1.4. Levanta `_Rejected` se recusado."""
         try:
             graph = parse_graph(flow.graph_json)
@@ -359,65 +336,16 @@ class Supervisor:
         for aviso in result.warnings:
             logger.info("Flow %s: %s", flow.id, aviso)
 
-        blocks: dict[str, tuple[dict[str, Any], Block]] = {}
-        instances: list[Block] = []
-        for node in sorted(graph.nodes, key=lambda item: item.exec_order):
-            functional = node.functional_config()
-            kept = reuse.get(node.id)
-            # Config funcional igual ⇒ a instância viva continua, e o estado interno vem
-            # junto de graça (ADR-011). O método É o comparador: `exec_order`, rótulo e
-            # posição ficam fora dele de propósito (ADR-024).
-            block = (
-                kept[1]
-                if kept is not None and kept[0] == functional
-                else self._instantiate(node, flow_id=flow.id, ts_seconds=ts_seconds, tags=tags)
-            )
-            blocks[node.id] = (functional, block)
-            instances.append(block)
-
-        return _Staged(
-            definition=FlowDefinition(
-                flow_id=flow.id,
-                ts_seconds=ts_seconds,
-                blocks=tuple(instances),
-                wiring=_wiring(graph),
-            ),
+        return build_definition(
+            graph,
+            tags,
+            flow_id=flow.id,
             ts_seconds=ts_seconds,
-            conn_ids=_conn_ids(graph, tags),
-            blocks=blocks,
+            reuse=reuse,
+            redis_client=self._redis,
+            pool=self._pool,
+            snapshot=self._snapshot,
         )
-
-    def _instantiate(
-        self, node: FlowNode, *, flow_id: int, ts_seconds: float, tags: Mapping[int, TagRef]
-    ) -> Block:
-        """Instancia o bloco com os serviços do runtime. Bloco novo nasce zerado (§4.1-3)."""
-        config: Any = node.config
-        if node.type == "opc_read":
-            tag = tags[config.tag_id]
-            return OpcReadBlock(
-                node.id, tag_id=tag.id, data_type=tag.data_type, snapshot=self._snapshot
-            )
-        if node.type == "opc_write":
-            tag = tags[config.tag_id]
-            return OpcWriteBlock(
-                node.id,
-                tag_id=tag.id,
-                conn_id=tag.conn_id,
-                flow_id=flow_id,
-                redis_client=self._redis,
-            )
-        if node.type == "script":
-            return ScriptBlock(
-                node.id,
-                code=config.code,
-                n_inputs=config.n_inputs,
-                n_outputs=config.n_outputs,
-                flow_id=flow_id,
-                ts_seconds=ts_seconds,
-                pool=self._pool,
-                redis_client=self._redis,
-            )
-        return TfsBlock(node.id, matrix=config.matrix, ts_seconds=ts_seconds)
 
     # ----------------------------------------------------------------------------------
     # Contrato F2 §3.7 (spec §2.2-8)
@@ -577,27 +505,6 @@ class Supervisor:
         finally:
             self._runtimes.pop(flow_id, None)
             self._state.forget(flow_id)
-
-
-def _wiring(graph: FlowGraph) -> dict[str, dict[str, tuple[str, str]]]:
-    """`wiring[block_id][handle_de_entrada] = (bloco_origem, handle_de_origem)`."""
-    wiring: dict[str, dict[str, tuple[str, str]]] = {}
-    for edge in graph.edges:
-        wiring.setdefault(edge.target, {})[edge.target_handle] = (edge.source, edge.source_handle)
-    return wiring
-
-
-def _conn_ids(graph: FlowGraph, tags: Mapping[int, TagRef]) -> frozenset[int]:
-    """Conexões que o grafo referencia — o conjunto que o `comm_failure` consulta (§2.2-8).
-
-    Mora aqui, e não na `FlowDefinition`, porque o laço de varredura não tem nada a fazer
-    com `conn_id`: quem reage à queda de conexão é o supervisor.
-    """
-    return frozenset(
-        tags[node.config.tag_id].conn_id
-        for node in graph.nodes
-        if node.type in _TAG_TYPES and node.config.tag_id in tags
-    )
 
 
 def _log_teardown_results(flow_ids: list[int], results: list[Any]) -> None:
