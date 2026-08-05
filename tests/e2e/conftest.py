@@ -14,6 +14,7 @@ import os
 import subprocess
 import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,17 +24,21 @@ import httpx
 import pytest
 import redis
 from asyncua import Client
+from websockets.exceptions import InvalidStatus
+from websockets.sync.client import connect
 
 from opcsim import (
     NODE_CTRL_FREEZE_WATCHDOG,
     NODE_MIRROR_FLOAT,
+    NODE_MIRROR_INT,
     NODE_SINE,
     NODE_STATIC,
     NODE_W_FLOAT,
+    NODE_W_INT,
     NODE_WD_FROM_SYSTEM,
     NODE_WD_TO_SYSTEM,
 )
-from ottima_core.bus import CHANNEL_EVENTS, CHANNEL_OPC_WRITES, OpcWrite
+from ottima_core.bus import CHANNEL_EVENTS, CHANNEL_OPC_WRITES, OpcWrite, channel_mpc_state
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_DIR = REPO_ROOT / "deploy"
@@ -396,3 +401,444 @@ def projeto_com_conexao(admin: httpx.Client, request: pytest.FixtureRequest) -> 
     finally:
         _ativar_sentinela(admin)
         admin.delete(f"/api/projects/{projeto['id']}")
+
+
+# ============================================================================
+# F4b — malha fechada MPC↔TFS (tarefa 4.1, spec F4 §9.2)
+# ============================================================================
+#
+# `mv_pid` é a única MV que fecha malha física: escreve no `write_tag_id` (espelho do
+# opcsim `NODE_W_FLOAT`), e a MESMA tag de `readback_tag_id` é reaproveitada como fonte do
+# `opc_read` que alimenta a TFS `planta` — é assim que "o TFS fecha malha sem PLC" (ADR-022)
+# sem formar ciclo no grafo: uma aresta de volta ao próprio `mpc1` seria rejeitada por
+# `_check_cycles` (spec §2.2). `mv_direta` nunca sai do LOCAL/`initial_value` — entra na
+# matriz `models` só pra satisfazer "cada MV com ≥1 par habilitado" (spec §2.2-3).
+
+TS_FLOW_MPC = 0.5
+"""Ts do flow dos cenários E2E-F4 — pequeno pra rodar rápido (brief da tarefa)."""
+MULTIPLICADOR_MPC = 2
+TS_MPC = TS_FLOW_MPC * MULTIPLICADOR_MPC  # 1.0 s
+
+GANHO_CV = 1.0
+TAU1_CV = 2.0
+TAU2_CV = 0.5
+"""SOPDT de `cv1` (settle ~4×(τ1+τ2)=10s) — mesmos números no `models` do MPC e na matriz
+da TFS `planta`: sem mismatch deliberado de modelo, o E2E-F4-04 testa a malha fechada de
+verdade, não a robustez a erro de modelo (isso é TDD, spec §9.1)."""
+GANHO_INTEGRADOR_CO = 0.01
+"""Ki de `co1` (IOPDT) — fraco o bastante pra `mv_pid` chegar a um SP moderado sem estourar
+a faixa (E2E-F4-04), mas um SP perto do teto de `LIMITES_SP_CV` (E2E-F4-05) estoura mesmo
+assim: só `mv_pid` move `co1` de verdade (`mv_direta` entra com Ki desprezível)."""
+
+LIMITES_MV = {"min": 0.0, "max": 100.0}
+DU_MAX_MV = 5.0
+LIMITES_SP_CV = {"min": 0.0, "max": 100.0}
+FAIXA_CO = {"low": -5.0, "high": 5.0}
+VALOR_DV = 2.0
+TSS_MALHA = 10.0
+"""TSS de `cv1`/`co1` — `Np=ceil(10/1)=10`, `Nc=max(2,ceil(10/4))=3` (spec §2.2-5)."""
+
+
+@dataclass(frozen=True, slots=True)
+class AmbienteMpc:
+    """Projeto+conexão do E2E-F4 e as 4 tags do `pid` de `mv_pid` (spec §2.1-3)."""
+
+    project_id: int
+    conn_id: int
+    write: int
+    mode_cmd: int
+    readback: int
+    mode_read: int
+
+
+@pytest.fixture(scope="module")
+def ambiente_mpc(admin: httpx.Client, request: pytest.FixtureRequest) -> Iterator[AmbienteMpc]:
+    """Projeto ativo + conexão ao opcsim + as tags do `pid` de `mv_pid` — mesmo padrão de
+    `projeto_com_conexao`, módulo à parte porque o F4b usa 4 tags diferentes das da F2 (dois
+    pares w/espelho: float pra posição, int pra modo)."""
+    sufixo = f"{request.module.__name__.rsplit('.', 1)[-1]}-{RUN_ID}"
+    r = admin.post("/api/projects", json={"name": f"f4-{sufixo}", "description": "L2 da F4b"})
+    assert r.status_code == 201, f"criação do projeto falhou: HTTP {r.status_code} {r.text}"
+    projeto = r.json()
+    try:
+        assert admin.post(f"/api/projects/{projeto['id']}/activate").status_code == 200
+        r = admin.post(
+            "/api/connections",
+            json={
+                "project_id": projeto["id"],
+                "name": f"opcsim-{sufixo}",
+                "endpoint": OPCSIM_URL,
+                "security_policy": "none",
+                "security_mode": "none",
+                "auth_mode": "anonymous",
+                "watchdog_read_node_id": NODE_WD_TO_SYSTEM,
+                "watchdog_write_node_id": NODE_WD_FROM_SYSTEM,
+                "watchdog_period_ms": 1000,
+            },
+        )
+        assert r.status_code == 201, f"criação da conexão falhou: HTTP {r.status_code} {r.text}"
+        conn_id = int(r.json()["id"])
+        ambiente = AmbienteMpc(
+            project_id=projeto["id"],
+            conn_id=conn_id,
+            write=_criar_tag(admin, conn_id, "mv-pid-write", NODE_W_FLOAT, "w"),
+            mode_cmd=_criar_tag(admin, conn_id, "mv-pid-mode-cmd", NODE_W_INT, "w"),
+            readback=_criar_tag(admin, conn_id, "mv-pid-readback", NODE_MIRROR_FLOAT, "r"),
+            mode_read=_criar_tag(admin, conn_id, "mv-pid-mode-read", NODE_MIRROR_INT, "r"),
+        )
+        esperar_conexao(conn_id)
+        yield ambiente
+    finally:
+        _ativar_sentinela(admin)
+        admin.delete(f"/api/projects/{projeto['id']}")
+
+
+def criar_tag_leitura_dummy(admin: httpx.Client, conn_id: int, nome: str) -> int:
+    """Tag `r` genérica (aponta pro `NODE_SINE`) — só pra satisfazer "entrada obrigatória"
+    em grafos de validação (E2E-F4-02) que não precisam de dinâmica real. O nome recebe um
+    sufixo único por chamada: os três sub-grafos do E2E-F4-02 compartilham a mesma conexão e
+    "nome de tag já em uso nesta conexão" é 409 (mesma barreira da F2)."""
+    return _criar_tag(admin, conn_id, f"{nome}-{valor_unico()}", NODE_SINE, "r")
+
+
+def _matriz_planta() -> list[list[dict]]:
+    """`u1` (mv_pid via `mv_readback`) alimenta `y1` (cv1, self-reg) e `y2` (co1,
+    integrador); `u2` fica desabilitado nas duas linhas e não precisa de aresta (mesma nota
+    de `matriz_integrador`, F3 §3.4 — só a coluna com elemento habilitado é obrigatória,
+    spec §3.4/`_required_input_handles`)."""
+    desabilitado = {"enabled": False, "kind": "iopdt", "params": {"Ki": 0.0, "theta": 0.0}}
+    y1 = [
+        {
+            "enabled": True,
+            "kind": "sopdt",
+            "params": {"K": GANHO_CV, "tau1": TAU1_CV, "tau2": TAU2_CV, "theta": 0.0},
+        },
+        dict(desabilitado),
+    ]
+    y2 = [
+        {"enabled": True, "kind": "iopdt", "params": {"Ki": GANHO_INTEGRADOR_CO, "theta": 0.0}},
+        dict(desabilitado),
+    ]
+    return [y1, y2]
+
+
+def _config_mpc_malha(ambiente: AmbienteMpc, *, multiplier: int = MULTIPLICADOR_MPC) -> dict:
+    """Config do bloco `mpc` do E2E-F4 (spec §2.1): `mv_pid` fecha a malha física via OPC
+    (ADR-022); `mv_direta` só precisa de um par na matriz pra passar na validação (spec
+    §2.2-3) — sem aresta no grafo, nunca sai do LOCAL/`initial_value`."""
+    pid = {
+        "write_tag_id": ambiente.write,
+        "target_mode": "rcas",
+        "mode_cmd_tag_id": ambiente.mode_cmd,
+        "mode_read_tag_id": ambiente.mode_read,
+        "readback_tag_id": ambiente.readback,
+        "mode_values": {"auto": 1, "target": 3},
+    }
+    return {
+        "name": "MPC E2E-F4",
+        "multiplier": multiplier,
+        "variables": {
+            "mvs": [
+                {
+                    "id": "mv_pid",
+                    "name": "MV com PID",
+                    "eu": "%",
+                    "limits": dict(LIMITES_MV),
+                    "du_max": DU_MAX_MV,
+                    "initial_value": 0.0,
+                    "pid": pid,
+                },
+                {
+                    "id": "mv_direta",
+                    "name": "MV direta",
+                    "eu": "%",
+                    "limits": dict(LIMITES_MV),
+                    "du_max": DU_MAX_MV,
+                    "initial_value": 0.0,
+                },
+            ],
+            "cvs": [
+                {
+                    "id": "cv_1",
+                    "name": "CV da malha",
+                    "eu": "C",
+                    "kind": "selfreg",
+                    "tss": TSS_MALHA,
+                    "weight": 1.0,
+                    "sp_limits": dict(LIMITES_SP_CV),
+                }
+            ],
+            "constraints": [
+                {
+                    "id": "co_1",
+                    "name": "Restrição da malha",
+                    "eu": "%",
+                    "kind": "integrating",
+                    "tss": TSS_MALHA,
+                    "range": dict(FAIXA_CO),
+                    "priority": 1,
+                }
+            ],
+            "dvs": [{"id": "dv_1", "name": "DV constante", "eu": "m3/h"}],
+        },
+        "models": {
+            "cv_1": {
+                "mv_pid": {
+                    "enabled": True,
+                    "params": {"K": GANHO_CV, "tau1": TAU1_CV, "tau2": TAU2_CV, "theta": 0.0},
+                },
+                "dv_1": {
+                    "enabled": True,
+                    "params": {"K": 0.05, "tau1": TAU1_CV, "tau2": TAU2_CV, "theta": 0.0},
+                },
+            },
+            "co_1": {
+                "mv_pid": {
+                    "enabled": True,
+                    "params": {"Ki": GANHO_INTEGRADOR_CO, "theta": 0.0},
+                },
+                "mv_direta": {"enabled": True, "params": {"Ki": 1e-4, "theta": 0.0}},
+            },
+        },
+    }
+
+
+def grafo_mpc_tfs(ambiente: AmbienteMpc, *, valor_dv: float = VALOR_DV, mpc_id: str = "mpc1") -> dict:
+    """Grafo E2E-F4 (spec §9.2): `mv_readback` (`opc_read` do espelho de `mv_pid`) alimenta a
+    TFS `planta`; `planta` fecha em `cv1`/`co1` do MPC. `mv_pid` fecha a malha só pelo OPC
+    (ADR-022) — uma aresta de volta do `mpc1` pra `planta`/`mv_readback` formaria ciclo no
+    grafo, rejeitado pela validação (`_check_cycles`)."""
+    dados = _config_mpc_malha(ambiente)
+    nodes = [
+        {
+            "id": "mv_readback",
+            "type": "opc_read",
+            "position": {"x": 0.0, "y": 0.0},
+            "data": {"exec_order": 1, "tag_id": ambiente.readback},
+        },
+        {
+            "id": "dv_source",
+            "type": "script",
+            "position": {"x": 0.0, "y": 0.0},
+            "data": {
+                "exec_order": 2,
+                "n_inputs": 0,
+                "n_outputs": 1,
+                "code": f"OUT1 = {valor_dv!r}\n",
+            },
+        },
+        {
+            "id": "planta",
+            "type": "tfs",
+            "position": {"x": 0.0, "y": 0.0},
+            "data": {"exec_order": 3, "matrix": _matriz_planta()},
+        },
+        {
+            "id": mpc_id,
+            "type": "mpc",
+            "position": {"x": 0.0, "y": 0.0},
+            "data": {"exec_order": 4, **dados},
+        },
+    ]
+    edges = [
+        {
+            "id": "e1",
+            "source": "mv_readback",
+            "sourceHandle": "out",
+            "target": "planta",
+            "targetHandle": "u1",
+        },
+        {
+            "id": "e2",
+            "source": "planta",
+            "sourceHandle": "y1",
+            "target": mpc_id,
+            "targetHandle": "cv_1",
+        },
+        {
+            "id": "e3",
+            "source": "planta",
+            "sourceHandle": "y2",
+            "target": mpc_id,
+            "targetHandle": "co_1",
+        },
+        {
+            "id": "e4",
+            "source": "dv_source",
+            "sourceHandle": "OUT1",
+            "target": mpc_id,
+            "targetHandle": "dv_1",
+        },
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def resetar_atuador_mpc(opcsim_client: OpcSim, *, timeout: float = 5.0) -> None:
+    """Zera a posição física de `mv_pid` (`NODE_W_FLOAT`) e espera o espelho refletir — os 5
+    cenários compartilham os mesmos nodes globais do opcsim (só há um par w/espelho float),
+    então sem isso o estado físico de um cenário vazaria pro início do próximo (a TFS
+    `planta` nasce zerada a cada deploy, mas `u1` seguiria lendo o valor velho até `mv_pid`
+    escrever de novo)."""
+    opcsim_client.write(NODE_W_FLOAT, 0.0)
+    esperar_ate(
+        lambda: abs(opcsim_client.read(NODE_MIRROR_FLOAT)) < 1e-6,
+        timeout=timeout,
+        intervalo=0.2,
+        descricao="espelho de mv_pid zerar após o reset",
+    )
+    time.sleep(1.0)  # propagação até o `ValueSnapshot` do flow-runtime via opc-worker
+
+
+def _health_do_runtime() -> dict[str, Any] | None:
+    """`/health` do flow-runtime, lido de dentro do container — cópia local de
+    `f3_support.runtime_health`: este `conftest` não pode importar de `f3_support.py`
+    porque `f3_support.py` já importa deste módulo (ciclo)."""
+    try:
+        return json.loads(
+            compose(
+                "exec",
+                "-T",
+                "flow-runtime",
+                "python",
+                "-c",
+                "import urllib.request;"
+                "print(urllib.request.urlopen('http://localhost:8002/health', "
+                "timeout=3).read().decode())",
+            )
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def _aguardar_flow_parado_mpc(flow_id: int, *, timeout: float = 60.0) -> None:
+    """Espera o runtime materializar a parada antes de excluir o flow — evita que uma
+    varredura órfã continue escrevendo em `mv_pid` (tag global do opcsim) depois que o
+    teste já seguiu para o próximo cenário."""
+
+    def parado() -> bool:
+        saude = _health_do_runtime()
+        if saude is None:
+            return True
+        flow = saude.get("flows", {}).get(str(flow_id))
+        return flow is None or flow["state"] != "running"
+
+    esperar_ate(parado, timeout=timeout, intervalo=1.0, descricao=f"flow {flow_id} deixar de rodar")
+
+
+def deploy_flow(admin: httpx.Client, flow_id: int) -> None:
+    r = admin.post(f"/api/flows/{flow_id}/deploy")
+    assert r.status_code == 202, f"deploy do flow {flow_id}: HTTP {r.status_code} {r.text}"
+
+
+@pytest.fixture
+def criar_flow_mpc(admin: httpx.Client, ambiente_mpc: AmbienteMpc) -> Iterator[Callable[..., int]]:
+    """Cria flows no projeto do `ambiente_mpc`; teardown para, espera e exclui — mesmo padrão
+    de `fabrica_de_flows` (F3), cópia local pela mesma razão de import cíclico."""
+    criados: list[int] = []
+
+    def criar(nome: str, *, ts_seconds: float = TS_FLOW_MPC, grafo: dict | None = None) -> int:
+        r = admin.post(
+            "/api/flows",
+            json={
+                "project_id": ambiente_mpc.project_id,
+                "name": f"{nome}-{RUN_ID}",
+                "ts_seconds": ts_seconds,
+            },
+        )
+        assert r.status_code == 201, f"criação do flow {nome}: HTTP {r.status_code} {r.text}"
+        flow_id = int(r.json()["id"])
+        criados.append(flow_id)
+        if grafo is not None:
+            r = admin.put(f"/api/flows/{flow_id}", json={"graph_json": grafo})
+            assert r.status_code == 200, f"PUT do grafo de {nome}: HTTP {r.status_code} {r.text}"
+        return flow_id
+
+    try:
+        yield criar
+    finally:
+        for flow_id in reversed(criados):
+            admin.post(f"/api/flows/{flow_id}/stop")
+            _aguardar_flow_parado_mpc(flow_id)
+            admin.delete(f"/api/flows/{flow_id}")
+
+
+def operar_modo(admin: httpx.Client, flow_id: int, block_id: str, axis: str, value: str) -> None:
+    r = admin.post(f"/api/operate/{flow_id}/{block_id}/mode", json={"axis": axis, "value": value})
+    assert r.status_code == 202, f"POST /operate mode: HTTP {r.status_code} {r.text}"
+
+
+def operar_sp(admin: httpx.Client, flow_id: int, block_id: str, var_id: str, value: float) -> None:
+    r = admin.post(f"/api/operate/{flow_id}/{block_id}/sp", json={"var_id": var_id, "value": value})
+    assert r.status_code == 202, f"POST /operate sp: HTTP {r.status_code} {r.text}"
+
+
+def operar_mv(admin: httpx.Client, flow_id: int, block_id: str, var_id: str, value: float) -> None:
+    r = admin.post(f"/api/operate/{flow_id}/{block_id}/mv", json={"var_id": var_id, "value": value})
+    assert r.status_code == 202, f"POST /operate mv: HTTP {r.status_code} {r.text}"
+
+
+class EstadoMpcStream:
+    """Leitor de `mpc.state.<flow_id>.<block_id>` pelo `/ws` real (spec §6.2) — assinatura
+    aberta ANTES do gatilho, mesmo estilo de `EventStream`/`StatusStream` (F3), mas em cima
+    de um WebSocket de verdade: a tarefa pede API + WS + opcsim reais, não o barramento
+    direto."""
+
+    def __init__(self, ws: Any, canal: str) -> None:
+        self._ws = ws
+        self._canal = canal
+
+    def proxima(self, *, timeout: float, descricao: str) -> dict[str, Any]:
+        limite = time.monotonic() + timeout
+        while True:
+            restante = limite - time.monotonic()
+            if restante <= 0:
+                raise AssertionError(f"{descricao}: nenhum mpc.state em {timeout:.0f}s")
+            try:
+                quadro = json.loads(self._ws.recv(timeout=restante))
+            except TimeoutError:
+                continue
+            if quadro.get("channel") == self._canal:
+                return quadro["data"]
+
+    def esperar(
+        self, pred: Callable[[dict[str, Any]], bool], *, timeout: float, descricao: str
+    ) -> dict[str, Any]:
+        limite = time.monotonic() + timeout
+        while True:
+            restante = limite - time.monotonic()
+            if restante <= 0:
+                raise AssertionError(f"{descricao}: nenhum mpc.state correspondente em {timeout:.0f}s")
+            estado = self.proxima(timeout=restante, descricao=descricao)
+            if pred(estado):
+                return estado
+
+    def coletar(self, *, quantidade: int, timeout: float, descricao: str) -> list[dict[str, Any]]:
+        limite = time.monotonic() + timeout
+        amostras: list[dict[str, Any]] = []
+        while len(amostras) < quantidade:
+            restante = limite - time.monotonic()
+            if restante <= 0:
+                raise AssertionError(
+                    f"{descricao}: {len(amostras)} de {quantidade} amostras em {timeout:.0f}s"
+                )
+            amostras.append(self.proxima(timeout=restante, descricao=descricao))
+        return amostras
+
+
+@contextmanager
+def assinar_mpc_state(admin: httpx.Client, flow_id: int, block_id: str) -> Iterator[EstadoMpcStream]:
+    """Abre o `/ws` real, autentica com o token do `admin` e assina `mpc_state` do bloco —
+    mesmo `abrir_ws` da F3 (`test_f3_lifecycle.py`), cópia local pela mesma razão de ciclo."""
+    url = f"{BASE.replace('http://', 'ws://').rstrip('/')}/ws"
+    token = admin.headers["Authorization"].removeprefix("Bearer ")
+    try:
+        ws = connect(f"{url}?token={token}", open_timeout=15)
+    except InvalidStatus as erro:
+        raise AssertionError(
+            f"o nginx recusou o upgrade do /ws com HTTP {erro.response.status_code}"
+        ) from None
+    try:
+        ws.send(json.dumps({"subscribe": {"mpc_state": [f"{flow_id}/{block_id}"]}}))
+        yield EstadoMpcStream(ws, channel_mpc_state(flow_id, block_id))
+    finally:
+        ws.close()
