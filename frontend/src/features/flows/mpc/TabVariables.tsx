@@ -1,0 +1,390 @@
+import { Button } from "../../../components/ui/button";
+import { Input } from "../../../components/ui/input";
+import { Label } from "../../../components/ui/label";
+import { Select } from "../../../components/ui/select";
+import type { TagOut } from "../../../lib/api";
+import type {
+  TipoLinhaMpc,
+  VariaveisMpc,
+  VariavelCv,
+  VariavelDv,
+  VariavelMv,
+  VariavelRestricao,
+} from "../graph";
+import { CamposPid } from "./CamposPid";
+import { gerarIdVariavel, nomeCampoVar } from "./mpcLogic";
+
+interface Props {
+  variaveis: VariaveisMpc;
+  aoMudar: (variaveis: VariaveisMpc) => void;
+  tags: readonly TagOut[];
+}
+
+function CampoNomeEu({ id, nome, eu }: { id: string; nome: string; eu: string }) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-1">
+        <Label htmlFor={`${id}-name`}>Nome</Label>
+        <Input id={`${id}-name`} name={nomeCampoVar(id, "name")} defaultValue={nome} />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={`${id}-eu`}>EU</Label>
+        <Input id={`${id}-eu`} name={nomeCampoVar(id, "eu")} defaultValue={eu} />
+      </div>
+    </div>
+  );
+}
+
+function CampoNumero({
+  id,
+  campo,
+  rotulo,
+  valor,
+}: {
+  id: string;
+  campo: string;
+  rotulo: string;
+  valor: number;
+}) {
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={`${id}-${campo}`}>{rotulo}</Label>
+      <Input
+        id={`${id}-${campo}`}
+        name={nomeCampoVar(id, campo)}
+        type="text"
+        inputMode="decimal"
+        className="process-value"
+        defaultValue={String(valor)}
+      />
+    </div>
+  );
+}
+
+function LinhaVariavel({
+  varId,
+  testid,
+  aoRemover,
+  children,
+}: {
+  varId: string;
+  testid: string;
+  aoRemover: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <fieldset
+      data-testid={testid}
+      data-var-id={varId}
+      title={varId}
+      className="space-y-2 rounded-panel border border-hairline bg-well p-3"
+    >
+      <legend className="plaqueta flex w-full items-center justify-between px-1 text-[10px] text-fg-muted">
+        <span className="process-value">{varId}</span>
+        <Button type="button" variant="outline" size="sm" onClick={aoRemover}>
+          Remover
+        </Button>
+      </legend>
+      {children}
+    </fieldset>
+  );
+}
+
+function ListaMv({
+  mvs,
+  tags,
+  aoMudar,
+}: {
+  mvs: VariavelMv[];
+  tags: readonly TagOut[];
+  aoMudar: (mvs: VariavelMv[]) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="plaqueta text-xs text-fg-muted">MVs (saídas manipuladas)</h3>
+        <Button
+          type="button"
+          size="sm"
+          data-testid="mpc-add-mv"
+          onClick={() => {
+            const id = gerarIdVariavel("mv");
+            aoMudar([
+              ...mvs,
+              {
+                id,
+                name: "",
+                eu: "",
+                limits: { min: 0, max: 100 },
+                du_max: 1,
+                initial_value: 0,
+                pid: null,
+              },
+            ]);
+          }}
+        >
+          Adicionar MV
+        </Button>
+      </div>
+      {mvs.map((mv) => (
+        <LinhaVariavel
+          key={mv.id}
+          varId={mv.id}
+          testid={`mpc-var-row-${mv.id}`}
+          aoRemover={() => aoMudar(mvs.filter((item) => item.id !== mv.id))}
+        >
+          <CampoNomeEu id={mv.id} nome={mv.name} eu={mv.eu} />
+          <div className="grid grid-cols-3 gap-3">
+            <CampoNumero id={mv.id} campo="limits_min" rotulo="Limite mín." valor={mv.limits.min} />
+            <CampoNumero id={mv.id} campo="limits_max" rotulo="Limite máx." valor={mv.limits.max} />
+            <CampoNumero id={mv.id} campo="du_max" rotulo="Δu máx." valor={mv.du_max} />
+            <CampoNumero
+              id={mv.id}
+              campo="initial_value"
+              rotulo="Valor inicial"
+              valor={mv.initial_value}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-xs text-fg">
+            <input
+              type="checkbox"
+              data-testid={`mpc-pid-toggle-${mv.id}`}
+              checked={mv.pid !== null}
+              onChange={(evento) => {
+                const comPid = evento.target.checked;
+                aoMudar(
+                  mvs.map((item) =>
+                    item.id !== mv.id
+                      ? item
+                      : {
+                          ...item,
+                          pid: !comPid
+                            ? null
+                            : {
+                                write_tag_id: 0,
+                                target_mode: "rcas",
+                                mode_cmd_tag_id: 0,
+                                mode_read_tag_id: null,
+                                readback_tag_id: 0,
+                                mode_values: { auto: 0, target: 1 },
+                              },
+                        },
+                  ),
+                );
+              }}
+              className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+            />
+            MV com PID (RF-604) — ausente ⇒ MV direta (decisão A-8)
+          </label>
+          {mv.pid !== null && <CamposPid varId={mv.id} pid={mv.pid} tags={tags} />}
+        </LinhaVariavel>
+      ))}
+    </div>
+  );
+}
+
+function ListaCv({
+  cvs,
+  aoMudar,
+}: {
+  cvs: VariavelCv[];
+  aoMudar: (cvs: VariavelCv[]) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="plaqueta text-xs text-fg-muted">CVs (variáveis controladas)</h3>
+        <Button
+          type="button"
+          size="sm"
+          data-testid="mpc-add-cv"
+          onClick={() => {
+            const id = gerarIdVariavel("cv");
+            aoMudar([
+              ...cvs,
+              {
+                id,
+                name: "",
+                eu: "",
+                kind: "selfreg",
+                tss: 600,
+                weight: 1,
+                sp_limits: { min: 0, max: 100 },
+              },
+            ]);
+          }}
+        >
+          Adicionar CV
+        </Button>
+      </div>
+      {cvs.map((cv) => (
+        <LinhaVariavel
+          key={cv.id}
+          varId={cv.id}
+          testid={`mpc-var-row-${cv.id}`}
+          aoRemover={() => aoMudar(cvs.filter((item) => item.id !== cv.id))}
+        >
+          <CampoNomeEu id={cv.id} nome={cv.name} eu={cv.eu} />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor={`${cv.id}-kind`}>Modelo (kind)</Label>
+              <Select
+                id={`${cv.id}-kind`}
+                data-testid={`mpc-kind-${cv.id}`}
+                value={cv.kind}
+                onChange={(evento) => {
+                  const kind = evento.target.value as TipoLinhaMpc;
+                  aoMudar(cvs.map((item) => (item.id !== cv.id ? item : { ...item, kind })));
+                }}
+              >
+                <option value="selfreg">Autorregulável (SOPDT)</option>
+                <option value="integrating">Integrador (IOPDT)</option>
+              </Select>
+            </div>
+            <CampoNumero id={cv.id} campo="tss" rotulo="TSS (s)" valor={cv.tss} />
+            <CampoNumero id={cv.id} campo="weight" rotulo="Peso" valor={cv.weight} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <CampoNumero
+              id={cv.id}
+              campo="sp_limits_min"
+              rotulo="SP mín."
+              valor={cv.sp_limits.min}
+            />
+            <CampoNumero
+              id={cv.id}
+              campo="sp_limits_max"
+              rotulo="SP máx."
+              valor={cv.sp_limits.max}
+            />
+          </div>
+        </LinhaVariavel>
+      ))}
+    </div>
+  );
+}
+
+function ListaRestricao({
+  constraints,
+  aoMudar,
+}: {
+  constraints: VariavelRestricao[];
+  aoMudar: (constraints: VariavelRestricao[]) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="plaqueta text-xs text-fg-muted">Restrições</h3>
+        <Button
+          type="button"
+          size="sm"
+          data-testid="mpc-add-constraint"
+          onClick={() => {
+            const id = gerarIdVariavel("co");
+            aoMudar([
+              ...constraints,
+              {
+                id,
+                name: "",
+                eu: "",
+                kind: "selfreg",
+                tss: 600,
+                range: { low: 0, high: 100 },
+                priority: 1,
+              },
+            ]);
+          }}
+        >
+          Adicionar restrição
+        </Button>
+      </div>
+      {constraints.map((co) => (
+        <LinhaVariavel
+          key={co.id}
+          varId={co.id}
+          testid={`mpc-var-row-${co.id}`}
+          aoRemover={() => aoMudar(constraints.filter((item) => item.id !== co.id))}
+        >
+          <CampoNomeEu id={co.id} nome={co.name} eu={co.eu} />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor={`${co.id}-kind`}>Modelo (kind)</Label>
+              <Select
+                id={`${co.id}-kind`}
+                data-testid={`mpc-kind-${co.id}`}
+                value={co.kind}
+                onChange={(evento) => {
+                  const kind = evento.target.value as TipoLinhaMpc;
+                  aoMudar(
+                    constraints.map((item) => (item.id !== co.id ? item : { ...item, kind })),
+                  );
+                }}
+              >
+                <option value="selfreg">Autorregulável (SOPDT)</option>
+                <option value="integrating">Integrador (IOPDT)</option>
+              </Select>
+            </div>
+            <CampoNumero id={co.id} campo="tss" rotulo="TSS (s)" valor={co.tss} />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <CampoNumero id={co.id} campo="range_low" rotulo="Faixa mín." valor={co.range.low} />
+            <CampoNumero id={co.id} campo="range_high" rotulo="Faixa máx." valor={co.range.high} />
+            <CampoNumero id={co.id} campo="priority" rotulo="Prioridade" valor={co.priority} />
+          </div>
+        </LinhaVariavel>
+      ))}
+    </div>
+  );
+}
+
+function ListaDv({
+  dvs,
+  aoMudar,
+}: {
+  dvs: VariavelDv[];
+  aoMudar: (dvs: VariavelDv[]) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="plaqueta text-xs text-fg-muted">DVs (distúrbios medidos)</h3>
+        <Button
+          type="button"
+          size="sm"
+          data-testid="mpc-add-dv"
+          onClick={() => aoMudar([...dvs, { id: gerarIdVariavel("dv"), name: "", eu: "" }])}
+        >
+          Adicionar DV
+        </Button>
+      </div>
+      {dvs.map((dv) => (
+        <LinhaVariavel
+          key={dv.id}
+          varId={dv.id}
+          testid={`mpc-var-row-${dv.id}`}
+          aoRemover={() => aoMudar(dvs.filter((item) => item.id !== dv.id))}
+        >
+          <CampoNomeEu id={dv.id} nome={dv.name} eu={dv.eu} />
+        </LinhaVariavel>
+      ))}
+    </div>
+  );
+}
+
+/** Aba Variáveis (spec F4 §7.3, §2.1): 4 listas com criar/remover. Estrutura (ids, `kind`,
+ *  presença do `pid`) vive em estado controlado — decide o que renderiza e é usada pela aba
+ *  Modelos; nome/EU/números ficam não-controlados, lidos pelo id no Aplicar (mesmo padrão do
+ *  TFS, `config/CamposTfs.tsx`). */
+export function TabVariables({ variaveis, aoMudar, tags }: Props) {
+  return (
+    <div data-testid="mpc-tab-variaveis" className="space-y-6">
+      <ListaMv mvs={variaveis.mvs} tags={tags} aoMudar={(mvs) => aoMudar({ ...variaveis, mvs })} />
+      <ListaCv cvs={variaveis.cvs} aoMudar={(cvs) => aoMudar({ ...variaveis, cvs })} />
+      <ListaRestricao
+        constraints={variaveis.constraints}
+        aoMudar={(constraints) => aoMudar({ ...variaveis, constraints })}
+      />
+      <ListaDv dvs={variaveis.dvs} aoMudar={(dvs) => aoMudar({ ...variaveis, dvs })} />
+    </div>
+  );
+}
