@@ -28,8 +28,10 @@ from runtime_test_helpers import (
     create_project,
     create_tag,
     delete_flow,
+    edge,
     graph,
     node,
+    read_node,
     read_only_graph,
     save_graph,
     script_node,
@@ -52,7 +54,11 @@ from ottima_core.bus import (
     channel_flow_status,
     publish_event,
 )
-from ottima_flow_runtime.supervisor import REASON_INVALID_GRAPH, REASON_PROJECT_INACTIVE
+from ottima_flow_runtime.supervisor import (
+    REASON_INVALID_GRAPH,
+    REASON_MPC_NOT_READY,
+    REASON_PROJECT_INACTIVE,
+)
 
 Factory = Callable[..., Awaitable[Harness]]
 Collect = Callable[[str], Awaitable[Collector]]
@@ -203,6 +209,80 @@ async def test_deploy_de_grafo_invalido_e_rejeitado_sem_task_orfa(
     assert rejeitado.severity == "warning"
     assert rejeitado.origin == f"flow:{flow_id}"
     assert rejeitado.payload["reason"] == REASON_INVALID_GRAPH
+    assert dict(harness.supervisor.flows) == {}
+    assert harness.state.flows == {}
+
+
+def _grafo_mpc_valido(tag_id: int) -> dict:
+    """Esqueleto mínimo válido do §2.1 (spec F4): 1 MV direta + 1 CV, matriz cheia.
+
+    A CV entra pela porta obrigatória (decisão A-10) — precisa de 1 leitor OPC dedicado.
+    """
+    mpc = node(
+        "m1",
+        "mpc",
+        2,
+        {
+            "name": "MPC teste",
+            "multiplier": 1,
+            "variables": {
+                "mvs": [
+                    {
+                        "id": "mv_a",
+                        "name": "MV a",
+                        "eu": "m3/h",
+                        "limits": {"min": 0.0, "max": 100.0},
+                        "du_max": 5.0,
+                        "initial_value": 0.0,
+                    }
+                ],
+                "cvs": [
+                    {
+                        "id": "cv_a",
+                        "name": "CV a",
+                        "eu": "C",
+                        "kind": "selfreg",
+                        "tss": 30.0,
+                        "weight": 1.0,
+                        "sp_limits": {"min": 80.0, "max": 120.0},
+                    }
+                ],
+                "constraints": [],
+                "dvs": [],
+            },
+            "models": {
+                "cv_a": {
+                    "mv_a": {
+                        "enabled": True,
+                        "params": {"K": 1.2, "tau1": 10.0, "tau2": 2.0, "theta": 15.0},
+                    }
+                }
+            },
+        },
+    )
+    return graph([read_node("r1", 1, tag_id), mpc], [edge("r1", "out", "m1", "cv_a")])
+
+
+async def test_deploy_de_flow_com_mpc_e_rejeitado_pela_ponte_do_f4a(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    """PONTE DE DEPLOY [tarefa 3.1 do F4a; REMOVER na tarefa 2.2 do F4b]: o grafo com `mpc`
+    valida e salva (spec F4 §2.2, tarefa 1.2), mas o `MpcWorker` que o executa só nasce no
+    F4b (spec F4 §4.1) — o staging recusa aqui e o flow permanece parado."""
+    project_id = await create_project(session_factory)
+    connection_id = await create_connection(session_factory, project_id)
+    tag_id = await create_tag(session_factory, connection_id, direction="r")
+    flow_id = await create_flow(session_factory, project_id, graph=_grafo_mpc_valido(tag_id))
+    events = await collect(CHANNEL_EVENTS)
+    harness = await harness_factory()
+
+    await harness.command("deploy", flow_id)
+    await await_until(lambda: len(events.events(KIND_DEPLOY_REJECTED)) == 1)
+
+    rejeitado = events.events(KIND_DEPLOY_REJECTED)[0]
+    assert rejeitado.severity == "warning"
+    assert rejeitado.origin == f"flow:{flow_id}"
+    assert rejeitado.payload["reason"] == REASON_MPC_NOT_READY
     assert dict(harness.supervisor.flows) == {}
     assert harness.state.flows == {}
 

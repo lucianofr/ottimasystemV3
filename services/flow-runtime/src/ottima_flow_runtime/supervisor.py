@@ -44,7 +44,7 @@ from ottima_core.models import Flow, Project
 from ottima_core.tags import project_tags
 
 from .blocks.base import Block
-from .definition import StagedDefinition, build_definition
+from .definition import MpcNotReadyError, StagedDefinition, build_definition
 from .events import (
     ChannelListener,
     publish_flow_deployed,
@@ -69,8 +69,20 @@ REASON_COMM_FAILURE = "comm_failure"
 REASON_FLOW_DELETED = "flow_deleted"
 REASON_PROJECT_INACTIVE = "project_inactive"
 REASON_INVALID_GRAPH = "invalid_graph"
+# Ponte de deploy [tarefa 3.1 do F4a; REMOVER na tarefa 2.2 do F4b] — ver `definition.py`.
+REASON_MPC_NOT_READY = "mpc_not_ready"
 # Desligamento do runtime: contrato com o mapa de tradução de `reason` do frontend (§6.1).
 REASON_SHUTDOWN = "shutdown"
+
+# Mensagem humana por `reason` de `_Rejected`, compartilhada entre deploy e hot-swap: as
+# duas recusas têm o mesmo texto de causa, só o prefixo de ação (§4.3) muda por chamador.
+_REJECTION_REASON_MESSAGES: dict[str, str] = {
+    REASON_INVALID_GRAPH: "o grafo salvo é inválido",
+    REASON_MPC_NOT_READY: (
+        "o grafo tem bloco mpc, que ainda não executa (ponte da tarefa 3.1 do F4a;"
+        " remove na tarefa 2.2 do F4b)"
+    ),
+}
 
 # Ator do log de desmonte do serviço. NUNCA entra em payload de auditoria: parada sem comando
 # de usuário atrás omite a chave `user` (ver `events.publish_flow_stopped`).
@@ -80,8 +92,9 @@ SYSTEM_ACTOR = "runtime"
 class _Rejected(Exception):
     """Grafo do banco recusado na montagem da definição. `messages` traz todas as reprovações."""
 
-    def __init__(self, messages: list[str]) -> None:
+    def __init__(self, messages: list[str], *, reason: str = REASON_INVALID_GRAPH) -> None:
         self.messages = list(messages)
+        self.reason = reason
         super().__init__(" | ".join(self.messages))
 
 
@@ -228,8 +241,11 @@ class Supervisor:
                     KIND_DEPLOY_REJECTED,
                     flow_id=flow_id,
                     user=command.user,
-                    reason=REASON_INVALID_GRAPH,
-                    message=f"Deploy do flow {flow_id} recusado: o grafo salvo é inválido",
+                    reason=rejected.reason,
+                    message=(
+                        f"Deploy do flow {flow_id} recusado: "
+                        f"{_REJECTION_REASON_MESSAGES[rejected.reason]}"
+                    ),
                     detail=str(rejected),
                 )
                 return
@@ -296,9 +312,10 @@ class Supervisor:
                 KIND_RELOAD_REJECTED,
                 flow_id=flow.id,
                 user=user,
-                reason=REASON_INVALID_GRAPH,
+                reason=rejected.reason,
                 message=(
-                    f"Hot-swap do flow {flow.id} recusado: o grafo salvo é inválido;"
+                    f"Hot-swap do flow {flow.id} recusado: "
+                    f"{_REJECTION_REASON_MESSAGES[rejected.reason]};"
                     " a definição em execução foi mantida"
                 ),
                 detail=str(rejected),
@@ -336,16 +353,19 @@ class Supervisor:
         for aviso in result.warnings:
             logger.info("Flow %s: %s", flow.id, aviso)
 
-        return build_definition(
-            graph,
-            tags,
-            flow_id=flow.id,
-            ts_seconds=ts_seconds,
-            reuse=reuse,
-            redis_client=self._redis,
-            pool=self._pool,
-            snapshot=self._snapshot,
-        )
+        try:
+            return build_definition(
+                graph,
+                tags,
+                flow_id=flow.id,
+                ts_seconds=ts_seconds,
+                reuse=reuse,
+                redis_client=self._redis,
+                pool=self._pool,
+                snapshot=self._snapshot,
+            )
+        except MpcNotReadyError as recusado:
+            raise _Rejected([str(recusado)], reason=REASON_MPC_NOT_READY) from None
 
     # ----------------------------------------------------------------------------------
     # Contrato F2 §3.7 (spec §2.2-8)

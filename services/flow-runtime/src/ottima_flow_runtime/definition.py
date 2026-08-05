@@ -28,6 +28,20 @@ from .snapshot import ValueSnapshot
 _TAG_TYPES = frozenset({"opc_read", "opc_write"})
 
 
+class MpcNotReadyError(Exception):
+    """Grafo tem nó `mpc`: staging recusa por enquanto (ponte deliberada e temporária).
+
+    PONTE DE DEPLOY — tarefa 3.1 do plano F4a; REMOVER na tarefa 2.2 do plano F4b. O bloco
+    `mpc` já valida e salva pela API (spec F4 §2.2, tarefa 1.2), mas o `MpcWorker` que o
+    executa só nasce no F4b (spec F4 §4.1). Até lá, o flow com `mpc` salva normalmente —
+    só o deploy/hot-swap recusa aqui, para não subir um bloco sem worker real.
+    """
+
+    def __init__(self, node_id: str) -> None:
+        self.node_id = node_id
+        super().__init__(f"nó '{node_id}' (mpc): bloco ainda não executa (ponte F4a -> F4b)")
+
+
 @dataclass(frozen=True, slots=True)
 class StagedDefinition:
     """Definição pronta para subir ou entrar em hot-swap, com o que o supervisor guarda dela."""
@@ -56,6 +70,10 @@ def build_definition(
     continua, e o estado interno vem junto de graça (ADR-011). O método É o comparador:
     `exec_order`, rótulo e posição ficam fora dele de propósito (ADR-024).
     """
+    mpc_node = next((n for n in graph.nodes if n.type == "mpc"), None)
+    if mpc_node is not None:
+        raise MpcNotReadyError(mpc_node.id)
+
     blocks: dict[str, tuple[dict[str, Any], Block]] = {}
     instances: list[Block] = []
     for node in sorted(graph.nodes, key=lambda item: item.exec_order):
