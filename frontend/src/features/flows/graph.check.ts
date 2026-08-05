@@ -55,6 +55,63 @@ function tfs(id: string, ordem: number): BlocoNode {
   return criarBloco("tfs", id, POS, ordem);
 }
 
+/** Nó MPC com config vazio-mas-válido (criarBloco); `overrides` substitui `variables`/`name`
+ *  etc. para os testes de porta dinâmica e round-trip. */
+function mpc(id: string, ordem: number, overrides: Partial<BlocoNode["data"]> = {}): BlocoNode {
+  const base = criarBloco("mpc", id, POS, ordem);
+  if (base.type !== "mpc") throw new Error("tipo preservado");
+  return { ...base, data: { ...base.data, ...overrides } };
+}
+
+function variavelMv(id: string, name: string, eu: string, comPid = false) {
+  return {
+    id,
+    name,
+    eu,
+    limits: { min: 0, max: 100 },
+    du_max: 5,
+    initial_value: 0,
+    pid: comPid
+      ? {
+          write_tag_id: 12,
+          target_mode: "rcas" as const,
+          mode_cmd_tag_id: 13,
+          mode_read_tag_id: 14,
+          readback_tag_id: 15,
+          mode_values: { auto: 1, target: 3 },
+        }
+      : null,
+  };
+}
+
+function variavelCv(id: string, name: string, eu: string) {
+  return {
+    id,
+    name,
+    eu,
+    kind: "selfreg" as const,
+    tss: 600,
+    weight: 1,
+    sp_limits: { min: 80, max: 120 },
+  };
+}
+
+function variavelRestricao(id: string, name: string, eu: string) {
+  return {
+    id,
+    name,
+    eu,
+    kind: "integrating" as const,
+    tss: 900,
+    range: { low: 20, high: 80 },
+    priority: 1,
+  };
+}
+
+function variavelDv(id: string, name: string, eu: string) {
+  return { id, name, eu };
+}
+
 function aresta(
   id: string,
   source: string,
@@ -80,6 +137,38 @@ test("os handles de cada tipo são exatamente os que o servidor reconhece", () =
   expect(handlesSaida(escrita("w", 1, 20))).toEqual([]);
   expect(handlesEntrada(tfs("t", 1))).toEqual(["u1", "u2"]);
   expect(handlesSaida(tfs("t", 1))).toEqual(["y1", "y2"]);
+});
+
+test("criarBloco('mpc', ...) nasce com config vazio e sem portas (spec F4 §2.1)", () => {
+  const no = mpc("m", 1);
+  if (no.type !== "mpc") throw new Error("tipo preservado");
+  expect(no.data).toEqual({
+    exec_order: 1,
+    label: "",
+    name: "",
+    multiplier: 1,
+    variables: { mvs: [], cvs: [], constraints: [], dvs: [] },
+    models: {},
+  });
+  expect(handlesEntrada(no)).toEqual([]);
+  expect(handlesSaida(no)).toEqual([]);
+});
+
+test("portas do MPC são dinâmicas do config: entradas CV+Restrição+DV, saída MV, na ordem (decisão A-10)", () => {
+  const no = mpc("m", 1, {
+    variables: {
+      mvs: [variavelMv("mv_1", "Vazão de refluxo", "m3/h")],
+      cvs: [variavelCv("cv_1", "Temperatura de topo", "C")],
+      constraints: [variavelRestricao("co_1", "Nível do vaso", "%")],
+      dvs: [variavelDv("dv_1", "Vazão de carga", "m3/h")],
+    },
+  });
+  expect(handlesEntrada(no)).toEqual(["cv_1", "co_1", "dv_1"]);
+  expect(handlesSaida(no)).toEqual(["mv_1"]);
+});
+
+test("tipo da porta do MPC é sempre numérico (spec F4 §2.1-5)", () => {
+  expect(tipoPorta(mpc("m", 1), TAGS)).toBe("num");
 });
 
 test("as portas do Script acompanham n_inputs/n_outputs, inclusive em zero", () => {
@@ -282,6 +371,7 @@ test("data sai com exatamente as chaves do contrato, uma lista por tipo", () => 
     criarBloco("opc_write", "w", POS, 2),
     criarBloco("script", "s", POS, 3),
     criarBloco("tfs", "t", POS, 4),
+    criarBloco("mpc", "m", POS, 5),
   ];
   const chaves = paraGraphJson(nodes, []).nodes.map((no) => Object.keys(no.data).sort());
   expect(chaves).toEqual([
@@ -289,6 +379,7 @@ test("data sai com exatamente as chaves do contrato, uma lista por tipo", () => 
     ["exec_order", "label", "tag_id"],
     ["code", "exec_order", "label", "n_inputs", "n_outputs"],
     ["exec_order", "label", "matrix"],
+    ["exec_order", "label", "models", "multiplier", "name", "variables"],
   ]);
 });
 
@@ -336,6 +427,29 @@ test("ida e volta pelo graph_json preserva o grafo", () => {
   expect(volta.edges).toEqual(edges);
 });
 
+test("ida e volta pelo graph_json preserva o nó mpc com config completo (mvs com pid, cvs, constraints, dvs, models)", () => {
+  const no = mpc("m", 1, {
+    name: "MPC da coluna",
+    multiplier: 5,
+    variables: {
+      mvs: [variavelMv("mv_x7k2", "Vazão de refluxo", "m3/h", true)],
+      cvs: [variavelCv("cv_a1b2", "Temperatura de topo", "C")],
+      constraints: [variavelRestricao("co_c3d4", "Nível do vaso", "%")],
+      dvs: [variavelDv("dv_e5f6", "Vazão de carga", "m3/h")],
+    },
+    models: {
+      cv_a1b2: {
+        mv_x7k2: { enabled: true, params: { K: 1.2, tau1: 120, tau2: 30, theta: 15 } },
+      },
+      co_c3d4: {
+        mv_x7k2: { enabled: false, params: { Ki: 0.4, theta: 2 } },
+      },
+    },
+  });
+  const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson([no], []))));
+  expect(volta.nodes).toEqual([no]);
+});
+
 test("grafo vazio do flow recém-criado abre sem nó nem aresta", () => {
   expect(deGraphJson({ nodes: [], edges: [] })).toEqual({ nodes: [], edges: [] });
   expect(deGraphJson(null)).toEqual({ nodes: [], edges: [] });
@@ -344,7 +458,7 @@ test("grafo vazio do flow recém-criado abre sem nó nem aresta", () => {
 test("nó de tipo desconhecido é descartado junto com as arestas que o citam", () => {
   const grafo = deGraphJson({
     nodes: [
-      { id: "m", type: "mpc", position: { x: 0, y: 0 }, data: { exec_order: 1 } },
+      { id: "m", type: "invalido", position: { x: 0, y: 0 }, data: { exec_order: 1 } },
       { id: "s", type: "script", position: { x: 0, y: 0 }, data: { exec_order: 2, n_inputs: 1, n_outputs: 1, code: "" } },
     ],
     edges: [
