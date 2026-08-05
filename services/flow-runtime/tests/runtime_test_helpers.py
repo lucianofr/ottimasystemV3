@@ -342,6 +342,11 @@ class StubPool:
         self.started = False
         self.calls.append("stop")
 
+    def stats(self) -> dict:
+        """Espelha o contrato de `ScriptPool.stats()` (F4a 0.6, spec F4 §4.10) — sem
+        processos reais, só as chaves que `Supervisor.script_pool_stats()` repassa."""
+        return {"size": 0, "busy": 0, "respawns": 0}
+
     async def run(
         self, *, code: str, inputs: dict[str, float], state: Any, n_outputs: int, timeout_s: float
     ) -> ScriptResult:

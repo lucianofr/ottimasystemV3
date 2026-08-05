@@ -218,7 +218,13 @@ async def test_deploy_de_flow_com_mpc_succeede_ponte_f4a_removida(
     """PONTE DE DEPLOY [tarefa 3.1 do F4a; REMOVIDA na tarefa 2.2 do F4b]: o grafo com `mpc`
     valida e salva (spec F4 §2.2, tarefa 1.2) e agora TAMBÉM sobe — `MpcBlock`/`MpcHost`
     (plano F4b, tarefas 2.1/2.2) já executam de verdade; nenhum `deploy_rejected` sai mais
-    por causa de um nó `mpc`."""
+    por causa de um nó `mpc`.
+
+    Também cobre `Supervisor.mpc_health()`/`script_pool_stats()` (plano F4b, tarefa 2.3;
+    spec F4 §4.10) contra um flow MPC de verdade — `test_health_mpc.py` só prova o wiring
+    do `main.py` com um supervisor dublê; aqui a travessia real de `_runtimes`/`blocks`/
+    `_pool` está sob teste.
+    """
     project_id = await create_project(session_factory)
     connection_id = await create_connection(session_factory, project_id)
     tag_id = await create_tag(session_factory, connection_id, direction="r")
@@ -232,6 +238,14 @@ async def test_deploy_de_flow_com_mpc_succeede_ponte_f4a_removida(
     assert events.events(KIND_DEPLOY_REJECTED) == []
     assert len(events.events(KIND_FLOW_DEPLOYED)) == 1
     assert harness.flow_state(flow_id) == "running"
+
+    mpc_health = harness.supervisor.mpc_health(flow_id)
+    assert set(mpc_health) == {"m1"}
+    assert set(mpc_health["m1"]) == {"mode", "overruns", "last_solve_ms", "worker"}
+    assert set(mpc_health["m1"]["worker"]) == {"alive", "respawns", "last_solve_ms"}
+    # Flow inexistente: mesmo contrato de dict vazio de `mpc_graph_valido` sem bloco mpc.
+    assert harness.supervisor.mpc_health(flow_id + 1) == {}
+    assert set(harness.supervisor.script_pool_stats()) == {"size", "busy", "respawns"}
 
 
 # --------------------------------------------------------------------------------------
