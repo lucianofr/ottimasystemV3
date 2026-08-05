@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -165,6 +165,39 @@ export function MpcModal({
     setAba(novaAba);
   }
 
+  // Minor 3 (revisão final): fecha a semântica ARIA de tabs deixada pela metade na revisão
+  // 4.2 (`role`/`aria-selected` sem ligação `id`/`aria-controls`/`aria-labelledby` nem
+  // navegação por seta com tabindex circulante — WAI-ARIA APG). `abaRefs` guarda o botão de
+  // cada aba para o foco seguir a ativação em vez de só o `aria-selected`.
+  const abaRefs = useRef<Partial<Record<SlugAba, HTMLButtonElement>>>({});
+
+  function focarEAtivarAba(indice: number): void {
+    const alvo = ABAS[(indice + ABAS.length) % ABAS.length];
+    mudarAba(alvo.slug);
+    abaRefs.current[alvo.slug]?.focus();
+  }
+
+  function aoNavegarAbas(evento: KeyboardEvent<HTMLButtonElement>, indiceAtual: number): void {
+    switch (evento.key) {
+      case "ArrowRight":
+        evento.preventDefault();
+        focarEAtivarAba(indiceAtual + 1);
+        break;
+      case "ArrowLeft":
+        evento.preventDefault();
+        focarEAtivarAba(indiceAtual - 1);
+        break;
+      case "Home":
+        evento.preventDefault();
+        focarEAtivarAba(0);
+        break;
+      case "End":
+        evento.preventDefault();
+        focarEAtivarAba(ABAS.length - 1);
+        break;
+    }
+  }
+
   return (
     <dialog
       ref={dialogo}
@@ -214,22 +247,32 @@ export function MpcModal({
 
           {/* Navegação das 7 abas em botões (comutador de posição, não iOS toggle —
               DESIGN.md §Shapes/§Don'ts): a aba ativa vira chapa "pressionada". `role="tablist"`/
-              `role="tab"`/`aria-selected` fecham o minor 4 da revisão 4.2 (semântica ARIA
-              adiada até as 7 abas terem conteúdo real). */}
+              `role="tab"`/`aria-selected` + `id`/`aria-controls` linkando ao painel + tabindex
+              circulante com seta esquerda/direita/Home/End fecham o minor 3 da revisão final
+              (WAI-ARIA APG tabs pattern). */}
           <nav
             role="tablist"
             className="flex flex-wrap gap-1 border-b border-hairline pb-2"
             aria-label="Abas MPC"
           >
-            {ABAS.map((item) => (
+            {ABAS.map((item, indice) => (
               <button
                 key={item.slug}
+                ref={(elemento) => {
+                  if (elemento !== null) abaRefs.current[item.slug] = elemento;
+                }}
                 type="button"
                 role="tab"
+                id={`mpc-tab-${item.slug}`}
+                aria-controls={`mpc-tabpanel-${item.slug}`}
                 aria-selected={aba === item.slug}
+                tabIndex={aba === item.slug ? 0 : -1}
                 data-testid={`mpc-tab-${item.slug}`}
                 onClick={() => {
                   mudarAba(item.slug);
+                }}
+                onKeyDown={(evento) => {
+                  aoNavegarAbas(evento, indice);
                 }}
                 className={`plaqueta rounded-panel border px-3 py-1.5 text-[11px] transition-colors ${
                   aba === item.slug
@@ -242,7 +285,12 @@ export function MpcModal({
             ))}
           </nav>
 
-          <div role="tabpanel" className="min-h-[280px]">
+          <div
+            role="tabpanel"
+            id={`mpc-tabpanel-${aba}`}
+            aria-labelledby={`mpc-tab-${aba}`}
+            className="min-h-[280px]"
+          >
             {aba === "geral" && (
               <TabGeneral
                 nome={no.data.name}
