@@ -37,6 +37,7 @@ from ottima_flow_runtime.snapshot import TagValue
 
 TS_FLOW = 1.0
 OPERADOR = "user:7"
+FLOW_ID = 1
 
 
 def _config(*, multiplier: int = 1) -> MpcConfig:
@@ -185,6 +186,7 @@ def _block(
         ts_flow=TS_FLOW,
         snapshot=snapshot,
         host=host,
+        flow_id=FLOW_ID,
         publish=publish,
         write_opc=write_opc,
         emit_event=emit_event,
@@ -544,4 +546,4 @@ async def test_todos_os_eventos_carregam_o_origin_do_bloco() -> None:
     await block.step(entradas(20.0, ok=False))  # dispara mpc_input_invalid
 
     assert events.events, "pré-condição: precisa haver eventos para checar"
-    assert all(e["origin"] == "block:m1" for e in events.events)
+    assert all(e["origin"] == f"flow:{FLOW_ID}/block:m1" for e in events.events)

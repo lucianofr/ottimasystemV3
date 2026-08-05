@@ -27,9 +27,13 @@ em qualquer lugar que decida repetir essa checagem.
 Escopo desta tarefa (2.1) — o que NÃO mora aqui: escrita de `mode_cmd` no PID nas
 transições LOCAL<->REMOTO, confirmação por `mode_read` (2×Ts_mpc), shed por divergência de
 `mode_read` (§4.5) e hot-swap (§4.7) são orquestração do supervisor (plano F4b, tarefa 2.2,
-conforme a própria brief dessa tarefa) — o bloco só materializa o campo de modo e audita,
-via `command()`, respeitando as regras §4.8 (idempotência, `man_auto` em LOCAL ignorado,
-clamps, e materialização condicionada ao modo vigente).
+`mpc_arming.py` + `supervisor.py`) — o bloco só materializa o campo de modo e audita, via
+`command()`, respeitando as regras §4.8 (idempotência, `man_auto` em LOCAL ignorado,
+clamps, e materialização condicionada ao modo vigente). O supervisor precisa ver por fora
+do `step()` (host pronto, entrada quente/válida, `pid` de cada MV, `Ts_mpc`) para orquestrar
+sem duplicar essa configuração — daí as properties `host`/`local_remote`/`ts_mpc`/
+`pid_bindings` e o predicado puro `auto_arm_blocked_reason()`: leitura só, sem write, sem
+mudar o comportamento desta tarefa (achado da tarefa 2.2, documentado no relatório dela).
 """
 
 from __future__ import annotations
@@ -52,7 +56,7 @@ from ottima_core.bus import (
     MpcVarState,
     OpcWrite,
 )
-from ottima_core.flowgraph import CvVar, MpcConfig, MvVar, derive_horizons
+from ottima_core.flowgraph import CvVar, MpcConfig, MvVar, PidBinding, derive_horizons
 
 from ..mpc.host import MpcHost
 from ..mpc.worker import SolveRequest, SolveResult
@@ -74,8 +78,9 @@ class MpcBlock(Block):
     """Entradas: uma por CV/Restrição/DV (ordem do config, spec §2.1-5). Saídas: uma por MV.
 
     `host` já é dono do processo do worker (spec F4 §3.6/§4.2) — este bloco só chama
-    `dispatch()`/`poll()`/`stats()`/`ready`, nunca sobe/mata processo. `snapshot` é o
-    espelho do barramento (F3) usado só para o readback do PID em LOCAL (spec §4.3);
+    `dispatch()`/`poll()`/`stats()`/`ready`, nunca sobe/mata processo (quem faz isso é o
+    supervisor, plano F4b tarefa 2.2, dono do ciclo de vida do host por flow). `snapshot` é
+    o espelho do barramento (F3) usado só para o readback do PID em LOCAL (spec §4.3);
     `publish`/`write_opc`/`emit_event` são os pontos de saída para o barramento, injetados
     para o bloco nunca falar com Redis diretamente (testável em processo, sem I/O).
     """
@@ -88,6 +93,7 @@ class MpcBlock(Block):
         ts_flow: float,
         snapshot: ValueSnapshot,
         host: MpcHost,
+        flow_id: int,
         publish: Callable[[MpcState], Awaitable[None]],
         write_opc: Callable[[OpcWrite], Awaitable[None]],
         emit_event: Callable[..., Awaitable[None]],
@@ -98,7 +104,12 @@ class MpcBlock(Block):
         self._publish = publish
         self._write_opc = write_opc
         self._emit_event = emit_event
-        self._source = f"block:{block_id}"
+        # `flow_id` entra só para compor `_source` no padrão F3 (`flow:<fid>/block:<bid>`,
+        # igual a `OpcWriteBlock`) — achado do carry-over da tarefa 2.1: o bloco nasceu
+        # isolado (host/snapshot falsos, sem Redis) e não tinha o `flow_id` à mão; quem
+        # monta o bloco de verdade (`definition.py`, tarefa 2.2) sempre tem — a costura de
+        # string fica na fonte, não espalhada por quem publica os eventos/writes do bloco.
+        self._source = f"flow:{flow_id}/block:{block_id}"
 
         tss = [v.tss for v in (*config.variables.cvs, *config.variables.constraints)]
         self._multiplier = config.multiplier
@@ -122,6 +133,47 @@ class MpcBlock(Block):
     @property
     def output_ports(self) -> tuple[str, ...]:
         return self._mv_ids
+
+    @property
+    def host(self) -> MpcHost:
+        """O `MpcHost` deste bloco — o supervisor é dono do ciclo de vida dele (start no
+        deploy, stop no stop/hot-swap; plano F4b tarefa 2.2)."""
+        return self._host
+
+    @property
+    def local_remote(self) -> _LocalRemote:
+        """Leitura pura do eixo LOCAL/REMOTO — o supervisor usa para decidir se uma
+        transição `local_remote` de fato mudou algo (comando idempotente não dispara
+        escrita de `mode_cmd` nem arma confirmação, tarefa 2.2)."""
+        return self._local_remote
+
+    @property
+    def ts_mpc(self) -> float:
+        """`Ts_mpc` derivado (spec §2.2-5) — cadência que o supervisor usa para o relógio
+        de confirmação (2×Ts_mpc, §4.4) e shed (§4.5): mesma conta, não duplicada."""
+        return self._ts_mpc
+
+    @property
+    def pid_bindings(self) -> tuple[tuple[str, PidBinding], ...]:
+        """`(var_id, pid)` de cada MV com `pid` — o supervisor usa para escrever `mode_cmd`
+        e ler `mode_read` nas transições §4.4/§4.5 sem reparsear o `MpcConfig` a partir do
+        JSON salvo (o bloco já fez esse parse)."""
+        return tuple((mv_id, mv.pid) for mv_id, mv in self._mvs.items() if mv.pid is not None)
+
+    def auto_arm_blocked_reason(self) -> str | None:
+        """Predicado puro do gate de MAN→AUTO (spec §4.4): host pronto + entradas quentes
+        (já medidas ao menos uma vez, nunca frias) + válidas (última varredura `ok=True`).
+        Só LÊ estado — quem decide o que fazer com o motivo (emitir `mpc_arm_failed` e não
+        materializar o comando) é o supervisor, que intercepta o comando ANTES de rotear a
+        `command()` (tarefa 2.2): nenhuma mudança de comportamento desta tarefa (2.1)."""
+        if not self._host.ready:
+            return "worker_not_ready"
+        warm = all(var_id in self._last_measured for var_id in self._entrada_ids)
+        if not warm:
+            return "cold_input"
+        if not self._input_ok:
+            return "invalid_input"
+        return None
 
     @property
     def _in_auto(self) -> bool:
@@ -272,9 +324,10 @@ class MpcBlock(Block):
         válida (spec §4.3/§4.6) — em LOCAL não escreve nada, RF-621.
 
         `conn_id` sai como `0`: `PidBinding` não carrega a conexão da tag (só o
-        `write_tag_id`) — a resolução tag->conexão é de quem monta o `write_opc` real (a
-        mesma consulta de `_project_tags`, débito #3 da spec F4 §8), tarefa 2.2. Documentado
-        no relatório desta tarefa como decisão explícita, sem teste dedicado aqui.
+        `write_tag_id`) — a resolução tag->conexão é de quem monta o `write_opc` real
+        (`definition.py`, mesma consulta de `_project_tags`, débito #3 da spec F4 §8,
+        fechado na tarefa 2.2: o `write_opc` injetado já resolve o `conn_id` verdadeiro
+        antes de publicar).
         """
         if self._local_remote != "remote" or not ok:
             return
