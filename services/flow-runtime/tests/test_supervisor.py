@@ -30,6 +30,7 @@ from runtime_test_helpers import (
     delete_flow,
     graph,
     mpc_graph_valido,
+    mpc_host_echo_worker,
     node,
     read_only_graph,
     save_graph,
@@ -55,7 +56,6 @@ from ottima_core.bus import (
 )
 from ottima_flow_runtime.supervisor import (
     REASON_INVALID_GRAPH,
-    REASON_MPC_NOT_READY,
     REASON_PROJECT_INACTIVE,
 )
 
@@ -212,28 +212,26 @@ async def test_deploy_de_grafo_invalido_e_rejeitado_sem_task_orfa(
     assert harness.state.flows == {}
 
 
-async def test_deploy_de_flow_com_mpc_e_rejeitado_pela_ponte_do_f4a(
+async def test_deploy_de_flow_com_mpc_succeede_ponte_f4a_removida(
     harness_factory: Factory, collect: Collect, session_factory: Sessions
 ) -> None:
-    """PONTE DE DEPLOY [tarefa 3.1 do F4a; REMOVER na tarefa 2.2 do F4b]: o grafo com `mpc`
-    valida e salva (spec F4 §2.2, tarefa 1.2), mas o `MpcWorker` que o executa só nasce no
-    F4b (spec F4 §4.1) — o staging recusa aqui e o flow permanece parado."""
+    """PONTE DE DEPLOY [tarefa 3.1 do F4a; REMOVIDA na tarefa 2.2 do F4b]: o grafo com `mpc`
+    valida e salva (spec F4 §2.2, tarefa 1.2) e agora TAMBÉM sobe — `MpcBlock`/`MpcHost`
+    (plano F4b, tarefas 2.1/2.2) já executam de verdade; nenhum `deploy_rejected` sai mais
+    por causa de um nó `mpc`."""
     project_id = await create_project(session_factory)
     connection_id = await create_connection(session_factory, project_id)
     tag_id = await create_tag(session_factory, connection_id, direction="r")
     flow_id = await create_flow(session_factory, project_id, graph=mpc_graph_valido(tag_id))
     events = await collect(CHANNEL_EVENTS)
-    harness = await harness_factory()
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
 
     await harness.command("deploy", flow_id)
-    await await_until(lambda: len(events.events(KIND_DEPLOY_REJECTED)) == 1)
+    await harness.await_state(flow_id, "running", timeout_s=15.0)
 
-    rejeitado = events.events(KIND_DEPLOY_REJECTED)[0]
-    assert rejeitado.severity == "warning"
-    assert rejeitado.origin == f"flow:{flow_id}"
-    assert rejeitado.payload["reason"] == REASON_MPC_NOT_READY
-    assert dict(harness.supervisor.flows) == {}
-    assert harness.state.flows == {}
+    assert events.events(KIND_DEPLOY_REJECTED) == []
+    assert len(events.events(KIND_FLOW_DEPLOYED)) == 1
+    assert harness.flow_state(flow_id) == "running"
 
 
 # --------------------------------------------------------------------------------------
