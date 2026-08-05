@@ -99,6 +99,32 @@ export function variavelMvDoFormulario(
   };
 }
 
+/** Defaults hard-coded do `pid` na PRIMEIRA vez que o checkbox "com PID" liga (mesma forma
+ *  usada em `variavelMvDoFormulario` quando não há `pid` anterior). */
+const PID_PADRAO: NonNullable<VariavelMv["pid"]> = {
+  write_tag_id: 0,
+  target_mode: "rcas",
+  mode_cmd_tag_id: 0,
+  mode_read_tag_id: null,
+  readback_tag_id: 0,
+  mode_values: { auto: 0, target: 1 },
+};
+
+/** Decide o `pid` da MV ao alternar o checkbox "com PID" (RF-604, revisão final Important):
+ *  ligando, restaura o último `pid` capturado do formulário ANTES do uncheck anterior — em
+ *  vez de reconstruir do zero com `PID_PADRAO` e descartar o que o engenheiro já preencheu,
+ *  mesma classe de bug da revisão 4.3 (lá era troca de aba; aqui é o checkbox dentro da
+ *  mesma aba). Sem histórico (primeira vez que liga), cai nos defaults hard-coded.
+ *  Desligando, `null` (decisão A-8) — quem chama é responsável por cachear
+ *  `ultimoPidConhecido` FORA do estado controlado antes de desmontar `CamposPid`. */
+export function pidAoAlternar(
+  comPid: boolean,
+  ultimoPidConhecido: VariavelMv["pid"],
+): VariavelMv["pid"] {
+  if (!comPid) return null;
+  return ultimoPidConhecido ?? PID_PADRAO;
+}
+
 export function variavelCvDoFormulario(atual: VariavelCv, dados: FormData): VariavelCv {
   const c = (campo: string): string => nomeCampoVar(atual.id, campo);
   const n = (campo: string, padrao: number): number => numeroDoCampo(dados.get(c(campo)), padrao);

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -14,7 +14,7 @@ import type {
   VariavelRestricao,
 } from "../graph";
 import { CamposPid } from "./CamposPid";
-import { gerarIdVariavel, nomeCampoVar } from "./mpcLogic";
+import { gerarIdVariavel, nomeCampoVar, pidAoAlternar, variavelMvDoFormulario } from "./mpcLogic";
 
 interface Props {
   variaveis: VariaveisMpc;
@@ -101,6 +101,10 @@ function ListaMv({
   tags: readonly TagOut[];
   aoMudar: (mvs: VariavelMv[]) => void;
 }) {
+  // Fix final (Important): cache FORA do estado controlado do último `pid` capturado do
+  // DOM antes de um uncheck — `pidAoAlternar` usa isto para não reconstruir do zero (e
+  // descartar o digitado) num recheck sem troca de aba (mesma classe de bug da revisão 4.3).
+  const ultimosPid = useRef<Record<string, VariavelMv["pid"]>>({});
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -154,23 +158,21 @@ function ListaMv({
               checked={mv.pid !== null}
               onChange={(evento) => {
                 const comPid = evento.target.checked;
+                const formulario = evento.target.form;
+                if (!comPid && mv.pid !== null && formulario !== null) {
+                  // Captura os campos do pid ainda montados no DOM neste instante — antes
+                  // do React desmontar `CamposPid` — para o recheck poder restaurá-los.
+                  ultimosPid.current[mv.id] = variavelMvDoFormulario(
+                    mv,
+                    new FormData(formulario),
+                    true,
+                  ).pid;
+                }
                 aoMudar(
                   mvs.map((item) =>
                     item.id !== mv.id
                       ? item
-                      : {
-                          ...item,
-                          pid: !comPid
-                            ? null
-                            : {
-                                write_tag_id: 0,
-                                target_mode: "rcas",
-                                mode_cmd_tag_id: 0,
-                                mode_read_tag_id: null,
-                                readback_tag_id: 0,
-                                mode_values: { auto: 0, target: 1 },
-                              },
-                        },
+                      : { ...item, pid: pidAoAlternar(comPid, ultimosPid.current[mv.id] ?? null) },
                   ),
                 );
               }}

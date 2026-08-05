@@ -1,7 +1,7 @@
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
 import type { ParModeloMpc, TipoLinhaMpc, VariaveisMpc } from "../graph";
-import { nomeCampoModelo, paramsPadraoLinha } from "./mpcLogic";
+import { nomeCampoModelo, parModeloDoFormulario, paramsPadraoLinha } from "./mpcLogic";
 
 const ROTULO_PARAM: Record<string, string> = {
   K: "K (ganho)",
@@ -99,9 +99,26 @@ export function TabModels({ variaveis, modelos, aoMudar }: Props) {
                         type="checkbox"
                         data-testid={`mpc-cell-enabled-${linha.id}-${coluna.id}`}
                         checked={par.enabled}
-                        onChange={(evento) =>
-                          mudarPar(linha.id, coluna.id, { enabled: evento.target.checked })
-                        }
+                        onChange={(evento) => {
+                          const habilitado = evento.target.checked;
+                          const formulario = evento.target.form;
+                          if (!habilitado && par.enabled && formulario !== null) {
+                            // Captura os params ainda montados no DOM neste instante —
+                            // antes do React desmontar os campos — para o recheck não cair
+                            // nos defaults do `kind` (fix final, Important; mesma classe de
+                            // bug da revisão 4.3, aqui via checkbox em vez de troca de aba).
+                            const capturado = parModeloDoFormulario(
+                              par,
+                              linha.id,
+                              coluna.id,
+                              linha.kind,
+                              new FormData(formulario),
+                            );
+                            mudarPar(linha.id, coluna.id, { enabled: false, params: capturado.params });
+                          } else {
+                            mudarPar(linha.id, coluna.id, { enabled: habilitado });
+                          }
+                        }}
                         className="h-3.5 w-3.5 accent-[var(--color-accent)]"
                       />
                       Habilitado

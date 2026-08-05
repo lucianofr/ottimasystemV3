@@ -11,6 +11,7 @@ import {
   nomeCampoVar,
   parModeloDoFormulario,
   paramsPadraoLinha,
+  pidAoAlternar,
   rotuloVariavel,
   tagsPorDirecao,
   tsMpcDerivado,
@@ -468,4 +469,115 @@ test("mesmo mecanismo em TabVariables: limites/Δu digitados numa MV sobrevivem 
   const camposResumo = formulario({});
   const resultado = variavelMvDoFormulario(mvDigitada, camposResumo, false);
   expect(resultado).toEqual(mvDigitada);
+});
+
+// --------------------------------------------------------------------------------------
+// Fix final (revisão de branch completo, Important) — mesma classe de bug da revisão 4.3
+// (perda silenciosa por desmontagem sem captura prévia), aqui via dois checkboxes que
+// desmontam campos-folha DENTRO da mesma aba (sem troca de aba): "MV com PID" (TabVariables)
+// e "Habilitado" da matriz (TabModels). `pidAoAlternar` é o helper puro extraído para o
+// primeiro caso (o segundo reusa o `parModeloDoFormulario` já testado acima). Os testes
+// abaixo provam, em lógica pura, que desmarcar+marcar de novo sem trocar de aba preserva o
+// que foi digitado — a mesma propriedade que os testes de troca de aba provam para o
+// mecanismo do `mudarAba`.
+// --------------------------------------------------------------------------------------
+
+test("pidAoAlternar: desligar sempre devolve null, mesmo com um pid conhecido em cache", () => {
+  const pidConhecido: VariavelMv["pid"] = {
+    write_tag_id: 5,
+    target_mode: "cas",
+    mode_cmd_tag_id: 6,
+    mode_read_tag_id: 7,
+    readback_tag_id: 8,
+    mode_values: { auto: 1, target: 2 },
+  };
+  expect(pidAoAlternar(false, pidConhecido)).toBeNull();
+});
+
+test("pidAoAlternar: ligar pela primeira vez (sem cache) cai nos defaults hard-coded", () => {
+  expect(pidAoAlternar(true, null)).toEqual({
+    write_tag_id: 0,
+    target_mode: "rcas",
+    mode_cmd_tag_id: 0,
+    mode_read_tag_id: null,
+    readback_tag_id: 0,
+    mode_values: { auto: 0, target: 1 },
+  });
+});
+
+test("pidAoAlternar: ligar de novo restaura o último pid capturado, não os defaults hard-coded", () => {
+  const pidDigitado: VariavelMv["pid"] = {
+    write_tag_id: 12,
+    target_mode: "cas",
+    mode_cmd_tag_id: 13,
+    mode_read_tag_id: 14,
+    readback_tag_id: 15,
+    mode_values: { auto: 3, target: 4 },
+  };
+  expect(pidAoAlternar(true, pidDigitado)).toEqual(pidDigitado);
+  expect(pidAoAlternar(true, pidDigitado)).not.toEqual({
+    write_tag_id: 0,
+    target_mode: "rcas",
+    mode_cmd_tag_id: 0,
+    mode_read_tag_id: null,
+    readback_tag_id: 0,
+    mode_values: { auto: 0, target: 1 },
+  });
+});
+
+test("cenário do checkbox 'com PID': campos digitados sobrevivem a desmarcar+marcar de novo sem trocar de aba", () => {
+  const mvComPid: VariavelMv = {
+    id: "mv_1",
+    name: "Vazão",
+    eu: "m3/h",
+    limits: { min: 0, max: 100 },
+    du_max: 1,
+    initial_value: 0,
+    pid: {
+      write_tag_id: 0,
+      target_mode: "rcas",
+      mode_cmd_tag_id: 0,
+      mode_read_tag_id: null,
+      readback_tag_id: 0,
+      mode_values: { auto: 0, target: 1 },
+    },
+  };
+  // Passo 1 — checkbox ligado, engenheiro digita os campos do pid, sem trocar de aba.
+  const camposDigitados = formulario({
+    [nomeCampoVar("mv_1", "pid_write_tag_id")]: "42",
+    [nomeCampoVar("mv_1", "pid_readback_tag_id")]: "43",
+    [nomeCampoVar("mv_1", "pid_mode_cmd_tag_id")]: "44",
+  });
+  // Passo 2 — desmarca: o handler captura o DOM (ainda montado) antes de desmontar.
+  const capturado = variavelMvDoFormulario(mvComPid, camposDigitados, true).pid;
+  expect(capturado).not.toBeNull();
+  // Passo 3 — remarca: sem o fix cairia nos defaults hard-coded; com o fix restaura o
+  // capturado no passo 2.
+  const restaurado = pidAoAlternar(true, capturado);
+  expect(restaurado).toEqual(capturado);
+  expect(restaurado?.write_tag_id).toBe(42);
+  expect(restaurado?.readback_tag_id).toBe(43);
+  expect(restaurado?.mode_cmd_tag_id).toBe(44);
+});
+
+test("cenário do checkbox 'Habilitado' na matriz: params digitados sobrevivem a desmarcar+marcar de novo sem trocar de aba", () => {
+  const linha = "cv_1";
+  const coluna = "mv_1";
+  const parAntesDoUncheck: ParModeloMpc = { enabled: true, params: {} };
+  const camposDigitados = formulario({
+    [nomeCampoModelo(linha, coluna, "K")]: "3",
+    [nomeCampoModelo(linha, coluna, "tau1")]: "40",
+    [nomeCampoModelo(linha, coluna, "tau2")]: "5",
+    [nomeCampoModelo(linha, coluna, "theta")]: "2",
+  });
+  // Uncheck: o handler captura o DOM (ainda montado) antes de desmontar os campos.
+  const capturado = parModeloDoFormulario(parAntesDoUncheck, linha, coluna, "selfreg", camposDigitados);
+  const parAposUncheck: ParModeloMpc = { enabled: false, params: capturado.params };
+  expect(parAposUncheck.params).toEqual({ K: 3, tau1: 40, tau2: 5, theta: 2 });
+  // Recheck: campos desmontados (FormData vazio) — sem o fix `parAntesDoUncheck.params`
+  // (`{}`) teria sido usado como `atual`, caindo em `paramsPadraoLinha`; com o fix o `atual`
+  // já é `parAposUncheck`, que carrega o digitado.
+  const restaurado = parModeloDoFormulario(parAposUncheck, linha, coluna, "selfreg", formulario({}));
+  expect(restaurado.params).toEqual({ K: 3, tau1: 40, tau2: 5, theta: 2 });
+  expect(restaurado.params).not.toEqual(paramsPadraoLinha("selfreg"));
 });
