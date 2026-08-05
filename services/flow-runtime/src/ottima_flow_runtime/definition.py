@@ -4,42 +4,45 @@ Extraído do supervisor (débito 6 do plano F4a — teto de linhas por arquivo):
 supervisor precisa para subir ou trocar a definição de um flow a partir do grafo já validado
 e das tags do projeto. O supervisor mantém a leitura do banco, a validação e a orquestração
 de comandos/ciclo de vida (`supervisor.py`); aqui mora só a montagem em si.
+
+Bloco `mpc` (plano F4b, tarefa 2.2): instanciado como qualquer outro — `MpcHost` nasce aqui
+(spawn ainda NÃO acontece; `MpcHost.__init__` só monta o processo em `start()`, que o
+supervisor chama depois de montar a `StagedDefinition` inteira, dono do ciclo de vida do
+host por flow). `write_opc`/`publish`/`emit_event` são fechos sobre `redis_client` — o MESMO
+`write_opc` (`_make_write_opc`) resolve `conn_id` a partir de `tags` tanto para as escritas
+de MV do próprio bloco quanto para as escritas de `mode_cmd` que o supervisor faz por fora
+(`mpc_arming.write_mode_cmd`, via `StagedDefinition.mpc_write_opc`) — um fechamento só,
+dois chamadores, sem duplicar a resolução tag→conexão (débito #3 da spec F4 §8, fechado
+aqui). A PONTE de deploy da tarefa 3.1 do F4a (`MpcNotReadyError`, que recusava um grafo
+com `mpc` no stage) morreu nesta tarefa: o grafo agora instancia normalmente.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from multiprocessing.connection import Connection
 from typing import Any
 
 from redis.asyncio import Redis
 
+from ottima_core.bus import CHANNEL_OPC_WRITES, MpcState, OpcWrite, channel_mpc_state, publish_event
 from ottima_core.flowgraph import FlowGraph, FlowNode, MpcConfig, TagRef
 
 from .blocks.base import Block
+from .blocks.mpc import MpcBlock
 from .blocks.opc_read import OpcReadBlock
 from .blocks.opc_write import OpcWriteBlock
 from .blocks.script import ScriptBlock
 from .blocks.tfs import TfsBlock
+from .mpc.host import MpcHost
+from .mpc.worker import worker_main
 from .scheduler import FlowDefinition
 from .script_pool import ScriptPool
 from .snapshot import ValueSnapshot
 
 _TAG_TYPES = frozenset({"opc_read", "opc_write"})
-
-
-class MpcNotReadyError(Exception):
-    """Grafo tem nó `mpc`: staging recusa por enquanto (ponte deliberada e temporária).
-
-    PONTE DE DEPLOY — tarefa 3.1 do plano F4a; REMOVER na tarefa 2.2 do plano F4b. O bloco
-    `mpc` já valida e salva pela API (spec F4 §2.2, tarefa 1.2), mas o `MpcWorker` que o
-    executa só nasce no F4b (spec F4 §4.1). Até lá, o flow com `mpc` salva normalmente —
-    só o deploy/hot-swap recusa aqui, para não subir um bloco sem worker real.
-    """
-
-    def __init__(self, node_id: str) -> None:
-        self.node_id = node_id
-        super().__init__(f"nó '{node_id}' (mpc): bloco ainda não executa (ponte F4a -> F4b)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +54,12 @@ class StagedDefinition:
     conn_ids: frozenset[int]
     blocks: dict[str, tuple[dict[str, Any], Block]]
     """`block_id -> (config funcional, instância)`: a chave da preservação de estado (§4.1-3)."""
+    hosts: dict[str, MpcHost] = field(default_factory=dict)
+    """`block_id -> MpcHost` só dos blocos `mpc` — o supervisor decide start/stop por
+    identidade de objeto (mesmo host reaproveitado = bloco não mudou, §4.1-3)."""
+    mpc_write_opc: Callable[[OpcWrite], Awaitable[None]] | None = None
+    """`write_opc` com `conn_id` já resolvido — o supervisor reusa para escrever `mode_cmd`
+    fora do `step()` do bloco (transições §4.4/§4.5, `mpc_arming.py`)."""
 
 
 def build_definition(
@@ -63,6 +72,7 @@ def build_definition(
     redis_client: Redis,
     pool: ScriptPool,
     snapshot: ValueSnapshot,
+    mpc_worker_target: Callable[[Connection, str, float], None] = worker_main,
 ) -> StagedDefinition:
     """Instancia os blocos do grafo (reaproveitando os que não mudaram) e monta a fiação.
 
@@ -70,12 +80,10 @@ def build_definition(
     continua, e o estado interno vem junto de graça (ADR-011). O método É o comparador:
     `exec_order`, rótulo e posição ficam fora dele de propósito (ADR-024).
     """
-    mpc_node = next((n for n in graph.nodes if n.type == "mpc"), None)
-    if mpc_node is not None:
-        raise MpcNotReadyError(mpc_node.id)
-
     blocks: dict[str, tuple[dict[str, Any], Block]] = {}
+    hosts: dict[str, MpcHost] = {}
     instances: list[Block] = []
+    write_opc = _make_write_opc(redis_client, tags)
     for node in sorted(graph.nodes, key=lambda item: item.exec_order):
         functional = node.functional_config()
         kept = reuse.get(node.id)
@@ -90,10 +98,14 @@ def build_definition(
                 redis_client=redis_client,
                 pool=pool,
                 snapshot=snapshot,
+                write_opc=write_opc,
+                mpc_worker_target=mpc_worker_target,
             )
         )
         blocks[node.id] = (functional, block)
         instances.append(block)
+        if isinstance(block, MpcBlock):
+            hosts[node.id] = block.host
 
     return StagedDefinition(
         definition=FlowDefinition(
@@ -105,7 +117,25 @@ def build_definition(
         ts_seconds=ts_seconds,
         conn_ids=_conn_ids(graph, tags),
         blocks=blocks,
+        hosts=hosts,
+        mpc_write_opc=write_opc,
     )
+
+
+def _make_write_opc(
+    redis_client: Redis, tags: Mapping[int, TagRef]
+) -> Callable[[OpcWrite], Awaitable[None]]:
+    """`OpcWrite` chega com `conn_id=0` (o `pid` não carrega conexão, só `tag_id`) — este
+    fecho é quem resolve o `conn_id` de verdade a partir de `tags` antes de publicar
+    (débito #3 da spec F4 §8). Único fechamento — usado tanto pelas escritas de MV do
+    próprio `MpcBlock` (`_write_pid`) quanto pelas de `mode_cmd` que o supervisor faz por
+    fora dele (`mpc_arming.write_mode_cmd`)."""
+
+    async def write_opc(write: OpcWrite) -> None:
+        resolved = write.model_copy(update={"conn_id": tags[write.tag_id].conn_id})
+        await redis_client.publish(CHANNEL_OPC_WRITES, resolved.model_dump_json())
+
+    return write_opc
 
 
 def _instantiate(
@@ -117,6 +147,8 @@ def _instantiate(
     redis_client: Redis,
     pool: ScriptPool,
     snapshot: ValueSnapshot,
+    write_opc: Callable[[OpcWrite], Awaitable[None]],
+    mpc_worker_target: Callable[[Connection, str, float], None],
 ) -> Block:
     """Instancia o bloco com os serviços do runtime. Bloco novo nasce zerado (§4.1-3)."""
     config: Any = node.config
@@ -143,7 +175,50 @@ def _instantiate(
             pool=pool,
             redis_client=redis_client,
         )
+    if node.type == "mpc":
+        return _instantiate_mpc(
+            node,
+            flow_id=flow_id,
+            ts_seconds=ts_seconds,
+            snapshot=snapshot,
+            redis_client=redis_client,
+            write_opc=write_opc,
+            worker_target=mpc_worker_target,
+        )
     return TfsBlock(node.id, matrix=config.matrix, ts_seconds=ts_seconds)
+
+
+def _instantiate_mpc(
+    node: FlowNode,
+    *,
+    flow_id: int,
+    ts_seconds: float,
+    snapshot: ValueSnapshot,
+    redis_client: Redis,
+    write_opc: Callable[[OpcWrite], Awaitable[None]],
+    worker_target: Callable[[Connection, str, float], None],
+) -> MpcBlock:
+    config = MpcConfig.model_validate(node.config.model_dump())
+    host = MpcHost(node.id, config, ts_seconds, worker_target=worker_target)
+    channel = channel_mpc_state(flow_id, node.id)
+
+    async def publish(state: MpcState) -> None:
+        await redis_client.publish(channel, state.model_dump_json())
+
+    async def emit_event(**kwargs: Any) -> None:
+        await publish_event(redis_client, ts=datetime.now(UTC), **kwargs)
+
+    return MpcBlock(
+        node.id,
+        config=config,
+        ts_flow=ts_seconds,
+        snapshot=snapshot,
+        host=host,
+        flow_id=flow_id,
+        publish=publish,
+        write_opc=write_opc,
+        emit_event=emit_event,
+    )
 
 
 def _wiring(graph: FlowGraph) -> dict[str, dict[str, tuple[str, str]]]:
