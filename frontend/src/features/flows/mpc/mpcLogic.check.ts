@@ -1,14 +1,20 @@
 import { expect, test } from "@playwright/test";
 
 import type { TagOut } from "../../../lib/api";
+import type { ParModeloMpc, VariavelCv, VariavelMv, VariavelRestricao, VariaveisMpc } from "../graph";
 import {
+  arredondarBankers,
+  derivarHorizontes,
+  dimensaoEstado,
   gerarIdVariavel,
   nomeCampoModelo,
   nomeCampoVar,
   parModeloDoFormulario,
   paramsPadraoLinha,
+  rotuloVariavel,
   tagsPorDirecao,
   tsMpcDerivado,
+  validarConfigMpc,
   variavelCvDoFormulario,
   variavelDvDoFormulario,
   variavelMvDoFormulario,
@@ -173,4 +179,207 @@ test("tagsPorDirecao filtra por W (write/mode_cmd) e R (readback/mode_read)", ()
   const tags = [tag(1, "w"), tag(2, "r"), tag(3, "w")];
   expect(tagsPorDirecao(tags, "w").map((t) => t.id)).toEqual([1, 3]);
   expect(tagsPorDirecao(tags, "r").map((t) => t.id)).toEqual([2]);
+});
+
+// --------------------------------------------------------------------------------------
+// Tarefa 4.3 — espelho client-side de `derive_horizons`/`mpc_state_dimension`/validação
+// semântica (spec F4 §2.2). Fábricas mínimas por variável — só os campos que cada teste
+// precisa variam, o resto usa um default plausível e sem impacto na regra testada.
+// --------------------------------------------------------------------------------------
+
+function mv(id: string, parcial: Partial<VariavelMv> = {}): VariavelMv {
+  return {
+    id,
+    name: "",
+    eu: "",
+    limits: { min: 0, max: 100 },
+    du_max: 5,
+    initial_value: 0,
+    pid: null,
+    ...parcial,
+  };
+}
+
+function cv(id: string, parcial: Partial<VariavelCv> = {}): VariavelCv {
+  return {
+    id,
+    name: "",
+    eu: "",
+    kind: "selfreg",
+    tss: 600,
+    weight: 1,
+    sp_limits: { min: 0, max: 100 },
+    ...parcial,
+  };
+}
+
+function restricao(id: string, parcial: Partial<VariavelRestricao> = {}): VariavelRestricao {
+  return {
+    id,
+    name: "",
+    eu: "",
+    kind: "selfreg",
+    tss: 600,
+    range: { low: 0, high: 100 },
+    priority: 1,
+    ...parcial,
+  };
+}
+
+function parSelfreg(paramsParciais: Record<string, number> = {}): ParModeloMpc {
+  return { enabled: true, params: { K: 1, tau1: 10, tau2: 0, theta: 0, ...paramsParciais } };
+}
+
+function parIntegrating(paramsParciais: Record<string, number> = {}): ParModeloMpc {
+  return { enabled: true, params: { Ki: 1, theta: 0, ...paramsParciais } };
+}
+
+test("derivarHorizontes: (5, 1.0, [600]) -> ts_mpc 5.0 / Np 120 / Nc 30 (exemplo do brief)", () => {
+  expect(derivarHorizontes(5, 1.0, [600])).toEqual({ tsMpc: 5, np: 120, nc: 30 });
+});
+
+test("derivarHorizontes: Np<2 quando o multiplicador é grande demais para o TSS", () => {
+  expect(derivarHorizontes(1000, 1, [1])?.np).toBe(1);
+});
+
+test("derivarHorizontes: Np>120 quando o TSS é grande demais para o multiplicador", () => {
+  expect(derivarHorizontes(1, 1, [200])?.np).toBe(200);
+});
+
+test("derivarHorizontes: Np=61, no limiar do aviso não-bloqueante (>60)", () => {
+  expect(derivarHorizontes(10, 1, [610])?.np).toBe(61);
+});
+
+test("derivarHorizontes: sem CV/Restrição (TSS vazio) devolve null em vez de Infinity/NaN", () => {
+  expect(derivarHorizontes(1, 1, [])).toBeNull();
+});
+
+test("arredondarBankers: arredonda para o par mais próximo, mesma convenção do round() do Python", () => {
+  expect(arredondarBankers(0.5)).toBe(0);
+  expect(arredondarBankers(1.5)).toBe(2);
+  expect(arredondarBankers(2.5)).toBe(2);
+  expect(arredondarBankers(3.5)).toBe(4);
+  expect(arredondarBankers(0.4)).toBe(0);
+  expect(arredondarBankers(0.6)).toBe(1);
+});
+
+test("dimensaoEstado: par SOPDT soma 2 estados + atraso banker's + 1 por MV (espelho de mpc_state_dimension)", () => {
+  const variaveis: VariaveisMpc = { mvs: [mv("mv_1")], cvs: [cv("cv_1")], constraints: [], dvs: [] };
+  const modelos = { cv_1: { mv_1: parSelfreg({ theta: 15 }) } };
+  expect(dimensaoEstado(variaveis, modelos, 5)).toBe(1 + 2 + 3); // round(15/5) = 3
+});
+
+test("dimensaoEstado: par IOPDT soma 1 estado, ignora par desabilitado e linha órfã", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [mv("mv_1")],
+    cvs: [],
+    constraints: [restricao("co_1", { kind: "integrating" })],
+    dvs: [],
+  };
+  const modelos = {
+    co_1: { mv_1: parIntegrating({ theta: 2.5 }), mv_2: { enabled: false, params: {} } },
+    linha_removida: { mv_1: parSelfreg({ theta: 999 }) },
+  };
+  // linha_removida não corresponde a nenhuma CV/Restrição (matriz já podada em
+  // `modelosDoFormulario`) e o par mv_2 está desabilitado — nenhum dos dois soma estado.
+  expect(dimensaoEstado(variaveis, modelos, 1)).toBe(1 + 1 + 2); // round(2.5) = 2 (par banker's)
+});
+
+test("rotuloVariavel: usa o nome quando preenchido, senão cai no id estável", () => {
+  expect(rotuloVariavel({ id: "mv_x7k2", name: "Vazão de refluxo" })).toBe("Vazão de refluxo");
+  expect(rotuloVariavel({ id: "mv_x7k2", name: "   " })).toBe("mv_x7k2");
+});
+
+test("validarConfigMpc: config mínima válida não gera erro nem aviso", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [mv("mv_1")],
+    cvs: [cv("cv_1", { tss: 600 })],
+    constraints: [],
+    dvs: [],
+  };
+  const modelos = { cv_1: { mv_1: parSelfreg({ theta: 5 }) } };
+  const { erros, avisos } = validarConfigMpc(variaveis, modelos, 10, 1);
+  expect(erros).toEqual([]);
+  expect(avisos).toEqual([]);
+});
+
+test("validarConfigMpc: teto de MVs (spec §2.2-2) vira erro bloqueante quando 0 MVs", () => {
+  const variaveis: VariaveisMpc = { mvs: [], cvs: [cv("cv_1")], constraints: [], dvs: [] };
+  const { erros } = validarConfigMpc(variaveis, {}, 1, 1);
+  expect(erros.some((erro) => erro.includes("MV(s)"))).toBe(true);
+});
+
+test("validarConfigMpc: MV sem nenhum par habilitado na matriz vira erro (spec §2.2-3)", () => {
+  const variaveis: VariaveisMpc = { mvs: [mv("mv_1")], cvs: [cv("cv_1")], constraints: [], dvs: [] };
+  const modelos = { cv_1: { mv_1: { enabled: false, params: {} } } };
+  const { erros } = validarConfigMpc(variaveis, modelos, 1, 1);
+  expect(
+    erros.some((erro) => erro.includes("mv_1") && erro.includes("não tem nenhum par habilitado")),
+  ).toBe(true);
+});
+
+test("validarConfigMpc: pisos numéricos de weight/du_max/tss/faixas bloqueiam (harmonização da revisão 4.2)", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [mv("mv_1", { limits: { min: 10, max: 5 }, du_max: 0 })],
+    cvs: [cv("cv_1", { tss: 0, weight: 0, sp_limits: { min: 10, max: 5 } })],
+    constraints: [restricao("co_1", { tss: 0, range: { low: 10, high: 5 } })],
+    dvs: [],
+  };
+  const { erros } = validarConfigMpc(variaveis, {}, 1, 1);
+  expect(erros.some((e) => e.includes("limite mínimo menor que o máximo"))).toBe(true);
+  expect(erros.some((e) => e.includes("Δu máx."))).toBe(true);
+  expect(erros.some((e) => e.includes("CV") && e.includes("TSS maior que zero"))).toBe(true);
+  expect(erros.some((e) => e.includes("SP mínimo menor que o máximo"))).toBe(true);
+  expect(erros.some((e) => e.includes("peso maior que zero"))).toBe(true);
+  expect(erros.some((e) => e.includes("Restrição") && e.includes("TSS maior que zero"))).toBe(true);
+  expect(erros.some((e) => e.includes("faixa mínima menor que a máxima"))).toBe(true);
+});
+
+test("validarConfigMpc: Np<2 e Np>120 usam as strings verbatim do 422 do servidor (spec §2.2-5)", () => {
+  const baseVariaveis = (tss: number): VariaveisMpc => ({
+    mvs: [mv("mv_1")],
+    cvs: [cv("cv_1", { tss })],
+    constraints: [],
+    dvs: [],
+  });
+  const modelos = { cv_1: { mv_1: parSelfreg({ theta: 0 }) } };
+
+  const baixo = validarConfigMpc(baseVariaveis(1), modelos, 1000, 1);
+  expect(baixo.erros).toContain("multiplicador grande demais para o TSS");
+
+  const alto = validarConfigMpc(baseVariaveis(200), modelos, 1, 1);
+  expect(alto.erros).toContain("aumente o multiplicador ou reduza o TSS");
+});
+
+test("validarConfigMpc: Np=61 é aviso não-bloqueante (>60, referência de carga RNF-02)", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [mv("mv_1")],
+    cvs: [cv("cv_1", { tss: 610 })],
+    constraints: [],
+    dvs: [],
+  };
+  const modelos = { cv_1: { mv_1: parSelfreg({ theta: 0 }) } };
+  const { erros, avisos } = validarConfigMpc(variaveis, modelos, 10, 1);
+  expect(erros).toEqual([]);
+  expect(avisos.some((aviso) => aviso.startsWith("Np = 61"))).toBe(true);
+});
+
+test("validarConfigMpc: dimensão de estados > 120 é aviso, pulado quando a matriz não está íntegra (RF-608)", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [mv("mv_1")],
+    cvs: [cv("cv_1", { tss: 100 })],
+    constraints: [],
+    dvs: [],
+  };
+  const modelosIntactos = { cv_1: { mv_1: parSelfreg({ theta: 200 }) } };
+  const intacta = validarConfigMpc(variaveis, modelosIntactos, 1, 1);
+  expect(intacta.erros).toEqual([]);
+  expect(intacta.avisos.some((aviso) => aviso.includes("Dimensão de estados agregada"))).toBe(true);
+
+  const variaveisQuebradas: VariaveisMpc = { ...variaveis, mvs: [mv("mv_1"), mv("mv_2")] };
+  const quebrada = validarConfigMpc(variaveisQuebradas, modelosIntactos, 1, 1);
+  expect(quebrada.erros.some((erro) => erro.includes("mv_2"))).toBe(true);
+  expect(quebrada.avisos.some((aviso) => aviso.includes("Dimensão de estados agregada"))).toBe(
+    false,
+  );
 });
