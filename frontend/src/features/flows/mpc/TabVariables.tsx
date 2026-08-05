@@ -243,7 +243,9 @@ function ListaCv({
                 <option value="integrating">Integrador (IOPDT)</option>
               </Select>
             </div>
-            <CampoNumero id={cv.id} campo="tss" rotulo="TSS (s)" valor={cv.tss} />
+            {/* TSS mora só na aba Horizontes (tarefa 4.3): precisa ser estado controlado
+                para Ts_mpc/Np/Nc derivarem ao vivo — um segundo campo aqui, não-controlado,
+                divergiria do que o usuário digitou lá. */}
             <CampoNumero id={cv.id} campo="weight" rotulo="Peso" valor={cv.weight} />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -308,26 +310,24 @@ function ListaRestricao({
           aoRemover={() => aoMudar(constraints.filter((item) => item.id !== co.id))}
         >
           <CampoNomeEu id={co.id} nome={co.name} eu={co.eu} />
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label htmlFor={`${co.id}-kind`}>Modelo (kind)</Label>
-              <Select
-                id={`${co.id}-kind`}
-                data-testid={`mpc-kind-${co.id}`}
-                value={co.kind}
-                onChange={(evento) => {
-                  const kind = evento.target.value as TipoLinhaMpc;
-                  aoMudar(
-                    constraints.map((item) => (item.id !== co.id ? item : { ...item, kind })),
-                  );
-                }}
-              >
-                <option value="selfreg">Autorregulável (SOPDT)</option>
-                <option value="integrating">Integrador (IOPDT)</option>
-              </Select>
-            </div>
-            <CampoNumero id={co.id} campo="tss" rotulo="TSS (s)" valor={co.tss} />
+          <div className="space-y-1">
+            <Label htmlFor={`${co.id}-kind`}>Modelo (kind)</Label>
+            <Select
+              id={`${co.id}-kind`}
+              data-testid={`mpc-kind-${co.id}`}
+              value={co.kind}
+              onChange={(evento) => {
+                const kind = evento.target.value as TipoLinhaMpc;
+                aoMudar(
+                  constraints.map((item) => (item.id !== co.id ? item : { ...item, kind })),
+                );
+              }}
+            >
+              <option value="selfreg">Autorregulável (SOPDT)</option>
+              <option value="integrating">Integrador (IOPDT)</option>
+            </Select>
           </div>
+          {/* TSS mora só na aba Horizontes (tarefa 4.3) — mesma nota da ListaCv acima. */}
           <div className="grid grid-cols-3 gap-3">
             <CampoNumero id={co.id} campo="range_low" rotulo="Faixa mín." valor={co.range.low} />
             <CampoNumero id={co.id} campo="range_high" rotulo="Faixa máx." valor={co.range.high} />
