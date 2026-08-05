@@ -103,7 +103,9 @@ OTTIMA_E2E=1 bash deploy/smoke.sh                   # L1 — stack, retenção, 
 # O check de boot parado exige flow-runtime recem-subido: ele assere flows={}, e um deploy/stop
 # deixa o flow no mapa como stopped. Re-rodar o L1 depois da L2 da vermelho falso; nesse caso
 # `docker compose ... restart flow-runtime` antes.
-uv run pytest -m e2e tests/e2e -v                   # L2 — 24 cenários (5 F1 + 9 F2 + 10 F3)
+uv run pytest -m e2e tests/e2e -v                   # L2 — 34 cenários (5 F1 + 9 F2 + 10 F3 + 10 F4)
+# F4: POST /api/operate/{flow_id}/{block_id}/mode|sp|mv publica FlowCommand (202); o runtime
+# materializa e audita — a API não emite evento (spec F4 §6.1).
 cd frontend && npm run e2e                          # regressão Playwright da F1 (specs novas não)
 # A L2 e o Playwright NÃO podem rodar juntos: o E2E-16 publica project_activated duas vezes e
 # derruba os cenários E2E-F3-03/04/08. Serialize.
