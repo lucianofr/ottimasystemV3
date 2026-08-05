@@ -309,6 +309,38 @@ export function definirExecOrder(
 }
 
 // --------------------------------------------------------------------------------------
+// Inserção em grade por clique na paleta
+// --------------------------------------------------------------------------------------
+
+const COLUNAS_GRADE = 4;
+const PASSO_X_GRADE = 250;
+const PASSO_Y_GRADE = 170;
+
+function posicaoDoSlot(ancora: XYPosition, indice: number): XYPosition {
+  return {
+    x: ancora.x + (indice % COLUNAS_GRADE) * PASSO_X_GRADE,
+    y: ancora.y + Math.floor(indice / COLUNAS_GRADE) * PASSO_Y_GRADE,
+  };
+}
+
+/** Posição do próximo nó inserido por clique na paleta: primeiro slot da grade (4 colunas,
+ *  passo 250x170) sem nó ocupando a coordenada. Nunca `nodes.length`: um buraco no meio da
+ *  grade (nó excluído) faria o próximo nó colidir com o que já ocupa aquele índice, em vez
+ *  de tampar o buraco (débito m4-b, plano F4a). */
+export function proximaPosicaoNaGrade(
+  nodes: readonly BlocoNode[],
+  ancora: XYPosition,
+): XYPosition {
+  const ocupados = new Set(nodes.map((no) => `${String(no.position.x)}:${String(no.position.y)}`));
+  let indice = 0;
+  for (;;) {
+    const posicao = posicaoDoSlot(ancora, indice);
+    if (!ocupados.has(`${String(posicao.x)}:${String(posicao.y)}`)) return posicao;
+    indice++;
+  }
+}
+
+// --------------------------------------------------------------------------------------
 // Criação de blocos
 // --------------------------------------------------------------------------------------
 

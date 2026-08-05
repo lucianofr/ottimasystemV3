@@ -11,6 +11,7 @@ import {
   motivoRecusa,
   paraGraphJson,
   podarArestasDoBloco,
+  proximaPosicaoNaGrade,
   proximoExecOrder,
   tipoPorta,
   type BlocoEdge,
@@ -164,6 +165,45 @@ test("porta de entrada aceita no máximo uma aresta; saída pode alimentar vári
   expect(
     motivoRecusa({ source: "a", sourceHandle: "OUT1", target: "c", targetHandle: "IN1" }, nodes, edges, TAGS),
   ).toBeNull();
+});
+
+// --------------------------------------------------------------------------------------
+// Inserção em grade por clique na paleta (débito m4-b, plano F4a)
+// --------------------------------------------------------------------------------------
+
+function noEm(id: string, posicao: { x: number; y: number }): BlocoNode {
+  const no = script(id, 1);
+  no.position = posicao;
+  return no;
+}
+
+test("grade vazia começa no slot da própria âncora", () => {
+  expect(proximaPosicaoNaGrade([], { x: 100, y: 50 })).toEqual({ x: 100, y: 50 });
+});
+
+test("grade contígua emenda no próximo slot livre", () => {
+  const ancora = { x: 0, y: 0 };
+  const nodes = [noEm("a", { x: 0, y: 0 }), noEm("b", { x: 250, y: 0 })];
+  expect(proximaPosicaoNaGrade(nodes, ancora)).toEqual({ x: 500, y: 0 });
+});
+
+test("buraco no meio da grade (nó removido) tampa antes de avançar para o fim", () => {
+  const ancora = { x: 0, y: 0 };
+  // slot 1 (x=250) ficou livre porque o nó que ali estava foi excluído
+  const nodes = [noEm("a", { x: 0, y: 0 }), noEm("c", { x: 500, y: 0 })];
+  expect(proximaPosicaoNaGrade(nodes, ancora)).toEqual({ x: 250, y: 0 });
+});
+
+test("a quinta inserção quebra linha: volta para a coluna 0 na linha seguinte", () => {
+  const ancora = { x: 0, y: 0 };
+  const nodes = [0, 1, 2, 3].map((i) => noEm(`n${String(i)}`, { x: i * 250, y: 0 }));
+  expect(proximaPosicaoNaGrade(nodes, ancora)).toEqual({ x: 0, y: 170 });
+});
+
+test("âncora fora da origem desloca a grade inteira, sem mudar o passo", () => {
+  const ancora = { x: 40, y: 40 };
+  const nodes = [noEm("a", { x: 40, y: 40 })];
+  expect(proximaPosicaoNaGrade(nodes, ancora)).toEqual({ x: 290, y: 40 });
 });
 
 // --------------------------------------------------------------------------------------
