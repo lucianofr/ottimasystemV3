@@ -30,10 +30,6 @@ _TESTS_DIR = str(Path(__file__).parent)
 if _TESTS_DIR not in sys.path:
     sys.path.insert(0, _TESTS_DIR)
 
-from ottima_flow_runtime.events import build_event_listener  # noqa: E402
-from ottima_flow_runtime.snapshot import ValueSnapshot  # noqa: E402
-from ottima_flow_runtime.state import RuntimeState  # noqa: E402
-from ottima_flow_runtime.supervisor import Supervisor  # noqa: E402
 from runtime_test_helpers import (  # noqa: E402
     AWAIT_TIMEOUT_S,
     SLOW_POLL_S,
@@ -42,6 +38,10 @@ from runtime_test_helpers import (  # noqa: E402
     StubPool,
 )
 
+from ottima_flow_runtime.events import build_event_listener  # noqa: E402
+from ottima_flow_runtime.snapshot import ValueSnapshot  # noqa: E402
+from ottima_flow_runtime.state import RuntimeState  # noqa: E402
+from ottima_flow_runtime.supervisor import Supervisor  # noqa: E402
 
 # --------------------------------------------------------------------------------------
 # Banco: o supervisor tem session_factory próprio, então o cenário é commitado de verdade

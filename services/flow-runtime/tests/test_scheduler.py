@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from redis.asyncio import Redis
+from runtime_test_helpers import AWAIT_TIMEOUT_S, await_until
 
 from ottima_core.bus import (
     CHANNEL_EVENTS,
@@ -24,7 +25,6 @@ from ottima_core.bus import (
 )
 from ottima_flow_runtime.blocks.base import Block, PortSample
 from ottima_flow_runtime.scheduler import FlowDefinition, FlowTask
-from runtime_test_helpers import AWAIT_TIMEOUT_S, await_until
 
 FLOW_ID = 7
 OTHER_FLOW_ID = 9

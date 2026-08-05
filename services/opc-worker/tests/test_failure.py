@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager, suppress
 
 import pytest
 from redis.asyncio import Redis
+from worker_test_helpers import await_until
 
 from opcsim import (
     NODE_COUNTER,
@@ -43,7 +44,6 @@ from ottima_opc_worker.state import (
     TagConfig,
 )
 from ottima_opc_worker.subscriptions import QUALITY_BAD
-from worker_test_helpers import await_until
 
 CONN_ID = 11
 

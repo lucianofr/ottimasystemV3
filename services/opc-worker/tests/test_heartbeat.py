@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 import pytest
 from redis.asyncio import Redis
+from worker_test_helpers import await_until, collecting
 
 from opcsim import NODE_SINE, NODE_STATIC, NODE_W_FLOAT, OpcSimServer, free_port
 from ottima_core.bus import channel_opc_values
@@ -28,7 +29,6 @@ from ottima_opc_worker.state import (
     TagConfig,
 )
 from ottima_opc_worker.subscriptions import QUALITY_BAD, QUALITY_GOOD
-from worker_test_helpers import await_until, collecting
 
 CONN_ID = 9
 # Janela para provar que algo NÃO acontece; cobre várias batidas do heartbeat de teste.

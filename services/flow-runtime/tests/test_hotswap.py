@@ -15,9 +15,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-from ottima_core.bus import CHANNEL_EVENTS, KIND_RELOAD_REJECTED, channel_flow_status
 from runtime_test_helpers import (
     QUIET_WINDOW_S,
     Collector,
@@ -37,6 +34,9 @@ from runtime_test_helpers import (
     sopdt,
     tfs_node,
 )
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from ottima_core.bus import CHANNEL_EVENTS, KIND_RELOAD_REJECTED, channel_flow_status
 
 Factory = Callable[..., Awaitable[Harness]]
 Collect = Callable[[str], Awaitable[Collector]]

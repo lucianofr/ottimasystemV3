@@ -4,10 +4,10 @@ import asyncio
 
 import pytest
 from redis.asyncio import Redis
+from runtime_test_helpers import AWAIT_TIMEOUT_S
 
 from ottima_core.bus import CHANNEL_EVENTS
 from ottima_flow_runtime.events import ChannelListener
-from runtime_test_helpers import AWAIT_TIMEOUT_S
 
 
 async def _handler(data: str) -> None:

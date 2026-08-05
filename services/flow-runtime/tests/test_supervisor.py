@@ -15,23 +15,6 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-from ottima_core.bus import (
-    CHANNEL_EVENTS,
-    KIND_COMM_FAILURE,
-    KIND_COMM_RESTORED,
-    KIND_DEPLOY_REJECTED,
-    KIND_FLOW_DEPLOYED,
-    KIND_FLOW_FAILED,
-    KIND_FLOW_STOPPED,
-    KIND_PROJECT_ACTIVATED,
-    KIND_SCRIPT_ERROR,
-    KIND_SCRIPT_TIMEOUT,
-    channel_flow_status,
-    publish_event,
-)
-from ottima_flow_runtime.supervisor import REASON_INVALID_GRAPH, REASON_PROJECT_INACTIVE
 from runtime_test_helpers import (
     FAST_POLL_S,
     QUIET_WINDOW_S,
@@ -53,6 +36,23 @@ from runtime_test_helpers import (
     set_project_active,
     tfs_node,
 )
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from ottima_core.bus import (
+    CHANNEL_EVENTS,
+    KIND_COMM_FAILURE,
+    KIND_COMM_RESTORED,
+    KIND_DEPLOY_REJECTED,
+    KIND_FLOW_DEPLOYED,
+    KIND_FLOW_FAILED,
+    KIND_FLOW_STOPPED,
+    KIND_PROJECT_ACTIVATED,
+    KIND_SCRIPT_ERROR,
+    KIND_SCRIPT_TIMEOUT,
+    channel_flow_status,
+    publish_event,
+)
+from ottima_flow_runtime.supervisor import REASON_INVALID_GRAPH, REASON_PROJECT_INACTIVE
 
 Factory = Callable[..., Awaitable[Harness]]
 Collect = Callable[[str], Awaitable[Collector]]

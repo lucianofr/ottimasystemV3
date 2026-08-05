@@ -19,13 +19,13 @@ from multiprocessing.connection import Connection
 import pytest
 from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
+from runtime_test_helpers import AWAIT_TIMEOUT_S, await_until
 
 from ottima_core.bus import CHANNEL_EVENTS, KIND_SCRIPT_ERROR, KIND_SCRIPT_TIMEOUT
 from ottima_flow_runtime import script_pool
 from ottima_flow_runtime.blocks.base import PortSample
 from ottima_flow_runtime.blocks.script import ScriptBlock
 from ottima_flow_runtime.script_pool import ScriptPool
-from runtime_test_helpers import AWAIT_TIMEOUT_S, await_until
 
 DRAIN_TIMEOUT_S = 5.0
 SENTINEL_CHANNEL = "tests.sentinel.script"

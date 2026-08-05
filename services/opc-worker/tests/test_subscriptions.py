@@ -15,6 +15,7 @@ from datetime import timedelta
 import pytest
 from asyncua import ua
 from redis.asyncio import Redis
+from worker_test_helpers import await_until, collecting
 
 from opcsim import NODE_SINE, NODE_STATIC, NODE_W_FLOAT, OpcSimServer
 from ottima_core.bus import (
@@ -38,7 +39,6 @@ from ottima_opc_worker.subscriptions import (
     coerce_value,
     status_to_quality,
 )
-from worker_test_helpers import await_until, collecting
 
 # Severidade nos 2 bits mais altos: 11 é reservado e a spec manda tratar como Bad.
 RESERVED_SEVERITY_CODE = 0xC0000000
