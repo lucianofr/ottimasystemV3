@@ -161,15 +161,34 @@ class MpcBlock(Block):
         return tuple((mv_id, mv.pid) for mv_id, mv in self._mvs.items() if mv.pid is not None)
 
     def auto_arm_blocked_reason(self) -> str | None:
-        """Predicado puro do gate de MAN→AUTO (spec §4.4): host pronto + entradas quentes
-        (já medidas ao menos uma vez, nunca frias) + válidas (última varredura `ok=True`).
+        """Predicado puro e ÚNICO do gate de armar em AMBOS os eixos (fix-final, achado do
+        arquiteto F-4): host pronto + entradas quentes (já medidas ao menos uma vez, nunca
+        frias) + válidas (última varredura `ok=True`) + toda MV com `pid` já com readback
+        publicado no `snapshot`. Sem o último item, `_effective_value` cai no
+        `initial_value` — `u_applied` do solve e o init bumpless (§3.6) partiam de uma
+        ficção em vez da posição física real do PID. `local_remote -> remote` (contrato
+        com `MpcOrchestrator`, supervisor_mpc.py) e `MAN -> AUTO` (spec §4.4, tabela de
+        transições) chamam o MESMO predicado — nenhum eixo arma sobre entrada fria.
+
+        Reaproveita o motivo `"cold_input"` para o readback ausente (em vez de cunhar um
+        motivo novo): do ponto de vista do operador é a mesma história — "ainda não vi o
+        valor real dessa variável" —, e `"cold_input"` já está no enum de `mpc_arm_failed`
+        (spec §5.3); justificativa completa no relatório da tarefa.
+
         Só LÊ estado — quem decide o que fazer com o motivo (emitir `mpc_arm_failed` e não
         materializar o comando) é o supervisor, que intercepta o comando ANTES de rotear a
-        `command()` (tarefa 2.2): nenhuma mudança de comportamento desta tarefa (2.1)."""
+        `command()` (tarefa 2.2)."""
         if not self._host.ready:
             return "worker_not_ready"
         warm = all(var_id in self._last_measured for var_id in self._entrada_ids)
         if not warm:
+            return "cold_input"
+        pid_sem_readback = any(
+            self._snapshot.get(mv.pid.readback_tag_id) is None
+            for mv in self._mvs.values()
+            if mv.pid is not None
+        )
+        if pid_sem_readback:
             return "cold_input"
         if not self._input_ok:
             return "invalid_input"
@@ -203,6 +222,11 @@ class MpcBlock(Block):
         self._overrun_reported = False
         self._input_invalid_reported = False
         self._input_ok = True
+        # Baseline p/ distinguir crash real de exceção isolada do worker (fix-final,
+        # `_apply_result`): conta reposições JÁ ocorridas até aqui — inclusive de um host
+        # reaproveitado num reset() de hot-swap — para nunca acusar "crash" por um respawn
+        # anterior a este bloco/host observar pela 1a vez.
+        self._last_respawns: int = self._host.stats()["respawns"]
 
     # ------------------------------------------------------------------------------
     # Varredura
@@ -214,6 +238,13 @@ class MpcBlock(Block):
 
         samples = {pid: inputs.get(pid, PortSample(None, False)) for pid in self._entrada_ids}
         if has_cold_input(samples):
+            if is_frontier:
+                # Cold start (§3.0 F3): saídas nulas — mas §5.2 pede publicação a cada
+                # execução MESMO fora de AUTO, então a fronteira ainda precisa emitir um
+                # frame honesto (achado F-5): sem isso, um flow recém-implantado fica
+                # mudo em `mpc.state.*` até a 1a varredura totalmente quente.
+                self._input_ok = False
+                await self._publish(self._build_state())
             return null_outputs(self._mv_ids)
 
         valid = all(sample.ok for sample in samples.values())
@@ -228,14 +259,20 @@ class MpcBlock(Block):
         else:
             await self._report_input_invalid()
 
-        if is_frontier:
-            if valid:
-                await self._run_frontier()
-            await self._publish(self._build_state())
+        if is_frontier and valid:
+            await self._run_frontier()
 
         outputs = self._compute_outputs(ok=valid)
         self._mv_last = {mv_id: float(sample.v) for mv_id, sample in outputs.items()}  # type: ignore[arg-type]
         await self._write_pid(outputs, ok=valid)
+
+        if is_frontier:
+            # Publica DEPOIS de `_mv_last` atualizado (achado F-5): publicar antes fazia
+            # `vars.<mv_id>.v` reportar a MV da varredura ANTERIOR enquanto
+            # `vars.<cv_id>.v` já reportava a atual — skew de uma varredura que corrompe
+            # o overlay de trend do F5 (spec §5.2, "publicação a cada execução").
+            await self._publish(self._build_state())
+
         return outputs
 
     async def _run_frontier(self) -> None:
@@ -276,6 +313,17 @@ class MpcBlock(Block):
         if result.status != "overrun":
             self._overrun_reported = False
 
+        # Baseline ANTES de atualizar (fix-final, achado F-1): o host sintetiza o MESMO
+        # `status="error"` tanto pra um crash de verdade (pipe morreu, `_CRASHED` em
+        # `host.py::_await_response`, respawn agendado) quanto pra
+        # `worker.py::_handle` isolar uma exceção de UM pedido (processo segue vivo,
+        # NENHUM respawn). Comparar `stats()["respawns"]` com o valor observado da
+        # ÚLTIMA vez que este método rodou — não só quando o resultado é "error" —
+        # evita falso positivo quando um overrun anterior já tiver disparado um respawn
+        # nesse meio-tempo.
+        respawns_antes = self._last_respawns
+        self._last_respawns = self._host.stats()["respawns"]
+
         if result.status == "ok":
             self._plan = dict(result.u_plan)
             self._cost = result.cost
@@ -288,12 +336,22 @@ class MpcBlock(Block):
             self._solver_status = "overrun"
             await self._report_overrun()
         else:
-            # `error` (crash) ou `no_convergence`: falha de solver != overrun (RF-624).
-            # `u_plan` chega POPULADO (carryover 1.1/1.2) e NUNCA é aplicado — só o ramo
-            # `status == "ok"` acima toca `self._plan`.
+            # `error` (crash real OU exceção isolada, achado F-1) ou `no_convergence`:
+            # falha de solver != overrun (RF-624). `u_plan` chega POPULADO (carryover
+            # 1.1/1.2) e NUNCA é aplicado — só o ramo `status == "ok"` acima toca
+            # `self._plan`.
             self._solver_status = "error"
-            reason = "crash" if result.status == "error" else "no_convergence"
-            await self._report_solver_error(reason)
+            if result.status == "no_convergence":
+                reason = "no_convergence"
+            elif self._last_respawns > respawns_antes:
+                reason = "crash"
+            else:
+                # Worker vivo, nenhum respawn: `worker.py::_handle` isolou uma exceção
+                # de UM pedido — não é o crash literal do §4.9. Extensão deliberada do
+                # enum de `mpc_solver_error` (§5.3 documenta `no_convergence|crash`);
+                # justificativa completa no relatório da tarefa.
+                reason = "exception"
+            await self._report_solver_error(reason, result.detail)
 
     # ------------------------------------------------------------------------------
     # Saída por modo (spec §4.3)
@@ -363,11 +421,18 @@ class MpcBlock(Block):
             payload={},
         )
 
-    async def _report_solver_error(self, reason: str) -> None:
+    async def _report_solver_error(self, reason: str, detail: str) -> None:
+        message = f"MPC '{self.block_id}': falha do solver ({reason})"
+        if detail:
+            # Diagnóstico do worker (traceback aparado de `worker.py::_handle`, ou o
+            # `detail` sintético do host pro crash) — achado F-1: antes ficava só no
+            # `SolveResult`, nunca chegava a lugar nenhum. Mensagem, não payload: o
+            # payload `{reason: ...}` é o documentado em §5.3 e não ganha campo novo.
+            message = f"{message} — {detail}"
         await self._emit_event(
             origin=self._source,
             severity="alarm",
-            message=f"MPC '{self.block_id}': falha do solver ({reason})",
+            message=message,
             kind=KIND_MPC_SOLVER_ERROR,
             payload={"reason": reason},
         )

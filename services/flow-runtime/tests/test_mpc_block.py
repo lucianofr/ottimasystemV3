@@ -119,6 +119,7 @@ class FakeHost:
     pending: SolveResult | None = None
     requests: list[SolveRequest] = field(default_factory=list)
     last_solve_ms: float | None = None
+    respawns: int = 0
 
     def dispatch(self, request: SolveRequest) -> bool:
         self.requests.append(request)
@@ -129,7 +130,7 @@ class FakeHost:
         return result
 
     def stats(self) -> dict:
-        return {"alive": True, "respawns": 0, "last_solve_ms": self.last_solve_ms}
+        return {"alive": True, "respawns": self.respawns, "last_solve_ms": self.last_solve_ms}
 
 
 class FakeSnapshot:
@@ -568,3 +569,127 @@ async def test_todos_os_eventos_carregam_o_origin_do_bloco() -> None:
 
     assert events.events, "pré-condição: precisa haver eventos para checar"
     assert all(e["origin"] == f"flow:{FLOW_ID}/block:m1" for e in events.events)
+
+
+# --------------------------------------------------------------------------------------
+# Fix-final item 1 (achado F-1): "crash" só quando o worker de fato respawnou; detail
+# do worker (ou do host, no crash sintético) chega na mensagem do evento
+# --------------------------------------------------------------------------------------
+
+
+async def test_status_error_sem_respawn_nao_e_crash_e_carrega_o_detail() -> None:
+    """`worker.py::_handle` isola uma exceção de UM pedido e devolve `status="error"` com o
+    processo VIVO (nenhum respawn) — o bloco não pode gritar "crash" nessa hora, nem
+    engolir o `detail` diagnóstico (achado F-1)."""
+    block, host, _, _, _, events = _block()
+    await _entra_remoto_auto(block)
+
+    host.pending = SolveResult(
+        u_plan={"mv_pid": 999.0, "mv_direto": 999.0},
+        prediction_t=[],
+        prediction_cv=[],
+        prediction_mv=[],
+        cost=0.0,
+        status="error",
+        wall_ms=8.0,
+        detail="ValueError: NaN na matriz de estados",
+    )
+    saida = await block.step(entradas(20.0))
+    assert saida["mv_pid"] == PortSample(10.0, True)  # MV mantida (RF-624)
+
+    erros = events.of_kind(KIND_MPC_SOLVER_ERROR)
+    assert len(erros) == 1
+    assert erros[0]["payload"]["reason"] != "crash", (
+        "sem respawn, o worker não crashou — reason falso derruba a confiança no alarme"
+    )
+    assert erros[0]["payload"].keys() == {"reason"}, "payload segue o shape do §5.3"
+    assert "NaN na matriz de estados" in erros[0]["message"], (
+        "o detail diagnóstico do worker não pode ser descartado (achado F-1)"
+    )
+    assert block.health()["overruns"] == 0, "falha de solver != overrun (RF-624)"
+
+
+async def test_status_error_com_respawn_avancado_e_crash_real() -> None:
+    """O MESMO `status="error"` — mas desta vez `host.stats()["respawns"]` avançou: é o
+    crash literal do §4.9 (pipe morreu, host já agendou reposição)."""
+    block, host, _, _, _, events = _block()
+    await _entra_remoto_auto(block)
+
+    host.respawns = 1  # host já repôs o worker antes de entregar este resultado
+    host.pending = SolveResult(
+        u_plan={},
+        prediction_t=[],
+        prediction_cv=[],
+        prediction_mv=[],
+        cost=0.0,
+        status="error",
+        wall_ms=0.0,
+        detail="crash",
+    )
+    await block.step(entradas(20.0))
+
+    erros = events.of_kind(KIND_MPC_SOLVER_ERROR)
+    assert len(erros) == 1
+    assert erros[0]["payload"] == {"reason": "crash"}
+
+
+# --------------------------------------------------------------------------------------
+# Fix-final item 2 (achado do arquiteto F-5): publish() na fronteira reflete ESTA
+# varredura (MV e CV), e cold start ainda publica um frame
+# --------------------------------------------------------------------------------------
+
+
+async def test_publish_de_fronteira_usa_a_mv_desta_mesma_varredura() -> None:
+    """Publish acontecia ANTES de `_compute_outputs`/`_mv_last`: `vars.<mv_id>.v` saía com
+    a MV da varredura ANTERIOR enquanto `vars.<cv_id>.v` já saía com a atual — skew de uma
+    varredura que corrompe o overlay de trend do F5 (achado F-5)."""
+    block, _, snapshot, publish, _, _ = _block()
+
+    snapshot.set(503, 10.0)  # readback da MV com pid nesta 1a varredura
+    await block.step(entradas(50.0))
+
+    snapshot.set(503, 20.0)  # readback muda ANTES da 2a varredura
+    await block.step(entradas(60.0))
+
+    ultimo = publish.states[-1]
+    assert ultimo.vars["cv_a"].v == pytest.approx(60.0)
+    assert ultimo.vars["mv_pid"].v == pytest.approx(20.0), (
+        "MV publicada precisa vir do readback DESTA varredura, não da anterior"
+    )
+
+
+async def test_cold_start_publica_frame_com_input_valid_false_na_fronteira() -> None:
+    """`step()` retornava antes de qualquer publish durante cold start — um flow recém-
+    implantado ficava mudo em `mpc.state.*` até a 1a varredura quente; §5.2 pede
+    publicação a cada execução, inclusive fora de AUTO (achado F-5)."""
+    block, *_, publish, _, _ = _block()
+
+    saida = await block.step({"cv_a": PortSample(None, False)})
+
+    assert saida == {"mv_pid": PortSample(None, False), "mv_direto": PortSample(None, False)}
+    assert len(publish.states) == 1, "fronteira em cold start precisa publicar um frame"
+    estado = publish.states[0]
+    assert estado.status.input_valid is False
+    assert estado.prediction.t == []
+
+
+# --------------------------------------------------------------------------------------
+# Fix-final item 3 (contrato com o supervisor, achado do arquiteto F-4):
+# `auto_arm_blocked_reason()` também exige readback de PID publicado
+# --------------------------------------------------------------------------------------
+
+
+async def test_auto_arm_blocked_reason_exige_readback_do_pid() -> None:
+    """Sem o readback (tag 503) publicado no snapshot, `_effective_value` cai no
+    `initial_value` — armar sobre essa ficção quebraria `u_applied` e o init bumpless
+    (§3.6). O predicado único (contrato com `MpcOrchestrator`) tem que barrar isso ANTES
+    de o supervisor sequer tentar `local_remote -> remote` ou `MAN -> AUTO`."""
+    block, _, snapshot, *_ = _block()
+    await block.step(entradas(20.0))  # aquenta a única entrada (cv_a)
+
+    assert block.auto_arm_blocked_reason() == "cold_input", (
+        "mv_pid tem `pid` mas o readback (tag 503) nunca chegou"
+    )
+
+    snapshot.set(503, 42.0)  # readback chega
+    assert block.auto_arm_blocked_reason() is None
