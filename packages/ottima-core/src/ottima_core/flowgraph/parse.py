@@ -1,0 +1,400 @@
+"""Modelo tipado do `graph_json` de um flow — forma e tipagem estática do JSONB (RF-302/307).
+
+`parse_graph` levanta `GraphParseError` com a lista completa de problemas estruturais. A
+semântica que precisa de contexto (tags do projeto, Ts do flow, topologia) é
+`ottima_core.flowgraph.validate.validate_graph` — ver `ottima_core/flowgraph/__init__.py`
+para a divisão de responsabilidade completa do pacote.
+"""
+
+import math
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+NodeType = Literal["opc_read", "opc_write", "script", "tfs"]
+NODE_TYPES: tuple[str, ...] = ("opc_read", "opc_write", "script", "tfs")
+
+MAX_SCRIPT_PORTS = 8  # spec §3.3
+
+_CONFIG_KEYS: dict[str, tuple[str, ...]] = {
+    "opc_read": ("tag_id",),
+    "opc_write": ("tag_id",),
+    "script": ("n_inputs", "n_outputs", "code"),
+    "tfs": ("matrix",),
+}
+_PARAM_KEYS: dict[str, tuple[str, ...]] = {
+    "sopdt": ("K", "tau1", "tau2", "theta"),
+    "iopdt": ("Ki", "theta"),
+}
+_GAIN_KEYS = frozenset({"K", "Ki"})  # únicos params que podem ser negativos
+_TAG_DIRECTION: dict[str, str] = {"opc_read": "r", "opc_write": "w"}
+
+
+# --------------------------------------------------------------------------------------
+# Modelo
+# --------------------------------------------------------------------------------------
+
+
+class Position(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x: float
+    y: float
+
+
+class TagConfig(BaseModel):
+    """Config de `opc_read` e `opc_write` — idêntica; quem discrimina é `FlowNode.type`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tag_id: int
+
+
+class ScriptConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    n_inputs: int = Field(ge=0, le=MAX_SCRIPT_PORTS)
+    n_outputs: int = Field(ge=0, le=MAX_SCRIPT_PORTS)
+    code: str
+
+
+class SopdtParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    K: float
+    tau1: float = Field(ge=0)
+    tau2: float = Field(ge=0)
+    theta: float = Field(ge=0)
+
+
+class IopdtParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    Ki: float
+    theta: float = Field(ge=0)
+
+
+class TfsElement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    kind: Literal["sopdt", "iopdt"]
+    params: SopdtParams | IopdtParams
+
+
+class TfsConfig(BaseModel):
+    """`matrix[J][K]` é a contribuição de `uK` para `yJ` (spec §3.4), sempre 2x2."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    matrix: list[list[TfsElement]]
+
+
+NodeConfig = TagConfig | ScriptConfig | TfsConfig
+
+
+class FlowNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    type: NodeType
+    position: Position
+    exec_order: int = Field(ge=1)
+    label: str = ""
+    config: NodeConfig
+
+    def functional_config(self) -> dict[str, Any]:
+        """Identidade funcional do bloco, para o hot-swap (ADR-024, spec §4.1-3).
+
+        `exec_order`, `label` e `position` ficam de fora de propósito: mudá-los não altera o
+        que o bloco calcula, então o estado interno sobrevive ao swap (ADR-011).
+        """
+        return {"type": self.type, **self.config.model_dump()}
+
+
+class FlowEdge(BaseModel):
+    # As chaves do JSON são as do React Flow (camelCase); do lado Python valem os nomes
+    # snake_case do projeto.
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    id: str
+    source: str
+    target: str
+    source_handle: str = Field(alias="sourceHandle")
+    target_handle: str = Field(alias="targetHandle")
+
+
+class FlowGraph(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nodes: list[FlowNode]
+    edges: list[FlowEdge]
+
+    def node(self, node_id: str) -> FlowNode:
+        for node in self.nodes:
+            if node.id == node_id:
+                return node
+        raise KeyError(node_id)
+
+
+class GraphParseError(ValueError):
+    """Problemas estruturais do `graph_json`. `errors` traz todos, não só o primeiro."""
+
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = list(errors)
+        super().__init__("; ".join(self.errors))
+
+
+# --------------------------------------------------------------------------------------
+# parse_graph
+# --------------------------------------------------------------------------------------
+
+
+def _is_int(value: object) -> bool:
+    # bool é subclasse de int em Python: True não é um exec_order nem um tag_id.
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def parse_graph(data: dict) -> FlowGraph:
+    """Valida a forma do `graph_json` e devolve o modelo tipado.
+
+    Levanta `GraphParseError` com **todos** os problemas estruturais encontrados, para que o
+    usuário corrija de uma vez em lugar de descobrir um por save.
+    """
+    if not isinstance(data, dict):
+        raise GraphParseError(["graph_json deve ser um objeto com 'nodes' e 'edges'"])
+
+    errors: list[str] = []
+    raw_nodes = data.get("nodes")
+    raw_edges = data.get("edges")
+    if not isinstance(raw_nodes, list):
+        errors.append("graph_json: 'nodes' é obrigatório e deve ser uma lista")
+    if not isinstance(raw_edges, list):
+        errors.append("graph_json: 'edges' é obrigatório e deve ser uma lista")
+    if errors:
+        raise GraphParseError(errors)
+
+    nodes = _parse_nodes(raw_nodes, errors)
+    edges = _parse_edges(raw_edges, errors)
+    if errors:
+        raise GraphParseError(errors)
+    return FlowGraph(nodes=nodes, edges=edges)
+
+
+def _parse_nodes(raw_nodes: list, errors: list[str]) -> list[FlowNode]:
+    nodes: list[FlowNode] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(raw_nodes):
+        if not isinstance(raw, dict):
+            errors.append(f"nó na posição {index}: deve ser um objeto")
+            continue
+        node_id = raw.get("id")
+        if not isinstance(node_id, str) or not node_id:
+            errors.append(f"nó na posição {index}: 'id' deve ser uma string não-vazia")
+            continue
+        if node_id in seen:
+            errors.append(f"id de nó duplicado: '{node_id}'")
+            continue
+        seen.add(node_id)
+        node = _parse_node(node_id, raw, errors)
+        if node is not None:
+            nodes.append(node)
+    return nodes
+
+
+def _parse_node(node_id: str, raw: dict, errors: list[str]) -> FlowNode | None:
+    where = f"nó '{node_id}'"
+    node_type = raw.get("type")
+    if node_type == "mpc":
+        errors.append(
+            f"{where}: o bloco MPC só entra em operação na F4 (decisão A-1); "
+            "remova-o do grafo antes de salvar"
+        )
+        return None
+    if node_type not in NODE_TYPES:
+        errors.append(
+            f"{where}: tipo '{node_type}' não é um bloco válido; use um de: {', '.join(NODE_TYPES)}"
+        )
+        return None
+
+    position = _parse_position(where, raw.get("position"), errors)
+
+    data = raw.get("data")
+    if not isinstance(data, dict):
+        errors.append(f"{where}: 'data' é obrigatório e deve ser um objeto")
+        return None
+
+    exec_order = data.get("exec_order")
+    if not _is_int(exec_order) or exec_order < 1:
+        errors.append(f"{where}: 'exec_order' é obrigatório e deve ser um inteiro maior que 0")
+        exec_order = None
+
+    label = data.get("label", "")
+    if not isinstance(label, str):
+        errors.append(f"{where}: 'label' deve ser uma string")
+        label = ""
+
+    # O editor é a única fonte deste JSON: chave extra em 'data' é bug de versão do frontend,
+    # não campo opcional. Aceitar em silêncio esconderia o bug até o runtime tropeçar nele.
+    allowed = {"exec_order", "label", *_CONFIG_KEYS[node_type]}
+    for key in sorted(set(data) - allowed):
+        errors.append(f"{where}: chave desconhecida em 'data': '{key}'")
+
+    config = _parse_config(where, node_type, data, errors)
+    if config is None or position is None or exec_order is None:
+        return None
+    return FlowNode(
+        id=node_id,
+        type=node_type,
+        position=position,
+        exec_order=exec_order,
+        label=label,
+        config=config,
+    )
+
+
+def _parse_position(where: str, raw: object, errors: list[str]) -> Position | None:
+    if not isinstance(raw, dict) or not all(_is_number(raw.get(axis)) for axis in ("x", "y")):
+        errors.append(f"{where}: 'position' deve ser um objeto com 'x' e 'y' numéricos")
+        return None
+    return Position(x=float(raw["x"]), y=float(raw["y"]))
+
+
+def _parse_config(where: str, node_type: str, data: dict, errors: list[str]) -> NodeConfig | None:
+    if node_type in _TAG_DIRECTION:
+        tag_id = data.get("tag_id")
+        if not _is_int(tag_id) or tag_id < 1:
+            errors.append(f"{where}: 'tag_id' é obrigatório e deve ser um inteiro positivo")
+            return None
+        return TagConfig(tag_id=tag_id)
+    if node_type == "script":
+        return _parse_script_config(where, data, errors)
+    return _parse_tfs_config(where, data, errors)
+
+
+def _parse_script_config(where: str, data: dict, errors: list[str]) -> ScriptConfig | None:
+    counts: dict[str, int] = {}
+    for field in ("n_inputs", "n_outputs"):
+        value = data.get(field)
+        if not _is_int(value) or not 0 <= value <= MAX_SCRIPT_PORTS:
+            errors.append(
+                f"{where}: '{field}' é obrigatório e deve ser um inteiro entre 0 e "
+                f"{MAX_SCRIPT_PORTS}"
+            )
+        else:
+            counts[field] = value
+
+    code = data.get("code")
+    if not isinstance(code, str):
+        errors.append(f"{where}: 'code' é obrigatório e deve ser uma string")
+        return None
+    if len(counts) != 2:
+        return None
+    return ScriptConfig(n_inputs=counts["n_inputs"], n_outputs=counts["n_outputs"], code=code)
+
+
+def _parse_tfs_config(where: str, data: dict, errors: list[str]) -> TfsConfig | None:
+    matrix = data.get("matrix")
+    if (
+        not isinstance(matrix, list)
+        or len(matrix) != 2
+        or any(not isinstance(row, list) or len(row) != 2 for row in matrix)
+    ):
+        errors.append(
+            f"{where}: 'matrix' é obrigatória e deve ser 2x2 (linhas y1..y2 por colunas u1..u2)"
+        )
+        return None
+
+    rows: list[list[TfsElement]] = []
+    complete = True
+    for j, row in enumerate(matrix):
+        parsed: list[TfsElement] = []
+        for k, raw in enumerate(row):
+            element = _parse_tfs_element(f"{where}: elemento y{j + 1}/u{k + 1}", raw, errors)
+            if element is None:
+                complete = False
+            else:
+                parsed.append(element)
+        rows.append(parsed)
+    if not complete:
+        return None
+    return TfsConfig(matrix=rows)
+
+
+def _parse_tfs_element(where: str, raw: object, errors: list[str]) -> TfsElement | None:
+    if not isinstance(raw, dict):
+        errors.append(f"{where}: deve ser um objeto com 'enabled', 'kind' e 'params'")
+        return None
+    enabled = raw.get("enabled")
+    if not isinstance(enabled, bool):
+        errors.append(f"{where}: 'enabled' é obrigatório e deve ser booleano")
+        return None
+    kind = raw.get("kind")
+    if kind not in _PARAM_KEYS:
+        errors.append(f"{where}: 'kind' deve ser 'sopdt' ou 'iopdt'")
+        return None
+    params = raw.get("params")
+    if not isinstance(params, dict):
+        errors.append(f"{where}: 'params' é obrigatório e deve ser um objeto")
+        return None
+
+    expected = _PARAM_KEYS[kind]
+    values: dict[str, float] = {}
+    for extra in sorted(set(params) - set(expected)):
+        errors.append(f"{where}: '{extra}' não é um parâmetro de '{kind}'")
+    for key in expected:
+        value = params.get(key)
+        # Exigir finitude também em theta: ele entra em round(theta/Ts) na regra de teto,
+        # onde inf/nan estouraria com OverflowError/ValueError em vez de virar um 422.
+        if not _is_number(value) or not math.isfinite(value):
+            errors.append(f"{where}: '{key}' é obrigatório e deve ser um número finito")
+        elif key not in _GAIN_KEYS and value < 0:
+            # tau = 0 é legal (spec §3.4 degrada para passagem direta); negativo é não-físico.
+            errors.append(f"{where}: '{key}' não pode ser negativo")
+        else:
+            values[key] = float(value)
+
+    if len(values) != len(expected) or len(params) != len(expected):
+        return None
+    built = SopdtParams(**values) if kind == "sopdt" else IopdtParams(**values)
+    return TfsElement(enabled=enabled, kind=kind, params=built)
+
+
+def _parse_edges(raw_edges: list, errors: list[str]) -> list[FlowEdge]:
+    edges: list[FlowEdge] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(raw_edges):
+        if not isinstance(raw, dict):
+            errors.append(f"aresta na posição {index}: deve ser um objeto")
+            continue
+        edge_id = raw.get("id")
+        if not isinstance(edge_id, str) or not edge_id:
+            errors.append(f"aresta na posição {index}: 'id' deve ser uma string não-vazia")
+            continue
+        if edge_id in seen:
+            errors.append(f"id de aresta duplicado: '{edge_id}'")
+            continue
+        seen.add(edge_id)
+
+        fields: dict[str, str] = {}
+        for key in ("source", "target", "sourceHandle", "targetHandle"):
+            value = raw.get(key)
+            if not isinstance(value, str) or not value:
+                errors.append(f"aresta '{edge_id}': '{key}' deve ser uma string não-vazia")
+            else:
+                fields[key] = value
+        if len(fields) == 4:
+            edges.append(
+                FlowEdge(
+                    id=edge_id,
+                    source=fields["source"],
+                    target=fields["target"],
+                    source_handle=fields["sourceHandle"],
+                    target_handle=fields["targetHandle"],
+                )
+            )
+    return edges
