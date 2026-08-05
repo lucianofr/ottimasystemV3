@@ -364,6 +364,82 @@ def test_par_habilitado_integrating_com_ki_zero_e_erro():
     assert has(errors_of(graph, tags), "cv_a", "mv_a", "params inválidos ou incompletos")
 
 
+def test_par_selfreg_com_k_zero_e_erro():
+    m, c = mv("a"), cv("a", kind="selfreg")
+    models = {c["id"]: {m["id"]: pair("selfreg", K=0.0)}}
+    node = mpc_node(mvs=[m], cvs=[c], models=models)
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert has(errors_of(graph, tags), "cv_a", "mv_a", "params inválidos ou incompletos")
+
+
+def test_par_selfreg_com_tau1_no_piso_e_erro():
+    """τ1>0 é estrito: τ1=0 (o piso) reprova — não `>=0`."""
+    m, c = mv("a"), cv("a", kind="selfreg")
+    models = {c["id"]: {m["id"]: pair("selfreg", tau1=0.0)}}
+    node = mpc_node(mvs=[m], cvs=[c], models=models)
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert has(errors_of(graph, tags), "cv_a", "mv_a", "params inválidos ou incompletos")
+
+
+def test_par_selfreg_com_tau2_negativo_e_erro():
+    m, c = mv("a"), cv("a", kind="selfreg")
+    models = {c["id"]: {m["id"]: pair("selfreg", tau2=-1.0)}}
+    node = mpc_node(mvs=[m], cvs=[c], models=models)
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert has(errors_of(graph, tags), "cv_a", "mv_a", "params inválidos ou incompletos")
+
+
+def test_par_selfreg_com_tau2_no_piso_aprova():
+    """τ2≥0 é inclusivo: τ2=0 (o piso) aprova."""
+    m, c = mv("a"), cv("a", kind="selfreg")
+    models = {c["id"]: {m["id"]: pair("selfreg", tau2=0.0)}}
+    node = mpc_node(mvs=[m], cvs=[c], models=models)
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert not has(errors_of(graph, tags), "params inválidos ou incompletos")
+
+
+def test_par_selfreg_com_theta_negativo_e_erro():
+    m, c = mv("a"), cv("a", kind="selfreg")
+    models = {c["id"]: {m["id"]: pair("selfreg", theta=-1.0)}}
+    node = mpc_node(mvs=[m], cvs=[c], models=models)
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert has(errors_of(graph, tags), "cv_a", "mv_a", "params inválidos ou incompletos")
+
+
+def test_par_selfreg_com_theta_no_piso_aprova():
+    """θ≥0 é inclusivo: θ=0 (o piso) aprova."""
+    m, c = mv("a"), cv("a", kind="selfreg")
+    models = {c["id"]: {m["id"]: pair("selfreg", theta=0.0)}}
+    node = mpc_node(mvs=[m], cvs=[c], models=models)
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert not has(errors_of(graph, tags), "params inválidos ou incompletos")
+
+
+def test_par_integrating_com_theta_negativo_e_erro():
+    m, c = mv("a"), cv("a", kind="integrating")
+    models = {c["id"]: {m["id"]: pair("integrating", theta=-1.0)}}
+    node = mpc_node(mvs=[m], cvs=[c], models=models)
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert has(errors_of(graph, tags), "cv_a", "mv_a", "params inválidos ou incompletos")
+
+
+def test_par_integrating_valido_aprova():
+    """Contraparte quase-ok de `test_par_habilitado_integrating_com_ki_zero_e_erro`."""
+    m, c = mv("a"), cv("a", kind="integrating")
+    models = {c["id"]: {m["id"]: pair("integrating")}}
+    node = mpc_node(mvs=[m], cvs=[c], models=models)
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert not has(errors_of(graph, tags), "params inválidos ou incompletos")
+
+
 def test_theta_infinito_no_par_habilitado_e_erro():
     """Pré-condição da tarefa 1.1: `mpc_state_dimension` faz `round(theta/ts_mpc)` — theta
     não-finito precisa virar 422, nunca `OverflowError` cru (mesma nota de `parse.py` para
@@ -392,6 +468,19 @@ def test_coluna_orfa_em_models_e_erro():
     graph = mpc_graph(node)
     tags = mpc_tags(node)
     assert has(errors_of(graph, tags), "mv_fantasma", "não corresponde a nenhuma MV ou DV")
+
+
+def test_linha_totalmente_ausente_de_models_e_erro():
+    """Uma CV/Restrição sem NENHUMA entrada em `models` (chave nem existe) reprova como
+    'sem par habilitado cuja coluna é MV' — não é a mesma checagem de `test_linha_orfa_em_
+    models_e_erro` (essa é o caminho inverso: chave de `models` que não é CV/Restrição)."""
+    m = mv("a")
+    c1, c2 = cv("a"), cv("b")
+    models = {c1["id"]: {m["id"]: pair("selfreg")}}  # c2 nunca aparece em models
+    node = mpc_node(mvs=[m], cvs=[c1, c2], models=models)
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert has(errors_of(graph, tags), "cv_b", "cuja coluna é MV")
 
 
 # --------------------------------------------------------------------------------------
@@ -464,6 +553,15 @@ def test_priority_zero_e_erro_estrutural():
     graph = mpc_graph(node)
     tags = mpc_tags(node)
     assert has(errors_of(graph, tags), "priority")
+
+
+def test_multiplier_zero_e_erro_estrutural():
+    """`multiplier: Field(ge=1)` já trava em `MpcConfig` (tarefa 1.1) — mesma rota
+    estrutural de `test_priority_zero_e_erro_estrutural`."""
+    node = mpc_node(multiplier=0)
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert has(errors_of(graph, tags), "multiplier")
 
 
 # --------------------------------------------------------------------------------------

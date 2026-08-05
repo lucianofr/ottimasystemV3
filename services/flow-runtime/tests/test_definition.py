@@ -6,7 +6,7 @@ serviços de runtime — mesmo padrão de `test_flowgraph.py`/`test_flowgraph_mp
 """
 
 from ottima_core.flowgraph import TagRef, parse_graph
-from ottima_flow_runtime.definition import _conn_ids
+from ottima_flow_runtime.definition import _conn_ids, _mpc_pid_tag_ids
 
 
 def opc_read_node(node_id: str, *, tag_id: int, exec_order: int) -> dict:
@@ -186,3 +186,17 @@ def test_conn_ids_soma_conexoes_de_varias_mvs_com_pid():
         203: TagRef(id=203, conn_id=40, direction="r", data_type="float"),
     }
     assert _conn_ids(graph, tags) == frozenset({10, 30, 40})
+
+
+def test_mpc_pid_tag_ids_devolve_exatamente_as_tags_do_pid():
+    """Reforça `test_conn_ids_soma_conexoes_de_varias_mvs_com_pid`: aquele teste só confere
+    o `frozenset` de `conn_id` (passaria mesmo se `_mpc_pid_tag_ids` rendesse um `tag_id`
+    estranho que caísse por acaso na mesma conexão) — este confere os `tag_id` exatos que a
+    função devolve, MV sem `pid` incluída (não deve render nada dela)."""
+    m1 = mv("a", pid=pid_binding(100, with_mode_read=False))
+    m2 = mv("b", pid=pid_binding(200))
+    m3 = mv("c")  # sem pid — decisão A-8, MV "direta"
+    node, _cv_id, _input_tag_id = mpc_node("m1", exec_order=2, mvs=[m1, m2, m3], input_tag_id=1)
+    graph = parse_graph({"nodes": [node], "edges": []})
+
+    assert set(_mpc_pid_tag_ids(graph.node("m1"))) == {100, 101, 102, 200, 201, 202, 203}
