@@ -191,7 +191,7 @@ def test_bias_corrige_erro_de_ganho_do_modelo_em_regime():
     # Loop aberto: aplica sempre a mesma MV vigente, propaga a "planta real" (ganho 20%
     # maior que o modelo) e re-arma o bumpless a cada passo com a medida real -- até
     # assentar em regime (>> constante de tempo, poucos Ts_mpc bastam para tau=20/ts=5).
-    for _ in range(40):
+    for _ in range(80):
         x_real = a_real * x_real + b_real * u_now
         y_real = k_real * x_real
         init_bumpless(built, u_now={"mv_1": u_now}, y_now={"cv_1": y_real}, d_now={})

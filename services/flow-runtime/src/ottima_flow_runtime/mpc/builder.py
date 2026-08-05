@@ -23,9 +23,9 @@ import casadi.tools as castools
 from do_mpc.controller import MPC
 from do_mpc.model import Model
 
-from ottima_core.flowgraph import Horizons, MpcConfig, derive_horizons
+from ottima_core.flowgraph import Horizons, MpcConfig, RowKind, derive_horizons
 
-from .discretize import discretize_iopdt, discretize_sopdt
+from .discretize import PairSS, discretize_iopdt, discretize_sopdt
 
 R_DELTA_U = 0.1
 """Peso do termo `R_Δu·Δu²_norm` do objetivo (spec F4 §3.4) — constante nomeada: a spec fixa
@@ -35,6 +35,31 @@ SLACK_WEIGHT_MULTIPLIER = 1e4
 """Multiplicador de `w_slack = 1e4 × max(w_cv, 1.0) × priority` (spec F4 §3.4, ADR-019) — a
 dominância da Restrição sobre o CV é por construção: precisa ser grande o bastante para que
 QUALQUER violação de faixa custe mais que o pior erro de SP possível."""
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PairInit:
+    """Metadados de um par HABILITADO para `init_bumpless` (spec F4 §3.6, tarefa 2.3).
+
+    Nomes de estado na MESMA convenção usada ao montar o modelo (`x_{row}_{col}_{i}` para os
+    estados dinâmicos do par, `delay_{row}_{col}_{i}` para o shift register do atraso) — quem
+    arma o controller nunca reconstrói esses nomes, só os consome daqui.
+
+    `state_names`: vazio no caso degenerado de ganho puro sem estado (SOPDT com os dois
+    estágios em passagem direta, `pair.a.shape[0] == 0` — ver `discretize_sopdt`); nesse caso
+    `direct_gain` carrega o `K` que soma direto na linha (sem estado `_x` para inicializar).
+
+    `eq=False`: mesmo motivo do `PairSS`/`BuiltMpc` — `pair` carrega `np.ndarray`.
+    """
+
+    row_id: str
+    col_id: str
+    is_mv_column: bool
+    kind: RowKind
+    state_names: tuple[str, ...]
+    delay_state_names: tuple[str, ...]
+    pair: PairSS
+    direct_gain: float | None
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -76,6 +101,9 @@ class BuiltMpc:
     """row_id (CV/Restrição) -> nome do `_tvp` de bias (escrito pelo worker, DMC §3.3)."""
     dv_tvp_name: dict[str, str]
     """dv_id -> nome do `_tvp` de DV (escrito pelo worker; futura = último valor medido)."""
+    pair_init: tuple[PairInit, ...]
+    """Metadados por par habilitado (índices de estado, `PairSS`, kind) — consumido por
+    `init_bumpless` (tarefa 2.3) para montar `x_ss` sem reconstruir a matriz `models`."""
     tvp_template: castools.structure3.DMStruct
 
 
@@ -110,6 +138,7 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
     rhs: dict[str, ca.SX] = {f"uprev_{mv.id}": mv_symbol[mv.id] for mv in mvs}
     output_expr_name: dict[str, str] = {}
     row_mterm_unsafe: dict[str, bool] = {}
+    pair_inits: list[PairInit] = []
 
     for row_id in row_ids:
         kind = row_kind[row_id]
@@ -129,11 +158,13 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
 
             is_mv_column = col_id in mv_symbol
             pair_input = col_symbol[col_id]
+            delay_names: list[str] = []
             for i in range(1, pair.delay + 1):
                 name = f"delay_{row_id}_{col_id}_{i}"
                 state = model.set_variable("_x", name)
                 rhs[name] = pair_input
                 pair_input = state
+                delay_names.append(name)
 
             n = pair.a.shape[0]
             if n == 0:
@@ -153,6 +184,18 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
                     has_unsafe_term = True
                 else:
                     row_expr_terminal += gain_term
+                pair_inits.append(
+                    PairInit(
+                        row_id=row_id,
+                        col_id=col_id,
+                        is_mv_column=is_mv_column,
+                        kind=kind,
+                        state_names=(),
+                        delay_state_names=tuple(delay_names),
+                        pair=pair,
+                        direct_gain=params["K"],
+                    )
+                )
                 continue
 
             names = [f"x_{row_id}_{col_id}_{i}" for i in range(n)]
@@ -164,6 +207,18 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
             y_contribution = (pair.c @ x_vec)[0]
             row_expr += y_contribution
             row_expr_terminal += y_contribution
+            pair_inits.append(
+                PairInit(
+                    row_id=row_id,
+                    col_id=col_id,
+                    is_mv_column=is_mv_column,
+                    kind=kind,
+                    state_names=tuple(names),
+                    delay_state_names=tuple(delay_names),
+                    pair=pair,
+                    direct_gain=None,
+                )
+            )
 
         output_expr_name[row_id] = f"y_{row_id}"
         model.set_expression(f"y_{row_id}", row_expr + bias_symbol[row_id])
@@ -265,5 +320,6 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
         sp_tvp_name={cv.id: f"sp_{cv.id}" for cv in cvs},
         bias_tvp_name={row_id: f"bias_{row_id}" for row_id in row_ids},
         dv_tvp_name={dv.id: dv.id for dv in dvs},
+        pair_init=tuple(pair_inits),
         tvp_template=tvp_template,
     )
