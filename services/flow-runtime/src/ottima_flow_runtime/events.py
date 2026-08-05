@@ -25,6 +25,7 @@ from ottima_core.bus import (
     KIND_DEPLOY_REJECTED,
     KIND_FLOW_DEPLOYED,
     KIND_FLOW_STOPPED,
+    KIND_MPC_MODE_CHANGED,
     KIND_PROJECT_ACTIVATED,
     KIND_RELOAD_REJECTED,
     EventMessage,
@@ -71,6 +72,12 @@ def flow_origin(flow_id: int) -> str:
     return f"flow:{flow_id}"
 
 
+def mpc_block_origin(flow_id: int, block_id: str) -> str:
+    """`origin` de evento de bloco MPC — mesmo padrão de `OpcWriteBlock`/`MpcBlock._source`
+    (`flow:<fid>/block:<bid>`, plano F4b tarefa 2.2)."""
+    return f"flow:{flow_id}/block:{block_id}"
+
+
 async def publish_flow_deployed(redis_client: Redis, *, flow_id: int, user: str) -> None:
     await publish_event(
         redis_client,
@@ -98,6 +105,22 @@ async def publish_flow_stopped(
         message=f"Flow {flow_id} parado (motivo: {reason})",
         kind=KIND_FLOW_STOPPED,
         payload=payload,
+    )
+
+
+async def publish_mpc_hot_swap(redis_client: Redis, *, flow_id: int, block_id: str) -> None:
+    """`mpc_mode_changed {reason: hot_swap}` (spec F4 §4.7) — forma DIFERENTE do evento que
+    `MpcBlock._audit_mode_changed` publicaria (`{axis, from, to, user}`): o bloco antigo é
+    descartado no hot-swap, então quem materializa este evento é sempre o supervisor, nunca
+    o bloco. A escrita de `mode_cmd=auto` (se o bloco antigo estava armado) é
+    responsabilidade de quem chama, ANTES deste publish (`mpc_arming.write_mode_cmd`)."""
+    await publish_event(
+        redis_client,
+        severity="info",
+        origin=mpc_block_origin(flow_id, block_id),
+        message=f"MPC '{block_id}': config alterada com o flow {flow_id} rodando (hot-swap)",
+        kind=KIND_MPC_MODE_CHANGED,
+        payload={"reason": "hot_swap"},
     )
 
 
@@ -136,7 +159,9 @@ __all__ = [
     "ChannelListener",
     "build_event_listener",
     "flow_origin",
+    "mpc_block_origin",
     "publish_flow_deployed",
     "publish_flow_stopped",
+    "publish_mpc_hot_swap",
     "publish_rejected",
 ]
