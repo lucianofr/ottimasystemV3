@@ -10,6 +10,7 @@ const DESCRICAO: Record<TipoBloco, string> = {
   opc_write: "Escreve o valor da entrada em uma tag do projeto",
   script: "Código Python com IN1..INn e OUT1..OUTn",
   tfs: "Matriz 2x2 de funções de transferência (SOPDT/IOPDT)",
+  mpc: "Controle preditivo multivariável — portas dinâmicas conforme o config",
 };
 
 interface Props {
@@ -43,11 +44,8 @@ function ItemPaleta({ tipo, onAdicionar }: { tipo: TipoBloco; onAdicionar: Props
   );
 }
 
-/**
- * Paleta de 5 blocos (RF-301). O MPC aparece porque o produto tem 5 blocos, mas entra em
- * operação só na F4 (decisão A-1): desabilitado, com badge "F4" e sem arraste — o servidor
- * devolve 422 para um nó `mpc` na F3.
- */
+/** Paleta de 5 blocos (RF-301): o MPC entra em operação na F4 (decisão A-1) igual aos
+ *  demais — arrastável, sem badge de fase pendente (spec F4 §7.1). */
 export function FlowPalette({ onAdicionar }: Props) {
   return (
     <Card className="w-56 shrink-0 space-y-2 p-3">
@@ -59,22 +57,6 @@ export function FlowPalette({ onAdicionar }: Props) {
         {TIPOS_BLOCO.map((tipo) => (
           <ItemPaleta key={tipo} tipo={tipo} onAdicionar={onAdicionar} />
         ))}
-        <div
-          data-testid="paleta-mpc"
-          aria-disabled="true"
-          title="O bloco MPC entra em operação na F4"
-          className="w-full cursor-not-allowed rounded-panel border border-dashed border-hairline bg-well px-2 py-2 opacity-50"
-        >
-          <span className="flex items-center justify-between gap-2">
-            <span className="plaqueta text-[11px] text-fg">MPC</span>
-            <span className="plaqueta rounded-[2px] border border-hairline px-1 text-[9px] text-fg-muted">
-              F4
-            </span>
-          </span>
-          <span className="mt-0.5 block text-[10px] leading-tight text-fg-muted">
-            Disponível na próxima fase
-          </span>
-        </div>
       </div>
     </Card>
   );

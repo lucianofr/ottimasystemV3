@@ -7,8 +7,13 @@ import {
   portasScript,
   type NoEscrita,
   type NoLeitura,
+  type NoMpc as NoMpcData,
   type NoScript,
   type NoTfs,
+  type VariavelCv,
+  type VariavelDv,
+  type VariavelMv,
+  type VariavelRestricao,
 } from "../graph";
 import { BlocoChapa, LinhaResumo, type Porta } from "./BlocoChapa";
 import { useTagsDoEditor } from "./contexto";
@@ -16,6 +21,17 @@ import { useTagsDoEditor } from "./contexto";
 /** Portas rotuladas com o próprio nome do handle: é o que o engenheiro vê no 422 do save. */
 function portas(ids: readonly string[]): Porta[] {
   return ids.map((id) => ({ id, rotulo: id }));
+}
+
+/** Portas do MPC rotulam `nome (EU)` — ao contrário do resto do canvas, que rotula pelo
+ *  handle id (decisão A-10, spec F4 §7.2). Nome vazio cai no id (variável ainda sem nome). */
+function portasMpc(
+  variaveis: readonly (VariavelMv | VariavelCv | VariavelRestricao | VariavelDv)[],
+): Porta[] {
+  return variaveis.map((variavel) => {
+    const nome = variavel.name.trim() || variavel.id;
+    return { id: variavel.id, rotulo: variavel.eu ? `${nome} (${variavel.eu})` : nome };
+  });
 }
 
 function CorpoTag({ tagId, tag }: { tagId: number | null; tag: TagOut | undefined }) {
@@ -75,6 +91,11 @@ export function NoEscritaOpc({ id, data, selected }: NodeProps<NoEscrita>) {
   );
 }
 
+/** Débito m4 (EU nas portas): Script e TFS não têm EU por porta em nenhuma fonte hoje
+ *  (config sem campo `eu`; `PortValue`/`bus.py` também não carrega EU no valor ao vivo —
+ *  achado registrado no relatório da tarefa 4.1). `BlocoChapa` já aceita `eu` por bloco
+ *  (usado por Leitura/Escrita OPC, que têm uma tag ⇒ uma EU); Script/TFS não passam o
+ *  prop de propósito — nenhum valor fabricado é melhor que uma unidade inventada. */
 export function NoScriptPython({ id, data, selected }: NodeProps<NoScript>) {
   const linhas = data.code === "" ? 0 : data.code.split("\n").length;
   return (
@@ -135,10 +156,39 @@ export function NoTfsMatriz({ id, data, selected }: NodeProps<NoTfs>) {
   );
 }
 
+/** Portas dinâmicas do config (spec F4 §7.2, decisão A-10): entradas = CVs+Restrições+DVs à
+ *  esquerda, saída = MVs à direita, na ordem do config; sem variáveis ⇒ sem portas
+ *  (B-F4-01 passo 5). */
+export function NoMpc({ id, data, selected }: NodeProps<NoMpcData>) {
+  const { mvs, cvs, constraints, dvs } = data.variables;
+  const entradas = portasMpc([...cvs, ...constraints, ...dvs]);
+  const saidas = portasMpc(mvs);
+  return (
+    <BlocoChapa
+      tipo="mpc"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={entradas}
+      saidas={saidas}
+      blockId={id}
+    >
+      <div className="space-y-0.5">
+        <LinhaResumo rotulo="Nome" valor={data.name.trim() || "—"} />
+        <LinhaResumo
+          rotulo="Variáveis"
+          valor={`${String(mvs.length)} MV · ${String(cvs.length)} CV · ${String(constraints.length)} restrição(ões) · ${String(dvs.length)} DV`}
+        />
+      </div>
+    </BlocoChapa>
+  );
+}
+
 /** Referência estável: `nodeTypes` novo a cada render faz o React Flow remontar os nós. */
 export const TIPOS_DE_NO: NodeTypes = {
   opc_read: NoLeituraOpc,
   opc_write: NoEscritaOpc,
   script: NoScriptPython,
   tfs: NoTfsMatriz,
+  mpc: NoMpc,
 };
