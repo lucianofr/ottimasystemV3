@@ -184,10 +184,19 @@ class MpcHost:
     async def start(self) -> None:
         """Sobe o processo e espera o handshake `("ready", n_x)` — `ready` fica `False` até
         lá. O runtime segue varrendo os outros blocos enquanto isso: só ESTE `await` bloqueia
-        (o chamador decide quando pagar esse tempo, não `dispatch()`)."""
+        (o chamador decide quando pagar esse tempo, não `dispatch()`).
+
+        O boot roda numa task rastreada em `self._background` — não só `await`ada aqui
+        diretamente — porque um `stop()` concorrente (chamado antes deste `await` retornar)
+        precisa ENXERGAR essa task pendente no laço de ponto fixo: sem isso, `stop()` sairia
+        pela espera vazia, leria `proc`/`conn` ainda `None` e retornaria, deixando o processo
+        que o boot ainda está subindo vivo e nunca mais rastreado (achado da revisão)."""
         if self._stopped or self._proc is not None:
             return
-        await self._spawn_and_wait_ready()
+        task = asyncio.get_running_loop().create_task(self._spawn_and_wait_ready())
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+        await task
 
     @property
     def ready(self) -> bool:
@@ -309,16 +318,38 @@ class MpcHost:
 
     async def _respawn(self) -> None:
         proc, conn = self._proc, self._conn
+        # Zera ANTES de desligar: entre este ponto e `self._proc` apontar pro worker NOVO
+        # (dentro de `_spawn_and_wait_ready`, só depois do custo inteiro do spawn) não pode
+        # sobrar uma referência a um `Process` já fechado — `stats()["alive"]` chama
+        # `proc.is_alive()`, que levanta `ValueError` num `Process` fechado; e evita
+        # desligar o MESMO worker duas vezes se `stop()` também correr concorrente e ler
+        # `self._proc`/`self._conn` (já `None` aqui) no seu próprio trecho de desligamento.
+        self._proc, self._conn = None, None
         if proc is not None and conn is not None:
             await asyncio.to_thread(_shutdown_worker, proc, conn)
         self._respawns += 1
         self._needs_reinit = True
+        if self._stopped:
+            # `stop()` já pediu para encerrar (achado da revisão, mesmo gate de
+            # `ScriptPool._do_replace`: `if self._running:` antes de repor) — subir um
+            # worker novo aqui seria trabalho jogado fora: `stop()` só está bloqueado
+            # esperando ESTA task (rastreada em `_background` por `_schedule_respawn`) e vai
+            # encontrar `self._proc`/`self._conn` já `None`, sem nada a desligar de novo.
+            return
         await self._spawn_and_wait_ready()
 
     async def _spawn_and_wait_ready(self) -> None:
         proc, conn = await asyncio.to_thread(self._spawn_worker)
         self._proc, self._conn = proc, conn
         handshake = await asyncio.to_thread(_receive, conn, _BOOT_TIMEOUT_S)
+        if self._stopped:
+            # `stop()` venceu a corrida enquanto o boot estava em voo (chamado por `start()`
+            # OU por `_respawn()`): `self._proc`/`self._conn` já apontam para o processo que
+            # acabou de subir — `stop()` (bloqueado na mesma task via `_background`) vai
+            # desligá-lo — mas `ready` NUNCA pode virar `True` depois que `stop()` já baixou
+            # `_stopped`, ou a property mentiria para quem checasse `host.ready` logo após
+            # `await stop()` retornar (achado da revisão).
+            return
         if isinstance(handshake, tuple) and len(handshake) == 2 and handshake[0] == _READY:
             self._ready = True
             return
