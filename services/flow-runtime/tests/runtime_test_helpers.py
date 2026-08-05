@@ -484,3 +484,16 @@ def mpc_host_sleeper_worker(conn: Connection, config_json: str, ts_flow: float) 
             time.sleep(10.0)  # bem além de qualquer deadline usado na suíte de MpcHost
     except (EOFError, OSError):
         return
+
+
+def mpc_host_dying_on_request_worker(conn: Connection, config_json: str, ts_flow: float) -> None:
+    """Fica pronto na hora, mas morre (`os._exit`, sem responder) assim que recebe o
+    PRIMEIRO pedido — prova o caminho de crash-EM-VOO (spec §4.9: `_receive` vê EOF/erro de
+    SO no meio da espera de um dispatch, não um `dispatch()` idle notando `is_alive()`
+    depois). `os._exit` (não `sys.exit`/exceção) porque precisa fechar o processo sem passar
+    pelo `finally: conn.close()` do laço normal — mais perto de um crash real."""
+    import os
+
+    conn.send(("ready", 1))
+    conn.recv()
+    os._exit(1)

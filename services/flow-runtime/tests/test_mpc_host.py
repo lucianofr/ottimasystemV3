@@ -31,6 +31,7 @@ from collections.abc import AsyncIterator, Callable
 
 import pytest
 from runtime_test_helpers import (
+    mpc_host_dying_on_request_worker,
     mpc_host_echo_worker,
     mpc_host_reinit_capturing_worker,
     mpc_host_sleeper_worker,
@@ -216,6 +217,33 @@ async def test_crash_espontaneo_respawna_sozinho_no_proximo_ciclo(
 
     await await_until(lambda: host.stats()["alive"] is True, timeout_s=10.0)
     assert host.stats()["respawns"] == 1
+    assert host._proc.pid != old_pid  # noqa: SLF001
+
+
+# --------------------------------------------------------------------------------------
+# Crash EM VOO (worker morre respondendo a um dispatch pendente) -> status="error"/"crash"
+# --------------------------------------------------------------------------------------
+
+
+async def test_crash_em_voo_durante_dispatch_entrega_error_crash_e_respawna(
+    make_host: Callable[[Callable], MpcHost],
+) -> None:
+    host = make_host(mpc_host_dying_on_request_worker)
+    await host.start()
+    old_pid = host._proc.pid  # noqa: SLF001
+
+    # Diferente do teste de crash espontâneo acima (processo morto IDLE, sem pedido em
+    # voo): aqui o worker morre respondendo a ESTE dispatch — o caminho que `_receive`
+    # detecta sozinho como EOF/erro de SO no meio da espera (spec §4.9), não o
+    # `proc.is_alive()` do topo de `dispatch()`.
+    assert host.dispatch(_EMPTY_REQUEST) is True
+
+    result = await _wait_poll(host, timeout_s=DEADLINE_S + 5.0)
+    assert result.status == "error"
+    assert result.detail == "crash"
+
+    await await_until(lambda: host.stats()["respawns"] == 1, timeout_s=10.0)
+    await await_until(lambda: host.ready is True, timeout_s=10.0)
     assert host._proc.pid != old_pid  # noqa: SLF001
 
 
