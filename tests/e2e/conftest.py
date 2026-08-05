@@ -23,7 +23,7 @@ from typing import Any
 import httpx
 import pytest
 import redis
-from asyncua import Client
+from asyncua import Client, ua
 from websockets.exceptions import InvalidStatus
 from websockets.sync.client import connect
 
@@ -250,16 +250,20 @@ class OpcSim:
     def read(self, node_id: str) -> Any:
         return asyncio.run(self._read(node_id))
 
-    def write(self, node_id: str, value: Any) -> None:
-        asyncio.run(self._write(node_id, value))
+    def write(self, node_id: str, value: Any, *, variant_type: ua.VariantType | None = None) -> None:
+        """`variant_type` força o tipo OPC-UA da escrita (spec F4 §2.1-4: `mode_cmd`/
+        `mode_read` são Int32 — o cliente infere Int64 de um `int` cru sem essa dica e o
+        servidor reprova com `BadTypeMismatch`); `None` preserva a inferência automática
+        (double para os `float` de posição, já usada em todo o resto da suíte)."""
+        asyncio.run(self._write(node_id, value, variant_type))
 
     async def _read(self, node_id: str) -> Any:
         async with Client(url=self._url, timeout=10) as client:
             return await client.get_node(node_id).read_value()
 
-    async def _write(self, node_id: str, value: Any) -> None:
+    async def _write(self, node_id: str, value: Any, variant_type: ua.VariantType | None) -> None:
         async with Client(url=self._url, timeout=10) as client:
-            await client.get_node(node_id).write_value(value)
+            await client.get_node(node_id).write_value(value, variant_type)
 
 
 @dataclass(frozen=True, slots=True)
@@ -842,3 +846,86 @@ def assinar_mpc_state(admin: httpx.Client, flow_id: int, block_id: str) -> Itera
         yield EstadoMpcStream(ws, channel_mpc_state(flow_id, block_id))
     finally:
         ws.close()
+
+
+# ============================================================================
+# F4b — falhas, /operate, WS e hot-swap (tarefa 4.2, spec F4 §9.2 E2E-F4-06..10)
+# ============================================================================
+
+
+def evento_mpc(kind: str, flow_id: int, block_id: str) -> Callable[[dict[str, Any]], bool]:
+    """Predicado de evento do canal `events` por `kind` e origem de bloco MPC (spec §5.3) —
+    mesmo padrão de `evento_de` (F2), mas por `origin` (`flow:<fid>/block:<bid>`) em vez de
+    `conn_id`: os eventos do MPC não carregam `conn_id` no payload."""
+    origem = f"flow:{flow_id}/block:{block_id}"
+
+    def casa(evento: dict[str, Any]) -> bool:
+        return evento.get("origin") == origem and evento.get("payload", {}).get("kind") == kind
+
+    return casa
+
+
+def mpc_block_health(flow_id: int, block_id: str) -> dict[str, Any] | None:
+    """`flows.<flow_id>.mpc.<block_id>` do `/health` do flow-runtime (spec §4.10) — `None`
+    enquanto o runtime não conhece o flow ou o bloco (ainda não deployado, ou não é `mpc`)."""
+    saude = _health_do_runtime()
+    if saude is None:
+        return None
+    flow = saude.get("flows", {}).get(str(flow_id))
+    if flow is None:
+        return None
+    return flow.get("mpc", {}).get(block_id)
+
+
+def armar_ate_remoto(admin: httpx.Client, fluxo: EstadoMpcStream, flow_id: int, block_id: str) -> None:
+    """LOCAL→REMOTO(MAN) com confirmação (spec §4.4) — pra blocos com MV(s) `pid` cujo
+    `mode_read` alimenta o watchdog de armar/shed (`mpc_arming.watch_arm`): espera a
+    transição aparecer no `mpc.state` e depois confere que ela NÃO reverte dentro da
+    janela de confirmação (2×Ts_mpc) — reverter seria `mpc_arm_failed{reason:no_confirm}`,
+    o oposto do que este helper afirma. Mesmo padrão de `_armar_ate_remoto` em
+    `test_f4_mpc.py` (tarefa 4.1), aqui compartilhado entre os arquivos da tarefa 4.2."""
+    operar_modo(admin, flow_id, block_id, "local_remote", "remote")
+    fluxo.esperar(
+        lambda e: e["modes"]["local_remote"] == "remote", timeout=10.0, descricao=f"{block_id} pra REMOTO"
+    )
+    janela = fluxo.coletar(
+        quantidade=3, timeout=TS_MPC * 3 + 5.0, descricao=f"{block_id} janela de confirmação do arme"
+    )
+    assert all(e["modes"]["local_remote"] == "remote" for e in janela), (
+        f"{block_id} reverteu pra LOCAL durante a janela de confirmação — mpc_arm_failed(no_confirm)? "
+        f"série: {[e['modes']['local_remote'] for e in janela]}"
+    )
+
+
+def armar_remoto_direto(admin: httpx.Client, fluxo: EstadoMpcStream, flow_id: int, block_id: str) -> None:
+    """LOCAL→REMOTO(MAN) para um bloco sem nenhuma MV com `pid`+`mode_read`: sem alvo pra
+    confirmar, `watch_arm` devolve na hora (spec §4.4/§4.5 — "sem mode_read, sem shed") e a
+    transição nunca reverte, então não há janela de confirmação a esperar aqui."""
+    operar_modo(admin, flow_id, block_id, "local_remote", "remote")
+    fluxo.esperar(
+        lambda e: e["modes"]["local_remote"] == "remote", timeout=10.0, descricao=f"{block_id} pra REMOTO"
+    )
+
+
+def armar_auto_com_retentativa(
+    admin: httpx.Client,
+    fluxo: EstadoMpcStream,
+    flow_id: int,
+    block_id: str,
+    *,
+    timeout: float = 60.0,
+) -> dict[str, Any]:
+    """MAN→AUTO reenviando o comando até o `mpc.state` confirmar (spec §4.4): o gate
+    `host.ready` pode não estar pronto na 1ª tentativa (build do do-mpc em segundo plano,
+    spec §4.1) — a API não sabe quando o worker termina, então o cliente reenvia, igual a
+    um operador de verdade clicando de novo depois do `mpc_arm_failed{reason:worker_not_ready}`."""
+    limite = time.monotonic() + timeout
+    while True:
+        operar_modo(admin, flow_id, block_id, "man_auto", "auto")
+        try:
+            return fluxo.esperar(
+                lambda e: e["modes"]["man_auto"] == "auto", timeout=5.0, descricao=f"{block_id} pra AUTO"
+            )
+        except AssertionError:
+            if time.monotonic() >= limite:
+                raise
