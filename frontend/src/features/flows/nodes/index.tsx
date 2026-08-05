@@ -15,6 +15,7 @@ import {
   type VariavelMv,
   type VariavelRestricao,
 } from "../graph";
+import { rotuloVariavel } from "../mpc/mpcLogic";
 import { BlocoChapa, LinhaResumo, type Porta } from "./BlocoChapa";
 import { useTagsDoEditor } from "./contexto";
 
@@ -29,7 +30,7 @@ function portasMpc(
   variaveis: readonly (VariavelMv | VariavelCv | VariavelRestricao | VariavelDv)[],
 ): Porta[] {
   return variaveis.map((variavel) => {
-    const nome = variavel.name.trim() || variavel.id;
+    const nome = rotuloVariavel(variavel);
     return { id: variavel.id, rotulo: variavel.eu ? `${nome} (${variavel.eu})` : nome };
   });
 }
