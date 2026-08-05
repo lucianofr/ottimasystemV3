@@ -19,7 +19,6 @@ from redis.asyncio.client import PubSub
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from conftest import await_until, collecting
 from opcsim import NODE_SINE, NODE_STATIC, OpcSimServer
 from ottima_core.bus import (
     CHANNEL_EVENTS,
@@ -42,6 +41,7 @@ from ottima_opc_worker.supervisor import (
     load_active_configuration,
     read_watermark,
 )
+from worker_test_helpers import await_until, collecting
 
 # Poll curto: a reconciliação dos testes vem do loop, não de chamada direta.
 TEST_POLL_INTERVAL_S = 0.2

@@ -18,7 +18,6 @@ from asyncua import ua
 from asyncua.common.node import Node
 from redis.asyncio import Redis
 
-from conftest import AWAIT_TIMEOUT_S, await_until, collecting
 from opcsim import (
     NODE_MIRROR_BOOL,
     NODE_MIRROR_FLOAT,
@@ -42,6 +41,7 @@ from ottima_core.bus import (
 from ottima_opc_worker.connection import ConnectionRuntime
 from ottima_opc_worker.state import ConnectionConfig, ConnectionSnapshot, ConnectionState, TagConfig
 from ottima_opc_worker.writes import WriteConsumer, coerce_value
+from worker_test_helpers import AWAIT_TIMEOUT_S, await_until, collecting
 
 CONN_ID = 7
 TAG_FLOAT = 11

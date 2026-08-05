@@ -2,7 +2,8 @@
 
 Comando entra sempre pelo barramento (`flow.commands`), nunca por chamada direta: o que está
 sob teste é o caminho que a API usa. O cenário (banco commitado, grafos, pool-duplo, fábrica
-de supervisores) vem do `conftest.py` do serviço, compartilhado com `test_hotswap.py`.
+de supervisores) vem do `runtime_test_helpers.py` do serviço, compartilhado com
+`test_hotswap.py`.
 """
 
 from __future__ import annotations
@@ -16,7 +17,22 @@ from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from conftest import (
+from ottima_core.bus import (
+    CHANNEL_EVENTS,
+    KIND_COMM_FAILURE,
+    KIND_COMM_RESTORED,
+    KIND_DEPLOY_REJECTED,
+    KIND_FLOW_DEPLOYED,
+    KIND_FLOW_FAILED,
+    KIND_FLOW_STOPPED,
+    KIND_PROJECT_ACTIVATED,
+    KIND_SCRIPT_ERROR,
+    KIND_SCRIPT_TIMEOUT,
+    channel_flow_status,
+    publish_event,
+)
+from ottima_flow_runtime.supervisor import REASON_INVALID_GRAPH, REASON_PROJECT_INACTIVE
+from runtime_test_helpers import (
     FAST_POLL_S,
     QUIET_WINDOW_S,
     USER,
@@ -37,21 +53,6 @@ from conftest import (
     set_project_active,
     tfs_node,
 )
-from ottima_core.bus import (
-    CHANNEL_EVENTS,
-    KIND_COMM_FAILURE,
-    KIND_COMM_RESTORED,
-    KIND_DEPLOY_REJECTED,
-    KIND_FLOW_DEPLOYED,
-    KIND_FLOW_FAILED,
-    KIND_FLOW_STOPPED,
-    KIND_PROJECT_ACTIVATED,
-    KIND_SCRIPT_ERROR,
-    KIND_SCRIPT_TIMEOUT,
-    channel_flow_status,
-    publish_event,
-)
-from ottima_flow_runtime.supervisor import REASON_INVALID_GRAPH, REASON_PROJECT_INACTIVE
 
 Factory = Callable[..., Awaitable[Harness]]
 Collect = Callable[[str], Awaitable[Collector]]

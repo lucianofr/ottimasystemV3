@@ -5,8 +5,8 @@ Critério de "bloco não alterado" é igualdade de `FlowNode.functional_config()
 por identidade de objeto — o contrato que o operador enxerga é o estado interno continuar (a
 resposta ao degrau do TFS não reinicia; o contador de varreduras do Script não volta a 1).
 
-O `state` do Script vem do pool-duplo do `conftest.py`, que devolve em `OUT1` o número de
-varreduras que aquele bloco já fez: se a instância foi trocada, `OUT1` volta a 1.
+O `state` do Script vem do pool-duplo do `runtime_test_helpers.py`, que devolve em `OUT1` o
+número de varreduras que aquele bloco já fez: se a instância foi trocada, `OUT1` volta a 1.
 """
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ from collections.abc import Awaitable, Callable
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from conftest import (
+from ottima_core.bus import CHANNEL_EVENTS, KIND_RELOAD_REJECTED, channel_flow_status
+from runtime_test_helpers import (
     QUIET_WINDOW_S,
     Collector,
     Harness,
@@ -36,7 +37,6 @@ from conftest import (
     sopdt,
     tfs_node,
 )
-from ottima_core.bus import CHANNEL_EVENTS, KIND_RELOAD_REJECTED, channel_flow_status
 
 Factory = Callable[..., Awaitable[Harness]]
 Collect = Callable[[str], Awaitable[Collector]]

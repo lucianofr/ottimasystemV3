@@ -20,7 +20,6 @@ from asyncua.client.ua_client import UaClientState
 from cryptography.fernet import Fernet
 from redis.asyncio import Redis
 
-from conftest import await_until, collecting
 from opcsim import NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM, OpcSimServer, free_port
 from ottima_core.bus import CHANNEL_EVENTS, KIND_COMM_FAILURE, KIND_COMM_RESTORED
 from ottima_core.security import encrypt_secret
@@ -31,6 +30,7 @@ from ottima_opc_worker.state import (
     ConnectionState,
     TagConfig,
 )
+from worker_test_helpers import await_until, collecting
 
 # Backoff curto: os testes não podem esperar o 1→2→4 s de produção.
 TEST_BACKOFF_INITIAL_S = 0.05

@@ -18,7 +18,6 @@ from contextlib import asynccontextmanager, suppress
 import pytest
 from redis.asyncio import Redis
 
-from conftest import await_until
 from opcsim import (
     NODE_COUNTER,
     NODE_SINE,
@@ -44,6 +43,7 @@ from ottima_opc_worker.state import (
     TagConfig,
 )
 from ottima_opc_worker.subscriptions import QUALITY_BAD
+from worker_test_helpers import await_until
 
 CONN_ID = 11
 
@@ -298,6 +298,7 @@ async def test_fail_concorrente_produz_um_alarme_e_uma_rajada(redis_client: Redi
         )
         await await_until(lambda: len(bad_values(trail)) == len(READ_TAG_IDS))
         await await_until(lambda: len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1)
+
         await asyncio.sleep(QUIET_WINDOW_S / 3)
 
         assert len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1
