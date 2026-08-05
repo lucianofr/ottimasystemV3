@@ -285,7 +285,9 @@ def test_e2e_f4_07_devolver_congela_mv_e_escreve_mode_cmd_auto(
         f"salto no instante da devolução: vigente={vigente} -> {primeiro_local}"
     )
     valores_local = [e["vars"]["mv_pid"]["v"] for e in pos_local]
-    assert max(valores_local) - min(valores_local) < 1e-6, f"MV não congelou em LOCAL: {valores_local}"
+    assert max(valores_local) - min(valores_local) < 1e-6, (
+        f"MV não congelou em LOCAL: {valores_local}"
+    )
 
     # `mode_cmd = mode_values.auto` (1, spec §2.1-4 do config da malha) chegou ao opcsim.
     esperar_ate(

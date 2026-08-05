@@ -77,7 +77,9 @@ def test_e2e_f4_09_shed_por_mode_read_divergente(
         )
         armar_ate_remoto(admin, fluxo, flow_id, "mpc1")
 
-        opcsim_client.write(NODE_W_INT, 1, variant_type=ua.VariantType.Int32)  # auto(1) != target(3)
+        opcsim_client.write(
+            NODE_W_INT, 1, variant_type=ua.VariantType.Int32
+        )  # auto(1) != target(3)
         esperar_ate(
             lambda: opcsim_client.read(NODE_MIRROR_INT) == 1.0 or None,
             timeout=2.0,
@@ -174,7 +176,10 @@ def _grafo_hot_swap(admin: httpx.Client, ambiente: AmbienteMpc, *, peso_mpc1: fl
             "id": "mpc1",
             "type": "mpc",
             "position": {"x": 0.0, "y": 0.0},
-            "data": {"exec_order": 3, **_config_mpc_leve(mv_id="mv_1", cv_id="cv_1", weight=peso_mpc1)},
+            "data": {
+                "exec_order": 3,
+                **_config_mpc_leve(mv_id="mv_1", cv_id="cv_1", weight=peso_mpc1),
+            },
         },
         {
             "id": "mpc2",
@@ -184,8 +189,20 @@ def _grafo_hot_swap(admin: httpx.Client, ambiente: AmbienteMpc, *, peso_mpc1: fl
         },
     ]
     edges = [
-        {"id": "e1", "source": "r1", "sourceHandle": "out", "target": "mpc1", "targetHandle": "cv_1"},
-        {"id": "e2", "source": "r2", "sourceHandle": "out", "target": "mpc2", "targetHandle": "cv_2"},
+        {
+            "id": "e1",
+            "source": "r1",
+            "sourceHandle": "out",
+            "target": "mpc1",
+            "targetHandle": "cv_1",
+        },
+        {
+            "id": "e2",
+            "source": "r2",
+            "sourceHandle": "out",
+            "target": "mpc2",
+            "targetHandle": "cv_2",
+        },
     ]
     return {"nodes": nodes, "edges": edges}
 
@@ -211,7 +228,9 @@ def test_e2e_f4_10_ws_fanout_e_hot_swap(
         deploy_flow(admin, flow_id)
 
         # (a) fanout do /ws — payload §5.1 exato.
-        amostra = fluxo1.esperar(lambda _e: True, timeout=30.0, descricao="1ª amostra de mpc1 pós-deploy")
+        amostra = fluxo1.esperar(
+            lambda _e: True, timeout=30.0, descricao="1ª amostra de mpc1 pós-deploy"
+        )
         assert set(amostra.keys()) == {"modes", "status", "vars", "cost", "prediction"}
         assert set(amostra["modes"].keys()) == {"local_remote", "man_auto"}
         assert set(amostra["status"].keys()) == {
@@ -226,10 +245,14 @@ def test_e2e_f4_10_ws_fanout_e_hot_swap(
             assert set(estado_var.keys()) == {"v", "sp"}
 
         fluxo1.esperar(
-            lambda e: e["modes"]["local_remote"] == "local", timeout=10.0, descricao="mpc1 boot em LOCAL"
+            lambda e: e["modes"]["local_remote"] == "local",
+            timeout=10.0,
+            descricao="mpc1 boot em LOCAL",
         )
         fluxo2.esperar(
-            lambda e: e["modes"]["local_remote"] == "local", timeout=10.0, descricao="mpc2 boot em LOCAL"
+            lambda e: e["modes"]["local_remote"] == "local",
+            timeout=10.0,
+            descricao="mpc2 boot em LOCAL",
         )
 
         # Arma os dois pra AUTO — mpc1 é quem recebe o hot-swap, mpc2 é o irmão de controle.
@@ -241,11 +264,15 @@ def test_e2e_f4_10_ws_fanout_e_hot_swap(
         # Espera um solve de verdade nos dois — health com `last_solve_ms` populado é o
         # baseline "worker vivo" contra o qual comparamos o pós-swap.
         estado_ok_1 = fluxo1.esperar(
-            lambda e: e["status"]["solver"] == "ok", timeout=TS_MPC * 10 + 15.0, descricao="mpc1 1º solve ok"
+            lambda e: e["status"]["solver"] == "ok",
+            timeout=TS_MPC * 10 + 15.0,
+            descricao="mpc1 1º solve ok",
         )
         assert estado_ok_1["modes"] == {"local_remote": "remote", "man_auto": "auto"}
         fluxo2.esperar(
-            lambda e: e["status"]["solver"] == "ok", timeout=TS_MPC * 10 + 15.0, descricao="mpc2 1º solve ok"
+            lambda e: e["status"]["solver"] == "ok",
+            timeout=TS_MPC * 10 + 15.0,
+            descricao="mpc2 1º solve ok",
         )
 
         pre_health_1 = mpc_block_health(flow_id, "mpc1")
@@ -265,11 +292,15 @@ def test_e2e_f4_10_ws_fanout_e_hot_swap(
             descricao="mpc_mode_changed{reason: hot_swap} de mpc1 (não a transição de armar)",
         )
         estado_local_1 = fluxo1.esperar(
-            lambda e: e["modes"]["local_remote"] == "local", timeout=15.0, descricao="mpc1 shedar pra LOCAL"
+            lambda e: e["modes"]["local_remote"] == "local",
+            timeout=15.0,
+            descricao="mpc1 shedar pra LOCAL",
         )
 
         # Flow segue rodando: mpc.state dos dois blocos continua chegando normalmente.
-        pos_swap_2 = fluxo2.esperar(lambda _e: True, timeout=10.0, descricao="mpc2 mpc.state pós-swap")
+        pos_swap_2 = fluxo2.esperar(
+            lambda _e: True, timeout=10.0, descricao="mpc2 mpc.state pós-swap"
+        )
         fluxo1.esperar(lambda _e: True, timeout=10.0, descricao="mpc1 mpc.state pós-swap")
 
     assert evento["payload"] == {"kind": KIND_MPC_MODE_CHANGED, "reason": "hot_swap"}

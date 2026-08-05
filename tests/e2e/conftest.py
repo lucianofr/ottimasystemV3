@@ -250,7 +250,9 @@ class OpcSim:
     def read(self, node_id: str) -> Any:
         return asyncio.run(self._read(node_id))
 
-    def write(self, node_id: str, value: Any, *, variant_type: ua.VariantType | None = None) -> None:
+    def write(
+        self, node_id: str, value: Any, *, variant_type: ua.VariantType | None = None
+    ) -> None:
         """`variant_type` força o tipo OPC-UA da escrita (spec F4 §2.1-4: `mode_cmd`/
         `mode_read` são Int32 — o cliente infere Int64 de um `int` cru sem essa dica e o
         servidor reprova com `BadTypeMismatch`); `None` preserva a inferência automática
@@ -607,7 +609,9 @@ def _config_mpc_malha(ambiente: AmbienteMpc, *, multiplier: int = MULTIPLICADOR_
     }
 
 
-def grafo_mpc_tfs(ambiente: AmbienteMpc, *, valor_dv: float = VALOR_DV, mpc_id: str = "mpc1") -> dict:
+def grafo_mpc_tfs(
+    ambiente: AmbienteMpc, *, valor_dv: float = VALOR_DV, mpc_id: str = "mpc1"
+) -> dict:
     """Grafo E2E-F4 (spec §9.2): `mv_readback` (`opc_read` do espelho de `mv_pid`) alimenta a
     TFS `planta`; `planta` fecha em `cv1`/`co1` do MPC. `mv_pid` fecha a malha só pelo OPC
     (ADR-022) — uma aresta de volta do `mpc1` pra `planta`/`mv_readback` formaria ciclo no
@@ -811,7 +815,9 @@ class EstadoMpcStream:
         while True:
             restante = limite - time.monotonic()
             if restante <= 0:
-                raise AssertionError(f"{descricao}: nenhum mpc.state correspondente em {timeout:.0f}s")
+                raise AssertionError(
+                    f"{descricao}: nenhum mpc.state correspondente em {timeout:.0f}s"
+                )
             estado = self.proxima(timeout=restante, descricao=descricao)
             if pred(estado):
                 return estado
@@ -830,7 +836,9 @@ class EstadoMpcStream:
 
 
 @contextmanager
-def assinar_mpc_state(admin: httpx.Client, flow_id: int, block_id: str) -> Iterator[EstadoMpcStream]:
+def assinar_mpc_state(
+    admin: httpx.Client, flow_id: int, block_id: str
+) -> Iterator[EstadoMpcStream]:
     """Abre o `/ws` real, autentica com o token do `admin` e assina `mpc_state` do bloco —
     mesmo `abrir_ws` da F3 (`test_f3_lifecycle.py`), cópia local pela mesma razão de ciclo."""
     url = f"{BASE.replace('http://', 'ws://').rstrip('/')}/ws"
@@ -877,7 +885,9 @@ def mpc_block_health(flow_id: int, block_id: str) -> dict[str, Any] | None:
     return flow.get("mpc", {}).get(block_id)
 
 
-def armar_ate_remoto(admin: httpx.Client, fluxo: EstadoMpcStream, flow_id: int, block_id: str) -> None:
+def armar_ate_remoto(
+    admin: httpx.Client, fluxo: EstadoMpcStream, flow_id: int, block_id: str
+) -> None:
     """LOCAL→REMOTO(MAN) com confirmação (spec §4.4) — pra blocos com MV(s) `pid` cujo
     `mode_read` alimenta o watchdog de armar/shed (`mpc_arming.watch_arm`): espera a
     transição aparecer no `mpc.state` e depois confere que ela NÃO reverte dentro da
@@ -886,24 +896,33 @@ def armar_ate_remoto(admin: httpx.Client, fluxo: EstadoMpcStream, flow_id: int, 
     `test_f4_mpc.py` (tarefa 4.1), aqui compartilhado entre os arquivos da tarefa 4.2."""
     operar_modo(admin, flow_id, block_id, "local_remote", "remote")
     fluxo.esperar(
-        lambda e: e["modes"]["local_remote"] == "remote", timeout=10.0, descricao=f"{block_id} pra REMOTO"
+        lambda e: e["modes"]["local_remote"] == "remote",
+        timeout=10.0,
+        descricao=f"{block_id} pra REMOTO",
     )
     janela = fluxo.coletar(
-        quantidade=3, timeout=TS_MPC * 3 + 5.0, descricao=f"{block_id} janela de confirmação do arme"
+        quantidade=3,
+        timeout=TS_MPC * 3 + 5.0,
+        descricao=f"{block_id} janela de confirmação do arme",
     )
     assert all(e["modes"]["local_remote"] == "remote" for e in janela), (
-        f"{block_id} reverteu pra LOCAL durante a janela de confirmação — mpc_arm_failed(no_confirm)? "
+        f"{block_id} reverteu pra LOCAL durante a janela de confirmação — "
+        f"mpc_arm_failed(no_confirm)? "
         f"série: {[e['modes']['local_remote'] for e in janela]}"
     )
 
 
-def armar_remoto_direto(admin: httpx.Client, fluxo: EstadoMpcStream, flow_id: int, block_id: str) -> None:
+def armar_remoto_direto(
+    admin: httpx.Client, fluxo: EstadoMpcStream, flow_id: int, block_id: str
+) -> None:
     """LOCAL→REMOTO(MAN) para um bloco sem nenhuma MV com `pid`+`mode_read`: sem alvo pra
     confirmar, `watch_arm` devolve na hora (spec §4.4/§4.5 — "sem mode_read, sem shed") e a
     transição nunca reverte, então não há janela de confirmação a esperar aqui."""
     operar_modo(admin, flow_id, block_id, "local_remote", "remote")
     fluxo.esperar(
-        lambda e: e["modes"]["local_remote"] == "remote", timeout=10.0, descricao=f"{block_id} pra REMOTO"
+        lambda e: e["modes"]["local_remote"] == "remote",
+        timeout=10.0,
+        descricao=f"{block_id} pra REMOTO",
     )
 
 
@@ -924,7 +943,9 @@ def armar_auto_com_retentativa(
         operar_modo(admin, flow_id, block_id, "man_auto", "auto")
         try:
             return fluxo.esperar(
-                lambda e: e["modes"]["man_auto"] == "auto", timeout=5.0, descricao=f"{block_id} pra AUTO"
+                lambda e: e["modes"]["man_auto"] == "auto",
+                timeout=5.0,
+                descricao=f"{block_id} pra AUTO",
             )
         except AssertionError:
             if time.monotonic() >= limite:

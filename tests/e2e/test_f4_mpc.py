@@ -80,12 +80,16 @@ def _dv_e2e(letra: str) -> dict:
     return {"id": f"dv_{letra}", "name": f"DV {letra}", "eu": "m3/h"}
 
 
-def _grafo_validacao(admin: httpx.Client, ambiente: AmbienteMpc, dados: dict, *, mpc_id: str = "m1") -> dict:
+def _grafo_validacao(
+    admin: httpx.Client, ambiente: AmbienteMpc, dados: dict, *, mpc_id: str = "m1"
+) -> dict:
     """Grafo mínimo com um bloco `mpc` — cada entrada dinâmica (CV/Restrição/DV) ganha um
     `opc_read` dedicado (mesmo padrão de `_grafo_mpc`, `test_flows_mpc.py`): as reprovações
     destes cenários são da matriz/horizontes/tags do `pid`, nunca de porta solta."""
     variables = dados["variables"]
-    ids_entrada = [v["id"] for v in (*variables["cvs"], *variables["constraints"], *variables["dvs"])]
+    ids_entrada = [
+        v["id"] for v in (*variables["cvs"], *variables["constraints"], *variables["dvs"])
+    ]
     nodes: list[dict] = []
     edges: list[dict] = []
     for indice, var_id in enumerate(ids_entrada, start=1):
@@ -139,10 +143,14 @@ def test_e2e_f4_01_deploy_publica_mpc_state_e_boot_em_local(
 
     with assinar_mpc_state(admin, flow_id, "mpc1") as fluxo:
         deploy_flow(admin, flow_id)
-        amostras = [fluxo.esperar(lambda _e: True, timeout=30.0, descricao="1º mpc.state após deploy")]
+        amostras = [
+            fluxo.esperar(lambda _e: True, timeout=30.0, descricao="1º mpc.state após deploy")
+        ]
         chegada = [time.monotonic()]
         for _ in range(3):
-            amostras.append(fluxo.esperar(lambda _e: True, timeout=15.0, descricao="mpc.state seguinte"))
+            amostras.append(
+                fluxo.esperar(lambda _e: True, timeout=15.0, descricao="mpc.state seguinte")
+            )
             chegada.append(time.monotonic())
 
     primeira = amostras[0]
@@ -152,7 +160,7 @@ def test_e2e_f4_01_deploy_publica_mpc_state_e_boot_em_local(
     solvers = [e["status"]["solver"] for e in amostras]
     assert all(s == "idle" for s in solvers), f"solver fora de 'idle' em LOCAL: {solvers}"
 
-    deltas = [b - a for a, b in zip(chegada, chegada[1:])]
+    deltas = [b - a for a, b in zip(chegada, chegada[1:], strict=False)]
     assert all(TS_MPC * 0.7 <= d <= TS_MPC * 1.5 for d in deltas), (
         f"cadência fora de [{TS_MPC * 0.7:.2f}, {TS_MPC * 1.5:.2f}]s (Ts_mpc={TS_MPC}s): {deltas}"
     )
@@ -200,7 +208,12 @@ def test_e2e_f4_02_reprovacoes_422_de_validacao(
             "dvs": [],
         },
         "models": {
-            "cv_b": {"mv_b": {"enabled": True, "params": {"K": 1.0, "tau1": 10.0, "tau2": 2.0, "theta": 0.0}}}
+            "cv_b": {
+                "mv_b": {
+                    "enabled": True,
+                    "params": {"K": 1.0, "tau1": 10.0, "tau2": 2.0, "theta": 0.0},
+                }
+            }
         },
     }
     grafo_np = _grafo_validacao(admin, ambiente_mpc, dados_np)
@@ -228,7 +241,12 @@ def test_e2e_f4_02_reprovacoes_422_de_validacao(
             "dvs": [],
         },
         "models": {
-            "cv_c": {"mv_c": {"enabled": True, "params": {"K": 1.0, "tau1": 10.0, "tau2": 2.0, "theta": 0.0}}}
+            "cv_c": {
+                "mv_c": {
+                    "enabled": True,
+                    "params": {"K": 1.0, "tau1": 10.0, "tau2": 2.0, "theta": 0.0},
+                }
+            }
         },
     }
     grafo_pid = _grafo_validacao(admin, ambiente_mpc, dados_pid)
@@ -249,7 +267,9 @@ def _armar_ate_remoto(admin: httpx.Client, fluxo: Any, flow_id: int, block_id: s
     afirma."""
     operar_modo(admin, flow_id, block_id, "local_remote", "remote")
     fluxo.esperar(
-        lambda e: e["modes"]["local_remote"] == "remote", timeout=10.0, descricao="transição pra REMOTO"
+        lambda e: e["modes"]["local_remote"] == "remote",
+        timeout=10.0,
+        descricao="transição pra REMOTO",
     )
     janela = fluxo.coletar(
         quantidade=3, timeout=TS_MPC * 3 + 5.0, descricao="janela de confirmação do arme (2×Ts_mpc)"
@@ -263,7 +283,9 @@ def _armar_ate_remoto(admin: httpx.Client, fluxo: Any, flow_id: int, block_id: s
 def _armar_ate_auto(admin: httpx.Client, fluxo: Any, flow_id: int, block_id: str) -> None:
     _armar_ate_remoto(admin, fluxo, flow_id, block_id)
     operar_modo(admin, flow_id, block_id, "man_auto", "auto")
-    fluxo.esperar(lambda e: e["modes"]["man_auto"] == "auto", timeout=5.0, descricao="transição pra AUTO")
+    fluxo.esperar(
+        lambda e: e["modes"]["man_auto"] == "auto", timeout=5.0, descricao="transição pra AUTO"
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -294,7 +316,9 @@ def test_e2e_f4_03_arme_local_remoto_auto_sem_salto(
 
         _armar_ate_remoto(admin, fluxo, flow_id, "mpc1")
         operar_modo(admin, flow_id, "mpc1", "man_auto", "auto")
-        fluxo.esperar(lambda e: e["modes"]["man_auto"] == "auto", timeout=5.0, descricao="transição pra AUTO")
+        fluxo.esperar(
+            lambda e: e["modes"]["man_auto"] == "auto", timeout=5.0, descricao="transição pra AUTO"
+        )
         operar_sp(admin, flow_id, "mpc1", "cv_1", 95.0)
 
         pos_auto = fluxo.coletar(
@@ -334,13 +358,17 @@ def test_e2e_f4_04_auto_converge_cv_para_sp_na_malha_tfs(
 
     with assinar_mpc_state(admin, flow_id, "mpc1") as fluxo:
         deploy_flow(admin, flow_id)
-        fluxo.esperar(lambda e: e["modes"]["local_remote"] == "local", timeout=30.0, descricao="boot em LOCAL")
+        fluxo.esperar(
+            lambda e: e["modes"]["local_remote"] == "local", timeout=30.0, descricao="boot em LOCAL"
+        )
 
         _armar_ate_auto(admin, fluxo, flow_id, "mpc1")
         operar_sp(admin, flow_id, "mpc1", "cv_1", sp)
 
         convergiu = fluxo.esperar(
-            lambda e: e["modes"]["man_auto"] == "auto" and abs(e["vars"]["cv_1"]["v"] - sp) < tolerancia,
+            lambda e: (
+                e["modes"]["man_auto"] == "auto" and abs(e["vars"]["cv_1"]["v"] - sp) < tolerancia
+            ),
             timeout=20 * TS_MPC,
             descricao=f"cv1 convergir pra SP={sp} (±{tolerancia})",
         )
@@ -373,14 +401,18 @@ def test_e2e_f4_05_restricao_vence_cv(
 
     with assinar_mpc_state(admin, flow_id, "mpc1") as fluxo:
         deploy_flow(admin, flow_id)
-        fluxo.esperar(lambda e: e["modes"]["local_remote"] == "local", timeout=30.0, descricao="boot em LOCAL")
+        fluxo.esperar(
+            lambda e: e["modes"]["local_remote"] == "local", timeout=30.0, descricao="boot em LOCAL"
+        )
 
         _armar_ate_auto(admin, fluxo, flow_id, "mpc1")
         operar_sp(admin, flow_id, "mpc1", "cv_1", sp_agressivo)
 
         # Mesma ordem de grandeza da janela de acomodação do E2E-F4-04.
         acomodado = fluxo.coletar(
-            quantidade=20, timeout=20 * TS_MPC + 10.0, descricao="acomodação sob conflito SP×Restrição"
+            quantidade=20,
+            timeout=20 * TS_MPC + 10.0,
+            descricao="acomodação sob conflito SP×Restrição",
         )
 
     finais = acomodado[-5:]
