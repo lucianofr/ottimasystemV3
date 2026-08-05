@@ -5,6 +5,7 @@ Núcleo puro — nada de SQLAlchemy nem de `services/` aqui: o chamador traduz l
 `ottima_core/flowgraph/__init__.py` para a divisão de responsabilidade completa do pacote.
 """
 
+import math
 from collections.abc import Mapping
 from typing import Literal
 
@@ -448,9 +449,14 @@ def _check_mpc_caps(node: FlowNode, config: MpcConfig, errors: list[str]) -> Non
 
 def _valid_pair_params(kind: RowKind, params: dict[str, float]) -> bool:
     """Completude e validade dos `params` do par por `kind` da linha (spec §2.2-3):
-    selfreg (SOPDT) exige K≠0, τ1>0, τ2≥0, θ≥0; integrating (IOPDT) exige Ki≠0, θ≥0."""
+    selfreg (SOPDT) exige K≠0, τ1>0, τ2≥0, θ≥0; integrating (IOPDT) exige Ki≠0, θ≥0.
+
+    Exige finitude em todo `params`: `theta` alimenta `round(theta/ts_mpc)` em
+    `mpc_state_dimension`, onde inf/nan estouraria `OverflowError`/`ValueError` em vez de
+    virar 422 (mesma nota de `parse.py` para o TFS — pré-condição da tarefa 1.1).
+    """
     expected = _SELFREG_PARAMS if kind == "selfreg" else _INTEGRATING_PARAMS
-    if set(params) != expected:
+    if set(params) != expected or not all(math.isfinite(value) for value in params.values()):
         return False
     if kind == "selfreg":
         return (
@@ -531,29 +537,41 @@ def _check_mpc_matrix(node: FlowNode, config: MpcConfig, errors: list[str]) -> b
     return intact
 
 
+def _positive(value: float) -> bool:
+    """Finito e > 0 — TSS alimenta `math.ceil(max(tss)/ts_mpc)` em `derive_horizons`, onde
+    inf/nan estouraria `OverflowError`/`ValueError` em vez de virar 422 (pré-condição da
+    tarefa 1.1, mesma nota de `parse.py` para o TFS)."""
+    return math.isfinite(value) and value > 0
+
+
+def _less_than(low: float, high: float) -> bool:
+    """Finito e `low < high`."""
+    return math.isfinite(low) and math.isfinite(high) and low < high
+
+
 def _check_mpc_numbers(node: FlowNode, config: MpcConfig, errors: list[str]) -> None:
     """Spec §2.2-4 (exceto `priority`/`multiplier`, já travados em `MpcConfig` — tarefa 1.1)."""
     variables = config.variables
     for mv_var in variables.mvs:
-        if not mv_var.limits.min < mv_var.limits.max:
+        if not _less_than(mv_var.limits.min, mv_var.limits.max):
             errors.append(
                 f"nó '{node.id}' (mpc): a MV '{mv_var.id}' precisa de limits.min < limits.max"
             )
-        if not mv_var.du_max > 0:
+        if not _positive(mv_var.du_max):
             errors.append(f"nó '{node.id}' (mpc): a MV '{mv_var.id}' precisa de du_max > 0")
     for cv_var in variables.cvs:
-        if not cv_var.tss > 0:
+        if not _positive(cv_var.tss):
             errors.append(f"nó '{node.id}' (mpc): a CV '{cv_var.id}' precisa de tss > 0")
-        if not cv_var.sp_limits.min < cv_var.sp_limits.max:
+        if not _less_than(cv_var.sp_limits.min, cv_var.sp_limits.max):
             errors.append(
                 f"nó '{node.id}' (mpc): a CV '{cv_var.id}' precisa de sp_limits.min < sp_limits.max"
             )
-        if not cv_var.weight > 0:
+        if not _positive(cv_var.weight):
             errors.append(f"nó '{node.id}' (mpc): a CV '{cv_var.id}' precisa de weight > 0")
     for co_var in variables.constraints:
-        if not co_var.tss > 0:
+        if not _positive(co_var.tss):
             errors.append(f"nó '{node.id}' (mpc): a Restrição '{co_var.id}' precisa de tss > 0")
-        if not co_var.range.low < co_var.range.high:
+        if not _less_than(co_var.range.low, co_var.range.high):
             errors.append(
                 f"nó '{node.id}' (mpc): a Restrição '{co_var.id}' precisa de range.low < range.high"
             )
@@ -618,7 +636,9 @@ def _check_mpc_horizons(
     tss = [cv_var.tss for cv_var in config.variables.cvs] + [
         co_var.tss for co_var in config.variables.constraints
     ]
-    if not tss:
+    if not tss or not all(math.isfinite(value) for value in tss):
+        # TSS ausente (0 CVs+Restrições, já reprovado pelo teto §2.2-2) ou não-finito (já
+        # reprovado por `_check_mpc_numbers`) — sem isso `derive_horizons` estouraria.
         return None
     horizons = derive_horizons(config.multiplier, ts_seconds, tss)
     if horizons.np < 2:
