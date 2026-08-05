@@ -115,12 +115,15 @@ sys.exit(0 if conn and conn["state"] == "up" and conn["watchdog_alive"] else 1)
   # auto-aplica `desired_state` — só o comando `deploy` sobe flow. E `status` precisa ser
   # "ok" (não "degraded"): é ele que denuncia o banco fora do alcance do runtime, a
   # dependência que este serviço passou a ter (spec F3 §2.2-10).
+  # F4 §4.10: o payload ganha `script_pool` ({size, busy, respawns}) e, por flow, `mpc`
+  # (vazio no boot parado — o conteúdo por bloco é asserido na L2).
   "${COMPOSE[@]}" exec -T flow-runtime python -c '
 import json, urllib.request
 corpo = json.load(urllib.request.urlopen("http://localhost:8002/health", timeout=3))
 assert corpo["status"] == "ok", corpo
 assert corpo["flows"] == {}, corpo
-print("  /health: status=ok, flows={} (nenhum flow subiu no boot)")
+assert set(corpo["script_pool"]) == {"size", "busy", "respawns"}, corpo
+print("  /health: status=ok, flows={} (nenhum flow subiu no boot), script_pool presente")
 '
 fi
 
