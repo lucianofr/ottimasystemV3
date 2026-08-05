@@ -167,18 +167,23 @@ def test_e2e_f4_06_overrun_mantem_mv_e_alarme(
     tentativas sem exceção) — todo disparo em AUTO estoura, mata o worker e repõe; a MV
     nunca sai do `initial_value` e o contador de overruns/respawns cresce.
 
-    ACHADO (defeito de implementação, não mascarado — reportado no relatório da tarefa):
-    `MpcBlock.reset()` inicializa `_solver_status = "ok"` (`blocks/mpc.py:196`), e
-    `_build_state()` expõe esse valor cru sempre que `host.ready` — mesmo sem NENHUM solve
-    real ter terminado ainda. A 1ª publicação após entrar em AUTO mostra `status.solver=
-    "ok"` por 1-2 amostras ANTES do 1º overrun ser detectado, com `last_solve_ms=0.0` (o
-    padrão nunca-resolveu, não um solve de 0ms) — reproduzido de forma determinística
-    (não é uma corrida rara) contra o stack real. Um cliente que confiasse literalmente em
-    `status.solver=="ok"` seria enganado por essa janela. A prova de verdade (nenhum plano
-    jamais aplicado) é `last_solve_ms` — só vira >0 quando o filho responde de verdade
-    (`MpcHost._last_solve_ms`, docstring de `mpc/host.py`) — e a MV, que só sai do hold
-    quando `self._plan is not None` (`_compute_outputs`), só é setada dentro de um
-    `status=="ok"` DE VERDADE (`_apply_result`), nunca alcançado neste cenário."""
+    DEFEITO FIXADO (originalmente achado nesta tarefa, corrigido no nível do bloco antes do
+    fechamento da fase): `MpcBlock.reset()` inicializava `_solver_status = "ok"`, e
+    `_build_state()` expunha esse valor cru sempre que `host.ready` — mesmo sem NENHUM solve
+    real ter terminado ainda, mostrando `status.solver=="ok"` por 1-2 amostras ANTES do 1º
+    overrun ser detectado. Corrigido em `blocks/mpc.py`: `reset()` agora inicializa
+    `_solver_status` como `"idle"` (não `"ok"`), e `_build_state()` ganhou um gate de defesa
+    em profundidade — `status=="ok"` sem `self._plan` aplicado não é exposto como "ok" (mantém
+    o rótulo honesto anterior). Coberto em
+    `test_mpc_block.py::test_solver_status_nao_e_ok_antes_do_primeiro_resultado_real`.
+
+    Este E2E continua a assertar sobre `last_solve_ms` (tempo real do filho,
+    `MpcHost._last_solve_ms`), não sobre o enum `status.solver`: é a prova de verdade de que
+    nenhum plano jamais foi aplicado — só vira >0 quando o filho responde de verdade, e a MV,
+    que só sai do hold quando `self._plan is not None` (`_compute_outputs`), só é setada
+    dentro de um `status=="ok"` DE VERDADE (`_apply_result`), nunca alcançado neste cenário.
+    `last_solve_ms` prova o comportamento físico independente do rótulo do enum — mesmo com o
+    defeito acima já corrigido, este é o sinal mais direto do orçamento estourado."""
     flow_id = criar_flow_mpc(
         "f4-06", ts_seconds=_TS_FLOW_PESADO, grafo=_grafo_overrun(admin, ambiente_mpc)
     )

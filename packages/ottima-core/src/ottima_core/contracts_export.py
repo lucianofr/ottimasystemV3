@@ -5,10 +5,22 @@ Débito 2+4 do plano F4a: três espelhos TS mantidos à mão (`graph.ts`, `nodes
 única; `frontend/scripts/generate-contracts.mjs` consome a saída daqui e gera
 `frontend/src/lib/contracts.gen.ts`.
 
-`port_contracts` descreve, por tipo de bloco, ou uma lista fixa de portas (nome, direção,
-tipo) ou uma regra dinâmica (`dynamic: true` + `source` + `rules`). Script e TFS existem em
-`flowgraph.py` hoje; MPC ainda não (plano F4a tarefa 1.2 adiciona `validate_graph` para
-`mpc`), então a regra dele é declarada aqui a partir do spec F4 §2.2, não derivada de código.
+`PORT_CONTRACTS` descreve, por tipo de bloco, ou uma lista fixa de portas (nome, direção,
+tipo) ou uma regra dinâmica (`dynamic: true` + `source` + `rules`). `opc_read`/`opc_write`/
+`tfs` são fixos; `script` é dinâmico de verdade (IN1..INn/OUT1..OUTn por `n_inputs`/
+`n_outputs`, spec F3 §3.3) — o gerador TS materializa esse padrão em `PortaFixa[]` a partir
+de `count_field`/`prefix`/`max`, sem precisar do config de nenhum flow específico.
+
+`mpc` NÃO segue o mesmo padrão: `flowgraph.validate.py` (plano F4a tarefa 1.2, já concluída)
+deriva as portas por INSTÂNCIA — `_input_handles`/`_output_handles` leem
+`config.variables.{cvs,constraints,dvs}` (entrada) e `config.variables.mvs` (saída), e o
+nome de cada porta é o `id` estável que o usuário deu à variável no config daquele flow
+(spec F4 §2.1-5, decisão A-10) — não um `IN{i}` templável. Por isso a entrada `mpc` aqui
+embaixo é só metadado descritivo (a origem da regra, para leitura humana e para a chave do
+`Record` TS existir) — `frontend/src/features/flows/graph.ts::handlesEntrada`/
+`handlesSaida` NUNCA a consultam; resolvem direto do `BlocoNode.config`, como só eles podem
+(ver o comentário lá). `rules`/`source` do `mpc` não alimentam nenhum gerador TS de nome de
+porta, ao contrário de `script`.
 
 `ws_payloads` é o JSON Schema (`model_json_schema()`) dos modelos do barramento que o canvas
 ao vivo consome. `MpcVarState` (spec F4 §5.1) chega aninhado em `MpcState.vars` — não precisa
@@ -65,8 +77,10 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
     "mpc": {
         "dynamic": True,
         "source": (
-            "config.cvs + config.constraints + config.dvs (entrada) / "
-            "config.mvs (saída) — spec F4 §2.2, plano F4a tarefa 1.2"
+            "config.variables.cvs + config.variables.constraints + config.variables.dvs "
+            "(entrada) / config.variables.mvs (saída) — nome de porta = id da variável, "
+            "por instância (spec F4 §2.1-5, decisão A-10; derivado em "
+            "flowgraph.validate._input_handles/_output_handles, plano F4a tarefa 1.2)"
         ),
         "rules": [
             {"direction": "input", "source": "ids de cvs + constraints + dvs", "type": "num"},
