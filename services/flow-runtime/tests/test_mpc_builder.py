@@ -273,3 +273,36 @@ def test_bounds_duros_de_mv_nunca_violados_com_sp_extremo():
     for k in range(built.horizons.np):
         u_k = float(controller.opt_x_num["_u", k, 0, "mv_1"])
         assert -1e-6 <= u_k <= 10.0 + 1e-6
+
+
+# --------------------------------------------------------------------------------------
+# Par puro-ganho (n=0) via coluna MV sem atraso — fix round 1 (revisão)
+# --------------------------------------------------------------------------------------
+
+
+def test_par_puro_ganho_via_mv_sem_atraso_nao_quebra_o_mterm():
+    """SOPDT duplamente degenerado (τ1,τ2 << Ts/10) alimentando um CV por uma coluna MV sem
+    atraso injeta um símbolo `_u` cru na saída da linha (`row_expr`). Essa saída alimenta o
+    `mterm` do do-mpc (via `cv_cost`), cuja assinatura fixa é `[_x, _tvp, _p]` — sem `_u`.
+    Reproduzia `RuntimeError: ... variables [mv_1] are free` em `set_objective` antes do fix.
+    A config passa pela validação semântica (só exige K != 0, tau1 > 0, tau2 >= 0, theta >=
+    0) — não é um caso rejeitado em 1.2."""
+    config = MpcConfig.model_validate(
+        {
+            "name": "puro-ganho",
+            "multiplier": 5,
+            "variables": {
+                "mvs": [_mv("mv_1")],
+                "cvs": [_cv("cv_1")],
+                "constraints": [],
+                "dvs": [],
+            },
+            "models": {"cv_1": {"mv_1": _par(1.0, 0.01, 0.01, 0.0)}},
+        }
+    )
+
+    built = build_mpc(config, ts_flow=1.0)
+
+    assert built.mpc.model.n_x == 1  # só o u_prev da MV — o par n=0 não cria estado dinâmico
+
+    _solve(built, sp={"cv_1": 10.0})

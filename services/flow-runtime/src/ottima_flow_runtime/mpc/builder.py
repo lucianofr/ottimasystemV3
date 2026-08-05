@@ -109,10 +109,13 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
 
     rhs: dict[str, ca.SX] = {f"uprev_{mv.id}": mv_symbol[mv.id] for mv in mvs}
     output_expr_name: dict[str, str] = {}
+    row_mterm_unsafe: dict[str, bool] = {}
 
     for row_id in row_ids:
         kind = row_kind[row_id]
         row_expr = 0
+        row_expr_terminal = 0
+        has_unsafe_term = False
         for col_id, pair_cfg in config.models.get(row_id, {}).items():
             if not pair_cfg.enabled:
                 continue
@@ -124,6 +127,7 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
             else:
                 pair = discretize_iopdt(params["Ki"], params["theta"], ts_mpc)
 
+            is_mv_column = col_id in mv_symbol
             pair_input = col_symbol[col_id]
             for i in range(1, pair.delay + 1):
                 name = f"delay_{row_id}_{col_id}_{i}"
@@ -138,7 +142,17 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
                 # nunca degenera, `discretize_iopdt` sempre devolve 1 estado). `PairSS` sem
                 # termo direto não representa esse ganho puro (`y=c@x=0` sempre); o ganho
                 # entra aqui como alimentação direta na saída agregada da linha.
-                row_expr += params["K"] * pair_input
+                gain_term = params["K"] * pair_input
+                row_expr += gain_term
+                # Alimentação direta de coluna MV sem atraso injeta um símbolo `_u` cru na
+                # saída da linha — seguro em `lterm`/`nl_cons` (aceitam `_u`), mas NÃO em
+                # `mterm` (assinatura fixa do do-mpc = `[_x, _tvp, _p]`, sem `_u`; fix round 1
+                # da revisão — `RuntimeError: variables [...] are free`). Coluna DV (`_tvp`)
+                # ou atraso>0 (vira estado `_x`) continuam seguros para o mterm.
+                if is_mv_column and pair.delay == 0:
+                    has_unsafe_term = True
+                else:
+                    row_expr_terminal += gain_term
                 continue
 
             names = [f"x_{row_id}_{col_id}_{i}" for i in range(n)]
@@ -147,10 +161,15 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
             x_next = pair.a @ x_vec + pair.b * pair_input
             for i, name in enumerate(names):
                 rhs[name] = x_next[i]
-            row_expr += (pair.c @ x_vec)[0]
+            y_contribution = (pair.c @ x_vec)[0]
+            row_expr += y_contribution
+            row_expr_terminal += y_contribution
 
         output_expr_name[row_id] = f"y_{row_id}"
         model.set_expression(f"y_{row_id}", row_expr + bias_symbol[row_id])
+        row_mterm_unsafe[row_id] = has_unsafe_term
+        if has_unsafe_term:
+            model.set_expression(f"y_{row_id}_mterm", row_expr_terminal + bias_symbol[row_id])
 
     for name, expr in rhs.items():
         model.set_rhs(name, expr)
@@ -174,10 +193,18 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
     max_w_cv = max((cv.weight for cv in cvs), default=1.0)
 
     cv_cost = ca.DM(0)
+    cv_cost_terminal = ca.DM(0)
     for cv in cvs:
         y = model.aux[f"y_{cv.id}"]
         sp = model.tvp[f"sp_{cv.id}"]
         cv_cost = cv_cost + cv.weight * ((y - sp) / spans[cv.id]) ** 2
+
+        # mterm exclui `_u` (assinatura fixa do do-mpc) — para as linhas com alimentação
+        # direta de MV sem atraso (`row_mterm_unsafe`), o mterm usa a variante sem esse termo
+        # (registrada como `y_{row_id}_mterm`); nas demais, reaproveita a mesma `y` do lterm
+        # (nenhuma mudança de comportamento no caso comum).
+        y_terminal = model.aux[f"y_{cv.id}_mterm"] if row_mterm_unsafe[cv.id] else y
+        cv_cost_terminal = cv_cost_terminal + cv.weight * ((y_terminal - sp) / spans[cv.id]) ** 2
 
     slack_cost = ca.DM(0)
     for co in constraints:
@@ -191,7 +218,7 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
         uprev = model.x[f"uprev_{mv.id}"]
         du_cost = du_cost + R_DELTA_U * ((u - uprev) / spans[mv.id]) ** 2
 
-    mpc.set_objective(mterm=cv_cost, lterm=cv_cost + slack_cost + du_cost)
+    mpc.set_objective(mterm=cv_cost_terminal, lterm=cv_cost + slack_cost + du_cost)
 
     for mv in mvs:
         mpc.bounds["lower", "_u", mv.id] = mv.limits.min
