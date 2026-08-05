@@ -19,7 +19,7 @@ from ottima_core.bus import (
     FlowCommand,
     publish_event,
 )
-from ottima_core.flowgraph import GraphParseError, TagRef, parse_graph, validate_graph
+from ottima_core.flowgraph import GraphParseError, parse_graph, validate_graph
 from ottima_core.models import Flow, Project, User
 from ottima_core.schemas.flows import (
     MAX_BIGINT,
