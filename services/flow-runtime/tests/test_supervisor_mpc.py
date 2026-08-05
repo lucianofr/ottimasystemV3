@@ -309,6 +309,61 @@ async def test_local_para_remoto_sem_confirmacao_em_2xtsmpc_reverte_e_arm_failed
 
 
 # --------------------------------------------------------------------------------------
+# 2b: reversão automática não pisa num rearme concorrente (fix round 1, review Main)
+# --------------------------------------------------------------------------------------
+
+
+async def test_auto_revert_nao_sobrescreve_rearme_concorrente_na_janela(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    """`_auto_revert` faz `await block.command(...,"local",...)`; se um `mpc_mode` do
+    operador chegar e rearmar o bloco ENQUANTO esse await ainda está em voo, a escrita de
+    `mode_cmd=auto` que viria a seguir não pode pisar no `mode_cmd=target` fresco do rearme.
+    Simula a janela interceptando `block.command`: a PRIMEIRA vez que a reversão automática
+    chama `command(...,"local",...)`, o duplo injeta o rearme concorrente (via o supervisor
+    de verdade, `flow.commands`) ANTES de devolver o controle — determinístico, sem depender
+    de timing de verdade."""
+    scenario = await _scenario(session_factory)
+    events = await collect(CHANNEL_EVENTS)
+    writes = await collect(CHANNEL_OPC_WRITES)
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+    await _deploy_and_warm(harness, collect, scenario)
+
+    runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    block = runtime.blocks["m1"][1]
+    original_command = block.command
+    rearmed = asyncio.Event()
+
+    async def intercepted_command(cmd: str, args: dict, user: str | None) -> None:
+        await original_command(cmd, args, user)
+        if cmd == "mpc_mode" and args.get("value") == "local" and not rearmed.is_set():
+            rearmed.set()
+            block.command = original_command  # evita recursão no rearme injetado abaixo
+            await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
+            await await_until(lambda: block.local_remote == "remote")
+
+    block.command = intercepted_command
+
+    # nunca publica mode_read == target: garante que o watchdog do armar ORIGINAL dispare
+    # `_auto_revert` por `no_confirm` — é essa reversão que a interceptação acima atrasa.
+    await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
+    await await_until(lambda: rearmed.is_set(), timeout_s=AWAIT_TIMEOUT_S)
+
+    # Sem o fix, um 3o write (auto, obsoleto) sairia aqui. Com o fix, só os dois `target`
+    # (armar original + rearme concorrente) — a reversão detecta o rearme e desiste.
+    await await_until(lambda: len(writes_of(writes, tag_id=scenario["mode_cmd_tag_id"])) >= 2)
+    await asyncio.sleep(QUIET_WINDOW_S)
+    mode_cmd = writes_of(writes, tag_id=scenario["mode_cmd_tag_id"])
+    assert [w.value for w in mode_cmd] == [float(_MODE_TARGET), float(_MODE_TARGET)]
+    assert block.local_remote == "remote", (
+        "o rearme concorrente tem de vencer, não a reversão obsoleta"
+    )
+    # A reversão obsoleta desiste ANTES de publicar qualquer evento (não só a escrita):
+    # nenhum `mpc_arm_failed` além do que o fluxo normal já não teria motivo pra emitir.
+    assert events.events(KIND_MPC_ARM_FAILED) == []
+
+
+# --------------------------------------------------------------------------------------
 # 3: MAN->AUTO — sucesso (host pronto + entrada quente e válida)
 # --------------------------------------------------------------------------------------
 

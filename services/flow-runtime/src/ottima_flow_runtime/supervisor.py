@@ -478,7 +478,14 @@ class Supervisor:
         `asyncio.current_task()` confere que ninguém já cancelou/substituiu esta task
         (comando concorrente do usuário sempre cancela ANTES de mexer no bloco de novo, spec
         `_transition_local_remote`), então não precisa do lock do supervisor: por construção,
-        chegar aqui significa que esta é ainda a task ativa para este bloco."""
+        chegar aqui significa que esta é ainda a task ativa para este bloco.
+
+        Achado da revisão 1: esse guard só cobre REENTRÂNCIA da mesma task, não a JANELA
+        entre `block.command(...)` (que já solta o watchdog do dict, síncrono) e o resto
+        deste corpo — um `mpc_mode` novo pode chegar, ver o bloco em LOCAL, e rearmar
+        (`mode_cmd=target`) enquanto este `await` de I/O ainda está em voo. Sem a
+        reconferência abaixo, a escrita de `mode_cmd=auto` que vem a seguir sobrescreveria
+        esse rearme fresco com um comando obsoleto — daí o segundo `if`."""
         current = asyncio.current_task()
         if runtime.mpc_watchdogs.get(block_id) is not current:
             return
@@ -486,12 +493,41 @@ class Supervisor:
         if block.local_remote != "remote":
             return
         await block.command("mpc_mode", {"axis": "local_remote", "value": "local"}, None)
-        await write_mode_cmd(
-            runtime.mpc_write_opc,
-            block.pid_bindings,
-            "auto",
-            source=mpc_block_origin(flow_id, block_id),
-        )
+        if block.local_remote != "local":
+            # Rearmado por um comando concorrente enquanto o `await` acima estava em voo:
+            # esse comando novo já escreveu seu próprio `mode_cmd`/iniciou seu próprio
+            # watchdog — nada a fazer aqui, e sobretudo nada a SOBRESCREVER.
+            return
+        try:
+            await write_mode_cmd(
+                runtime.mpc_write_opc,
+                block.pid_bindings,
+                "auto",
+                source=mpc_block_origin(flow_id, block_id),
+            )
+        except Exception:
+            # O bloco já está LOCAL (o `command()` acima teve sucesso), mas o PID real pode
+            # continuar armado em `target` no PLC — isso é dessincronismo silencioso se
+            # ninguém souber. Reporta explicitamente em vez de deixar o `mpc_arm_failed`/
+            # `mpc_shed` normal sair como se a devolução tivesse funcionado.
+            logger.exception(
+                "MPC '%s': falha ao escrever mode_cmd=auto na reversão automática (%s) — "
+                "bloco já está LOCAL mas o PID pode continuar armado em target no PLC",
+                block_id,
+                kind,
+            )
+            await publish_event(
+                self._redis,
+                severity="alarm",
+                origin=mpc_block_origin(flow_id, block_id),
+                message=(
+                    f"MPC '{block_id}': dessincronismo — bloco voltou a LOCAL mas a escrita "
+                    "de mode_cmd=auto falhou; confira o PID manualmente"
+                ),
+                kind=kind,
+                payload={**payload, "write_failed": True},
+            )
+            return
         await publish_event(
             self._redis,
             severity=severity,
