@@ -51,7 +51,7 @@ from .events import (
     publish_flow_stopped,
     publish_rejected,
 )
-from .scheduler import FlowDefinition, FlowTask
+from .scheduler import FlowTask
 from .script_pool import ScriptPool
 from .snapshot import ValueSnapshot
 from .state import RuntimeState
