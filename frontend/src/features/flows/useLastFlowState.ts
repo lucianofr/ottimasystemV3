@@ -33,6 +33,7 @@ const MOTIVOS: Record<string, string> = {
   comm_failure: "falha de comunicação",
   flow_deleted: "flow excluído",
   shutdown: "parado no desligamento do runtime",
+  unhandled_exception: "exceção não tratada no laço de varredura",
 };
 
 export type EstadoPublicado = "rodando" | "parado" | "falha";
