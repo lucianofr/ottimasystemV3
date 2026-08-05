@@ -364,7 +364,7 @@ test("validarConfigMpc: Np=61 é aviso não-bloqueante (>60, referência de carg
   expect(avisos.some((aviso) => aviso.startsWith("Np = 61"))).toBe(true);
 });
 
-test("validarConfigMpc: dimensão de estados > 120 é aviso, pulado quando a matriz não está íntegra (RF-608)", () => {
+test("validarConfigMpc: dimensão de estados > 120 é aviso, pulado quando um par habilitado tem params inválidos (RF-608, espelha matrix_intact)", () => {
   const variaveis: VariaveisMpc = {
     mvs: [mv("mv_1")],
     cvs: [cv("cv_1", { tss: 100 })],
@@ -376,10 +376,96 @@ test("validarConfigMpc: dimensão de estados > 120 é aviso, pulado quando a mat
   expect(intacta.erros).toEqual([]);
   expect(intacta.avisos.some((aviso) => aviso.includes("Dimensão de estados agregada"))).toBe(true);
 
-  const variaveisQuebradas: VariaveisMpc = { ...variaveis, mvs: [mv("mv_1"), mv("mv_2")] };
-  const quebrada = validarConfigMpc(variaveisQuebradas, modelosIntactos, 1, 1);
-  expect(quebrada.erros.some((erro) => erro.includes("mv_2"))).toBe(true);
+  // K=0 é inválido para selfreg (spec §2.2-3) — é isso, e só isso, que o servidor
+  // (`_valid_pair_params`) usa para derrubar `matrix_intact`.
+  const modelosQuebrados = {
+    cv_1: { mv_1: { enabled: true, params: { K: 0, tau1: 10, tau2: 0, theta: 200 } } },
+  };
+  const quebrada = validarConfigMpc(variaveis, modelosQuebrados, 1, 1);
+  expect(quebrada.erros.some((erro) => erro.includes("parâmetros inválidos"))).toBe(true);
   expect(quebrada.avisos.some((aviso) => aviso.includes("Dimensão de estados agregada"))).toBe(
     false,
   );
+});
+
+test("validarConfigMpc: MV sem nenhum par habilitado é erro, mas não suprime o aviso de dimensão (matrix_intact do servidor não olha isso)", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [mv("mv_1"), mv("mv_2")],
+    cvs: [cv("cv_1", { tss: 100 })],
+    constraints: [],
+    dvs: [],
+  };
+  // mv_2 não tem nenhum par na matriz — órfã, mas o par cv_1/mv_1 é válido e íntegro.
+  const modelos = { cv_1: { mv_1: parSelfreg({ theta: 200 }) } };
+  const { erros, avisos } = validarConfigMpc(variaveis, modelos, 1, 1);
+  expect(erros.some((erro) => erro.includes("mv_2"))).toBe(true);
+  expect(avisos.some((aviso) => aviso.includes("Dimensão de estados agregada"))).toBe(true);
+});
+
+// --------------------------------------------------------------------------------------
+// Fix round 1 (revisão 4.3) — Critical: perda silenciosa de dados ao trocar de aba antes de
+// Aplicar. `TabModels`/`TabVariables` têm campos não-controlados (só `name=`/`defaultValue=`,
+// lidos apenas do `FormData` do formulário no submit); como cada aba é desmontada ao trocar
+// (`{aba === "x" && (<TabX/>)}`), digitar em uma aba e ir para outra sem passar pelo Aplicar
+// apagava a edição do DOM antes de qualquer leitura. Correção em `MpcModal.tsx`: a troca de
+// aba (`mudarAba`) agora lê o `FormData` da aba que está SENDO deixada e o reconstrói no
+// estado (`variaveisDoFormulario`/`modelosDoFormulario` — as mesmas funções do Aplicar) antes
+// de desmontar. Os dois testes abaixo provam, no nível de lógica pura (sem infra de
+// component-rendering), que a reconstrução preserva o valor já commitado no estado quando o
+// `FormData` da aba atualmente montada não tem mais aquele campo — é essa propriedade que
+// torna `mudarAba` suficiente para fechar a classe inteira do bug.
+// --------------------------------------------------------------------------------------
+
+test("cenário B-F4-03 passos 9-11: params digitados na aba Modelos sobrevivem à troca para o Resumo antes do Aplicar", () => {
+  const linha = "cv_1";
+  const coluna = "mv_1";
+
+  // Passo 9 — aba Modelos montada: usuário habilita o par e digita K/tau1/tau2/theta.
+  const camposModelos = formulario({
+    [nomeCampoModelo(linha, coluna, "K")]: "2,5",
+    [nomeCampoModelo(linha, coluna, "tau1")]: "120",
+    [nomeCampoModelo(linha, coluna, "tau2")]: "30",
+    [nomeCampoModelo(linha, coluna, "theta")]: "15",
+  });
+  const parHabilitado: ParModeloMpc = { enabled: true, params: {} };
+  const sincronizadoAoTrocarDeAba = parModeloDoFormulario(
+    parHabilitado,
+    linha,
+    coluna,
+    "selfreg",
+    camposModelos,
+  );
+  expect(sincronizadoAoTrocarDeAba.params).toEqual({ K: 2.5, tau1: 120, tau2: 30, theta: 15 });
+
+  // Passos 10-11 — aba Resumo montada (nenhum campo `mdl_cv_1_mv_1_*` no FormData): o Aplicar
+  // reconstrói de novo, agora a partir do estado já sincronizado no passo anterior. Sem o fix
+  // (sem a sincronização na troca de aba), `atual` aqui seria `parHabilitado` (`params: {}`)
+  // e o resultado cairia em `paramsPadraoLinha("selfreg")` — os defaults, não o digitado.
+  const camposResumo = formulario({});
+  const resultadoNoAplicar = parModeloDoFormulario(
+    sincronizadoAoTrocarDeAba,
+    linha,
+    coluna,
+    "selfreg",
+    camposResumo,
+  );
+  expect(resultadoNoAplicar.params).toEqual({ K: 2.5, tau1: 120, tau2: 30, theta: 15 });
+  expect(resultadoNoAplicar.params).not.toEqual(paramsPadraoLinha("selfreg"));
+});
+
+test("mesmo mecanismo em TabVariables: limites/Δu digitados numa MV sobrevivem à troca de aba antes do Aplicar", () => {
+  const mvDigitada: VariavelMv = {
+    id: "mv_1",
+    name: "Vazão de refluxo",
+    eu: "m3/h",
+    limits: { min: 5, max: 95 },
+    du_max: 3.5,
+    initial_value: 10,
+    pid: null,
+  };
+  // Aba Resumo montada (nenhum campo `var_mv_1_*` no FormData) — a reconstrução deve
+  // preservar o valor já sincronizado no estado, não cair nos campos padrão.
+  const camposResumo = formulario({});
+  const resultado = variavelMvDoFormulario(mvDigitada, camposResumo, false);
+  expect(resultado).toEqual(mvDigitada);
 });

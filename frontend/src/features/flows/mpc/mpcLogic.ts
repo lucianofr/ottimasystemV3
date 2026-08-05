@@ -318,6 +318,12 @@ export function validarConfigMpc(
   const dvComPar: Record<string, boolean> = Object.fromEntries(
     variaveis.dvs.map((dv) => [dv.id, false]),
   );
+  // `matrizIntegra` espelha exatamente `matrix_intact` do servidor (`_check_mpc_matrix`):
+  // só cai por par HABILITADO com params inválidos/incompletos — órfão de linha/coluna é
+  // estruturalmente impossível aqui (linhas/colunas vêm sempre de `variaveis`, nunca das
+  // chaves de `modelos`). "Linha/MV/DV sem nenhum par" são erros bloqueantes por si só, mas
+  // NÃO tornam a matriz "não íntegra" no servidor — ele ainda soma a dimensão de estados dos
+  // pares que existem e avisa RF-608 mesmo com uma MV órfã ao lado.
   let matrizIntegra = true;
   for (const linha of linhas) {
     let linhaComParMv = false;
@@ -340,18 +346,15 @@ export function validarConfigMpc(
       }
     }
     if (!linhaComParMv) {
-      matrizIntegra = false;
       erros.push(`'${rotuloVariavel(linha)}' não tem nenhum par habilitado cuja coluna é uma MV.`);
     }
   }
   for (const mv of variaveis.mvs) {
     if (mvComPar[mv.id]) continue;
-    matrizIntegra = false;
     erros.push(`A MV '${rotuloVariavel(mv)}' não tem nenhum par habilitado na matriz.`);
   }
   for (const dv of variaveis.dvs) {
     if (dvComPar[dv.id]) continue;
-    matrizIntegra = false;
     erros.push(`A DV '${rotuloVariavel(dv)}' não tem nenhum par habilitado na matriz.`);
   }
 

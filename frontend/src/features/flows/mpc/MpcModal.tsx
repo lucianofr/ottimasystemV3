@@ -98,6 +98,7 @@ export function MpcModal({
   onFechar,
 }: Props) {
   const dialogo = useRef<HTMLDialogElement>(null);
+  const formulario = useRef<HTMLFormElement>(null);
   const [aba, setAba] = useState<SlugAba>("geral");
   const [multiplier, setMultiplier] = useState(no.data.multiplier);
   const [variaveis, setVariaveis] = useState<VariaveisMpc>(no.data.variables);
@@ -144,6 +145,26 @@ export function MpcModal({
     dialogo.current?.close();
   }
 
+  // Fix round 1 (revisão 4.3, Critical): cada aba é DESMONTADA ao trocar (`{aba === "x" &&
+  // (<TabX/>)}`), e a maioria dos campos folha (nome/EU/limites/Δu/params da matriz/pid) é
+  // não-controlada — só existe no DOM, lida apenas no Aplicar (mesmo padrão do TFS). Sem
+  // isso, digitar numa aba e trocar para outra sem passar pelo Aplicar apagava a edição antes
+  // de qualquer leitura (cenário B-F4-03 passos 9-11: params digitados em Modelos, trocar
+  // para Resumo, Aplicar via Resumo devolvia os defaults do `kind`, não o digitado).
+  // `mudarAba` lê o `FormData` da aba que está sendo deixada e reconstrói `variaveis`/
+  // `modelos` com as mesmas funções do Aplicar antes de desmontar — a aba nova sempre parte
+  // de um estado atualizado, e o Aplicar (de qualquer aba) já opera sobre esse estado.
+  function mudarAba(novaAba: SlugAba): void {
+    const elemento = formulario.current;
+    if (elemento !== null) {
+      const campos = new FormData(elemento);
+      const novasVariaveis = variaveisDoFormulario(variaveis, campos);
+      setVariaveis(novasVariaveis);
+      setModelos(modelosDoFormulario(novasVariaveis, modelos, campos));
+    }
+    setAba(novaAba);
+  }
+
   return (
     <dialog
       ref={dialogo}
@@ -151,7 +172,7 @@ export function MpcModal({
       data-testid="mpc-modal"
       className="modal-bloco max-h-[90vh] w-[min(960px,96vw)] overflow-auto rounded-panel border border-hairline bg-panel p-0 text-fg"
     >
-      <form onSubmit={aplicar}>
+      <form ref={formulario} onSubmit={aplicar}>
         <header className="flex items-center justify-between border-b border-hairline bg-well px-4 py-3">
           <h2 className="plaqueta text-sm text-fg">Configurar MPC</h2>
           <span className="process-value text-xs text-fg-muted">{no.id}</span>
@@ -208,7 +229,7 @@ export function MpcModal({
                 aria-selected={aba === item.slug}
                 data-testid={`mpc-tab-${item.slug}`}
                 onClick={() => {
-                  setAba(item.slug);
+                  mudarAba(item.slug);
                 }}
                 className={`plaqueta rounded-panel border px-3 py-1.5 text-[11px] transition-colors ${
                   aba === item.slug

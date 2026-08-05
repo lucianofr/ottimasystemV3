@@ -5,7 +5,7 @@ import { Label } from "../../../components/ui/label";
 import { numeroDoCampo } from "../config/campos";
 import type { ParModeloMpc, VariaveisMpc } from "../graph";
 import { formatarNumero } from "../useFlowStatus";
-import { derivarHorizontes, dimensaoEstado, nomeCampoVar } from "./mpcLogic";
+import { derivarHorizontes, nomeCampoVar, validarConfigMpc } from "./mpcLogic";
 
 interface LinhaTss {
   id: string;
@@ -126,9 +126,13 @@ export function TabHorizons({
     tsFlowSegundos,
     linhas.map((linha) => linha.tss),
   );
-  const np60 = horizontes !== null && horizontes.np > 60;
-  const dimensao = horizontes === null ? null : dimensaoEstado(variaveis, modelos, horizontes.tsMpc);
-  const dim120 = dimensao !== null && dimensao > 120;
+  // Avisos ao vivo (Np>60, dimensão>120): fonte única em `validarConfigMpc`, a mesma que a
+  // aba Resumo usa — evita o texto/gate divergir entre as duas abas para o mesmo estado
+  // (fix round 1 da revisão 4.3, Important 3). `dimensaoEstado` isolado ficaria sem o gate de
+  // `matrizIntegra` (só `validarConfigMpc` sabe se algum par habilitado tem params inválidos).
+  const { avisos } = validarConfigMpc(variaveis, modelos, multiplier, tsFlowSegundos);
+  const avisoNp60 = avisos.find((aviso) => aviso.startsWith("Np = "));
+  const avisoDimensao = avisos.find((aviso) => aviso.includes("Dimensão de estados agregada"));
 
   return (
     <div data-testid="mpc-tab-horizontes" className="space-y-4">
@@ -174,18 +178,16 @@ export function TabHorizons({
         Np = ceil(max(TSS)/Ts_mpc); Nc = max(2, ceil(Np/4)) — nunca editados diretamente (RF-603).
       </p>
 
-      {np60 && (
+      {avisoNp60 !== undefined && (
         <p data-testid="mpc-aviso-np60" className="text-xs text-warn">
           <span className="plaqueta mr-2 text-[10px]">Aviso</span>
-          Np = {horizontes?.np} acima de 60 — referência de carga do solver (RNF-02): o solve
-          pode não caber no orçamento de execução.
+          {avisoNp60}
         </p>
       )}
-      {dim120 && (
+      {avisoDimensao !== undefined && (
         <p data-testid="mpc-aviso-dimensao" className="text-xs text-warn">
           <span className="plaqueta mr-2 text-[10px]">Aviso</span>
-          Dimensão de estados agregada ({dimensao}) acima de 120 — reduza TSS/tempo morto ou o
-          número de pares habilitados na matriz (RF-608).
+          {avisoDimensao}
         </p>
       )}
     </div>
