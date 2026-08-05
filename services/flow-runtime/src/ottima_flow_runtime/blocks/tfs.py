@@ -103,6 +103,10 @@ class _Element:
         self._kernel: _Sopdt | _Iopdt = (
             _Sopdt(params, ts) if isinstance(params, SopdtParams) else _Iopdt(params, ts)
         )
+        # Arredondamento banker's (half-even) do round() do Python: a mesma convenção da
+        # validação do TFS (ottima_core.flowgraph.validate) e do futuro modelo interno do
+        # MPC (F4b) — o mesmo theta precisa virar o mesmo número de amostras nos dois
+        # códigos de propósito (spec F4 §3.1; fecha débito m2 da spec F4 §8).
         self._samples = round(params.theta / ts)
         self._queue: deque[float] = deque([0.0] * self._samples)
 

@@ -146,6 +146,11 @@ def _check_tfs_delay(nodes: list[FlowNode], ts_seconds: float, errors: list[str]
             for k, element in enumerate(row):
                 if not element.enabled:
                     continue
+                # Arredondamento banker's (half-even) do round() do Python: a mesma
+                # convenção do bloco TFS em runtime (ottima_flow_runtime.blocks.tfs) e do
+                # futuro modelo interno do MPC (F4b) — o mesmo theta precisa virar o mesmo
+                # número de amostras nos dois códigos de propósito (spec F4 §3.1; fecha
+                # débito m2 da spec F4 §8).
                 samples = round(element.params.theta / ts_seconds)
                 if samples > MAX_DELAY_SAMPLES:
                     errors.append(
