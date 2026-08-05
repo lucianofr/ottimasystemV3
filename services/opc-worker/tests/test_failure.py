@@ -298,7 +298,6 @@ async def test_fail_concorrente_produz_um_alarme_e_uma_rajada(redis_client: Redi
         )
         await await_until(lambda: len(bad_values(trail)) == len(READ_TAG_IDS))
         await await_until(lambda: len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1)
-
         await asyncio.sleep(QUIET_WINDOW_S / 3)
 
         assert len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1
