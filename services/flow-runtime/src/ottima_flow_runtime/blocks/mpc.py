@@ -193,7 +193,10 @@ class MpcBlock(Block):
         self._sp: dict[str, float] = dict.fromkeys(self._cv_ids, 0.0)
         self._last_measured: dict[str, float] = {}
         self._last_prediction = _EMPTY_PREDICTION
-        self._solver_status: _SolverStatus = "ok"
+        # Honesto por padrão (achado da tarefa 4.2, E2E F4b): só vira "ok" via
+        # `_apply_result` sob evidência real (`SolveResult.status == "ok"` aplicado) —
+        # nunca antes do primeiro solve genuíno concluído.
+        self._solver_status: _SolverStatus | Literal["idle"] = "idle"
         self._cost = 0.0
         self._overruns = 0
         self._reinit_pending = False
@@ -497,6 +500,12 @@ class MpcBlock(Block):
             solver: _SolverStatus | Literal["building", "idle"] = "idle"
         elif not self._host.ready:
             solver = "building"
+        elif self._solver_status == "ok" and self._plan is None:
+            # Defesa em profundidade (achado da tarefa 4.2): "ok" sem `_plan` aplicado
+            # seria o rótulo sem evidência — mantém o valor honesto anterior (o padrão
+            # "idle" do `reset()`, ou o último status real já aplicado) até o primeiro
+            # `SolveResult` genuíno.
+            solver = "idle"
         else:
             solver = self._solver_status
 

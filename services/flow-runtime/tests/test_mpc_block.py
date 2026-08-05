@@ -265,6 +265,27 @@ async def test_remoto_auto_sem_plano_ainda_segura_o_valor_vigente() -> None:
 
 
 # --------------------------------------------------------------------------------------
+# 1b. status.solver honesto: nunca "ok" antes do primeiro resultado real (spec §5.2)
+# --------------------------------------------------------------------------------------
+
+
+async def test_solver_status_nao_e_ok_antes_do_primeiro_resultado_real() -> None:
+    """Entrar em AUTO com host pronto e zero solves concluídos: `status.solver` publicado
+    não pode ser "ok" — não há `SolveResult` genuíno aplicado ainda (achado da tarefa 4.2,
+    E2E F4b). Só um resultado "ok" real aplicado muda o rótulo."""
+    block, host, _, publish, _, _ = _block()
+    await _entra_remoto_auto(block)  # host pronto, zero solves — a janela do defeito
+    assert publish.states[-1].status.solver == "idle"
+
+    await block.step(entradas(20.0))  # fronteira: dispara o solve, ainda sem resultado
+    assert publish.states[-1].status.solver == "idle"
+
+    host.pending = _resultado_ok({"mv_pid": 33.0, "mv_direto": -4.0})
+    await block.step(entradas(20.0))  # fronteira seguinte: consome o resultado real
+    assert publish.states[-1].status.solver == "ok"
+
+
+# --------------------------------------------------------------------------------------
 # 2. Aplicar-na-fronteira: resultado NUNCA muda porta no meio da varredura (RF-401)
 # --------------------------------------------------------------------------------------
 
