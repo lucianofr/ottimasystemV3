@@ -55,7 +55,7 @@ async def test_pattern_listener_entrega_mensagem_do_padrao(redis_client: Redis) 
 
 
 async def test_start_so_retorna_apos_confirmacao_sem_corrida(redis_client: Redis) -> None:
-    """Publicar logo depois do `start()` não pode perder a mensagem: a inscrição já foi confirmada."""
+    """Publicar logo após `start()` não pode perder mensagem: a inscrição já foi confirmada."""
     received: list[str] = []
     listener = ChannelListener(redis_client, CHANNEL, received.append, name="test-channel")
     await listener.start()
