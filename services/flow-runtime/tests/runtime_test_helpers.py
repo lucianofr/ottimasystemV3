@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from multiprocessing.connection import Connection
 from typing import Any
 
 from redis.asyncio import Redis
@@ -32,6 +33,7 @@ from ottima_core.bus import (
 )
 from ottima_core.models import Flow, OpcConnection, Project, Tag
 from ottima_flow_runtime.events import ChannelListener
+from ottima_flow_runtime.mpc.worker import SolveResult
 from ottima_flow_runtime.script_pool import ScriptResult
 from ottima_flow_runtime.snapshot import ValueSnapshot
 from ottima_flow_runtime.state import RuntimeState
@@ -415,3 +417,70 @@ def port_value(status: FlowStatus, block_id: str, port: str) -> float | bool | N
 def counters(collector: Collector, block_id: str = "s1") -> list[float | bool | None]:
     """Sequência de OUT1 do bloco Script nas varreduras: o contador do `state` do script."""
     return [port_value(status, block_id, "OUT1") for status in collector.scans()]
+
+
+# --------------------------------------------------------------------------------------
+# Workers falsos de `mpc.host` (test_mpc_host.py) — nível de MÓDULO PROPRIAMENTE
+# IMPORTÁVEL: `spawn` precisa reimportá-los por nome qualificado num interpretador novo, e
+# só um módulo real neste diretório inserido em `sys.path` (ver `conftest.py`) sobrevive a
+# isso — um módulo de teste sob `--import-mode=importlib` não tem um nome pontilhado
+# resolvível de fora do pytest (mesma razão de `worker_main` viver em `ottima_flow_runtime`
+# e não dentro de `test_mpc_worker.py`).
+# --------------------------------------------------------------------------------------
+
+
+def mpc_host_ok_result(*, detail: str = "") -> SolveResult:
+    return SolveResult(
+        u_plan={},
+        prediction_t=[],
+        prediction_cv=[],
+        prediction_mv=[],
+        cost=0.0,
+        status="ok",
+        wall_ms=1.0,
+        detail=detail,
+    )
+
+
+def mpc_host_echo_worker(conn: Connection, config_json: str, ts_flow: float) -> None:
+    """Fica pronto na hora e responde `status=ok` a todo pedido — usado nos testes que só
+    observam o ciclo de vida do processo, não o conteúdo do resultado."""
+    conn.send(("ready", 1))
+    try:
+        while True:
+            request = conn.recv()
+            if request is None:
+                return
+            conn.send(mpc_host_ok_result())
+    except (EOFError, OSError):
+        return
+
+
+def mpc_host_reinit_capturing_worker(conn: Connection, config_json: str, ts_flow: float) -> None:
+    """Ecoa `request.reinit` no campo `detail` da resposta — prova o que o host realmente
+    mandou pelo pipe, sem expor estado interno do host ao teste."""
+    conn.send(("ready", 1))
+    try:
+        while True:
+            request = conn.recv()
+            if request is None:
+                return
+            conn.send(mpc_host_ok_result(detail=str(request.reinit)))
+    except (EOFError, OSError):
+        return
+
+
+def mpc_host_sleeper_worker(conn: Connection, config_json: str, ts_flow: float) -> None:
+    """Fica pronto na hora, mas nunca responde a um pedido — prova o kill no deadline de
+    forma determinística (sem depender de timing do solver real)."""
+    import time
+
+    conn.send(("ready", 1))
+    try:
+        while True:
+            request = conn.recv()
+            if request is None:
+                return
+            time.sleep(10.0)  # bem além de qualquer deadline usado na suíte de MpcHost
+    except (EOFError, OSError):
+        return
