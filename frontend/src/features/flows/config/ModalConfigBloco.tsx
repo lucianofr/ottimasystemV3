@@ -185,6 +185,11 @@ export function ModalConfigBloco({
           execOrder,
         );
         break;
+      case "mpc":
+        // Modal dedicado do MPC (7 abas) é a tarefa 4.2; até lá, o duplo-clique num nó
+        // MPC cai aqui e só o rótulo/ordem (campos comuns a todo bloco) são editáveis.
+        onAplicar({ ...no, data: { ...no.data, label } }, execOrder);
+        break;
     }
     // `onClose` (linha do <dialog>) chama `onFechar`; fechar via `close()` explícito em vez
     // de chamar `onFechar()` direto evita que o desmonte (estado -> null) derrube o <dialog>
