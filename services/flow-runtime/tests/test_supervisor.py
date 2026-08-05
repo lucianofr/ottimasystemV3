@@ -28,10 +28,9 @@ from runtime_test_helpers import (
     create_project,
     create_tag,
     delete_flow,
-    edge,
     graph,
+    mpc_graph_valido,
     node,
-    read_node,
     read_only_graph,
     save_graph,
     script_node,
@@ -213,56 +212,6 @@ async def test_deploy_de_grafo_invalido_e_rejeitado_sem_task_orfa(
     assert harness.state.flows == {}
 
 
-def _grafo_mpc_valido(tag_id: int) -> dict:
-    """Esqueleto mínimo válido do §2.1 (spec F4): 1 MV direta + 1 CV, matriz cheia.
-
-    A CV entra pela porta obrigatória (decisão A-10) — precisa de 1 leitor OPC dedicado.
-    """
-    mpc = node(
-        "m1",
-        "mpc",
-        2,
-        {
-            "name": "MPC teste",
-            "multiplier": 1,
-            "variables": {
-                "mvs": [
-                    {
-                        "id": "mv_a",
-                        "name": "MV a",
-                        "eu": "m3/h",
-                        "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 5.0,
-                        "initial_value": 0.0,
-                    }
-                ],
-                "cvs": [
-                    {
-                        "id": "cv_a",
-                        "name": "CV a",
-                        "eu": "C",
-                        "kind": "selfreg",
-                        "tss": 30.0,
-                        "weight": 1.0,
-                        "sp_limits": {"min": 80.0, "max": 120.0},
-                    }
-                ],
-                "constraints": [],
-                "dvs": [],
-            },
-            "models": {
-                "cv_a": {
-                    "mv_a": {
-                        "enabled": True,
-                        "params": {"K": 1.2, "tau1": 10.0, "tau2": 2.0, "theta": 15.0},
-                    }
-                }
-            },
-        },
-    )
-    return graph([read_node("r1", 1, tag_id), mpc], [edge("r1", "out", "m1", "cv_a")])
-
-
 async def test_deploy_de_flow_com_mpc_e_rejeitado_pela_ponte_do_f4a(
     harness_factory: Factory, collect: Collect, session_factory: Sessions
 ) -> None:
@@ -272,7 +221,7 @@ async def test_deploy_de_flow_com_mpc_e_rejeitado_pela_ponte_do_f4a(
     project_id = await create_project(session_factory)
     connection_id = await create_connection(session_factory, project_id)
     tag_id = await create_tag(session_factory, connection_id, direction="r")
-    flow_id = await create_flow(session_factory, project_id, graph=_grafo_mpc_valido(tag_id))
+    flow_id = await create_flow(session_factory, project_id, graph=mpc_graph_valido(tag_id))
     events = await collect(CHANNEL_EVENTS)
     harness = await harness_factory()
 

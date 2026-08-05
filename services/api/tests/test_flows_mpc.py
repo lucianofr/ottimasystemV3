@@ -7,8 +7,6 @@ que as rotas existentes (nenhuma nova) devolvem 422 pt-BR string única, avisos 
 canal do PUT (F3) e que o esqueleto normativo §2.1 sobrevive a um round-trip POST/PUT/GET.
 """
 
-INF = float("inf")  # não usado aqui, mantido por paridade de estilo com test_flows.py
-
 
 async def _projeto(client, headers, nome: str) -> int:
     r = await client.post("/api/projects", json={"name": nome}, headers=headers)

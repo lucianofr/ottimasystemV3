@@ -26,6 +26,7 @@ from runtime_test_helpers import (
     create_tag,
     edge,
     graph,
+    mpc_graph_valido,
     port_value,
     publish_tag_value,
     read_node,
@@ -37,6 +38,7 @@ from runtime_test_helpers import (
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ottima_core.bus import CHANNEL_EVENTS, KIND_RELOAD_REJECTED, channel_flow_status
+from ottima_flow_runtime.supervisor import REASON_MPC_NOT_READY
 
 Factory = Callable[..., Awaitable[Harness]]
 Collect = Callable[[str], Awaitable[Collector]]
@@ -316,3 +318,46 @@ async def test_troca_aplica_na_varredura_seguinte_sem_parar_o_flow(
 
     await asyncio.sleep(QUIET_WINDOW_S)
     assert harness.flow_state(flow_id) == "running"
+
+
+# --------------------------------------------------------------------------------------
+# 23: ponte de deploy [tarefa 3.1 do F4a] também vale no hot-swap (§4.1-5)
+# --------------------------------------------------------------------------------------
+
+
+async def test_staged_com_mpc_e_recusado_pela_ponte_do_f4a(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    """PONTE DE DEPLOY [tarefa 3.1 do F4a; REMOVER na tarefa 2.2 do F4b] também vale no
+    hot-swap: trocar o grafo de um flow rodando para incluir um nó `mpc` recusa como
+    `reload_rejected`/`mpc_not_ready`, e a definição vigente (os dois counters) continua
+    varrendo sem reset — mesmo invariante do teste 21 (grafo semanticamente inválido)."""
+    project_id = await create_project(session_factory)
+    flow_id = await create_flow(session_factory, project_id, graph=TWO_COUNTERS)
+    connection_id = await create_connection(session_factory, project_id)
+    tag_id = await create_tag(session_factory, connection_id, direction="r")
+    events = await collect(CHANNEL_EVENTS)
+    status = await collect(channel_flow_status(flow_id))
+    harness = await harness_factory()
+
+    await harness.command("deploy", flow_id)
+    await harness.await_state(flow_id, "running")
+    await await_until(lambda: any((v or 0) >= 2 for v in series(status, "s1")))
+    corte = len(series(status, "s1"))
+    maximo_antes = max(v or 0 for v in series(status, "s1"))
+
+    await save_graph(session_factory, flow_id, mpc_graph_valido(tag_id))
+    await harness.command("reload", flow_id)
+
+    await await_until(lambda: len(events.events(KIND_RELOAD_REJECTED)) == 1)
+    rejeitado = events.events(KIND_RELOAD_REJECTED)[0]
+    assert rejeitado.severity == "warning"
+    assert rejeitado.origin == f"flow:{flow_id}"
+    assert rejeitado.payload["reason"] == REASON_MPC_NOT_READY
+
+    # Hot-swap nunca derruba flow: a definição vigente segue varrendo, sem reset.
+    await await_until(lambda: len(series(status, "s1")) > corte + 1)
+    depois = series(status, "s1")[corte:]
+    assert harness.flow_state(flow_id) == "running"
+    assert 1.0 not in depois
+    assert depois[-1] > maximo_antes

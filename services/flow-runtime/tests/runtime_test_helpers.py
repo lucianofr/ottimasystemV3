@@ -254,6 +254,59 @@ def counter_graph(node_id: str = "s1") -> dict:
     return graph([script_node(node_id, 1)])
 
 
+def mpc_graph_valido(tag_id: int, *, node_id: str = "m1") -> dict:
+    """Esqueleto mínimo válido do §2.1 (spec F4): 1 MV direta + 1 CV, matriz cheia.
+
+    Compartilhado entre `test_supervisor.py` (deploy) e `test_hotswap.py` (reload) — os
+    dois exercícios da ponte de deploy da tarefa 3.1 do F4a (`REMOVER na tarefa 2.2 do
+    F4b`). A CV entra pela porta obrigatória (decisão A-10): precisa de 1 leitor OPC
+    dedicado.
+    """
+    mpc = node(
+        node_id,
+        "mpc",
+        2,
+        {
+            "name": "MPC teste",
+            "multiplier": 1,
+            "variables": {
+                "mvs": [
+                    {
+                        "id": "mv_a",
+                        "name": "MV a",
+                        "eu": "m3/h",
+                        "limits": {"min": 0.0, "max": 100.0},
+                        "du_max": 5.0,
+                        "initial_value": 0.0,
+                    }
+                ],
+                "cvs": [
+                    {
+                        "id": "cv_a",
+                        "name": "CV a",
+                        "eu": "C",
+                        "kind": "selfreg",
+                        "tss": 30.0,
+                        "weight": 1.0,
+                        "sp_limits": {"min": 80.0, "max": 120.0},
+                    }
+                ],
+                "constraints": [],
+                "dvs": [],
+            },
+            "models": {
+                "cv_a": {
+                    "mv_a": {
+                        "enabled": True,
+                        "params": {"K": 1.2, "tau1": 10.0, "tau2": 2.0, "theta": 15.0},
+                    }
+                }
+            },
+        },
+    )
+    return graph([read_node("r1", 1, tag_id), mpc], [edge("r1", "out", node_id, "cv_a")])
+
+
 # --------------------------------------------------------------------------------------
 # Duplos e coletores
 # --------------------------------------------------------------------------------------
