@@ -469,3 +469,79 @@ async def test_cold_start_produz_saidas_nulas() -> None:
     block, *_ = _block()
     saida = await block.step({"cv_a": PortSample(None, False)})
     assert saida == {"mv_pid": PortSample(None, False), "mv_direto": PortSample(None, False)}
+
+
+# --------------------------------------------------------------------------------------
+# Fix round 1 (review): u_applied usa o READBACK, não o comandado (spec §3.3)
+# --------------------------------------------------------------------------------------
+
+
+async def test_u_applied_no_solve_usa_o_readback_quando_diverge_do_comandado() -> None:
+    """A realimentação por bias precisa do `u` FISICAMENTE aplicado — a posição real do PID,
+    nunca o plano/manual que o bloco comandou (achado da revisão de fix round 1)."""
+    block, host, snapshot, *_ = _block()
+    await _entra_remoto_auto(block)
+    host.pending = _resultado_ok({"mv_pid": 50.0, "mv_direto": 3.0})
+    await block.step(entradas(20.0))  # aplica o plano acima -> mv_pid comandado = 50.0
+
+    snapshot.set(503, 12.5)  # readback real diverge do comandado (posição física do PID)
+    await block.step(entradas(20.0))  # nova fronteira: dispara outro solve
+
+    ultimo = host.requests[-1]
+    assert ultimo.u_applied["mv_pid"] == pytest.approx(12.5), (
+        "u_applied precisa ser o READBACK, não o plano comandado"
+    )
+    assert ultimo.u_applied["mv_direto"] == pytest.approx(3.0), (
+        "sem pid: o próprio valor mantido pelo bloco já é a posição real"
+    )
+
+
+# --------------------------------------------------------------------------------------
+# Fix round 1 (review): publish() continua a cada fronteira mesmo com entrada inválida
+# --------------------------------------------------------------------------------------
+
+
+async def test_publish_continua_a_cada_fronteira_mesmo_com_entrada_invalida() -> None:
+    block, _, _, publish, _, _ = _block()
+    antes = len(publish.states)
+
+    await block.step(entradas(20.0, ok=False))
+    await block.step(entradas(20.0, ok=False))
+
+    assert len(publish.states) == antes + 2, "cada fronteira publica, mesmo com entrada ruim"
+    assert publish.states[-1].status.input_valid is False
+
+
+# --------------------------------------------------------------------------------------
+# Fix round 1 (review): SP retoma o PV-tracking ao sair de AUTO direto para LOCAL
+# --------------------------------------------------------------------------------------
+
+
+async def test_sp_retoma_tracking_ao_sair_de_auto_direto_para_local() -> None:
+    block, *_, publish, _, _ = _block()
+    await block.step(entradas(20.0))
+    await _entra_remoto_auto(block)
+    await block.step(entradas(50.0))  # em AUTO: SP congelado no valor de antes (20.0)
+    assert publish.states[-1].vars["cv_a"].sp == pytest.approx(20.0)
+
+    await block.command("mpc_mode", {"axis": "local_remote", "value": "local"}, OPERADOR)
+    await block.step(entradas(77.0))  # de volta a LOCAL: o tracking precisa retomar
+    assert publish.states[-1].vars["cv_a"].sp == pytest.approx(77.0), (
+        "sair de AUTO direto para LOCAL precisa reativar o PV-tracking do SP"
+    )
+
+
+# --------------------------------------------------------------------------------------
+# Fix round 1 (review): todo emit_event carrega o origin do bloco
+# --------------------------------------------------------------------------------------
+
+
+async def test_todos_os_eventos_carregam_o_origin_do_bloco() -> None:
+    block, *_, events = _block()
+    await block.command("mpc_mode", {"axis": "local_remote", "value": "remote"}, OPERADOR)
+    await block.command("mpc_mode", {"axis": "man_auto", "value": "auto"}, OPERADOR)
+    await block.command("mpc_sp", {"var_id": "cv_a", "value": 50.0}, OPERADOR)
+    await block.step(entradas(20.0, ok=False))  # dispara mpc_input_invalid
+
+    assert events.events, "pré-condição: precisa haver eventos para checar"
+    assert all(e["origin"] == "block:m1" for e in events.events)
