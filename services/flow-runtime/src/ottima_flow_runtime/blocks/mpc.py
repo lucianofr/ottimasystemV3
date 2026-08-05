@@ -123,6 +123,14 @@ class MpcBlock(Block):
     def output_ports(self) -> tuple[str, ...]:
         return self._mv_ids
 
+    @property
+    def _in_auto(self) -> bool:
+        """`True` só em REMOTO+AUTO — fonte única para o gate de tracking do SP (§4.4,
+        achado da revisão: entrar em AUTO e sair para LOCAL sem passar por MAN deixava
+        `_man_auto` "auto" órfão, e um gate que checasse só `_man_auto` travava o
+        PV-tracking em LOCAL) e para `_build_state`."""
+        return self._local_remote == "remote" and self._man_auto == "auto"
+
     def reset(self) -> None:
         self._n = 0
         self._local_remote: _LocalRemote = "local"
@@ -159,14 +167,16 @@ class MpcBlock(Block):
             self._input_invalid_reported = False
             for var_id, sample in samples.items():
                 self._last_measured[var_id] = float(sample.v)  # type: ignore[arg-type]
-            if self._man_auto != "auto":
+            if not self._in_auto:
                 for cv_id in self._cv_ids:
                     self._sp[cv_id] = self._last_measured[cv_id]
         else:
             await self._report_input_invalid()
 
-        if is_frontier and valid:
-            await self._run_frontier()
+        if is_frontier:
+            if valid:
+                await self._run_frontier()
+            await self._publish(self._build_state())
 
         outputs = self._compute_outputs(ok=valid)
         self._mv_last = {mv_id: float(sample.v) for mv_id, sample in outputs.items()}  # type: ignore[arg-type]
@@ -185,10 +195,17 @@ class MpcBlock(Block):
         if result is not None:
             await self._apply_result(result)
 
-        if self._man_auto == "auto" and self._local_remote == "remote":
+        if self._in_auto:
             request = SolveRequest(
                 y={row_id: self._last_measured[row_id] for row_id in self._row_ids},
-                u_applied=dict(self._mv_last),
+                # Realimentação por bias (spec §3.3, DMC) precisa do `u` EFETIVAMENTE
+                # aplicado à planta — nunca o plano/manual comandado. Por MV: com `pid`, o
+                # que está de fato em vigor é o readback (a posição real, que pode divergir
+                # do que o bloco escreveu); sem `pid`, o próprio valor mantido pelo bloco JÁ
+                # é a posição real (não há malha física entre os dois). `_effective_value`
+                # é a mesma resolução usada em LOCAL — u_applied é a mesma pergunta ("qual é
+                # o valor físico agora?"), não uma nova regra.
+                u_applied={mv_id: self._effective_value(mv) for mv_id, mv in self._mvs.items()},
                 d={dv_id: self._last_measured[dv_id] for dv_id in self._dv_ids},
                 sp=dict(self._sp),
                 reinit=self._reinit_pending,
@@ -199,8 +216,6 @@ class MpcBlock(Block):
                 # pula, sem novo evento (spec §4.2) — o `mpc_overrun` já saiu (ou sairá)
                 # pelo caminho de `poll()` quando o host sintetizar o resultado.
                 self._overruns += 1
-
-        await self._publish(self._build_state())
 
     async def _apply_result(self, result: SolveResult) -> None:
         if result.status != "overrun":
@@ -233,7 +248,7 @@ class MpcBlock(Block):
         outputs: dict[str, PortSample] = {}
         for mv in self._mvs.values():
             if self._local_remote == "local":
-                v = self._local_value(mv)
+                v = self._effective_value(mv)
             elif self._man_auto == "man":
                 v = _clamp(self._mv_manual[mv.id], mv.limits.min, mv.limits.max)
             else:
@@ -241,9 +256,11 @@ class MpcBlock(Block):
             outputs[mv.id] = PortSample(v, ok)
         return outputs
 
-    def _local_value(self, mv: MvVar) -> float:
-        """Tracking do readback (com `pid`) ou hold do último valor/`initial_value` (sem
-        `pid`, ou com `pid` mas ainda sem readback desde o deploy)."""
+    def _effective_value(self, mv: MvVar) -> float:
+        """Valor físico "vigente" de uma MV: readback (com `pid`) ou hold do último
+        valor/`initial_value` (sem `pid`, ou com `pid` mas ainda sem readback desde o
+        deploy). Usado tanto para a saída em LOCAL (§4.3) quanto para `u_applied` do
+        `SolveRequest` (§3.3) — é a mesma pergunta ("qual é a posição real agora?")."""
         if mv.pid is not None:
             tag = self._snapshot.get(mv.pid.readback_tag_id)
             if tag is not None:
@@ -283,6 +300,7 @@ class MpcBlock(Block):
             return
         self._overrun_reported = True
         await self._emit_event(
+            origin=self._source,
             severity="warning",
             message=f"MPC '{self.block_id}': orçamento do solve estourado",
             kind=KIND_MPC_OVERRUN,
@@ -291,6 +309,7 @@ class MpcBlock(Block):
 
     async def _report_solver_error(self, reason: str) -> None:
         await self._emit_event(
+            origin=self._source,
             severity="alarm",
             message=f"MPC '{self.block_id}': falha do solver ({reason})",
             kind=KIND_MPC_SOLVER_ERROR,
@@ -302,6 +321,7 @@ class MpcBlock(Block):
             return
         self._input_invalid_reported = True
         await self._emit_event(
+            origin=self._source,
             severity="warning",
             message=f"MPC '{self.block_id}': entrada inválida — solve pulado",
             kind=KIND_MPC_INPUT_INVALID,
@@ -352,6 +372,7 @@ class MpcBlock(Block):
 
     async def _audit_mode_changed(self, axis: str, old: str, new: str, user: str | None) -> None:
         await self._emit_event(
+            origin=self._source,
             severity="info",
             message=f"MPC '{self.block_id}': modo {axis} {old} -> {new}",
             kind=KIND_MPC_MODE_CHANGED,
@@ -360,7 +381,7 @@ class MpcBlock(Block):
         await self._publish(self._build_state())
 
     async def _command_sp(self, args: dict, user: str | None) -> None:
-        if self._man_auto != "auto":
+        if not self._in_auto:
             return  # fora de AUTO o PV-tracking manda (spec §4.8)
         var_id = args["var_id"]
         cv = self._cvs.get(var_id)
@@ -371,6 +392,7 @@ class MpcBlock(Block):
             return  # idempotente
         self._sp[var_id] = clamped
         await self._emit_event(
+            origin=self._source,
             severity="info",
             message=f"MPC '{self.block_id}': SP de {var_id} escrito para {clamped}",
             kind=KIND_MPC_SP_WRITTEN,
@@ -390,6 +412,7 @@ class MpcBlock(Block):
             return  # idempotente
         self._mv_manual[var_id] = clamped
         await self._emit_event(
+            origin=self._source,
             severity="info",
             message=f"MPC '{self.block_id}': MV manual de {var_id} escrita para {clamped}",
             kind=KIND_MPC_MV_WRITTEN,
@@ -403,7 +426,7 @@ class MpcBlock(Block):
 
     def _build_state(self) -> MpcState:
         armed = self._local_remote == "remote"
-        auto = armed and self._man_auto == "auto"
+        auto = self._in_auto
         cv_id_set = set(self._cv_ids)
 
         var_state: dict[str, MpcVarState] = {}
