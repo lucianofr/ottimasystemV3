@@ -87,7 +87,9 @@ uv run ruff check . && uv run ruff format --check . # lint + formato
 cd frontend && npm run build                        # tsc --noEmit strict + bundle
 cd frontend && npm run dev                          # frontend (Vite, 127.0.0.1:5173, proxy /api e /ws -> 8080)
 cd frontend && npm run test:unit                    # checks puros do frontend (sem browser, sem backend)
-cd frontend && npm run generate:api                 # tipos do OpenAPI; exige frontend/openapi.json (gitignored)
+cd frontend && npm run generate:api                 # tipos do OpenAPI + contratos gerados; exige frontend/openapi.json (gitignored)
+cd frontend && npm run generate:contracts           # só os contratos (portas por bloco + payloads do WS) de ottima_core.contracts_export
+uv run pytest -m slow services/flow-runtime/tests   # carga do MPC (RNF-02); o run default exclui `slow` além de `e2e`
 
 # Stack. A F2 acrescentou o opcsim e as portas de host do gate: use SEMPRE os dois arquivos.
 cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 8 serviços
