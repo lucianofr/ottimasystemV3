@@ -153,8 +153,8 @@ def test_e2e_f4_01_deploy_publica_mpc_state_e_boot_em_local(
     assert all(s == "idle" for s in solvers), f"solver fora de 'idle' em LOCAL: {solvers}"
 
     deltas = [b - a for a, b in zip(chegada, chegada[1:])]
-    assert all(TS_MPC * 0.5 <= d <= TS_MPC * 2.0 for d in deltas), (
-        f"cadência fora de [{TS_MPC * 0.5:.2f}, {TS_MPC * 2.0:.2f}]s (Ts_mpc={TS_MPC}s): {deltas}"
+    assert all(TS_MPC * 0.7 <= d <= TS_MPC * 1.5 for d in deltas), (
+        f"cadência fora de [{TS_MPC * 0.7:.2f}, {TS_MPC * 1.5:.2f}]s (Ts_mpc={TS_MPC}s): {deltas}"
     )
 
 
