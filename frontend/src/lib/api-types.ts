@@ -146,7 +146,8 @@ export interface paths {
          * @description Transação única: desativa o atual e ativa o alvo (ADR-017; índice parcial garante 1 ativo).
          *
          *     F1 apenas persiste; a partir da F3 este endpoint também encerra a execução do projeto
-         *     anterior via `flow.commands` (gancho registrado no spec §6.2).
+         *     anterior via `flow.commands` (gancho registrado no spec §6.2). Reativar o projeto que já
+         *     é o ativo continua respondendo 200 com o projeto, mas **não** republica o evento.
          */
         post: operations["activate_project_api_projects__project_id__activate_post"];
         delete?: never;
@@ -342,6 +343,57 @@ export interface paths {
         put?: never;
         /** Stop Flow */
         post: operations["stop_flow_api_flows__flow_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operate/{flow_id}/{block_id}/mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Mode */
+        post: operations["set_mode_api_operate__flow_id___block_id__mode_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operate/{flow_id}/{block_id}/sp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Sp */
+        post: operations["set_sp_api_operate__flow_id___block_id__sp_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operate/{flow_id}/{block_id}/mv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Mv */
+        post: operations["set_mv_api_operate__flow_id___block_id__mv_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -781,6 +833,26 @@ export interface components {
             expires_in: number;
             user: components["schemas"]["UserOut"];
         };
+        /** ModeCommand */
+        ModeCommand: {
+            /**
+             * Axis
+             * @enum {string}
+             */
+            axis: "local_remote" | "man_auto";
+            /**
+             * Value
+             * @enum {string}
+             */
+            value: "local" | "remote" | "man" | "auto";
+        };
+        /** MvCommand */
+        MvCommand: {
+            /** Var Id */
+            var_id: string;
+            /** Value */
+            value: number;
+        };
         /** ProjectCreate */
         ProjectCreate: {
             /** Name */
@@ -827,6 +899,13 @@ export interface components {
             server_cert_file: string;
             /** Fingerprint Sha256 */
             fingerprint_sha256: string;
+        };
+        /** SpCommand */
+        SpCommand: {
+            /** Var Id */
+            var_id: string;
+            /** Value */
+            value: number;
         };
         /** TagCreate */
         TagCreate: {
@@ -1964,6 +2043,114 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_mode_api_operate__flow_id___block_id__mode_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModeCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_sp_api_operate__flow_id___block_id__sp_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_mv_api_operate__flow_id___block_id__mv_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MvCommand"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {
