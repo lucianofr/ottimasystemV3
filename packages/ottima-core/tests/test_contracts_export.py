@@ -9,8 +9,8 @@ def test_json_tem_os_5_tipos_de_bloco():
 
 
 def test_schemas_ws_presentes():
-    # MpcVarState ainda não existe em bus.py (tarefa 1.3 acrescenta e regenera) — só os
-    # payloads existentes hoje entram no export (brief F4a tarefa 0.2).
+    # MpcVarState (spec F4 §5.1, tarefa 1.3) vem aninhado no schema de MpcState
+    # (`vars: dict[str, MpcVarState]`) — não é chave própria de `ws_payloads`.
     contratos = build_contracts()
     assert set(contratos["ws_payloads"]) == {"FlowStatus", "PortValue", "MpcState"}
     for schema in contratos["ws_payloads"].values():

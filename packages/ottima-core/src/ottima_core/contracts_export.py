@@ -11,8 +11,8 @@ tipo) ou uma regra dinâmica (`dynamic: true` + `source` + `rules`). Script e TF
 `mpc`), então a regra dele é declarada aqui a partir do spec F4 §2.2, não derivada de código.
 
 `ws_payloads` é o JSON Schema (`model_json_schema()`) dos modelos do barramento que o canvas
-ao vivo consome. `MpcVarState` ainda não existe em `bus.py` (tarefa 1.3 acrescenta e
-regenera) — só os payloads existentes hoje entram no export.
+ao vivo consome. `MpcVarState` (spec F4 §5.1) chega aninhado em `MpcState.vars` — não precisa
+entrar em `_WS_MODELS`: o gerador TS achata `$defs` e produz a interface própria mesmo assim.
 
 Executável como `uv run python -m ottima_core.contracts_export`.
 """
@@ -75,7 +75,8 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
     },
 }
 
-# MpcVarState: tarefa 1.3 acrescenta a `bus.py` e regenera este módulo.
+# MpcVarState (tarefa 1.3) vem aninhado no schema de MpcState (`vars: dict[str, MpcVarState]`)
+# — o gerador TS achata `$defs`, dispensa entrada própria aqui.
 _WS_MODELS = (FlowStatus, PortValue, MpcState)
 
 
