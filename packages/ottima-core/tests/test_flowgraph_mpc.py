@@ -45,7 +45,9 @@ def mv(suffix: str, *, pid: dict | None = None, **overrides) -> dict:
     return node
 
 
-def cv(suffix: str, *, kind: str = "selfreg", tss: float = 30.0, weight: float = 1.0, **overrides) -> dict:
+def cv(
+    suffix: str, *, kind: str = "selfreg", tss: float = 30.0, weight: float = 1.0, **overrides
+) -> dict:
     node = {
         "id": f"cv_{suffix}",
         "name": f"CV {suffix}",
@@ -59,7 +61,9 @@ def cv(suffix: str, *, kind: str = "selfreg", tss: float = 30.0, weight: float =
     return node
 
 
-def co(suffix: str, *, kind: str = "selfreg", tss: float = 45.0, priority: int = 1, **overrides) -> dict:
+def co(
+    suffix: str, *, kind: str = "selfreg", tss: float = 45.0, priority: int = 1, **overrides
+) -> dict:
     node = {
         "id": f"co_{suffix}",
         "name": f"Restrição {suffix}",
@@ -86,7 +90,11 @@ def integrating_params(**overrides: float) -> dict:
 
 
 def pair(kind: str = "selfreg", *, enabled: bool = True, **param_overrides: float) -> dict:
-    params = selfreg_params(**param_overrides) if kind == "selfreg" else integrating_params(**param_overrides)
+    params = (
+        selfreg_params(**param_overrides)
+        if kind == "selfreg"
+        else integrating_params(**param_overrides)
+    )
     return {"enabled": enabled, "params": params}
 
 
@@ -268,14 +276,18 @@ def test_zero_cv_e_restricao_e_erro():
 
 
 def test_seis_cv_mais_restricao_aprova():
-    node = mpc_node(cvs=[cv(letter) for letter in "abc"], constraints=[co(letter) for letter in "def"])
+    node = mpc_node(
+        cvs=[cv(letter) for letter in "abc"], constraints=[co(letter) for letter in "def"]
+    )
     graph = mpc_graph(node)
     tags = mpc_tags(node)
     assert not has(errors_of(graph, tags), "CVs somadas a Restrições", "1..6")
 
 
 def test_sete_cv_mais_restricao_e_erro():
-    node = mpc_node(cvs=[cv(letter) for letter in "abcd"], constraints=[co(letter) for letter in "efg"])
+    node = mpc_node(
+        cvs=[cv(letter) for letter in "abcd"], constraints=[co(letter) for letter in "efg"]
+    )
     graph = mpc_graph(node)
     tags = mpc_tags(node)
     assert has(errors_of(graph, tags), "CVs somadas a Restrições", "1..6")

@@ -11,8 +11,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-NodeType = Literal["opc_read", "opc_write", "script", "tfs"]
-NODE_TYPES: tuple[str, ...] = ("opc_read", "opc_write", "script", "tfs")
+NodeType = Literal["opc_read", "opc_write", "script", "tfs", "mpc"]
+NODE_TYPES: tuple[str, ...] = ("opc_read", "opc_write", "script", "tfs", "mpc")
 
 MAX_SCRIPT_PORTS = 8  # spec §3.3
 
@@ -21,6 +21,7 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
     "opc_write": ("tag_id",),
     "script": ("n_inputs", "n_outputs", "code"),
     "tfs": ("matrix",),
+    "mpc": ("name", "multiplier", "variables", "models"),
 }
 _PARAM_KEYS: dict[str, tuple[str, ...]] = {
     "sopdt": ("K", "tau1", "tau2", "theta"),
@@ -90,7 +91,22 @@ class TfsConfig(BaseModel):
     matrix: list[list[TfsElement]]
 
 
-NodeConfig = TagConfig | ScriptConfig | TfsConfig
+class MpcRawConfig(BaseModel):
+    """Payload bruto do bloco `mpc` (spec §2.1).
+
+    A forma tipada e travada (ids `mv_`/`cv_`/`co_`/`dv_`, `pid` opcional, `params` genérico)
+    nasce em `MpcConfig` (tarefa 1.1); esta classe só preserva as 4 chaves de `data` sem
+    tipar o conteúdo aninhado, porque a completude por `kind` de linha (spec §2.2-3) precisa
+    do resto do bloco — contexto que só `validate_graph` tem. `MpcConfig.model_validate`
+    roda lá (tarefa 1.2 do plano F4a) e os 422 saem pelo canal `ValidationResult.errors`,
+    nunca por `GraphParseError` — `parse_graph` nunca reprova um `mpc` por conteúdo, só por
+    forma alheia ao bloco (chave desconhecida em `data`, `exec_order` ausente etc.).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+NodeConfig = TagConfig | ScriptConfig | TfsConfig | MpcRawConfig
 
 
 class FlowNode(BaseModel):
@@ -209,12 +225,6 @@ def _parse_nodes(raw_nodes: list, errors: list[str]) -> list[FlowNode]:
 def _parse_node(node_id: str, raw: dict, errors: list[str]) -> FlowNode | None:
     where = f"nó '{node_id}'"
     node_type = raw.get("type")
-    if node_type == "mpc":
-        errors.append(
-            f"{where}: o bloco MPC só entra em operação na F4 (decisão A-1); "
-            "remova-o do grafo antes de salvar"
-        )
-        return None
     if node_type not in NODE_TYPES:
         errors.append(
             f"{where}: tipo '{node_type}' não é um bloco válido; use um de: {', '.join(NODE_TYPES)}"
@@ -273,7 +283,19 @@ def _parse_config(where: str, node_type: str, data: dict, errors: list[str]) -> 
         return TagConfig(tag_id=tag_id)
     if node_type == "script":
         return _parse_script_config(where, data, errors)
+    if node_type == "mpc":
+        return _parse_mpc_config(data)
     return _parse_tfs_config(where, data, errors)
+
+
+def _parse_mpc_config(data: dict) -> MpcRawConfig:
+    """Bloco `mpc` (spec §2.1): repassa as chaves previstas em `data` sem validar o
+    conteúdo — `_parse_node` já garante que só chaves de `_CONFIG_KEYS['mpc']` chegam
+    aqui (chave desconhecida já é erro de parse); a tipagem via `MpcConfig` mora em
+    `validate_graph` (tarefa 1.2).
+    """
+    payload = {key: data[key] for key in _CONFIG_KEYS["mpc"] if key in data}
+    return MpcRawConfig(**payload)
 
 
 def _parse_script_config(where: str, data: dict, errors: list[str]) -> ScriptConfig | None:
