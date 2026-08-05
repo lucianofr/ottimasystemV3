@@ -39,6 +39,7 @@ from runtime_test_helpers import (  # noqa: E402
 )
 
 from ottima_flow_runtime.events import build_event_listener  # noqa: E402
+from ottima_flow_runtime.mpc.worker import worker_main  # noqa: E402
 from ottima_flow_runtime.snapshot import ValueSnapshot  # noqa: E402
 from ottima_flow_runtime.state import RuntimeState  # noqa: E402
 from ottima_flow_runtime.supervisor import Supervisor  # noqa: E402
@@ -115,7 +116,11 @@ async def harness_factory(
 ) -> AsyncIterator[Callable[..., Awaitable[Harness]]]:
     built: list[Harness] = []
 
-    async def factory(*, poll_interval_s: float = SLOW_POLL_S) -> Harness:
+    async def factory(
+        *,
+        poll_interval_s: float = SLOW_POLL_S,
+        mpc_worker_target: Callable = worker_main,
+    ) -> Harness:
         state = RuntimeState()
         pool = StubPool()
         snapshot = ValueSnapshot(redis_client)
@@ -126,6 +131,7 @@ async def harness_factory(
             snapshot=snapshot,
             pool=pool,
             poll_interval_s=poll_interval_s,
+            mpc_worker_target=mpc_worker_target,
         )
         # Mesma composição do lifespan de `main.py`: o assinante de `events` é quem liga o
         # contrato F2 §3.7 ao supervisor, então o arreio tem de montá-lo igual.

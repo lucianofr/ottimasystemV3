@@ -390,17 +390,21 @@ class Harness:
     redis: Redis
     events: ChannelListener
 
-    async def command(self, cmd: str, flow_id: int, *, user: str = USER) -> None:
+    async def command(
+        self, cmd: str, flow_id: int, *, user: str = USER, args: dict[str, Any] | None = None
+    ) -> None:
         """Publica em `flow.commands` como a API faz (spec §5.1)."""
-        command = FlowCommand(flow_id=flow_id, cmd=cmd, args={}, user=user, ts=datetime.now(UTC))
+        command = FlowCommand(
+            flow_id=flow_id, cmd=cmd, args=args or {}, user=user, ts=datetime.now(UTC)
+        )
         await self.redis.publish(CHANNEL_FLOW_COMMANDS, command.model_dump_json())
 
     def flow_state(self, flow_id: int) -> str | None:
         task = self.supervisor.flows.get(flow_id)
         return None if task is None else task.state
 
-    async def await_state(self, flow_id: int, expected: str) -> None:
-        await await_until(lambda: self.flow_state(flow_id) == expected)
+    async def await_state(self, flow_id: int, expected: str, *, timeout_s: float = 5.0) -> None:
+        await await_until(lambda: self.flow_state(flow_id) == expected, timeout_s=timeout_s)
 
 
 async def publish_tag_value(
@@ -497,3 +501,41 @@ def mpc_host_dying_on_request_worker(conn: Connection, config_json: str, ts_flow
     conn.send(("ready", 1))
     conn.recv()
     os._exit(1)
+
+
+def mpc_host_echo_plan_worker(conn: Connection, config_json: str, ts_flow: float) -> None:
+    """Fica pronto na hora e responde `status=ok` com `u_plan = u_applied` do próprio
+    pedido (mantém a MV vigente) — `mpc_host_echo_worker` devolve `u_plan={}`, que faz
+    `MpcBlock._compute_outputs` estourar `KeyError` assim que um teste de integração
+    (supervisor, plano F4b tarefa 2.2) deixa o bloco entrar em AUTO de verdade; este worker
+    existe só para isso, sem pagar o custo de um solve real."""
+    conn.send(("ready", 1))
+    try:
+        while True:
+            request = conn.recv()
+            if request is None:
+                return
+            conn.send(
+                SolveResult(
+                    u_plan=dict(request.u_applied),
+                    prediction_t=[],
+                    prediction_cv=[],
+                    prediction_mv=[],
+                    cost=0.0,
+                    status="ok",
+                    wall_ms=1.0,
+                    detail="",
+                )
+            )
+    except (EOFError, OSError):
+        return
+
+
+def mpc_host_never_ready_worker(conn: Connection, config_json: str, ts_flow: float) -> None:
+    """Nunca manda o handshake `("ready", n_x)` — o host fica com `ready=False` para
+    sempre (usado para exercitar o gate `worker_not_ready` de MAN->AUTO, spec F4 §4.4,
+    plano F4b tarefa 2.2, sem esperar o `_BOOT_TIMEOUT_S` de 30 s do host de verdade)."""
+    import time
+
+    while True:
+        time.sleep(3600)
