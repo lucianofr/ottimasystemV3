@@ -217,11 +217,13 @@ async def test_ordem_de_flush_e_events_samples_mpc_samples(
     await redis_client.publish(channel_mpc_state(5, "b1"), mpc_state().model_dump_json())
     await await_until(
         lambda: (
-            pipeline.buffered_samples,
-            pipeline.buffered_events,
-            pipeline.buffered_mpc_samples,
+            (
+                pipeline.buffered_samples,
+                pipeline.buffered_events,
+                pipeline.buffered_mpc_samples,
+            )
+            == (3, 1, 1)
         )
-        == (3, 1, 1)
     )
 
     await pipeline.flush()
@@ -381,9 +383,7 @@ async def test_mpc_state_publicado_gera_uma_linha_por_var(
     await wait_rows(session_factory, mpc_samples_table, 2)
     async with session_factory() as session:
         rows = (
-            await session.execute(
-                select(mpc_samples_table).order_by(mpc_samples_table.c.var_id)
-            )
+            await session.execute(select(mpc_samples_table).order_by(mpc_samples_table.c.var_id))
         ).all()
 
     by_var = {row.var_id: row for row in rows}
