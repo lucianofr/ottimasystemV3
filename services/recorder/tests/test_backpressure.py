@@ -46,6 +46,7 @@ HEALTH_KEYS = {
     "version",
     "buffered_samples",
     "buffered_events",
+    "buffered_mpc_samples",
     "dropped_total",
     "last_flush_ts",
     "db_ok",
@@ -140,12 +141,14 @@ class StubPipeline:
         *,
         buffered_samples: int = 0,
         buffered_events: int = 0,
+        buffered_mpc_samples: int = 0,
         dropped_total: int = 0,
         last_flush_ts: datetime | None = None,
         db_ok: bool = True,
     ) -> None:
         self.buffered_samples = buffered_samples
         self.buffered_events = buffered_events
+        self.buffered_mpc_samples = buffered_mpc_samples
         self.dropped_total = dropped_total
         self.last_flush_ts = last_flush_ts
         self.db_ok = db_ok
@@ -453,7 +456,12 @@ async def test_health_sem_pipeline_usa_defaults(health_app):
     body = response.json()
     assert set(body) == HEALTH_KEYS
     assert body["service"] == "recorder"
-    assert (body["buffered_samples"], body["buffered_events"], body["dropped_total"]) == (0, 0, 0)
+    assert (
+        body["buffered_samples"],
+        body["buffered_events"],
+        body["buffered_mpc_samples"],
+        body["dropped_total"],
+    ) == (0, 0, 0, 0)
     assert body["last_flush_ts"] is None
     assert body["db_ok"] is False
     assert body["status"] == "degraded"
@@ -462,7 +470,12 @@ async def test_health_sem_pipeline_usa_defaults(health_app):
 async def test_health_ok_exige_redis_e_banco(health_app):
     health_app.state.redis_ok = True
     health_app.state.pipeline = StubPipeline(
-        buffered_samples=7, buffered_events=2, dropped_total=5, last_flush_ts=BASE_TS, db_ok=True
+        buffered_samples=7,
+        buffered_events=2,
+        buffered_mpc_samples=4,
+        dropped_total=5,
+        last_flush_ts=BASE_TS,
+        db_ok=True,
     )
 
     body = (await get_health(health_app)).json()
@@ -471,6 +484,7 @@ async def test_health_ok_exige_redis_e_banco(health_app):
     assert body["status"] == "ok"
     assert body["buffered_samples"] == 7
     assert body["buffered_events"] == 2
+    assert body["buffered_mpc_samples"] == 4
     assert body["dropped_total"] == 5
     assert body["last_flush_ts"] == BASE_TS.isoformat()
     assert body["db_ok"] is True
