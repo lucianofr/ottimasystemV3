@@ -1,20 +1,26 @@
 """Histórico colunar com downsampling automático (RF-802): bruto até 2 h, CAgg 1 min acima."""
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import Row, column, select, table
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_api.deps import get_db, require_operator
-from ottima_core.models import samples_table
+from ottima_api.messages import MSG_FLOW_NAO_ENCONTRADO
+from ottima_core.flowgraph import parse_graph
+from ottima_core.models import Flow, mpc_samples_table, samples_table
+from ottima_core.schemas.flows import MAX_BIGINT
 from ottima_core.schemas.history import (
+    MAX_MPC_VARS,
     MAX_TAGS,
     MAX_WINDOW_DAYS,
     RAW_WINDOW_HOURS,
     HistoryResponse,
     HistorySeries,
+    MpcHistoryResponse,
+    MpcHistorySeries,
 )
 
 # O CAgg é view materializada criada em SQL cru na migration 0002 e não tem handle no core:
@@ -30,11 +36,30 @@ samples_1m = table(
     column("worst_quality"),
 )
 
+# Mesmo raciocínio acima, para o CAgg da migration 0003 (spec F5 §2.2-3).
+mpc_samples_1m = table(
+    "mpc_samples_1m",
+    column("bucket"),
+    column("flow_id"),
+    column("block_id"),
+    column("var_id"),
+    column("v"),
+    column("v_min"),
+    column("v_max"),
+    column("sp"),
+    column("auto"),
+)
+
+FlowIdFilter = Annotated[int, Query(ge=1, le=MAX_BIGINT)]
+
 MAX_TAG_ID = 2**63 - 1  # tag_id é BIGINT no banco
 MAX_TAG_ID_DIGITOS = len(str(MAX_TAG_ID))  # 19
 
 ERRO_VAZIO = "tag_ids não pode ser vazio"
 ERRO_NAO_INTEIRO = "tag_ids deve conter apenas inteiros separados por vírgula"
+
+ERRO_VAR_IDS_VAZIO = "var_ids não pode ser vazio"
+ERRO_VAR_IDS_MALFORMADO = "var_ids deve conter valores não vazios separados por vírgula"
 
 router = APIRouter()
 
@@ -73,6 +98,26 @@ def _parse_tag_ids(bruto: str) -> list[int]:
     ids = list(dict.fromkeys(int(p) for p in itens))
     if len(ids) > MAX_TAGS:
         raise HTTPException(status_code=422, detail=f"no máximo {MAX_TAGS} tags por consulta")
+    return ids
+
+
+def _parse_mpc_var_ids(bruto: str) -> list[str]:
+    """Lista separada por vírgula, deduplicada preservando a ordem de entrada.
+
+    `var_id` é texto livre (BIGINT não se aplica; sem faixa a validar) — a única forma
+    inválida é estrutural: vazio ou item vazio entre vírgulas, mesma regra de `_parse_tag_ids`.
+    `var_id` desconhecido no bloco não é erro aqui, vira série vazia (spec F5 §2.4).
+    """
+    if not bruto.strip():
+        raise HTTPException(status_code=422, detail=ERRO_VAR_IDS_VAZIO)
+    itens = [p.strip() for p in bruto.split(",")]
+    if any(not item for item in itens):
+        raise HTTPException(status_code=422, detail=ERRO_VAR_IDS_MALFORMADO)
+    ids = list(dict.fromkeys(itens))
+    if len(ids) > MAX_MPC_VARS:
+        raise HTTPException(
+            status_code=422, detail=f"no máximo {MAX_MPC_VARS} variáveis por consulta"
+        )
     return ids
 
 
@@ -143,5 +188,107 @@ async def get_history(
                 v_max=[linha.v_max for linha in linhas] if downsample else None,
             )
             for tag_id, linhas in por_tag.items()
+        ],
+    )
+
+
+@router.get(
+    "/mpc",
+    response_model=MpcHistoryResponse,
+    response_model_exclude_none=True,  # v_min/v_max somem do JSON no modo raw
+    dependencies=[Depends(require_operator)],
+)
+async def get_history_mpc(
+    flow_id: FlowIdFilter,
+    block_id: str,
+    var_ids: str,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> MpcHistoryResponse:
+    """Histórico do bloco MPC (spec F5 §2.4): uma série por var_id pedida, sempre.
+
+    Validação de forma (`var_ids`/janela) roda antes de tocar o banco; só então o flow é
+    carregado (404 se inexistente) e o bloco validado contra o `graph_json` (422 se
+    inexistente ou não-`mpc`) — mesma ordem de `operate.py::_mpc_config`.
+    """
+    ids = _parse_mpc_var_ids(var_ids)
+    end = _as_utc(end) or datetime.now(UTC)
+    start = _as_utc(start) or end - timedelta(hours=1)
+    if start >= end:
+        raise HTTPException(status_code=422, detail="start deve ser anterior a end")
+    if end - start > timedelta(days=MAX_WINDOW_DAYS):
+        raise HTTPException(
+            status_code=422, detail=f"janela não pode exceder {MAX_WINDOW_DAYS} dias"
+        )
+
+    flow = await db.get(Flow, flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail=MSG_FLOW_NAO_ENCONTRADO)
+    graph = parse_graph(flow.graph_json)
+    try:
+        node = graph.node(block_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=422, detail=f"Bloco '{block_id}' não encontrado no flow"
+        ) from None
+    if node.type != "mpc":
+        raise HTTPException(status_code=422, detail=f"Bloco '{block_id}' não é um bloco MPC")
+
+    downsample = end - start > timedelta(hours=RAW_WINDOW_HOURS)
+    if downsample:
+        var_col, ts_col = mpc_samples_1m.c.var_id, mpc_samples_1m.c.bucket
+        flow_col, block_col = mpc_samples_1m.c.flow_id, mpc_samples_1m.c.block_id
+        colunas = [
+            var_col,
+            ts_col.label("ts"),  # "t" colidiria com Row.t (acessor de tupla do SQLAlchemy)
+            mpc_samples_1m.c.v.label("v"),
+            mpc_samples_1m.c.sp.label("sp"),
+            mpc_samples_1m.c.auto.label("auto"),
+            mpc_samples_1m.c.v_min.label("v_min"),
+            mpc_samples_1m.c.v_max.label("v_max"),
+        ]
+    else:
+        var_col, ts_col = mpc_samples_table.c.var_id, mpc_samples_table.c.ts
+        flow_col, block_col = mpc_samples_table.c.flow_id, mpc_samples_table.c.block_id
+        colunas = [
+            var_col,
+            ts_col.label("ts"),
+            mpc_samples_table.c.v.label("v"),
+            mpc_samples_table.c.sp.label("sp"),
+            mpc_samples_table.c.auto.label("auto"),
+        ]
+
+    # Uma única query para todas as vars; o agrupamento por var_id é feito em memória.
+    stmt = (
+        select(*colunas)
+        .where(
+            flow_col == flow_id,
+            block_col == block_id,
+            var_col.in_(ids),
+            ts_col >= start,
+            ts_col <= end,
+        )
+        .order_by(var_col, ts_col)
+    )
+    por_var: dict[str, list[Row[Any]]] = {var_id: [] for var_id in ids}
+    for linha in (await db.execute(stmt)).all():
+        por_var[linha.var_id].append(linha)
+
+    return MpcHistoryResponse(
+        mode="1m" if downsample else "raw",
+        start=start,
+        end=end,
+        series=[
+            MpcHistorySeries(
+                var_id=var_id,
+                t=[linha.ts for linha in linhas],
+                v=[linha.v for linha in linhas],
+                sp=[linha.sp for linha in linhas],
+                auto=[linha.auto for linha in linhas],
+                v_min=[linha.v_min for linha in linhas] if downsample else None,
+                v_max=[linha.v_max for linha in linhas] if downsample else None,
+            )
+            for var_id, linhas in por_var.items()
         ],
     )

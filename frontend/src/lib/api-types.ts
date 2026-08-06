@@ -440,6 +440,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/history/mpc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get History Mpc
+         * @description Histórico do bloco MPC (spec F5 §2.4): uma série por var_id pedida, sempre.
+         *
+         *     Validação de forma (`var_ids`/janela) roda antes de tocar o banco; só então o flow é
+         *     carregado (404 se inexistente) e o bloco validado contra o `graph_json` (422 se
+         *     inexistente ou não-`mpc`) — mesma ordem de `operate.py::_mpc_config`.
+         */
+        get: operations["get_history_mpc_api_history_mpc_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/certificates/app/generate": {
         parameters: {
             query?: never;
@@ -845,6 +869,47 @@ export interface components {
              * @enum {string}
              */
             value: "local" | "remote" | "man" | "auto";
+        };
+        /** MpcHistoryResponse */
+        MpcHistoryResponse: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "raw" | "1m";
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Series */
+            series: components["schemas"]["MpcHistorySeries"][];
+        };
+        /**
+         * MpcHistorySeries
+         * @description Mesma forma de `HistorySeries`, com `var_id` no lugar de `tag_id`; `sp`/`auto`
+         *     alinhados a `t` (spec F5 §2.4) — sem `q`, que não existe em `mpc_samples`.
+         */
+        MpcHistorySeries: {
+            /** Var Id */
+            var_id: string;
+            /** T */
+            t: string[];
+            /** V */
+            v: number[];
+            /** Sp */
+            sp: (number | null)[];
+            /** Auto */
+            auto: boolean[];
+            /** V Min */
+            v_min?: number[] | null;
+            /** V Max */
+            v_max?: number[] | null;
         };
         /** MvCommand */
         MvCommand: {
@@ -2227,6 +2292,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_history_mpc_api_history_mpc_get: {
+        parameters: {
+            query: {
+                flow_id: number;
+                block_id: string;
+                var_ids: string;
+                start?: string | null;
+                end?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MpcHistoryResponse"];
                 };
             };
             /** @description Validation Error */
