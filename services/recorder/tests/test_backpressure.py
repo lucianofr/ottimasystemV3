@@ -20,11 +20,17 @@ from ottima_core.bus import (
     KIND_RECORDER_BACKPRESSURE,
     KIND_TAG_CREATED,
     EventMessage,
+    MpcModes,
+    MpcPrediction,
+    MpcState,
+    MpcStatus,
+    MpcVarState,
     OpcValue,
+    channel_mpc_state,
     channel_opc_values,
     publish_event,
 )
-from ottima_core.models import events_table, samples_table
+from ottima_core.models import events_table, mpc_samples_table, samples_table
 from ottima_recorder import main as main_module
 from ottima_recorder.pipeline import RecorderPipeline
 from testkit.await_until import await_until
@@ -52,6 +58,18 @@ def sample(tag_id: int, *, offset: int = 0, value: float = 1.5, quality: int = 0
     )
 
 
+def mpc_state(*, offset: int = 0, v: float = 1.5) -> MpcState:
+    ts = BASE_TS + timedelta(seconds=offset)
+    return MpcState(
+        ts=ts,
+        modes=MpcModes(local_remote="remote", man_auto="auto"),
+        status=MpcStatus(solver="ok", overruns=0, last_solve_ms=0.0, armed=True, input_valid=True),
+        vars={"mv_a": MpcVarState(v=v)},
+        cost=0.0,
+        prediction=MpcPrediction(ts=ts, t=[], cv=[], mv=[]),
+    )
+
+
 async def count_rows(factory: Any, table: Table) -> int:
     async with factory() as session:
         return await session.scalar(select(func.count()).select_from(table))
@@ -68,6 +86,14 @@ async def sample_values(factory: Any) -> list[float]:
     async with factory() as session:
         rows = (await session.execute(select(samples_table).order_by(samples_table.c.ts))).all()
     return [row.value for row in rows]
+
+
+async def mpc_values(factory: Any) -> list[float]:
+    async with factory() as session:
+        rows = (
+            await session.execute(select(mpc_samples_table).order_by(mpc_samples_table.c.ts))
+        ).all()
+    return [row.v for row in rows]
 
 
 async def event_payloads(factory: Any, kind: str) -> list[dict[str, Any]]:
@@ -133,6 +159,7 @@ async def factory(migrated_database_url):
     async with real() as session:
         await session.execute(delete(samples_table))
         await session.execute(delete(events_table))
+        await session.execute(delete(mpc_samples_table))
         await session.commit()
     await engine.dispose()
 
@@ -232,6 +259,25 @@ async def test_overflow_de_samples_descarta_o_mais_antigo_e_conta(
     await wait_rows(factory, samples_table, 10)
     # As 5 mais antigas sumiram: sobraram exatamente as 10 mais frescas.
     assert await sample_values(factory) == [float(i) for i in range(5, 15)]
+
+
+async def test_overflow_de_mpc_samples_descarta_o_mais_antigo_e_conta(
+    redis_client, factory, make_pipeline, monkeypatch
+):
+    spy_retry_delay(monkeypatch)
+    pipeline = await make_pipeline(factory, flush_interval_s=FAST_INTERVAL_S, mpc_queue_max=10)
+    factory.up = False
+
+    channel = channel_mpc_state(1, "b1")
+    for i in range(15):
+        await redis_client.publish(channel, mpc_state(offset=i, v=float(i)).model_dump_json())
+    await await_until(lambda: pipeline.dropped_total == 5)
+    assert pipeline.buffered_mpc_samples == 10
+
+    factory.up = True
+    await wait_rows(factory, mpc_samples_table, 10)
+    # As 5 mais antigas sumiram: sobraram exatamente as 10 mais frescas.
+    assert await mpc_values(factory) == [float(i) for i in range(5, 15)]
 
 
 async def test_recuperacao_emite_um_unico_evento_de_backpressure(

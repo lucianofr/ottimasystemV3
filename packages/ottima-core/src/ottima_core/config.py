@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     admin_name: str = "Administrador"
     log_level: str = "INFO"
     certs_dir: Path = Path("/certs")  # volume `certs` do compose (spec F2 §5.4)
+    mpc_queue_max: int = 100_000  # teto do buffer de mpc_samples no recorder (spec F5 §2.3-3)
 
 
 @lru_cache

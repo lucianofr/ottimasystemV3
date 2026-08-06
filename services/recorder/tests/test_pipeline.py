@@ -15,11 +15,17 @@ from ottima_core.bus import (
     KIND_COMM_FAILURE,
     KIND_PROJECT_ACTIVATED,
     KIND_TAG_CREATED,
+    MpcModes,
+    MpcPrediction,
+    MpcState,
+    MpcStatus,
+    MpcVarState,
     OpcValue,
+    channel_mpc_state,
     channel_opc_values,
     publish_event,
 )
-from ottima_core.models import events_table, samples_table
+from ottima_core.models import events_table, mpc_samples_table, samples_table
 from ottima_core.pubsub import PatternListener
 from ottima_recorder import pipeline as pipeline_module
 from ottima_recorder.pipeline import RecorderPipeline
@@ -38,10 +44,29 @@ def sample(tag_id: int, *, offset: int = 0, value: float = 1.5, quality: int = 0
     )
 
 
+def mpc_state(
+    *,
+    offset: int = 0,
+    local_remote: str = "remote",
+    man_auto: str = "auto",
+    vars: dict[str, MpcVarState] | None = None,
+) -> MpcState:
+    ts = BASE_TS + timedelta(seconds=offset)
+    return MpcState(
+        ts=ts,
+        modes=MpcModes(local_remote=local_remote, man_auto=man_auto),
+        status=MpcStatus(solver="ok", overruns=0, last_solve_ms=0.0, armed=True, input_valid=True),
+        vars=vars if vars is not None else {"mv_a": MpcVarState(v=1.0)},
+        cost=0.0,
+        prediction=MpcPrediction(ts=ts, t=[], cv=[], mv=[]),
+    )
+
+
 async def purge(factory: Any) -> None:
     async with factory() as session:
         await session.execute(delete(samples_table))
         await session.execute(delete(events_table))
+        await session.execute(delete(mpc_samples_table))
         await session.commit()
 
 
@@ -172,7 +197,9 @@ async def test_flush_por_tempo_grava_uma_amostra_isolada(
     await wait_rows(session_factory, samples_table, 1)
 
 
-async def test_eventos_sao_gravados_antes_das_samples(redis_client, instrumented, make_pipeline):
+async def test_ordem_de_flush_e_events_samples_mpc_samples(
+    redis_client, instrumented, make_pipeline
+):
     factory, _opens, writes = instrumented
     pipeline = await make_pipeline(
         factory, flush_interval_s=LONG_INTERVAL_S, samples_flush_rows=HUGE_BUFFER_ROWS
@@ -187,11 +214,19 @@ async def test_eventos_sao_gravados_antes_das_samples(redis_client, instrumented
         kind=KIND_PROJECT_ACTIVATED,
         payload={"project_id": 1},
     )
-    await await_until(lambda: pipeline.buffered_samples == 3 and pipeline.buffered_events == 1)
+    await redis_client.publish(channel_mpc_state(5, "b1"), mpc_state().model_dump_json())
+    await await_until(
+        lambda: (
+            pipeline.buffered_samples,
+            pipeline.buffered_events,
+            pipeline.buffered_mpc_samples,
+        )
+        == (3, 1, 1)
+    )
 
     await pipeline.flush()
 
-    assert writes == ["events", "samples"]
+    assert writes == ["events", "samples", "mpc_samples"]
 
 
 async def test_buffer_de_eventos_cheio_forca_o_flush(
@@ -333,3 +368,65 @@ async def test_falha_ao_assinar_nao_vaza_inscricao_nem_conexao(
 
     await await_until(liberou)
     await pipeline.stop()  # sem task nem pubsub pendentes, o desmonte é no-op
+
+
+async def test_mpc_state_publicado_gera_uma_linha_por_var(
+    redis_client, session_factory, make_pipeline
+):
+    """spec F5 §2.2-1: uma linha por `var_id`; `sp` NULL fora de CV; flow/block do canal."""
+    await make_pipeline(session_factory)
+    state = mpc_state(vars={"mv_a": MpcVarState(v=5.0), "cv_b": MpcVarState(v=10.0, sp=12.0)})
+    await redis_client.publish(channel_mpc_state(59, "blk1"), state.model_dump_json())
+
+    await wait_rows(session_factory, mpc_samples_table, 2)
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(mpc_samples_table).order_by(mpc_samples_table.c.var_id)
+            )
+        ).all()
+
+    by_var = {row.var_id: row for row in rows}
+    assert by_var["mv_a"].sp is None
+    assert by_var["cv_b"].sp == 12.0
+    assert (by_var["mv_a"].v, by_var["cv_b"].v) == (5.0, 10.0)
+    for row in rows:
+        # ts vem do payload (âncora de gravação, spec F5 §2.1-1); flow/block, do canal.
+        assert (row.ts, row.flow_id, row.block_id, row.auto) == (state.ts, 59, "blk1", True)
+
+
+async def test_mpc_state_grava_em_todos_os_modos_com_auto_derivado(
+    redis_client, session_factory, make_pipeline
+):
+    """spec F5 §2.3-4: grava fora de AUTO também; `auto` deriva de `modes`, nunca do solver."""
+    await make_pipeline(session_factory)
+    state = mpc_state(local_remote="local", man_auto="man")
+    await redis_client.publish(channel_mpc_state(3, "b1"), state.model_dump_json())
+
+    await wait_rows(session_factory, mpc_samples_table, 1)
+    async with session_factory() as session:
+        row = (await session.execute(select(mpc_samples_table))).one()
+
+    assert row.auto is False
+
+
+async def test_payload_mpc_malformado_nao_derruba_o_pipeline(
+    redis_client, session_factory, make_pipeline
+):
+    await make_pipeline(session_factory)
+    channel = channel_mpc_state(9, "b1")
+    await redis_client.publish(channel, "{lixo")
+    primeira = mpc_state()
+    await redis_client.publish(channel, primeira.model_dump_json())
+    await wait_rows(session_factory, mpc_samples_table, 1)
+
+    # o loop segue vivo depois do descarte
+    segunda = mpc_state(offset=1, vars={"mv_a": MpcVarState(v=99.0)})
+    await redis_client.publish(channel, segunda.model_dump_json())
+    await wait_rows(session_factory, mpc_samples_table, 2)
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(select(mpc_samples_table).order_by(mpc_samples_table.c.ts))
+        ).all()
+    assert [r.v for r in rows] == [primeira.vars["mv_a"].v, segunda.vars["mv_a"].v]
