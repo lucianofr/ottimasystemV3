@@ -1,8 +1,8 @@
-"""Rotas `/api/operate` — modo, SP e MV do bloco MPC (spec F4 §6.1, plano F4b tarefa 3.1).
+"""Rotas `/api/operate` — modo, SP e MV do bloco MPC (spec F4 §6.1; emenda §1.3-3).
 
-A API valida só forma e faixa contra o `graph_json` (Regra do Estado Publicado): não conhece
-o modo vigente, então "flow existe" / "bloco é mpc" / faixa entram no mesmo canal 422 pt-BR
-string única das demais reprovações de domínio (spec §6.1, brief da tarefa). Sucesso publica
+A API valida forma e faixa contra o `graph_json` (Regra do Estado Publicado): não conhece o
+modo vigente. Flow inexistente é 404 (mesma constante de `flows.py`, decisão A-9); "bloco é
+mpc" / faixa / categoria seguem no canal 422 pt-BR string única (spec §6.1). Sucesso publica
 `FlowCommand` em `flow.commands` e responde 202 sem emitir evento (§4.8) — o runtime audita.
 
 O cenário (`_cenario`) sempre nasce com `admin_headers` (PUT do grafo exige admin, F3 §5.1);
@@ -286,13 +286,13 @@ async def test_mode_valor_invalido_422(client, admin_headers, operator_headers, 
     assert await comandos() == []
 
 
-async def test_mode_flow_inexistente_422(client, operator_headers, comandos):
+async def test_mode_flow_inexistente_404(client, operator_headers, comandos):
     r = await client.post(
         "/api/operate/999999/m1/mode",
         json={"axis": "local_remote", "value": "remote"},
         headers=operator_headers,
     )
-    assert r.status_code == 422
+    assert r.status_code == 404
     assert "Flow" in _mensagem(r)
     assert await comandos() == []
 
@@ -335,6 +335,17 @@ async def test_mode_nao_emite_evento(client, admin_headers, operator_headers, co
 
 
 # --------------------------------------------------------------------------------- /sp
+
+
+async def test_sp_flow_inexistente_404(client, operator_headers, comandos):
+    r = await client.post(
+        "/api/operate/999999/m1/sp",
+        json={"var_id": "cv_a", "value": 100.0},
+        headers=operator_headers,
+    )
+    assert r.status_code == 404
+    assert "Flow" in _mensagem(r)
+    assert await comandos() == []
 
 
 async def test_sp_operator_publica_comando_202(client, admin_headers, operator_headers, comandos):
@@ -388,6 +399,17 @@ async def test_sp_var_inexistente_422(client, admin_headers, operator_headers, c
 
 
 # --------------------------------------------------------------------------------- /mv
+
+
+async def test_mv_flow_inexistente_404(client, operator_headers, comandos):
+    r = await client.post(
+        "/api/operate/999999/m1/mv",
+        json={"var_id": "mv_a", "value": 50.0},
+        headers=operator_headers,
+    )
+    assert r.status_code == 404
+    assert "Flow" in _mensagem(r)
+    assert await comandos() == []
 
 
 async def test_mv_operator_publica_comando_202(client, admin_headers, operator_headers, comandos):

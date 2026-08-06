@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_api.deps import get_db, get_redis, require_admin, require_operator
+from ottima_api.messages import MSG_FLOW_NAO_ENCONTRADO
 from ottima_core.bus import (
     CHANNEL_FLOW_COMMANDS,
     KIND_FLOW_CREATED,
@@ -40,7 +41,6 @@ router = APIRouter()
 FlowId = Annotated[int, Path(ge=1, le=MAX_BIGINT)]
 ProjectFilter = Annotated[int | None, Query(ge=1, le=MAX_BIGINT)]
 
-MSG_NAO_ENCONTRADO = "Flow não encontrado"
 MSG_NOME_EM_USO = "Nome de flow já em uso neste projeto"
 MSG_RODANDO = "Flow em execução; pare o flow antes de excluir"
 
@@ -52,7 +52,7 @@ SEPARADOR_REPROVACOES = " | "
 async def _carregar(db: AsyncSession, flow_id: int) -> Flow:
     flow = await db.get(Flow, flow_id)
     if flow is None:
-        raise HTTPException(status_code=404, detail=MSG_NAO_ENCONTRADO)
+        raise HTTPException(status_code=404, detail=MSG_FLOW_NAO_ENCONTRADO)
     return flow
 
 

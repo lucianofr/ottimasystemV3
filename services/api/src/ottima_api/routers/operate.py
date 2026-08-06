@@ -1,11 +1,11 @@
-"""Rotas `/api/operate`: modo, SP e MV do bloco MPC (spec F4 §4.8/§6.1, decisão A-2).
+"""Rotas `/api/operate`: modo, SP e MV do bloco MPC (spec F4 §4.8/§6.1, decisão A-2; emenda §1.3-3).
 
 Regra do Estado Publicado (DESIGN.md): a API não conhece o modo vigente do bloco — só valida
 forma e faixa contra o `graph_json` já persistido (sempre válido: `PUT /api/flows/{id}` só
-grava grafo que passou por `validate_graph`, spec F3 §5.2). Toda reprovação daqui — flow
-inexistente, bloco inexistente/errado, enum incompatível, var fora de categoria, valor fora
-de faixa — sai pelo mesmo canal 422 pt-BR string única (spec §6.1): estas rotas comandam,
-não identificam um recurso CRUD, então "flow existe" não é 404 aqui como em `flows.py`.
+grava grafo que passou por `validate_graph`, spec F3 §5.2). Flow inexistente é 404, mesma
+constante de `flows.py` (emenda §1.3-3, decisão A-9): identifica o recurso comandado, igual
+ao CRUD. Bloco inexistente/errado, enum incompatível, var fora de categoria e valor fora de
+faixa seguem no canal 422 pt-BR string única (spec §6.1).
 
 Sucesso publica `FlowCommand{cmd: mpc_mode|mpc_sp|mpc_mv}` em `flow.commands` e responde 202
 — nenhum evento sai daqui; quem materializa e audita (`mpc_mode_changed`/`mpc_sp_written`/
@@ -22,6 +22,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_api.deps import get_db, get_redis, require_operator
+from ottima_api.messages import MSG_FLOW_NAO_ENCONTRADO
 from ottima_core.bus import CHANNEL_FLOW_COMMANDS, FlowCommand
 from ottima_core.flowgraph import CvVar, MpcConfig, MvVar, parse_graph
 from ottima_core.models import Flow, User
@@ -41,8 +42,6 @@ _VALORES_DO_EIXO: dict[Axis, frozenset[AxisValue]] = {
     "local_remote": frozenset({"local", "remote"}),
     "man_auto": frozenset({"man", "auto"}),
 }
-
-MSG_FLOW_NAO_ENCONTRADO = "Flow não encontrado"
 
 
 class ModeCommand(BaseModel):
@@ -66,10 +65,10 @@ def _reprovado(mensagem: str) -> HTTPException:
 
 
 async def _mpc_config(db: AsyncSession, flow_id: int, block_id: str) -> MpcConfig:
-    """Bloco `mpc` tipado, ou 422 (spec §6.1)."""
+    """Bloco `mpc` tipado, ou 404 (flow inexistente) / 422 (bloco, spec §6.1)."""
     flow = await db.get(Flow, flow_id)
     if flow is None:
-        raise _reprovado(MSG_FLOW_NAO_ENCONTRADO)
+        raise HTTPException(status_code=404, detail=MSG_FLOW_NAO_ENCONTRADO)
     graph = parse_graph(flow.graph_json)
     try:
         node = graph.node(block_id)
