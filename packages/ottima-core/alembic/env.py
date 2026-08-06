@@ -18,7 +18,7 @@ if env_url:
 target_metadata = Base.metadata
 
 # Objetos criados em SQL cru na 0002 — invisíveis ao autogenerate (spec §4)
-TIMESCALE_OBJECTS = {"samples", "events", "samples_1m"}
+TIMESCALE_OBJECTS = {"samples", "events", "samples_1m", "mpc_samples", "mpc_samples_1m"}
 
 
 def include_object(object_, name, type_, reflected, compare_to):
