@@ -20,13 +20,15 @@ async def health() -> dict:
 
 
 def _fetch_worker_health(url: str) -> dict:
-    """Busca o /health de um worker; falha de rede, timeout ou corpo inválido nunca propaga
-    (spec F5 §4.2, decisão A-8): o agregador sempre responde 200 e a degradação do worker
-    fica em `up`."""
+    """Busca o /health de um worker; falha de rede, timeout, corpo não-JSON ou JSON que não é
+    objeto (lista/escalar/bool/null) nunca propaga (spec F5 §4.2, decisão A-8): o agregador
+    sempre responde 200 e a degradação do worker fica em `up`."""
     try:
         with urllib.request.urlopen(url, timeout=1) as resp:  # noqa: S310 - URL vem de Settings
             corpo = json.loads(resp.read())
     except (urllib.error.URLError, OSError, ValueError):
+        return {"up": False}
+    if not isinstance(corpo, dict):
         return {"up": False}
     return {"up": True, **corpo}
 

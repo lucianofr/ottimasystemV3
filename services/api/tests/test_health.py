@@ -18,7 +18,7 @@ async def test_health_publico(client):
 class _RespostaFalsa:
     """Simula o context manager devolvido por `urllib.request.urlopen`."""
 
-    def __init__(self, corpo: dict) -> None:
+    def __init__(self, corpo: object) -> None:
         self._bytes = json.dumps(corpo).encode()
 
     def __enter__(self) -> "_RespostaFalsa":
@@ -31,7 +31,7 @@ class _RespostaFalsa:
         return self._bytes
 
 
-def _monkeypatch_urlopen(monkeypatch, respostas: dict) -> None:
+def _monkeypatch_urlopen(monkeypatch, respostas: dict[str, object]) -> None:
     """`respostas[url]` é um dict (sucesso) ou uma exceção (erro/timeout) a levantar."""
 
     def _fake_urlopen(url: str, timeout: float | None = None) -> _RespostaFalsa:
@@ -77,6 +77,31 @@ async def test_workers_erro_e_timeout_viram_up_false_sem_derrubar_o_200(
             test_settings.health_url_opc_worker: corpo_opc,
             test_settings.health_url_flow_runtime: urllib.error.URLError("conexão recusada"),
             test_settings.health_url_recorder: TimeoutError("tempo esgotado"),
+        },
+    )
+
+    r = await client.get("/api/health/workers", headers=operator_headers)
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["opc_worker"] == {"up": True, **corpo_opc}
+    assert body["flow_runtime"] == {"up": False}
+    assert body["recorder"] == {"up": False}
+
+
+async def test_workers_corpo_json_nao_objeto_vira_up_false_sem_derrubar_o_200(
+    client, operator_headers, monkeypatch, test_settings
+):
+    """`json.loads` de um corpo válido mas não-objeto (lista/string/bool/null) não pode
+    estourar o merge `{"up": True, **corpo}` com TypeError; assim como erro/timeout, vira
+    `{"up": False}` sem derrubar o 200 do agregador (spec F5 §4.2, decisão A-8)."""
+    corpo_opc = {"status": "ok", "service": "opc-worker", "version": "0.1.0"}
+    _monkeypatch_urlopen(
+        monkeypatch,
+        {
+            test_settings.health_url_opc_worker: corpo_opc,
+            test_settings.health_url_flow_runtime: [1, 2, 3],
+            test_settings.health_url_recorder: "ok",
         },
     )
 
