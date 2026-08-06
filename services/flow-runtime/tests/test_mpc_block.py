@@ -310,6 +310,58 @@ async def test_solver_status_nao_e_ok_antes_do_primeiro_resultado_real() -> None
 
 
 # --------------------------------------------------------------------------------------
+# 1c. `building` publicado em QUALQUER modo, precedendo `idle` (tarefa 4.1, F5a; spec F5
+#     §6.2 — emenda F4 §4.2/§5.1). Antes desta tarefa, `_build_state` forçava `idle` fora
+#     de AUTO sem checar `host.ready` — o operador não tinha nenhum estado publicado que
+#     explicasse a janela de boot do worker em LOCAL/REMOTO+MAN (deploy nasce sempre LOCAL,
+#     RNF-03).
+# --------------------------------------------------------------------------------------
+
+
+async def test_building_publicado_em_local_quando_host_ainda_nao_esta_pronto() -> None:
+    block, host, _, publish, _, _ = _block()
+    host.ready = False
+    await block.step(entradas(20.0))
+    assert publish.states[-1].status.solver == "building"
+
+
+async def test_transicao_building_para_idle_em_local_quando_host_fica_pronto() -> None:
+    block, host, _, publish, _, _ = _block()
+    host.ready = False
+    await block.step(entradas(20.0))
+    assert publish.states[-1].status.solver == "building"
+
+    host.ready = True
+    await block.step(entradas(20.0))
+    assert publish.states[-1].status.solver == "idle"
+
+
+async def test_transicao_building_para_ok_em_auto_quando_host_fica_pronto() -> None:
+    """A mesma emenda vale em AUTO — este caminho já funcionava antes da tarefa (reforço
+    de não-regressão do reordenamento em `_build_state`): `building` enquanto o host não
+    está pronto mesmo já armado REMOTO+AUTO, `idle` sem plano aplicado, `ok` só depois do
+    primeiro `SolveResult` genuíno (espelha `test_solver_status_nao_e_ok_antes_do_
+    primeiro_resultado_real`, partindo de um host ainda não pronto)."""
+    block, host, _, publish, _, _ = _block()
+    host.ready = False
+    host.accept = False  # `MpcHost.dispatch()` real recusa sem `ready` — espelha o double
+    await _entra_remoto_auto(block)
+    assert publish.states[-1].status.solver == "building"
+
+    await block.step(entradas(20.0))  # fronteira: host ainda não pronto, dispatch recusado
+    assert publish.states[-1].status.solver == "building"
+
+    host.ready = True
+    host.accept = True
+    await block.step(entradas(20.0))  # fronteira: host pronto, dispara o solve sem resultado
+    assert publish.states[-1].status.solver == "idle"
+
+    host.pending = _resultado_ok({"mv_pid": 33.0, "mv_direto": -4.0})
+    await block.step(entradas(20.0))  # fronteira seguinte: consome o resultado real
+    assert publish.states[-1].status.solver == "ok"
+
+
+# --------------------------------------------------------------------------------------
 # 2. Aplicar-na-fronteira: resultado NUNCA muda porta no meio da varredura (RF-401)
 # --------------------------------------------------------------------------------------
 

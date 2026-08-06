@@ -116,6 +116,13 @@ class _FlowRuntime:
     hosts: dict[str, MpcHost] = field(default_factory=dict)
     """`block_id -> MpcHost`, só dos blocos `mpc` (plano F4b, tarefa 2.2) — o supervisor é
     dono do ciclo de vida deles."""
+    mpc_boot_tasks: set[asyncio.Task[None]] = field(default_factory=set)
+    """Tasks de `MpcOrchestrator.start_host_background` (spec F5 §6.1, tarefa 4.1 F5a —
+    F-1): `host.start()` roda em segundo plano, fora do lock; a referência mora aqui
+    (mesmo idioma de `mpc_watchdogs` abaixo) para o event loop nunca segurar só a
+    referência fraca de `asyncio.create_task` — `MpcHost.stop()` já espera o boot em voo
+    por conta própria (`mpc/host.py`), então nada aqui precisa cancelar/aguardar por fora;
+    é só o que evita a task desaparecer no meio."""
     mpc_write_opc: Any = None
     """`write_opc` com `conn_id` já resolvido (`definition._make_write_opc`) — reusado para
     escrever `mode_cmd` fora do `step()` do bloco (transições §4.4/§4.5)."""
@@ -290,11 +297,8 @@ class Supervisor:
                 )
                 return
 
-        for host in staged.hosts.values():
-            await host.start()
-
         task = FlowTask(staged.definition, redis_client=self._redis)
-        self._runtimes[flow_id] = _FlowRuntime(
+        runtime = _FlowRuntime(
             task=task,
             ts_seconds=staged.ts_seconds,
             updated_at=flow.updated_at,
@@ -303,6 +307,13 @@ class Supervisor:
             hosts=staged.hosts,
             mpc_write_opc=staged.mpc_write_opc,
         )
+        self._runtimes[flow_id] = runtime
+        # F-1 (spec F5 §6.1, tarefa 4.1 F5a): `host.start()` sai do caminho síncrono do
+        # lock global — estagia e retorna; o build (spawn + montagem do-mpc) roda em
+        # segundo plano e o flow varre desde a 1a fronteira, publicando `building` (§6.2)
+        # até o host ficar pronto.
+        for host in staged.hosts.values():
+            self._mpc.start_host_background(runtime, host)
         self._state.track(flow_id, task)
         await task.start(user=command.user)
         await publish_flow_deployed(self._redis, flow_id=flow_id, user=command.user)

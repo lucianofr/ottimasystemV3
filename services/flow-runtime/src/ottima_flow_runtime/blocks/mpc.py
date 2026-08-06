@@ -605,10 +605,16 @@ class MpcBlock(Block):
         for mv_id in self._mv_ids:
             var_state[mv_id] = MpcVarState(v=self._mv_last.get(mv_id, 0.0))
 
-        if not auto:
-            solver: _SolverStatus | Literal["building", "idle"] = "idle"
-        elif not self._host.ready:
-            solver = "building"
+        if not self._host.ready:
+            # spec F5 §6.2 (emenda F4 §4.2/§5.1, tarefa 4.1 F5a — F-1): `building` precede
+            # `idle` em QUALQUER modo, LOCAL/REMOTO+MAN inclusive — não só AUTO. `idle`
+            # fica reservado a "worker pronto e ocioso fora de AUTO". Antes desta tarefa o
+            # `not auto` abaixo saía primeiro e forçava `idle` sem olhar `host.ready`: como
+            # o deploy nasce sempre LOCAL (RNF-03), `building` nunca era alcançado — o
+            # operador não tinha nenhum estado publicado que explicasse a janela de boot.
+            solver: _SolverStatus | Literal["building", "idle"] = "building"
+        elif not auto:
+            solver = "idle"
         elif self._solver_status == "ok" and self._plan is None:
             # Defesa em profundidade (achado da tarefa 4.2): "ok" sem `_plan` aplicado
             # seria o rótulo sem evidência — mantém o valor honesto anterior (o padrão

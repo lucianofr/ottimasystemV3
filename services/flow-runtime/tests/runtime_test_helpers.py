@@ -57,6 +57,11 @@ SLOW_POLL_S = 60.0
 FAST_POLL_S = 0.05
 # Janela para provar que algo NÃO acontece (cobre várias passadas do poll curto e 1 Ts).
 QUIET_WINDOW_S = 0.8
+# Atraso real e finito do boot de `mpc_host_slow_build_worker` (tarefa 4.1, F5a — F-1):
+# bem além de `AWAIT_TIMEOUT_S` (a janela em que os testes provam "ainda building"/"não
+# bloqueou outro flow" precisa fechar ANTES do host ficar pronto), mas dentro do
+# `_BOOT_TIMEOUT_S` real de 30 s (o handshake tem de chegar, não estourar o deadline).
+MPC_SLOW_BUILD_DELAY_S = 7.0
 
 
 # --------------------------------------------------------------------------------------
@@ -544,3 +549,35 @@ def mpc_host_never_ready_worker(conn: Connection, config_json: str, ts_flow: flo
 
     while True:
         time.sleep(3600)
+
+
+def mpc_host_slow_build_worker(conn: Connection, config_json: str, ts_flow: float) -> None:
+    """Atraso real e finito (`MPC_SLOW_BUILD_DELAY_S`) antes do handshake `("ready", n_x)`
+    — prova o boot assíncrono do host MPC (spec F5 §6.1/§6.2, tarefa 4.1 F5a — F-1): fica
+    "building" por um tempo bem além de `AWAIT_TIMEOUT_S`, mas termina o boot de verdade
+    (ao contrário de `mpc_host_never_ready_worker`) e passa a ecoar `status=ok` com
+    `u_plan = u_applied` do próprio pedido — mesmo corpo de `mpc_host_echo_plan_worker`,
+    só com o atraso na frente."""
+    import time
+
+    time.sleep(MPC_SLOW_BUILD_DELAY_S)
+    conn.send(("ready", 1))
+    try:
+        while True:
+            request = conn.recv()
+            if request is None:
+                return
+            conn.send(
+                SolveResult(
+                    u_plan=dict(request.u_applied),
+                    prediction_t=[],
+                    prediction_cv=[],
+                    prediction_mv=[],
+                    cost=0.0,
+                    status="ok",
+                    wall_ms=1.0,
+                    detail="",
+                )
+            )
+    except (EOFError, OSError):
+        return

@@ -22,6 +22,7 @@ from ottima_core.bus import KIND_MPC_ARM_FAILED, KIND_MPC_SHED, FlowCommand, pub
 from .blocks.mpc import MpcBlock
 from .definition import StagedDefinition
 from .events import mpc_block_origin
+from .mpc.host import MpcHost
 from .mpc_arming import watch_arm, write_mode_cmd
 from .script_pool import ScriptPool
 from .snapshot import ValueSnapshot
@@ -293,6 +294,29 @@ class MpcOrchestrator:
             payload=payload,
         )
 
+    # ----------------------------------------------------------------------------------
+    # Ciclo de vida do host MPC (spec F5 §6.1, tarefa 4.1 F5a — F-1: boot assíncrono)
+    # ----------------------------------------------------------------------------------
+
+    def start_host_background(self, runtime: _FlowRuntime, host: MpcHost) -> None:
+        """Sobe `host.start()` como task de fundo, FORA do caminho síncrono do lock global
+        do supervisor: quem chama (`Supervisor._deploy`/`reconcile_mpc_hosts`, os DOIS
+        caminhos que montam `MpcHost`, spec F5 §6.1) estagia e retorna sem pagar o build
+        (spawn + montagem do-mpc) — o flow varre desde a 1a fronteira, publicando
+        `building` (spec F5 §6.2, `blocks/mpc.py::_build_state`) até o host ficar pronto.
+
+        A task entra em `runtime.mpc_boot_tasks` (mesmo idioma de `mpc_watchdogs` logo
+        abaixo, e do `self._background` interno do próprio `MpcHost`): sem guardar a
+        referência o event loop só segura a fraca de `asyncio.create_task`, que pode sumir
+        no meio (docs do stdlib). `host.start()` nunca levanta — boot falho vira log e
+        `ready` permanece `False` (`mpc/host.py::_spawn_and_wait_ready`) — então não
+        precisa de tratamento de exceção aqui; e `MpcHost.stop()` já espera sozinho o boot
+        em voo antes de desligar o processo (`mpc/host.py::stop`), então nada aqui
+        precisa cancelar ou aguardar essa task por fora."""
+        task = asyncio.get_running_loop().create_task(host.start())
+        runtime.mpc_boot_tasks.add(task)
+        task.add_done_callback(runtime.mpc_boot_tasks.discard)
+
     async def shutdown_mpc(self, runtime: _FlowRuntime, *, flow_id: int) -> None:
         """Devolve o PID (`mode_cmd=auto`) de todo bloco MPC armado e mata os workers da
         tarefa — chamado ANTES de `task.stop()` em todo caminho de parada exceto
@@ -347,7 +371,7 @@ class MpcOrchestrator:
         new_hosts = staged.hosts
         for block_id, host in new_hosts.items():
             if old_hosts.get(block_id) is not host:
-                await host.start()
+                self.start_host_background(runtime, host)
         swapped: list[str] = []
         for block_id, old_host in old_hosts.items():
             if new_hosts.get(block_id) is old_host:
