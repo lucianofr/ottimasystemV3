@@ -72,3 +72,45 @@ async def test_duas_reprovacoes_usa_so_a_primeira(client, admin_headers, operato
     detail = r.json()["detail"]
     assert isinstance(detail, str), detail
     assert detail == "body.axis: valor inválido; esperado um de: local_remote, man_auto"
+
+
+async def test_corpo_json_malformado_detail_string_traduzida(
+    client, admin_headers, operator_headers
+):
+    """Corpo que nem chega a ser JSON válido — `json_invalid` do Pydantic vira string pt-BR,
+    sem vazar a mensagem de decodificação em inglês do parser."""
+    flow_id, block_id = await _cenario(client, admin_headers, "JsonInvalido")
+    r = await client.post(
+        f"/api/operate/{flow_id}/{block_id}/mode",
+        content=b"{invalido",
+        headers={**operator_headers, "content-type": "application/json"},
+    )
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert isinstance(detail, str), detail
+    assert detail.endswith(": corpo JSON inválido"), detail
+    assert "decode" not in detail.lower()
+
+
+async def test_query_param_invalido_detail_string_traduzida(client, operator_headers):
+    """`severity` fora de `info|warning|alarm` em `GET /api/events` — reprovação de query,
+    não de corpo; mesmo contrato de string pt-BR."""
+    r = await client.get("/api/events", params={"severity": "grave"}, headers=operator_headers)
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert isinstance(detail, str), detail
+    assert detail == "query.severity: valor inválido; esperado um de: info, warning, alarm"
+
+
+async def test_path_param_invalido_detail_string_traduzida(client, operator_headers):
+    """`flow_id` abaixo do mínimo (`Path(ge=1)`) — reprovação de path, não de corpo; mesmo
+    contrato de string pt-BR."""
+    r = await client.post(
+        "/api/operate/0/m1/mode",
+        json={"axis": "local_remote", "value": "local"},
+        headers=operator_headers,
+    )
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert isinstance(detail, str), detail
+    assert detail == "path.flow_id: deve ser maior ou igual a 1"

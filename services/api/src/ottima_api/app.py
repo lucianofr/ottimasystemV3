@@ -17,8 +17,9 @@ from ottima_core.db import create_engine, create_session_factory
 from ottima_core.logging import setup_logging
 
 # Motivo pt-BR por `type` de erro do Pydantic v2 (spec F5 §4.3-1, decisão A-9, dívida F4).
-# Só os tipos que realmente aparecem nos schemas do serviço (Literal, Field(min_length=...),
-# Field(ge=/le=...), campo obrigatório e `model_validator` com `ValueError` pt-BR já pronto).
+# Cobre os tipos que aparecem nos schemas do serviço (Literal, Field(min_length=...),
+# Field(ge=/le=...), campo obrigatório, `model_validator` com `ValueError` pt-BR já pronto)
+# e `json_invalid`, do corpo malformado antes mesmo de chegar ao schema.
 _MOTIVO_POR_TIPO = {
     "missing": lambda erro: "campo obrigatório",
     "string_too_short": lambda erro: f"mínimo de {erro['ctx']['min_length']} caractere(s)",
@@ -34,6 +35,7 @@ _MOTIVO_POR_TIPO = {
     "bool_parsing": lambda erro: "deve ser verdadeiro ou falso",
     "bool_type": lambda erro: "deve ser verdadeiro ou falso",
     "string_type": lambda erro: "deve ser um texto",
+    "json_invalid": lambda erro: "corpo JSON inválido",
 }
 
 
