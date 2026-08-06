@@ -105,6 +105,8 @@ O config vive inteiro no nó React Flow, como Script/TFS (export/import e hot-sw
 
 1. **`MpcWorker` — processo dedicado por bloco MPC** (decisão A-3; mesmo fundamento do ProcessPool do Script, F3 decisão #4, com afinidade obrigatória: o modelo não é picklável). Spawn no deploy do flow; build assíncrono (o flow varre desde já; `status.solver = "building"` até pronto). Por execução viaja `{y_medidos, u_aplicados, DVs, SPs, faixas}` → `{plano de MV, predição, custo, status, wall_ms}`. Estado (x, bias, u_prev, warm start) mora no worker. Kill ⇒ respawn ⇒ rebuild ⇒ re-init bumpless (§3.6). Segfault do IPOPT é falha isolada do bloco, nunca do runtime (ADR-004 satisfeito no espírito: o event loop jamais bloqueia).
 2. **Cadência e orçamento (RF-606/624, ADR-014):** fronteira de execução = varreduras com `n mod multiplier = 0`. Em AUTO, o `step()` **dispara** o solve na fronteira e **nunca espera**; o resultado aplica na primeira fronteira de varredura após concluir (a tabela de portas só muda em fronteira — determinismo do RF-401 preservado). Deadline **70% × Ts_mpc** medido do disparo: estourou ⇒ kill + respawn em background + `overruns++` + `mpc_overrun` (dedupe por período, padrão `flow_overrun`) + mantém última MV + pula (nunca acumula fila). Worker indisponível na fronteira seguinte ⇒ conta overrun e pula, sem novo evento. Entre execuções as saídas seguram o último valor (RF-606). Fora de AUTO o worker fica ocioso; `prediction` vazia e `status.solver = "idle"`.
+
+> Nota (spec F5 §6.2): a frase "fora de AUTO ... status.solver = "idle"" fica emendada — status.solver = "building" é publicado sempre que o host MPC não estiver pronto, em qualquer modo, precedendo idle (ver §5.1).
 3. **Saída MV por modo (RF-621/622/623):** LOCAL → tracking do readback (com `pid`; via `ValueSnapshot`) ou hold de `initial_value`/último valor (sem `pid`); REMOTO+MAN → valor manual clampado em `limits`; REMOTO+AUTO → último plano aplicado. Com `pid`, publica em `opc.writes` **a cada varredura do flow** (`source = flow:<fid>/block:<bid>`, padrão F3 §3.2) — em LOCAL não escreve **nada** (RF-621); o gate de watchdog/modo do opc-worker (F2) permanece a última barreira (RNF-03).
 4. **Transições (tabela normativa):**
 
@@ -147,13 +149,13 @@ O config vive inteiro no nó React Flow, como Script/TFS (export/import e hot-sw
 - Ordem das linhas de `prediction.cv[][]` = CVs na ordem do config, depois Restrições; `mv[][]` = MVs na ordem do config; `t[]` em segundos relativos a "agora" (0, Ts_mpc, …, Np×Ts_mpc). Fora de AUTO, `prediction` vazia (`t: []`). O consumidor mapeia pela ordem do `graph_json` — nenhuma chave além do PRD.
 - O stub `MpcState` do `bus.py` (F3) refina `vars` para o objeto acima — a forma externa do PRD (`{modes, status, vars, cost, prediction}`) não muda.
 
-> Nota (spec F5 §6.2): emenda a F4 §4.2 (item 2 — "fora de AUTO... `status.solver = "idle"`") e §5.1 (enum `solver`) — `status.solver = "building"` passa a ser publicado sempre que o host MPC não estiver pronto, em qualquer modo, precedendo `idle` (spec F5 §6.2).
+> Nota (spec F5 §6.2): emenda a F4 §4.2 (item 2 — "fora de AUTO... `status.solver = "idle"`") e §5.1 (enum `solver`) — `status.solver = "building"` passa a ser publicado sempre que o host MPC não estiver pronto, em qualquer modo, precedendo `idle`.
 
 ### 5.2 Publicação
 
 A cada execução do MPC (cadência Ts_mpc, inclusive fora de AUTO — modos/valores vivos) **e** imediatamente em: mudança de modo, escrita de SP/MV materializada, transição de `status.solver`. Fire-and-forget (RNF-05). **Recorder ignora `mpc.state`** — predições nunca persistidas (ADR-016).
 
-> Nota (spec F5 §2.2-7): a frase "Recorder ignora `mpc.state`" está revogada — o recorder passa a assinar `mpc.state`; a proibição de persistir predição/custo/status permanece em vigor (spec F5 §2.2-7).
+> Nota (spec F5 §2.2-7): a frase "Recorder ignora `mpc.state`" está revogada — o recorder passa a assinar `mpc.state`; a proibição de persistir predição/custo/status permanece em vigor.
 
 ### 5.3 Vocabulário `kind` novo (extensão da tabela F3 §4.3; `origin = flow:<fid>/block:<bid>`; `user` no payload quando houver comandante — emenda F3 de 2026-08-04)
 
@@ -167,7 +169,7 @@ A cada execução do MPC (cadência Ts_mpc, inclusive fora de AUTO — modos/val
 | `mpc_arm_failed` | warning | `{axis, reason: no_confirm\|worker_not_ready\|cold_input\|invalid_input}` |
 | `mpc_input_invalid` | warning | solve pulado por entrada inválida; dedupe |
 
-> Nota (spec F5 §7.2-2): tabela ganha linha nova `script_recovered` (severity info), publicada no rearme do latch do Script após `script_timeout`/`script_error` (spec F5 §7.2-2).
+> Nota (spec F5 §7.2-2): tabela ganha linha nova `script_recovered` (severity info), publicada no rearme do latch do Script após `script_timeout`/`script_error`.
 
 ---
 
@@ -183,7 +185,7 @@ A cada execução do MPC (cadência Ts_mpc, inclusive fora de AUTO — modos/val
 
 A API valida forma e faixa e publica `flow.commands`; **não** conhece o modo vigente (isso é estado publicado) — o runtime re-valida (§4.8) e é quem audita. Nenhum evento emitido pela API.
 
-> Nota (spec F5 §4.3-2): flow inexistente passa a responder 404 (`Flow não encontrado`), não mais 422, alinhado à convenção dos demais routers (spec F5 §4.3-2).
+> Nota (spec F5 §4.3-2): flow inexistente passa a responder 404 (`Flow não encontrado`), não mais 422, alinhado à convenção dos demais routers.
 
 ### 6.2 WebSocket `/ws` (mesmo protocolo da F3 §5.3)
 
