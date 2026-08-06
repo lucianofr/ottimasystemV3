@@ -1,4 +1,11 @@
 import type { Edge, Node, XYPosition } from "@xyflow/react";
+import {
+  PORT_CONTRACTS,
+  type ContratoPortaDinamica,
+  type DirecaoPorta,
+  type RegraPortaDinamica,
+} from "../../lib/contracts.gen";
+import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
 
 /**
  * Modelo do grafo do editor + as regras que o editor espelha do servidor.
@@ -13,17 +20,27 @@ import type { Edge, Node, XYPosition } from "@xyflow/react";
  * isso nenhum estado de interface pode morar ali.
  */
 
-export const TIPOS_BLOCO = ["opc_read", "opc_write", "script", "tfs"] as const;
+export const TIPOS_BLOCO = ["opc_read", "opc_write", "script", "tfs", "mpc"] as const;
 export type TipoBloco = (typeof TIPOS_BLOCO)[number];
 
-/** Teto de portas do bloco Script (spec F3 §3.3). */
-export const MAX_PORTAS_SCRIPT = 8;
+function tetoDoContrato(regra: RegraPortaDinamica): number {
+  if (regra.max === undefined) throw new Error("contrato de porta dinâmica sem teto (max)");
+  return regra.max;
+}
+
+const contratoScript: ContratoPortaDinamica | (typeof PORT_CONTRACTS)["script"] = PORT_CONTRACTS.script;
+if (!contratoScript.dynamic) throw new Error("contrato do script deveria ser dinâmico");
+
+/** Teto de portas do bloco Script — do contrato gerado (`MAX_SCRIPT_PORTS`, spec F3 §3.3),
+ *  fonte única com `flowgraph.py` (minor 0.2, plano F4a: fecha a cópia local duplicada). */
+export const MAX_PORTAS_SCRIPT = tetoDoContrato(contratoScript.rules[0]);
 
 export const ROTULO_BLOCO: Record<TipoBloco, string> = {
   opc_read: "Leitura OPC",
   opc_write: "Escrita OPC",
   script: "Script",
   tfs: "TFS",
+  mpc: "MPC",
 };
 
 export type TipoDadoTag = "float" | "int" | "bool";
@@ -50,7 +67,80 @@ export type MatrizTfs = [LinhaTfs, LinhaTfs];
 
 export type DadosTfs = DadosBase & { matrix: MatrizTfs };
 
-export type DadosBloco = DadosTag | DadosScript | DadosTfs;
+export type LimitesMpc = { min: number; max: number };
+export type FaixaMpc = { low: number; high: number };
+export type ValoresModoPid = { auto: number; target: number };
+export type ModoAlvoPid = "rcas" | "cas" | "rout";
+
+/** Tags do PID de uma MV (spec F4 §2.1-3, RF-604); ausente ⇒ MV "direta" (decisão A-8). */
+export type PidMv = {
+  write_tag_id: number;
+  target_mode: ModoAlvoPid;
+  mode_cmd_tag_id: number;
+  mode_read_tag_id: number | null;
+  readback_tag_id: number;
+  mode_values: ValoresModoPid;
+};
+
+export type VariavelMv = {
+  id: string;
+  name: string;
+  eu: string;
+  limits: LimitesMpc;
+  du_max: number;
+  initial_value: number;
+  pid: PidMv | null;
+};
+
+/** `kind` da linha (CV ou Restrição) define a forma dos `params` do par na matriz `models`
+ *  (spec F4 §2.1-2): `selfreg` → SOPDT, `integrating` → IOPDT. */
+export type TipoLinhaMpc = "selfreg" | "integrating";
+
+export type VariavelCv = {
+  id: string;
+  name: string;
+  eu: string;
+  kind: TipoLinhaMpc;
+  tss: number;
+  weight: number;
+  sp_limits: LimitesMpc;
+};
+
+export type VariavelRestricao = {
+  id: string;
+  name: string;
+  eu: string;
+  kind: TipoLinhaMpc;
+  tss: number;
+  range: FaixaMpc;
+  priority: number;
+};
+
+export type VariavelDv = { id: string; name: string; eu: string };
+
+/** Espelho de `MpcVariables` (spec F4 §2.1): entradas do nó = cvs+constraints+dvs, saída =
+ *  mvs, sempre nesta ordem (decisão A-10, `validate.py::_input_handles`/`_output_handles`). */
+export type VariaveisMpc = {
+  mvs: VariavelMv[];
+  cvs: VariavelCv[];
+  constraints: VariavelRestricao[];
+  dvs: VariavelDv[];
+};
+
+/** Par `models[linha][coluna]` (spec F4 §2.1-2); `params` genérico — a forma exata por
+ *  `kind` da linha é validação do modal (tarefa 4.2), fora do escopo desta tarefa. */
+export type ParModeloMpc = { enabled: boolean; params: Record<string, number> };
+
+/** Espelho de `MpcConfig` (spec F4 §2.1, `mpc_config.py`): `name`/`multiplier` são chaves do
+ *  config, distintas de `label` (rótulo genérico de exibição que todo bloco tem). */
+export type DadosMpc = DadosBase & {
+  name: string;
+  multiplier: number;
+  variables: VariaveisMpc;
+  models: Record<string, Record<string, ParModeloMpc>>;
+};
+
+export type DadosBloco = DadosTag | DadosScript | DadosTfs | DadosMpc;
 
 /** `type` é opcional em `Node`; aqui ele é o discriminante e nunca falta. */
 type Bloco<D extends Record<string, unknown>, T extends TipoBloco> = Node<D, T> & { type: T };
@@ -59,8 +149,9 @@ export type NoLeitura = Bloco<DadosTag, "opc_read">;
 export type NoEscrita = Bloco<DadosTag, "opc_write">;
 export type NoScript = Bloco<DadosScript, "script">;
 export type NoTfs = Bloco<DadosTfs, "tfs">;
+export type NoMpc = Bloco<DadosMpc, "mpc">;
 
-export type BlocoNode = NoLeitura | NoEscrita | NoScript | NoTfs;
+export type BlocoNode = NoLeitura | NoEscrita | NoScript | NoTfs | NoMpc;
 
 /** Toda aresta do editor nasce de um par de handles resolvidos; `null` nunca chega ao save. */
 export type BlocoEdge = Omit<Edge, "sourceHandle" | "targetHandle"> & {
@@ -79,33 +170,32 @@ export function portasScript(prefixo: "IN" | "OUT", quantidade: number): string[
   return Array.from({ length: quantidade }, (_, i) => `${prefixo}${String(i + 1)}`);
 }
 
-export const PORTAS_TFS_ENTRADA = ["u1", "u2"];
-export const PORTAS_TFS_SAIDA = ["y1", "y2"];
+/** Portas fixas do tipo (nome só, na direção pedida) — vem de `PORT_CONTRACTS`
+ *  (`contracts.gen.ts`), fonte única com `flowgraph.py` (débito 2+4, plano F4a). Tipo
+ *  dinâmico (Script) devolve `[]` aqui: quem resolve é `portasScript`, com a contagem da
+ *  config do bloco. */
+export function portasFixas(tipo: TipoBloco, direcao: DirecaoPorta): string[] {
+  const contrato = PORT_CONTRACTS[tipo];
+  if (contrato.dynamic) return [];
+  return contrato.ports.filter((porta) => porta.direction === direcao).map((porta) => porta.name);
+}
 
+/** Entradas/saídas do MPC são dinâmicas do config, não de `PORT_CONTRACTS` (que só descreve
+ *  a *origem* da regra — spec F4 §2.1-5, decisão A-10): entradas = CVs+Restrições+DVs à
+ *  esquerda, saída = MVs à direita, na ordem do config; handle = id estável da variável. */
 export function handlesEntrada(no: BlocoNode): string[] {
-  switch (no.type) {
-    case "opc_write":
-      return ["in"];
-    case "script":
-      return portasScript("IN", no.data.n_inputs);
-    case "tfs":
-      return [...PORTAS_TFS_ENTRADA];
-    default:
-      return [];
+  if (no.type === "script") return portasScript("IN", no.data.n_inputs);
+  if (no.type === "mpc") {
+    const { cvs, constraints, dvs } = no.data.variables;
+    return [...cvs, ...constraints, ...dvs].map((variavel) => variavel.id);
   }
+  return portasFixas(no.type, "input");
 }
 
 export function handlesSaida(no: BlocoNode): string[] {
-  switch (no.type) {
-    case "opc_read":
-      return ["out"];
-    case "script":
-      return portasScript("OUT", no.data.n_outputs);
-    case "tfs":
-      return [...PORTAS_TFS_SAIDA];
-    default:
-      return [];
-  }
+  if (no.type === "script") return portasScript("OUT", no.data.n_outputs);
+  if (no.type === "mpc") return no.data.variables.mvs.map((mv) => mv.id);
+  return portasFixas(no.type, "output");
 }
 
 export type TipoPorta = "num" | "bool" | "bivalente" | "desconhecido";
@@ -125,6 +215,7 @@ const ROTULO_PORTA: Record<Exclude<TipoPorta, "desconhecido">, string> = {
 export function tipoPorta(no: BlocoNode, tags: MapaTags): TipoPorta {
   if (no.type === "script") return "bivalente";
   if (no.type === "tfs") return "num";
+  if (no.type === "mpc") return "num";
   if (no.data.tag_id === null) return "desconhecido";
   const dado = tags.get(no.data.tag_id);
   if (dado === undefined) return "desconhecido";
@@ -255,6 +346,8 @@ export function comDados(no: BlocoNode, mudanca: Partial<DadosBase>): BlocoNode 
       return { ...no, data: { ...no.data, ...mudanca } };
     case "tfs":
       return { ...no, data: { ...no.data, ...mudanca } };
+    case "mpc":
+      return { ...no, data: { ...no.data, ...mudanca } };
   }
 }
 
@@ -317,6 +410,38 @@ export function definirExecOrder(
 }
 
 // --------------------------------------------------------------------------------------
+// Inserção em grade por clique na paleta
+// --------------------------------------------------------------------------------------
+
+const COLUNAS_GRADE = 4;
+const PASSO_X_GRADE = 250;
+const PASSO_Y_GRADE = 170;
+
+function posicaoDoSlot(ancora: XYPosition, indice: number): XYPosition {
+  return {
+    x: ancora.x + (indice % COLUNAS_GRADE) * PASSO_X_GRADE,
+    y: ancora.y + Math.floor(indice / COLUNAS_GRADE) * PASSO_Y_GRADE,
+  };
+}
+
+/** Posição do próximo nó inserido por clique na paleta: primeiro slot da grade (4 colunas,
+ *  passo 250x170) sem nó ocupando a coordenada. Nunca `nodes.length`: um buraco no meio da
+ *  grade (nó excluído) faria o próximo nó colidir com o que já ocupa aquele índice, em vez
+ *  de tampar o buraco (débito m4-b, plano F4a). */
+export function proximaPosicaoNaGrade(
+  nodes: readonly BlocoNode[],
+  ancora: XYPosition,
+): XYPosition {
+  const ocupados = new Set(nodes.map((no) => `${String(no.position.x)}:${String(no.position.y)}`));
+  let indice = 0;
+  for (;;) {
+    const posicao = posicaoDoSlot(ancora, indice);
+    if (!ocupados.has(`${String(posicao.x)}:${String(posicao.y)}`)) return posicao;
+    indice++;
+  }
+}
+
+// --------------------------------------------------------------------------------------
 // Criação de blocos
 // --------------------------------------------------------------------------------------
 
@@ -358,6 +483,20 @@ export function criarBloco(
       };
     case "tfs":
       return { id, type: "tfs", position, data: { exec_order, label: "", matrix: matrizPadrao() } };
+    case "mpc":
+      return {
+        id,
+        type: "mpc",
+        position,
+        data: {
+          exec_order,
+          label: "",
+          name: "",
+          multiplier: 1,
+          variables: { mvs: [], cvs: [], constraints: [], dvs: [] },
+          models: {},
+        },
+      };
   }
 }
 
@@ -405,13 +544,13 @@ export function paraGraphJson(nodes: readonly BlocoNode[], edges: readonly Bloco
   };
 }
 
-function objeto(valor: unknown): Record<string, unknown> | null {
+export function objeto(valor: unknown): Record<string, unknown> | null {
   return typeof valor === "object" && valor !== null && !Array.isArray(valor)
     ? (valor as Record<string, unknown>)
     : null;
 }
 
-function numero(valor: unknown, padrao: number): number {
+export function numero(valor: unknown, padrao: number): number {
   return typeof valor === "number" && Number.isFinite(valor) ? valor : padrao;
 }
 
@@ -419,7 +558,11 @@ function inteiro(valor: unknown, padrao: number, minimo: number, maximo: number)
   return Math.min(Math.max(Math.trunc(numero(valor, padrao)), minimo), maximo);
 }
 
-function texto(valor: unknown, padrao: string): string {
+export function inteiroSimples(valor: unknown, padrao: number): number {
+  return Number.isInteger(valor) ? (valor as number) : padrao;
+}
+
+export function texto(valor: unknown, padrao: string): string {
   return typeof valor === "string" ? valor : padrao;
 }
 
@@ -496,6 +639,20 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
         type: tipo,
         position,
         data: { exec_order, label, matrix: lerMatriz(dados.matrix) },
+      };
+    case "mpc":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          name: texto(dados.name, ""),
+          multiplier: inteiro(dados.multiplier, 1, 1, Number.MAX_SAFE_INTEGER),
+          variables: lerVariaveisMpc(dados.variables),
+          models: lerModelosMpc(dados.models),
+        },
       };
   }
 }

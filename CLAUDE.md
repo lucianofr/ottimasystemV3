@@ -87,7 +87,9 @@ uv run ruff check . && uv run ruff format --check . # lint + formato
 cd frontend && npm run build                        # tsc --noEmit strict + bundle
 cd frontend && npm run dev                          # frontend (Vite, 127.0.0.1:5173, proxy /api e /ws -> 8080)
 cd frontend && npm run test:unit                    # checks puros do frontend (sem browser, sem backend)
-cd frontend && npm run generate:api                 # tipos do OpenAPI; exige frontend/openapi.json (gitignored)
+cd frontend && npm run generate:api                 # tipos do OpenAPI + contratos gerados; exige frontend/openapi.json (gitignored)
+cd frontend && npm run generate:contracts           # só os contratos (portas por bloco + payloads do WS) de ottima_core.contracts_export
+uv run pytest -m slow services/flow-runtime/tests   # carga do MPC (RNF-02); o run default exclui `slow` além de `e2e`
 
 # Stack. A F2 acrescentou o opcsim e as portas de host do gate: use SEMPRE os dois arquivos.
 cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 8 serviços
@@ -101,7 +103,9 @@ OTTIMA_E2E=1 bash deploy/smoke.sh                   # L1 — stack, retenção, 
 # O check de boot parado exige flow-runtime recem-subido: ele assere flows={}, e um deploy/stop
 # deixa o flow no mapa como stopped. Re-rodar o L1 depois da L2 da vermelho falso; nesse caso
 # `docker compose ... restart flow-runtime` antes.
-uv run pytest -m e2e tests/e2e -v                   # L2 — 24 cenários (5 F1 + 9 F2 + 10 F3)
+uv run pytest -m e2e tests/e2e -v                   # L2 — 34 cenários (5 F1 + 9 F2 + 10 F3 + 10 F4)
+# F4: POST /api/operate/{flow_id}/{block_id}/mode|sp|mv publica FlowCommand (202); o runtime
+# materializa e audita — a API não emite evento (spec F4 §6.1).
 cd frontend && npm run e2e                          # regressão Playwright da F1 (specs novas não)
 # A L2 e o Playwright NÃO podem rodar juntos: o E2E-16 publica project_activated duas vezes e
 # derruba os cenários E2E-F3-03/04/08. Serialize.

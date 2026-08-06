@@ -139,6 +139,20 @@ test("shutdown é o motivo do desmonte do runtime e tem tradução própria", ()
   expect(mapa.get(1)?.falha).toBe(false);
 });
 
+/** `unhandled_exception` é o motivo de `flow_failed` que o scheduler emite quando uma
+ *  exceção não tratada derruba o laço de varredura (spec F3 §4.3,
+ *  `scheduler.py:_handle_loop_failure`). Não pode cair em "motivo desconhecido" — é a
+ *  falha mais comum de bug no código do usuário. */
+test("unhandled_exception é o motivo do laço de varredura quebrado e tem tradução própria", () => {
+  const mapa = derivarUltimoEstado(
+    desc([evento(0, "flow:1", "flow_failed", "unhandled_exception")]),
+  );
+
+  expect(mapa.get(1)?.rotulo).toBe("Falha: exceção não tratada no laço de varredura");
+  expect(mapa.get(1)?.estado).toBe("falha");
+  expect(mapa.get(1)?.falha).toBe(true);
+});
+
 test("pendente é exatamente a divergência entre desejado e publicado", () => {
   const rodando = derivarUltimoEstado([evento(0, "flow:1", "flow_deployed")]).get(1);
   const parado = derivarUltimoEstado([evento(0, "flow:1", "flow_stopped", "user")]).get(1);

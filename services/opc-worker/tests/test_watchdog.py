@@ -14,8 +14,8 @@ from contextlib import asynccontextmanager
 
 from asyncua import Client
 from redis.asyncio import Redis
+from worker_test_helpers import AWAIT_TIMEOUT_S, await_until
 
-from conftest import AWAIT_TIMEOUT_S, await_until
 from opcsim import NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM, OpcSimServer
 from ottima_opc_worker.connection import ConnectionRuntime
 from ottima_opc_worker.state import ConnectionConfig, ConnectionSnapshot, ConnectionState

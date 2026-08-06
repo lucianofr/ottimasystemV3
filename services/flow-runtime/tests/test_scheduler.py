@@ -12,8 +12,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from redis.asyncio import Redis
+from runtime_test_helpers import AWAIT_TIMEOUT_S, await_until
 
-from conftest import AWAIT_TIMEOUT_S, await_until
 from ottima_core.bus import (
     CHANNEL_EVENTS,
     KIND_FLOW_FAILED,

@@ -43,6 +43,7 @@ import {
   motivoRecusa,
   paraGraphJson,
   podarArestasDoBloco,
+  proximaPosicaoNaGrade,
   proximoExecOrder,
   TIPOS_BLOCO,
   type BlocoEdge,
@@ -50,6 +51,7 @@ import {
   type MapaTags,
   type TipoBloco,
 } from "./graph";
+import { MpcModal } from "./mpc/MpcModal";
 import { TIPOS_DE_NO } from "./nodes";
 import { ContextoTags, ContextoValores, type ValoresAoVivo } from "./nodes/contexto";
 import { formatarTs, useFlow, useSaveFlow } from "./useFlows";
@@ -258,13 +260,9 @@ function Editor({ flowId }: { flowId: number }) {
       const caixa = areaRef.current?.getBoundingClientRect();
       if (caixa === undefined) return;
       const ancora = screenToFlowPosition({ x: caixa.left + 48, y: caixa.top + 48 });
-      const indice = nodes.length;
-      adicionar(tipo, {
-        x: ancora.x + (indice % 4) * 250,
-        y: ancora.y + Math.floor(indice / 4) * 170,
-      });
+      adicionar(tipo, proximaPosicaoNaGrade(nodes, ancora));
     },
-    [adicionar, nodes.length, screenToFlowPosition],
+    [adicionar, nodes, screenToFlowPosition],
   );
 
   function aoSoltar(evento: DragEvent<HTMLDivElement>): void {
@@ -480,7 +478,21 @@ function Editor({ flowId }: { flowId: number }) {
           </div>
         </div>
 
-        {noEmConfig !== null && (
+        {noEmConfig !== null && noEmConfig.type === "mpc" && (
+          <MpcModal
+            key={noEmConfig.id}
+            no={noEmConfig}
+            totalBlocos={nodes.length}
+            tags={tagsDoProjeto}
+            tsFlowSegundos={flow.data.ts_seconds}
+            podeMutar={podeMutar}
+            onAplicar={aplicarConfig}
+            onFechar={() => {
+              setEmConfig(null);
+            }}
+          />
+        )}
+        {noEmConfig !== null && noEmConfig.type !== "mpc" && (
           <ModalConfigBloco
             key={noEmConfig.id}
             no={noEmConfig}

@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 
 import pytest
 from redis.asyncio import Redis
+from runtime_test_helpers import AWAIT_TIMEOUT_S, await_until
 
-from conftest import AWAIT_TIMEOUT_S, await_until
 from ottima_core.bus import OpcValue, channel_opc_values
 from ottima_flow_runtime.snapshot import ValueSnapshot
 
@@ -65,7 +65,7 @@ async def test_ultima_publicacao_vence(redis_client, snapshot):
 
 
 async def test_conexoes_diferentes_convivem_no_mesmo_espelho(redis_client, snapshot):
-    """Prova que o `psubscribe` cobre o padrão inteiro, não um canal só."""
+    """Prova que a assinatura por padrão cobre o padrão inteiro, não um canal só."""
     await publish(redis_client, conn_id=1, tag_id=11, value=10.0)
     await publish(redis_client, conn_id=2, tag_id=22, value=20.0)
 

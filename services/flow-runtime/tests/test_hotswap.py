@@ -5,8 +5,8 @@ Critério de "bloco não alterado" é igualdade de `FlowNode.functional_config()
 por identidade de objeto — o contrato que o operador enxerga é o estado interno continuar (a
 resposta ao degrau do TFS não reinicia; o contador de varreduras do Script não volta a 1).
 
-O `state` do Script vem do pool-duplo do `conftest.py`, que devolve em `OUT1` o número de
-varreduras que aquele bloco já fez: se a instância foi trocada, `OUT1` volta a 1.
+O `state` do Script vem do pool-duplo do `runtime_test_helpers.py`, que devolve em `OUT1` o
+número de varreduras que aquele bloco já fez: se a instância foi trocada, `OUT1` volta a 1.
 """
 
 from __future__ import annotations
@@ -15,9 +15,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-from conftest import (
+from runtime_test_helpers import (
     QUIET_WINDOW_S,
     Collector,
     Harness,
@@ -28,6 +26,8 @@ from conftest import (
     create_tag,
     edge,
     graph,
+    mpc_graph_valido,
+    mpc_host_echo_worker,
     port_value,
     publish_tag_value,
     read_node,
@@ -36,6 +36,8 @@ from conftest import (
     sopdt,
     tfs_node,
 )
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from ottima_core.bus import CHANNEL_EVENTS, KIND_RELOAD_REJECTED, channel_flow_status
 
 Factory = Callable[..., Awaitable[Harness]]
@@ -316,3 +318,41 @@ async def test_troca_aplica_na_varredura_seguinte_sem_parar_o_flow(
 
     await asyncio.sleep(QUIET_WINDOW_S)
     assert harness.flow_state(flow_id) == "running"
+
+
+# --------------------------------------------------------------------------------------
+# 23: ponte de deploy [tarefa 3.1 do F4a] removida na tarefa 2.2 — hot-swap com mpc succeede
+# --------------------------------------------------------------------------------------
+
+
+async def test_staged_com_mpc_succeede_ponte_f4a_removida(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    """PONTE DE DEPLOY [tarefa 3.1 do F4a; REMOVIDA na tarefa 2.2 do F4b]: trocar o grafo
+    de um flow rodando (dois counters) para um grafo com `mpc` agora aplica normalmente —
+    sem `reload_rejected`. O invariante "hot-swap nunca derruba flow" (§4.1-5) continua
+    valendo, só que a troca em si SUCEEDE: os dois counters saem do grafo, o bloco `mpc`
+    entra, e o flow segue rodando sem reset de estado (a definição inteira, não só um
+    bloco, é nova aqui — não há `block_id` em comum entre os dois grafos para preservar)."""
+    project_id = await create_project(session_factory)
+    flow_id = await create_flow(session_factory, project_id, graph=TWO_COUNTERS)
+    connection_id = await create_connection(session_factory, project_id)
+    tag_id = await create_tag(session_factory, connection_id, direction="r")
+    events = await collect(CHANNEL_EVENTS)
+    status = await collect(channel_flow_status(flow_id))
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+
+    await harness.command("deploy", flow_id)
+    await harness.await_state(flow_id, "running", timeout_s=15.0)
+    await await_until(lambda: any((v or 0) >= 2 for v in series(status, "s1")))
+
+    await save_graph(session_factory, flow_id, mpc_graph_valido(tag_id))
+    await harness.command("reload", flow_id)
+
+    await await_until(lambda: any("m1" in scan.ports for scan in status.scans()), timeout_s=15.0)
+
+    assert events.events(KIND_RELOAD_REJECTED) == []
+    assert harness.flow_state(flow_id) == "running"
+    # A troca É de definição inteira (s1/s2 saem, m1 entra) — nenhum reset de FLOW (a
+    # task não para), mas não há `block_id` para "preservar estado" através da troca.
+    assert {scan.state for scan in status.scans()} == {"running"}

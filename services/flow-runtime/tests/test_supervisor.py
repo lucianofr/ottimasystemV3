@@ -2,7 +2,8 @@
 
 Comando entra sempre pelo barramento (`flow.commands`), nunca por chamada direta: o que está
 sob teste é o caminho que a API usa. O cenário (banco commitado, grafos, pool-duplo, fábrica
-de supervisores) vem do `conftest.py` do serviço, compartilhado com `test_hotswap.py`.
+de supervisores) vem do `runtime_test_helpers.py` do serviço, compartilhado com
+`test_hotswap.py`.
 """
 
 from __future__ import annotations
@@ -14,9 +15,7 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-from conftest import (
+from runtime_test_helpers import (
     FAST_POLL_S,
     QUIET_WINDOW_S,
     USER,
@@ -30,6 +29,8 @@ from conftest import (
     create_tag,
     delete_flow,
     graph,
+    mpc_graph_valido,
+    mpc_host_echo_worker,
     node,
     read_only_graph,
     save_graph,
@@ -37,6 +38,8 @@ from conftest import (
     set_project_active,
     tfs_node,
 )
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from ottima_core.bus import (
     CHANNEL_EVENTS,
     KIND_COMM_FAILURE,
@@ -51,7 +54,10 @@ from ottima_core.bus import (
     channel_flow_status,
     publish_event,
 )
-from ottima_flow_runtime.supervisor import REASON_INVALID_GRAPH, REASON_PROJECT_INACTIVE
+from ottima_flow_runtime.supervisor import (
+    REASON_INVALID_GRAPH,
+    REASON_PROJECT_INACTIVE,
+)
 
 Factory = Callable[..., Awaitable[Harness]]
 Collect = Callable[[str], Awaitable[Collector]]
@@ -204,6 +210,42 @@ async def test_deploy_de_grafo_invalido_e_rejeitado_sem_task_orfa(
     assert rejeitado.payload["reason"] == REASON_INVALID_GRAPH
     assert dict(harness.supervisor.flows) == {}
     assert harness.state.flows == {}
+
+
+async def test_deploy_de_flow_com_mpc_succeede_ponte_f4a_removida(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    """PONTE DE DEPLOY [tarefa 3.1 do F4a; REMOVIDA na tarefa 2.2 do F4b]: o grafo com `mpc`
+    valida e salva (spec F4 §2.2, tarefa 1.2) e agora TAMBÉM sobe — `MpcBlock`/`MpcHost`
+    (plano F4b, tarefas 2.1/2.2) já executam de verdade; nenhum `deploy_rejected` sai mais
+    por causa de um nó `mpc`.
+
+    Também cobre `Supervisor.mpc_health()`/`script_pool_stats()` (plano F4b, tarefa 2.3;
+    spec F4 §4.10) contra um flow MPC de verdade — `test_health_mpc.py` só prova o wiring
+    do `main.py` com um supervisor dublê; aqui a travessia real de `_runtimes`/`blocks`/
+    `_pool` está sob teste.
+    """
+    project_id = await create_project(session_factory)
+    connection_id = await create_connection(session_factory, project_id)
+    tag_id = await create_tag(session_factory, connection_id, direction="r")
+    flow_id = await create_flow(session_factory, project_id, graph=mpc_graph_valido(tag_id))
+    events = await collect(CHANNEL_EVENTS)
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+
+    await harness.command("deploy", flow_id)
+    await harness.await_state(flow_id, "running", timeout_s=15.0)
+
+    assert events.events(KIND_DEPLOY_REJECTED) == []
+    assert len(events.events(KIND_FLOW_DEPLOYED)) == 1
+    assert harness.flow_state(flow_id) == "running"
+
+    mpc_health = harness.supervisor.mpc_health(flow_id)
+    assert set(mpc_health) == {"m1"}
+    assert set(mpc_health["m1"]) == {"mode", "overruns", "last_solve_ms", "worker"}
+    assert set(mpc_health["m1"]["worker"]) == {"alive", "respawns", "last_solve_ms"}
+    # Flow inexistente: mesmo contrato de dict vazio de `mpc_graph_valido` sem bloco mpc.
+    assert harness.supervisor.mpc_health(flow_id + 1) == {}
+    assert set(harness.supervisor.script_pool_stats()) == {"size", "busy", "respawns"}
 
 
 # --------------------------------------------------------------------------------------

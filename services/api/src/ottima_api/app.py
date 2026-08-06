@@ -53,6 +53,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         flows,
         health,
         history,
+        operate,
         projects,
         tags,
         users,
@@ -65,6 +66,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(connections.router, prefix="/api/connections", tags=["connections"])
     app.include_router(tags.router, prefix="/api/tags", tags=["tags"])
     app.include_router(flows.router, prefix="/api/flows", tags=["flows"])
+    app.include_router(operate.router, prefix="/api/operate", tags=["operate"])
     app.include_router(events.router, prefix="/api/events", tags=["events"])
     app.include_router(history.router, prefix="/api/history", tags=["history"])
     app.include_router(certificates.router, prefix="/api/certificates", tags=["certificates"])

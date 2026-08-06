@@ -141,6 +141,7 @@ class _Worker:
 class _PoolState:
     workers: list[_Worker] = field(default_factory=list)
     booting: set[asyncio.Task[None]] = field(default_factory=set)
+    replacing: set[asyncio.Task[None]] = field(default_factory=set)
 
 
 def _spawn_worker(ctx: SpawnContext) -> _Worker:
@@ -194,11 +195,25 @@ class ScriptPool:
         self._state = _PoolState()
         self._idle: asyncio.Queue[_Worker] = asyncio.Queue()
         self._running = False
+        self._respawns = 0
 
     @property
     def worker_pids(self) -> tuple[int, ...]:
         """Pids vivos do pool — diagnóstico e verificação de respawn."""
         return tuple(w.proc.pid for w in self._state.workers if w.proc.pid is not None)
+
+    def stats(self) -> dict:
+        """Fonte de dados do futuro `/health` (F4b tarefa 2.3): tamanho, ocupação, respawns.
+
+        `busy` conta workers fora da fila de livres (em execução ou ainda subindo o boot);
+        `respawns` acumula desde o `start()`, sem contar os spawns iniciais (só reposições
+        feitas por `_replace`).
+        """
+        return {
+            "size": self._size,
+            "busy": len(self._state.workers) - self._idle.qsize(),
+            "respawns": self._respawns,
+        }
 
     async def start(self) -> None:
         if self._running:
@@ -212,12 +227,23 @@ class ScriptPool:
     async def stop(self) -> None:
         """Idempotente e silencioso: parar o runtime não pode levantar (ADR-009)."""
         self._running = False
-        booting = tuple(self._state.booting)
-        if booting:
-            # Esperar o handshake em vez de cancelar: cancelar a tarefa não interrompe a
-            # thread do `poll`, e um worker que terminasse de subir depois do encerramento
-            # ficaria órfão fora da lista.
-            await asyncio.wait(booting, timeout=_BOOT_TIMEOUT_S)
+        # Laço até o ponto fixo, não uma única espera: um `_replace` em voo (capturado em
+        # `_state.replacing`) pode terminar E criar uma nova task de boot em
+        # `_state.booting` (via `_spawn`) DEPOIS do instantâneo de `pendentes` já ter sido
+        # tirado — sem repetir a checagem, essa task nova escapa da espera e `stop()`
+        # tentaria desligar o worker dela ao mesmo tempo que o próprio boot (vendo
+        # `self._running == False`) já estaria se autodesligando, um `_shutdown` em
+        # duplicata no mesmo processo (`proc.close()` chamado duas vezes). Como nenhum
+        # `_replace` novo começa depois do `self._running = False` acima, o laço converge
+        # em no máximo 2 voltas.
+        while True:
+            pendentes = tuple(self._state.booting) + tuple(self._state.replacing)
+            if not pendentes:
+                break
+            # Esperar o handshake/replace em vez de cancelar: cancelar a tarefa não
+            # interrompe a thread do `poll`/`_spawn_worker`, e um worker que terminasse de
+            # subir ou de ser reposto depois do encerramento ficaria órfão fora da lista.
+            await asyncio.wait(pendentes, timeout=_BOOT_TIMEOUT_S)
         workers = self._state.workers
         self._state.workers = []
         self._idle = asyncio.Queue()
@@ -258,7 +284,9 @@ class ScriptPool:
             )
         except asyncio.CancelledError:
             # O worker pode estar rodando código arbitrário do usuário: devolvê-lo à fila é
-            # inaceitável — kill + respawn, e o cancelamento segue propagando.
+            # inaceitável — kill + respawn, e o cancelamento segue propagando. `_replace`
+            # (abaixo) já se blinda contra uma segunda cancelação chegando aqui — ver o
+            # docstring dela para a interleaving exata que isso fecha (débito m3).
             await self._replace(worker, hard=True)
             raise
         except (OSError, EOFError, ValueError):
@@ -310,8 +338,29 @@ class ScriptPool:
         await asyncio.to_thread(_shutdown, worker, hard=True)
 
     async def _replace(self, worker: _Worker, *, hard: bool) -> None:
+        """Derruba `worker` e repõe — blindado contra cancelamento nos 4 call-sites de
+        `run()` (débito m3, achados 1 e 2 da revisão da tarefa 0.6).
+
+        A reposição de verdade (`_do_replace`) roda numa `Task` própria, rastreada em
+        `_state.replacing` e blindada por `asyncio.shield`: uma cancelação chegando
+        enquanto `run()` está suspenso aqui — segunda cancelação no ramo
+        `except CancelledError`, ou cancelação avulsa nos outros 3 ramos (pipe morto,
+        timeout do `_receive`, resultado inválido) — propaga na hora para `run()`, mas
+        NÃO interrompe a sequência remove→shutdown→spawn: ela sempre termina em segundo
+        plano, e `len(_state.workers) == size` volta a valer. `_state.replacing` segue o
+        mesmo padrão de `_state.booting`: `stop()` espera os dois antes de fechar o pool,
+        para nunca devolver com um respawn em voo (sem isso, um respawn assim sobreviveria
+        a `stop()` como processo órfão).
+        """
+        task = asyncio.create_task(self._do_replace(worker, hard=hard))
+        self._state.replacing.add(task)
+        task.add_done_callback(self._state.replacing.discard)
+        await asyncio.shield(task)
+
+    async def _do_replace(self, worker: _Worker, *, hard: bool) -> None:
         if worker in self._state.workers:
             self._state.workers.remove(worker)
         await asyncio.to_thread(_shutdown, worker, hard=hard)
         if self._running:
             await self._spawn()
+            self._respawns += 1

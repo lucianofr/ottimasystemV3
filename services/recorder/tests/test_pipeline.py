@@ -4,9 +4,6 @@ Engine e `session_factory` dedicados (não as fixtures em SAVEPOINT): o pipeline
 por conta própria e o teste precisa ver o dado commitado.
 """
 
-import asyncio
-import inspect
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -18,14 +15,15 @@ from ottima_core.bus import (
     KIND_COMM_FAILURE,
     KIND_PROJECT_ACTIVATED,
     KIND_TAG_CREATED,
-    EventMessage,
     OpcValue,
     channel_opc_values,
     publish_event,
 )
 from ottima_core.models import events_table, samples_table
+from ottima_core.pubsub import PatternListener
 from ottima_recorder import pipeline as pipeline_module
 from ottima_recorder.pipeline import RecorderPipeline
+from testkit.await_until import await_until
 
 WAIT_TIMEOUT_S = 5.0
 POLL_S = 0.02
@@ -50,24 +48,6 @@ async def purge(factory: Any) -> None:
 async def count_rows(factory: Any, table: Table) -> int:
     async with factory() as session:
         return await session.scalar(select(func.count()).select_from(table))
-
-
-async def await_until(
-    condition: Callable[[], bool | Awaitable[bool]],
-    timeout_s: float = WAIT_TIMEOUT_S,
-    interval: float = POLL_S,
-) -> None:
-    """Aguarda a condição virar verdadeira, com polling — evita sleep cego nos testes."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    while loop.time() < deadline:
-        result = condition()
-        if inspect.isawaitable(result):
-            result = await result
-        if result:
-            return
-        await asyncio.sleep(interval)
-    raise AssertionError(f"condição não satisfeita em {timeout_s}s")
 
 
 async def wait_rows(factory: Any, table: Table, expected: int) -> None:
@@ -268,7 +248,7 @@ async def test_payload_malformado_nao_derruba_o_pipeline(
     assert [r.value for r in rows] == [primeira.value, segunda.value]
 
 
-async def test_psubscribe_casa_multiplas_conexoes(redis_client, session_factory, make_pipeline):
+async def test_padrao_casa_multiplas_conexoes(redis_client, session_factory, make_pipeline):
     await make_pipeline(session_factory)
     await redis_client.publish(channel_opc_values(1), sample(11, value=1.0).model_dump_json())
     await redis_client.publish(channel_opc_values(2), sample(22, value=2.0).model_dump_json())
@@ -306,54 +286,38 @@ async def test_flush_com_buffer_vazio_nao_abre_sessao(instrumented, make_pipelin
     assert (opens, writes) == (["session"], ["samples"])
 
 
-class _StubPubSub:
-    """PubSub que entrega dado ANTES da última confirmação.
+async def test_publicacao_logo_apos_start_nao_e_perdida(
+    redis_client, session_factory, make_pipeline
+):
+    """`start()` só retorna com as duas inscrições confirmadas: nada publicado a seguir some."""
+    pipeline = await make_pipeline(session_factory)
 
-    Contra Redis real essa ordem é uma corrida entre conexões; com o stub ela é exata, que é
-    o ponto do teste: provar que a janela entre as duas inscrições não perde mensagem.
-    """
-
-    def __init__(self, messages: list[dict[str, Any]]) -> None:
-        self._messages = list(messages)
-
-    async def get_message(self, **_kwargs: Any) -> dict[str, Any] | None:
-        """Assinatura por kwargs: o pipeline chama com `timeout=` nomeado."""
-        return self._messages.pop(0) if self._messages else None
-
-
-async def test_dado_na_janela_das_confirmacoes_nao_e_descartado(redis_client, session_factory):
-    pipeline = RecorderPipeline(redis_client, session_factory)
-    valor = sample(31, value=7.5)
-    evento = EventMessage(
-        ts=BASE_TS,
+    await redis_client.publish(channel_opc_values(1), sample(31, value=7.5).model_dump_json())
+    await publish_event(
+        redis_client,
         severity="info",
         origin="api",
         message="Tag criada",
-        payload={"kind": KIND_TAG_CREATED},
-    )
-    stub = _StubPubSub(
-        [
-            {"type": "psubscribe", "data": 1},
-            {"type": "pmessage", "data": valor.model_dump_json()},
-            {"type": "message", "data": evento.model_dump_json()},
-            {"type": "subscribe", "data": 2},
-        ]
+        kind=KIND_TAG_CREATED,
+        payload={},
     )
 
-    await pipeline._await_confirmations(stub)
-
-    assert (pipeline.buffered_samples, pipeline.buffered_events) == (1, 1)
+    await await_until(lambda: (pipeline.buffered_samples, pipeline.buffered_events) == (1, 1))
 
 
 async def test_falha_ao_assinar_nao_vaza_inscricao_nem_conexao(
     redis_client, session_factory, monkeypatch
 ):
-    """`start()` que falha na confirmação não pode deixar inscrição pendurada no servidor."""
+    """`start()` que falha numa das duas assinaturas não deixa nem a outra pendurada.
+
+    `PatternListener` (samples) é a segunda a subir dentro de `start()`: forçá-la a falhar
+    prova que a primeira (`ChannelListener` de `events`), já confirmada, também é desfeita.
+    """
 
     async def explode(self, pubsub) -> None:
         raise TimeoutError("confirmação de inscrição não chegou")
 
-    monkeypatch.setattr(RecorderPipeline, "_await_confirmations", explode)
+    monkeypatch.setattr(PatternListener, "_await_confirmation", explode)
     pipeline = RecorderPipeline(redis_client, session_factory)
     numpat_antes = await redis_client.pubsub_numpat()
     canais_antes = await redis_client.pubsub_channels()

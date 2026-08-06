@@ -13,6 +13,7 @@ import {
   type DadosTfs,
   type NoEscrita,
   type NoLeitura,
+  type NoMpc,
   type NoScript,
 } from "../graph";
 import { inteiroDoCampo, matrizDoFormulario } from "./campos";
@@ -108,13 +109,17 @@ function CamposScript({ dados }: { dados: NoScript["data"] }) {
   );
 }
 
+/** MPC tem modal dedicado (`mpc/MpcModal.tsx`, tarefa 4.2); FlowEditorPage nunca passa um
+ *  nó MPC para cá. */
+type NoGenerico = Exclude<BlocoNode, NoMpc>;
+
 interface Props {
-  no: BlocoNode;
+  no: NoGenerico;
   /** Total de blocos no canvas: teto do `exec_order` (contíguo 1..N, ADR-024). */
   totalBlocos: number;
   tags: readonly TagOut[];
   podeMutar: boolean;
-  onAplicar: (no: BlocoNode, execOrder: number) => void;
+  onAplicar: (no: NoGenerico, execOrder: number) => void;
   onFechar: () => void;
 }
 
@@ -186,7 +191,10 @@ export function ModalConfigBloco({
         );
         break;
     }
-    onFechar();
+    // `onClose` (linha do <dialog>) chama `onFechar`; fechar via `close()` explícito em vez
+    // de chamar `onFechar()` direto evita que o desmonte (estado -> null) derrube o <dialog>
+    // do DOM ainda marcado como aberto (mesmo caminho que o botão Cancelar já usa).
+    dialogo.current?.close();
   }
 
   return (

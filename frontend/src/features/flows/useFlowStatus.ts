@@ -1,33 +1,28 @@
 import { useEffect, useState } from "react";
 
 import { getToken, type FlowOut } from "../../lib/api";
+import type { FlowStatus as FlowStatusGerado, PortValue } from "../../lib/contracts.gen";
 
 /**
  * Canvas ao vivo (RF-305, spec F3 §5.3/§6.2): um socket por editor aberto, assinando o
  * `flow_status` do flow da URL e morrendo com a página.
  *
- * `/ws` não aparece no OpenAPI (WebSocket não existe em OpenAPI 3.0), então o payload é
- * tipado aqui, à mão. `EstadoFlow` deriva do enum gerado para `desired_state`: `running` e
- * `stopped` são os mesmos literais do banco, e `failed` é o único estado que só existe no
- * barramento (`FlowStatus` de `bus.py`, spec §4.2).
+ * `/ws` não aparece no OpenAPI (WebSocket não existe em OpenAPI 3.0); `FlowStatus`/`PortValue`
+ * vêm de `contracts.gen.ts` (fonte: `ottima_core.bus`, débito 2+4 do plano F4a). `EstadoFlow`
+ * deriva do enum gerado para `desired_state`: `running` e `stopped` são os mesmos literais do
+ * banco, e `failed` é o único estado que só existe no barramento (spec §4.2).
  */
 
 export type EstadoFlow = FlowOut["desired_state"] | "failed";
 
-/** `PortValue` do barramento: `v` é `float | bool | None` e `ok` é a flag de invalidez. */
-export interface PortValue {
-  v: number | boolean | null;
-  ok: boolean;
-}
+export type { PortValue };
 
 /** `{block_id: {porta: PortValue}}` — a tabela inteira de portas de uma varredura. */
 export type PortsPorBloco = Readonly<Record<string, Readonly<Record<string, PortValue>>>>;
 
-export interface FlowStatus {
-  state: EstadoFlow;
-  scan_ms: number;
-  overruns: number;
-  ts: string;
+/** `ports` sai como visão somente-leitura (`PortsPorBloco`); o campo gerado é mutável — o
+ *  contrato do wire é o mesmo, isto é só disciplina de imutabilidade do frontend. */
+export interface FlowStatus extends Omit<FlowStatusGerado, "ports"> {
   ports: PortsPorBloco;
 }
 

@@ -17,8 +17,8 @@ from contextlib import asynccontextmanager, suppress
 
 import pytest
 from redis.asyncio import Redis
+from worker_test_helpers import await_until
 
-from conftest import await_until
 from opcsim import (
     NODE_COUNTER,
     NODE_SINE,

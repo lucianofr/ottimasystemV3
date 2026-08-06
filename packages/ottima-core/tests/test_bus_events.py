@@ -5,6 +5,7 @@ chega no canal, não o que a função devolve.
 """
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -25,6 +26,14 @@ from ottima_core.bus import (
     KIND_FLOW_OVERRUN,
     KIND_FLOW_STOPPED,
     KIND_FLOW_UPDATED,
+    KIND_MPC_ARM_FAILED,
+    KIND_MPC_INPUT_INVALID,
+    KIND_MPC_MODE_CHANGED,
+    KIND_MPC_MV_WRITTEN,
+    KIND_MPC_OVERRUN,
+    KIND_MPC_SHED,
+    KIND_MPC_SOLVER_ERROR,
+    KIND_MPC_SP_WRITTEN,
     KIND_OPC_WRITE,
     KIND_PROJECT_ACTIVATED,
     KIND_RECORDER_BACKPRESSURE,
@@ -39,6 +48,8 @@ from ottima_core.bus import (
     KIND_WRITE_REJECTED,
     KIND_WRITE_SUPPRESSED,
     EventMessage,
+    MpcState,
+    MpcVarState,
     publish_event,
 )
 
@@ -191,6 +202,64 @@ async def test_fixture_redis_isola_entre_testes(redis_client):
     assert await redis_client.get("chave-de-isolamento") is None
 
 
+# Testes puros (sem Redis) do payload `mpc.state` refinado (spec F4 §5.1, plano F4a 1.3).
+def test_mpc_var_state_sp_e_opcional_e_default_none():
+    # `sp` presente só em CV (spec §5.1) — a chave sempre viaja no payload (default None);
+    # MVs e Restrições simplesmente não a preenchem.
+    assert MpcVarState(v=45.0).sp is None
+    assert MpcVarState(v=12.3, sp=12.5).sp == 12.5
+
+
+def test_mpc_state_round_trip_payload_verbatim_spec_51_vars_com_e_sem_sp():
+    # Payload literal da spec F4 §5.1 (RF-625), enums concretizados: CV carrega `sp`, MV não;
+    # `armed = (local_remote == "remote")`.
+    payload = {
+        "modes": {"local_remote": "remote", "man_auto": "auto"},
+        "status": {
+            "solver": "ok",
+            "overruns": 3,
+            "last_solve_ms": 412.7,
+            "armed": True,
+            "input_valid": True,
+        },
+        "vars": {
+            "cv_a1b2": {"v": 12.3, "sp": 12.5},
+            "mv_x7k2": {"v": 45.0, "sp": None},
+        },
+        "cost": 0.184,
+        "prediction": {
+            "t": [0.0, 5.0, 10.0],
+            "cv": [[12.1, 12.4, 12.6]],
+            "mv": [[45.0, 44.0, 43.0]],
+        },
+    }
+    state = MpcState.model_validate_json(json.dumps(payload))
+    assert state.model_dump(mode="json") == payload
+    assert state.vars["cv_a1b2"].sp == 12.5
+    assert state.vars["mv_x7k2"].sp is None
+    assert state.status.armed == (state.modes.local_remote == "remote")
+
+
+def test_mpc_state_prediction_vazia_fora_de_auto_round_trip():
+    # spec F4 §5.1: fora de AUTO o worker fica ocioso — `prediction` viaja vazia.
+    payload = {
+        "modes": {"local_remote": "local", "man_auto": "man"},
+        "status": {
+            "solver": "idle",
+            "overruns": 0,
+            "last_solve_ms": 0.0,
+            "armed": False,
+            "input_valid": True,
+        },
+        "vars": {"cv_a1b2": {"v": 20.0, "sp": None}},
+        "cost": 0.0,
+        "prediction": {"t": [], "cv": [], "mv": []},
+    }
+    state = MpcState.model_validate_json(json.dumps(payload))
+    assert state.model_dump(mode="json") == payload
+    assert state.status.armed == (state.modes.local_remote == "remote")
+
+
 # Consumidores (recorder, API) fazem match por string de `kind`. Trocar um valor é quebra de
 # contrato silenciosa; as duas tabelas abaixo travam o vocabulário nas strings normativas.
 VOCABULARIO_F3 = [
@@ -225,6 +294,17 @@ VOCABULARIO_F2 = [
     (KIND_TAG_DELETED, "tag_deleted"),
 ]
 
+VOCABULARIO_F4 = [
+    (KIND_MPC_MODE_CHANGED, "mpc_mode_changed"),
+    (KIND_MPC_SP_WRITTEN, "mpc_sp_written"),
+    (KIND_MPC_MV_WRITTEN, "mpc_mv_written"),
+    (KIND_MPC_OVERRUN, "mpc_overrun"),
+    (KIND_MPC_SOLVER_ERROR, "mpc_solver_error"),
+    (KIND_MPC_SHED, "mpc_shed"),
+    (KIND_MPC_ARM_FAILED, "mpc_arm_failed"),
+    (KIND_MPC_INPUT_INVALID, "mpc_input_invalid"),
+]
+
 
 def test_vocabulario_kind_novo_da_f3_spec_43():
     assert [constante for constante, _ in VOCABULARIO_F3] == [
@@ -235,4 +315,10 @@ def test_vocabulario_kind_novo_da_f3_spec_43():
 def test_vocabulario_kind_da_f2_nao_mudou_spec_f2_73():
     assert [constante for constante, _ in VOCABULARIO_F2] == [
         esperado for _, esperado in VOCABULARIO_F2
+    ]
+
+
+def test_vocabulario_kind_novo_do_mpc_spec_53():
+    assert [constante for constante, _ in VOCABULARIO_F4] == [
+        esperado for _, esperado in VOCABULARIO_F4
     ]

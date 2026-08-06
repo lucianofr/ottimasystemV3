@@ -229,14 +229,19 @@ def test_parse_rejeita_tipo_desconhecido():
     assert has(errors, "r1", "pid")
 
 
-def test_parse_rejeita_bloco_mpc_com_mensagem_propria():
-    """Decisão A-1: MPC existe na paleta desabilitado, mas o grafo é 422 na F3."""
+def test_parse_aceita_bloco_mpc_desde_a_f4():
+    """Decisão A-1 revista pela spec F4 §2.2-1: `mpc` sai da lista de tipos rejeitados —
+    a mesa completa do bloco mora em `test_flowgraph_mpc.py` (tarefa 1.2 do plano F4a)."""
     graph = base_graph()
     node_of(graph, "r1")["type"] = "mpc"
-    node_of(graph, "r1")["data"] = {"exec_order": 1}
-    errors = parse_errors(graph)
-    assert has(errors, "r1", "MPC", "F4")
-    assert not has(errors, "desconhecido")
+    node_of(graph, "r1")["data"] = {
+        "exec_order": 1,
+        "name": "MPC",
+        "multiplier": 1,
+        "variables": {"mvs": [], "cvs": [], "constraints": [], "dvs": []},
+        "models": {},
+    }
+    assert parse_graph(graph).node("r1").type == "mpc"
 
 
 # regra 4 — exec_order

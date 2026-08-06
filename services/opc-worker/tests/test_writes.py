@@ -17,8 +17,8 @@ import pytest
 from asyncua import ua
 from asyncua.common.node import Node
 from redis.asyncio import Redis
+from worker_test_helpers import AWAIT_TIMEOUT_S, await_until, collecting
 
-from conftest import AWAIT_TIMEOUT_S, await_until, collecting
 from opcsim import (
     NODE_MIRROR_BOOL,
     NODE_MIRROR_FLOAT,

@@ -71,6 +71,27 @@ class FlowCommand(BaseModel):
     ts: datetime
 
 
+class MpcVarState(BaseModel):
+    """Estado publicado de uma variável do MPC (spec F4 §5.1) — `sp` só existe em CV
+    (em AUTO, o SP congelado; fora, o SP rastreado por PV-tracking)."""
+
+    v: float
+    sp: float | None = None
+
+
+class MpcModes(BaseModel):
+    local_remote: Literal["local", "remote"]
+    man_auto: Literal["man", "auto"]
+
+
+class MpcStatus(BaseModel):
+    solver: Literal["ok", "overrun", "error", "building", "idle"]
+    overruns: int
+    last_solve_ms: float
+    armed: bool  # armed = (local_remote == "remote"), spec F4 §5.1
+    input_valid: bool
+
+
 class MpcPrediction(BaseModel):
     t: list[float]
     cv: list[list[float]]
@@ -78,9 +99,15 @@ class MpcPrediction(BaseModel):
 
 
 class MpcState(BaseModel):
-    modes: dict[str, str]
-    status: dict[str, Any]
-    vars: dict[str, float]
+    """Publicado em `mpc.state.<flow_id>.<block_id>` a cada execução (spec F4 §5.1, RF-625).
+
+    A forma externa do stub F3 (`{modes, status, vars, cost, prediction}`) não muda; esta
+    tarefa (F4a 1.3) só refina `vars`/`modes`/`status` para o payload detalhado da spec F4.
+    """
+
+    modes: MpcModes
+    status: MpcStatus
+    vars: dict[str, MpcVarState]
     cost: float
     prediction: MpcPrediction
 
@@ -123,6 +150,16 @@ KIND_DEPLOY_REJECTED = "deploy_rejected"
 KIND_FLOW_CREATED = "flow_created"
 KIND_FLOW_UPDATED = "flow_updated"
 KIND_FLOW_DELETED = "flow_deleted"
+
+# Vocabulário `kind` novo do MPC (spec F4 §5.3).
+KIND_MPC_MODE_CHANGED = "mpc_mode_changed"
+KIND_MPC_SP_WRITTEN = "mpc_sp_written"
+KIND_MPC_MV_WRITTEN = "mpc_mv_written"
+KIND_MPC_OVERRUN = "mpc_overrun"
+KIND_MPC_SOLVER_ERROR = "mpc_solver_error"
+KIND_MPC_SHED = "mpc_shed"
+KIND_MPC_ARM_FAILED = "mpc_arm_failed"
+KIND_MPC_INPUT_INVALID = "mpc_input_invalid"
 
 
 async def publish_event(

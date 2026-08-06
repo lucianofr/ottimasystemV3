@@ -19,8 +19,8 @@ from asyncua import Client
 from asyncua.client.ua_client import UaClientState
 from cryptography.fernet import Fernet
 from redis.asyncio import Redis
+from worker_test_helpers import await_until, collecting
 
-from conftest import await_until, collecting
 from opcsim import NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM, OpcSimServer, free_port
 from ottima_core.bus import CHANNEL_EVENTS, KIND_COMM_FAILURE, KIND_COMM_RESTORED
 from ottima_core.security import encrypt_secret

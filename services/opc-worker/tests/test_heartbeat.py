@@ -14,8 +14,8 @@ from datetime import UTC, datetime
 
 import pytest
 from redis.asyncio import Redis
+from worker_test_helpers import await_until, collecting
 
-from conftest import await_until, collecting
 from opcsim import NODE_SINE, NODE_STATIC, NODE_W_FLOAT, OpcSimServer, free_port
 from ottima_core.bus import channel_opc_values
 from ottima_opc_worker import heartbeat as heartbeat_module
