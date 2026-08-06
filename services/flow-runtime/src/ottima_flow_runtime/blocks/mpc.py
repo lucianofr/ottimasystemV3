@@ -67,11 +67,14 @@ _LocalRemote = Literal["local", "remote"]
 _ManAuto = Literal["man", "auto"]
 _SolverStatus = Literal["ok", "overrun", "error"]
 
-_EMPTY_PREDICTION = MpcPrediction(t=[], cv=[], mv=[])
-
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
+
+
+def _empty_prediction(ts: datetime) -> MpcPrediction:
+    """Predição vazia fora de AUTO (spec F5 §2.1-2): `prediction.ts == ts` do quadro, `t: []`."""
+    return MpcPrediction(ts=ts, t=[], cv=[], mv=[])
 
 
 class MpcBlock(Block):
@@ -211,7 +214,7 @@ class MpcBlock(Block):
         self._plan: dict[str, float] | None = None
         self._sp: dict[str, float] = dict.fromkeys(self._cv_ids, 0.0)
         self._last_measured: dict[str, float] = {}
-        self._last_prediction = _EMPTY_PREDICTION
+        self._last_prediction = _empty_prediction(datetime.now(UTC))
         # Honesto por padrão (achado da tarefa 4.2, E2E F4b): só vira "ok" via
         # `_apply_result` sob evidência real (`SolveResult.status == "ok"` aplicado) —
         # nunca antes do primeiro solve genuíno concluído.
@@ -328,7 +331,12 @@ class MpcBlock(Block):
             self._plan = dict(result.u_plan)
             self._cost = result.cost
             self._last_prediction = MpcPrediction(
-                t=result.prediction_t, cv=result.prediction_cv, mv=result.prediction_mv
+                # Interim: instante do consumo do resultado — a âncora exata do overlay
+                # (fronteira de `host.dispatch()`) é a tarefa 1.2 (spec F5 §2.1-2/§3.5).
+                ts=datetime.now(UTC),
+                t=result.prediction_t,
+                cv=result.prediction_cv,
+                mv=result.prediction_mv,
             )
             self._solver_status = "ok"
         elif result.status == "overrun":
@@ -575,7 +583,11 @@ class MpcBlock(Block):
             solver = self._solver_status
 
         stats = self._host.stats()
+        # Interim: instante da publicação, não da fronteira de varredura
+        # (`task.last_scan_ts`) — a âncora exata é a tarefa 1.2 (spec F5 §2.1-1).
+        ts = datetime.now(UTC)
         return MpcState(
+            ts=ts,
             modes=MpcModes(local_remote=self._local_remote, man_auto=self._man_auto),
             status=MpcStatus(
                 solver=solver,
@@ -586,7 +598,7 @@ class MpcBlock(Block):
             ),
             vars=var_state,
             cost=self._cost,
-            prediction=self._last_prediction if auto else _EMPTY_PREDICTION,
+            prediction=self._last_prediction if auto else _empty_prediction(ts),
         )
 
     def health(self) -> dict:

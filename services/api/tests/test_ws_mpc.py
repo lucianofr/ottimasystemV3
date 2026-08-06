@@ -208,15 +208,21 @@ def mpc_state_json(
     v: float = 12.3,
     sp: float | None = None,
 ) -> str:
-    """Payload `mpc.state.<flow_id>.<block_id>` do §5.1, com um único var preenchido."""
+    """Payload `mpc.state.<flow_id>.<block_id>` do §5.1, com um único var preenchido.
+
+    `ts`/`prediction.ts` (spec F5 §2.1) são carimbados com o mesmo instante — fora de AUTO
+    (o único modo exercitado por este helper), `prediction.ts == ts` e `t: []` (§2.1-2).
+    """
+    ts = datetime.now(UTC)
     return MpcState(
+        ts=ts,
         modes=MpcModes(local_remote=local_remote, man_auto=man_auto),
         status=MpcStatus(
             solver=solver, overruns=0, last_solve_ms=0.0, armed=False, input_valid=True
         ),
         vars={var_id: MpcVarState(v=v, sp=sp)},
         cost=0.0,
-        prediction=MpcPrediction(t=[], cv=[], mv=[]),
+        prediction=MpcPrediction(ts=ts, t=[], cv=[], mv=[]),
     ).model_dump_json()
 
 

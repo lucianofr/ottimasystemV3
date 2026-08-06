@@ -93,6 +93,10 @@ class MpcStatus(BaseModel):
 
 
 class MpcPrediction(BaseModel):
+    """`ts` (UTC, spec F5 §2.1-2) é o instante da fronteira em que o solve que produziu esta
+    predição foi despachado — âncora do overlay, nunca `MpcState.ts` (F5R-01)."""
+
+    ts: datetime
     t: list[float]
     cv: list[list[float]]
     mv: list[list[float]]
@@ -101,10 +105,12 @@ class MpcPrediction(BaseModel):
 class MpcState(BaseModel):
     """Publicado em `mpc.state.<flow_id>.<block_id>` a cada execução (spec F4 §5.1, RF-625).
 
-    A forma externa do stub F3 (`{modes, status, vars, cost, prediction}`) não muda; esta
-    tarefa (F4a 1.3) só refina `vars`/`modes`/`status` para o payload detalhado da spec F4.
+    `ts` (UTC, spec F5 §2.1-1) é obrigatório de propósito — o recorder (F5 §2.3) depende dele
+    como âncora de gravação; quadro fora de AUTO publica `prediction.ts == ts` e
+    `prediction.t == []` (spec F5 §2.1-2).
     """
 
+    ts: datetime
     modes: MpcModes
     status: MpcStatus
     vars: dict[str, MpcVarState]
@@ -160,6 +166,9 @@ KIND_MPC_SOLVER_ERROR = "mpc_solver_error"
 KIND_MPC_SHED = "mpc_shed"
 KIND_MPC_ARM_FAILED = "mpc_arm_failed"
 KIND_MPC_INPUT_INVALID = "mpc_input_invalid"
+
+# Vocabulário `kind` novo da F5 (spec F5 §7.2-2, F5R-02b).
+KIND_SCRIPT_RECOVERED = "script_recovered"  # severity "info"
 
 
 async def publish_event(
