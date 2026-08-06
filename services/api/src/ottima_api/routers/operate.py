@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -249,50 +249,56 @@ async def set_mv(
 
 
 def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
-    """Projeta os blocos `mpc` de um flow (spec §4.1-1). `graph_json` que não parseia é
-    pulado com log, nunca 5xx (mesma postura de defesa em profundidade do resto do domínio —
-    ver Regra do Estado Publicado no topo do módulo): a listagem é melhor-esforço, não um
-    recurso identificado por id que mereça 404/422.
+    """Projeta os blocos `mpc` de um flow (spec §4.1-1). `graph_json` que não parseia, ou
+    cujo bloco `mpc` não tipa como `MpcConfig` (grafo estruturalmente válido mas conteúdo do
+    bloco incompleto/inválido — `parse_graph` não valida o conteúdo do `mpc`, só a forma
+    alheia a ele), é pulado com log, nunca 5xx: a listagem é melhor-esforço, não um recurso
+    identificado por id que mereça 404/422 (mesma postura de defesa em profundidade do resto
+    do domínio — ver Regra do Estado Publicado no topo do módulo).
     """
+    saida: list[MpcNodeOut] = []
     try:
         graph = parse_graph(flow.graph_json)
-    except GraphParseError:
+        for node in graph.nodes:
+            if node.type != "mpc":
+                continue
+            config = MpcConfig.model_validate(node.config.model_dump())
+            saida.append(
+                MpcNodeOut(
+                    flow_id=flow.id,
+                    flow_name=flow.name,
+                    flow_ts_seconds=float(flow.ts_seconds),
+                    block_id=node.id,
+                    name=config.name,
+                    multiplier=config.multiplier,
+                    variables=MpcVariablesOut(
+                        mvs=[
+                            MvOut(
+                                id=mv.id, name=mv.name, eu=mv.eu, limits=mv.limits, du_max=mv.du_max
+                            )
+                            for mv in config.variables.mvs
+                        ],
+                        cvs=[
+                            CvOut(id=cv.id, name=cv.name, eu=cv.eu, sp_limits=cv.sp_limits)
+                            for cv in config.variables.cvs
+                        ],
+                        constraints=[
+                            ConstraintOut(id=co.id, name=co.name, eu=co.eu, range=co.range)
+                            for co in config.variables.constraints
+                        ],
+                        dvs=[
+                            DvOut(id=dv.id, name=dv.name, eu=dv.eu) for dv in config.variables.dvs
+                        ],
+                    ),
+                )
+            )
+    except (GraphParseError, ValidationError):
         logger.warning(
             "Flow %s ('%s') com graph_json inválido; ignorado na projeção de MPCs",
             flow.id,
             flow.name,
         )
         return []
-    saida: list[MpcNodeOut] = []
-    for node in graph.nodes:
-        if node.type != "mpc":
-            continue
-        config = MpcConfig.model_validate(node.config.model_dump())
-        saida.append(
-            MpcNodeOut(
-                flow_id=flow.id,
-                flow_name=flow.name,
-                flow_ts_seconds=float(flow.ts_seconds),
-                block_id=node.id,
-                name=config.name,
-                multiplier=config.multiplier,
-                variables=MpcVariablesOut(
-                    mvs=[
-                        MvOut(id=mv.id, name=mv.name, eu=mv.eu, limits=mv.limits, du_max=mv.du_max)
-                        for mv in config.variables.mvs
-                    ],
-                    cvs=[
-                        CvOut(id=cv.id, name=cv.name, eu=cv.eu, sp_limits=cv.sp_limits)
-                        for cv in config.variables.cvs
-                    ],
-                    constraints=[
-                        ConstraintOut(id=co.id, name=co.name, eu=co.eu, range=co.range)
-                        for co in config.variables.constraints
-                    ],
-                    dvs=[DvOut(id=dv.id, name=dv.name, eu=dv.eu) for dv in config.variables.dvs],
-                ),
-            )
-        )
     return saida
 
 

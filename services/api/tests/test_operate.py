@@ -649,3 +649,50 @@ async def test_mpcs_graph_invalido_pulado_com_log(
         record.levelno == logging.WARNING and str(flow_corrompido.id) in record.getMessage()
         for record in caplog.records
     )
+
+
+async def test_mpcs_bloco_mpc_invalido_pulado_com_log(
+    client, admin_headers, operator_headers, db_session, caplog
+):
+    """`graph_json` estruturalmente válido (passa por `parse_graph`), mas o bloco `mpc` não
+    tem `variables` — `MpcConfig.model_validate` rejeita com `pydantic.ValidationError`. Só é
+    possível gravar assim inserindo direto no banco: `PUT /api/flows/{id}` roda
+    `validate_graph` (que já tipa o bloco via `MpcConfig`) antes de gravar. Mesma postura de
+    `test_mpcs_graph_invalido_pulado_com_log`, agora no nível do bloco, não do grafo inteiro."""
+    project_id = await _projeto(client, admin_headers, "MpcsBlocoInvalido")
+    r = await client.post(f"/api/projects/{project_id}/activate", headers=admin_headers)
+    assert r.status_code == 200, r.text
+
+    graph = {
+        "nodes": [
+            {
+                "id": "m1",
+                "type": "mpc",
+                "position": {"x": 0.0, "y": 0.0},
+                "data": {
+                    "exec_order": 1,
+                    "name": "MPC Quebrado",
+                    "multiplier": 1,
+                    "models": {},
+                    # 'variables' ausente de propósito: campo obrigatório de MpcConfig.
+                },
+            }
+        ],
+        "edges": [],
+    }
+    flow_corrompido = Flow(
+        project_id=project_id, name="BlocoInvalido", ts_seconds=1, graph_json=graph
+    )
+    db_session.add(flow_corrompido)
+    await db_session.commit()
+    await db_session.refresh(flow_corrompido)
+
+    with caplog.at_level(logging.WARNING, logger="ottima_api.routers.operate"):
+        r = await client.get("/api/operate/mpcs", headers=operator_headers)
+
+    assert r.status_code == 200, r.text
+    assert r.json() == []
+    assert any(
+        record.levelno == logging.WARNING and str(flow_corrompido.id) in record.getMessage()
+        for record in caplog.records
+    )
