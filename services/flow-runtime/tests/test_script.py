@@ -21,7 +21,12 @@ from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
 from runtime_test_helpers import AWAIT_TIMEOUT_S, await_until
 
-from ottima_core.bus import CHANNEL_EVENTS, KIND_SCRIPT_ERROR, KIND_SCRIPT_TIMEOUT
+from ottima_core.bus import (
+    CHANNEL_EVENTS,
+    KIND_SCRIPT_ERROR,
+    KIND_SCRIPT_RECOVERED,
+    KIND_SCRIPT_TIMEOUT,
+)
 from ottima_flow_runtime import script_pool
 from ottima_flow_runtime.blocks.base import PortSample
 from ottima_flow_runtime.blocks.script import ScriptBlock
@@ -751,7 +756,11 @@ async def test_dedupe_de_script_error_por_periodo_de_falha(redis_client, bus, po
     await block.step(ruim)
 
     publicados = await eventos(bus, redis_client)
-    assert [e["payload"]["kind"] for e in publicados] == [KIND_SCRIPT_ERROR, KIND_SCRIPT_ERROR]
+    assert [e["payload"]["kind"] for e in publicados] == [
+        KIND_SCRIPT_ERROR,
+        KIND_SCRIPT_RECOVERED,
+        KIND_SCRIPT_ERROR,
+    ]
 
 
 async def test_transicao_erro_para_timeout_emite_os_dois_eventos(redis_client, bus, pool):
@@ -764,6 +773,69 @@ async def test_transicao_erro_para_timeout_emite_os_dois_eventos(redis_client, b
     publicados = await eventos(bus, redis_client)
     assert [e["payload"]["kind"] for e in publicados] == [KIND_SCRIPT_ERROR, KIND_SCRIPT_TIMEOUT]
     assert publicados[1]["payload"]["timeout_s"] == pytest.approx(0.7 * TS_CURTO)
+
+
+async def test_timeout_seguido_de_sucesso_publica_recovered_uma_vez(redis_client, bus, pool):
+    """script_recovered: primeiro sucesso após timeout rearma o latch e avisa (F5 §7.2-2)."""
+    code = "if IN1 > 0:\n    while True:\n        pass\nOUT1 = 1.0\n"
+    block = bloco(code, redis_client, pool, ts_seconds=TS_CURTO)
+
+    await block.step({"IN1": PortSample(1.0, True)})
+    await block.step({"IN1": PortSample(-1.0, True)})
+
+    publicados = await eventos(bus, redis_client)
+    assert [e["payload"]["kind"] for e in publicados] == [
+        KIND_SCRIPT_TIMEOUT,
+        KIND_SCRIPT_RECOVERED,
+    ]
+    recuperado = publicados[1]
+    assert recuperado["severity"] == "info"
+    assert recuperado["origin"] == "flow:7/block:b9"
+    assert recuperado["payload"]["block_id"] == "b9"
+
+
+async def test_sucesso_apos_sucesso_nao_publica_recovered(redis_client, bus, pool):
+    """Sem falha pendente para rearmar, sucesso repetido não anuncia nada."""
+    block = bloco("OUT1 = 1.0\n", redis_client, pool, n_inputs=0)
+
+    await block.step({})
+    await block.step({})
+
+    assert await eventos(bus, redis_client) == []
+
+
+async def test_erro_seguido_de_sucesso_publica_recovered(redis_client, bus, pool):
+    code = "if IN1 > 0:\n    OUT1 = 1.0\nelse:\n    OUT1 = 1 / 0\n"
+    block = bloco(code, redis_client, pool)
+
+    await block.step({"IN1": PortSample(-1.0, True)})
+    await block.step({"IN1": PortSample(1.0, True)})
+
+    publicados = await eventos(bus, redis_client)
+    assert [e["payload"]["kind"] for e in publicados] == [
+        KIND_SCRIPT_ERROR,
+        KIND_SCRIPT_RECOVERED,
+    ]
+
+
+async def test_dois_ciclos_de_falha_e_rearme_emitem_dois_recovered(redis_client, bus, pool):
+    code = "if IN1 > 0:\n    OUT1 = 1.0\nelse:\n    OUT1 = 1 / 0\n"
+    block = bloco(code, redis_client, pool)
+    ruim = {"IN1": PortSample(-1.0, True)}
+    bom = {"IN1": PortSample(1.0, True)}
+
+    await block.step(ruim)
+    await block.step(bom)
+    await block.step(ruim)
+    await block.step(bom)
+
+    publicados = await eventos(bus, redis_client)
+    assert [e["payload"]["kind"] for e in publicados] == [
+        KIND_SCRIPT_ERROR,
+        KIND_SCRIPT_RECOVERED,
+        KIND_SCRIPT_ERROR,
+        KIND_SCRIPT_RECOVERED,
+    ]
 
 
 async def test_entrada_booleana_chega_como_float(redis_client, bus, pool):
