@@ -261,13 +261,14 @@ def counter_graph(node_id: str = "s1") -> dict:
     return graph([script_node(node_id, 1)])
 
 
-def mpc_graph_valido(tag_id: int, *, node_id: str = "m1") -> dict:
+def mpc_graph_valido(tag_id: int, *, node_id: str = "m1", du_max: float = 5.0) -> dict:
     """Esqueleto mínimo válido do §2.1 (spec F4): 1 MV direta + 1 CV, matriz cheia.
 
-    Compartilhado entre `test_supervisor.py` (deploy) e `test_hotswap.py` (reload) — os
-    dois exercícios da ponte de deploy da tarefa 3.1 do F4a (`REMOVER na tarefa 2.2 do
-    F4b`). A CV entra pela porta obrigatória (decisão A-10): precisa de 1 leitor OPC
-    dedicado.
+    Compartilhado entre `test_supervisor.py` (deploy), `test_hotswap.py` (reload) e
+    `test_mpc_boot_async.py` (tarefa 4.2 F5a — F-1, reload com host novo: `du_max`
+    muda config funcional sem afetar horizontes/validação, §4.1-3, mesmo truque de
+    `test_supervisor_mpc.py::mpc_graph_com_pid`). A CV entra pela porta obrigatória
+    (decisão A-10): precisa de 1 leitor OPC dedicado.
     """
     mpc = node(
         node_id,
@@ -283,7 +284,7 @@ def mpc_graph_valido(tag_id: int, *, node_id: str = "m1") -> dict:
                         "name": "MV a",
                         "eu": "m3/h",
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 5.0,
+                        "du_max": du_max,
                         "initial_value": 0.0,
                     }
                 ],

@@ -344,17 +344,61 @@ class MpcOrchestrator:
         task.add_done_callback(runtime.mpc_boot_tasks.discard)
         task.add_done_callback(_log_se_falhou)
 
-    async def shutdown_mpc(self, runtime: _FlowRuntime, *, flow_id: int) -> None:
-        """Devolve o PID (`mode_cmd=auto`) de todo bloco MPC armado e mata os workers da
-        tarefa — chamado ANTES de `task.stop()` em todo caminho de parada exceto
-        `on_comm_failure` (ADR-009: a conexão pode estar caída lá, sem como escrever; o
-        watchdog do lado do PLC devolve, documentado no relatório da tarefa 2.2).
+    def detach_hosts(self, runtime: _FlowRuntime) -> dict[str, MpcHost]:
+        """Esvazia `runtime.hosts` e devolve o que havia — spec F5 §6.3 (tarefa 4.2 F5a —
+        F-1): "desmonte destacado com o `MpcHost` já removido do mapa". Chamado ANTES de
+        `stop_host_background`: com o host já fora do mapa, nenhum comando novo para o
+        MESMO flow (nem um `_teardown`/redeploy subsequente, que passa por `shutdown_mpc`
+        de sempre) o encontra e tenta redesmontá-lo — `MpcHost.stop()` já é idempotente
+        (`mpc/host.py`), mas o mapa vazio deixa `runtime.hosts` refletir a verdade: nenhum
+        host desta chamada de `stop` segue "gerenciado" pelo supervisor."""
+        hosts = dict(runtime.hosts)
+        runtime.hosts.clear()
+        return hosts
 
-        Idempotente: repetir numa `_FlowRuntime` já tratada não escreve `mode_cmd` de novo
-        (guarda por `block.local_remote`, que a primeira chamada já deixou "local") nem
-        falha ao re-parar host (`MpcHost.stop()` já é idempotente) — é o que deixa o
-        supervisor chamar de novo sem se importar se já rodou antes (achado 1 da revisão
-        F4: falha interna do flow sem handback anunciado, `_handback_failed_mpc`)."""
+    def stop_host_background(
+        self, runtime: _FlowRuntime, host: MpcHost, *, flow_id: int, block_id: str
+    ) -> None:
+        """Desmonta `host` como task de fundo, FORA do caminho síncrono de quem chama —
+        spec F5 §6.3/§6.5 (tarefa 4.2 F5a — F-1). `MpcHost.stop()` espera o boot em voo
+        até `_BOOT_TIMEOUT_S = 30s` antes de matar/juntar o processo (`mpc/host.py::stop`,
+        comportamento pré-existente, intocado por esta tarefa): sem destacar essa espera,
+        o bloqueio que a tarefa 4.1 tirou do deploy só MIGRARIA para quem chama esta
+        função (`Supervisor._stop`, `reconcile_mpc_hosts` do hot-swap) — o canal
+        `flow.commands` tem um único consumidor sequencial (mesma nota de
+        `start_host_background` acima): um `stop`/`reload` que esperasse aqui de forma
+        síncrona atrasaria o PRÓXIMO comando de QUALQUER flow, não só deste.
+
+        `host` já saiu do mapa (`detach_hosts`, responsabilidade de quem chama esta
+        função, ANTES desta task nascer): nada mais disputa por ele enquanto desmonta. A
+        task entra em `runtime.mpc_stop_tasks` (mesmo idioma/motivo de `mpc_boot_tasks`:
+        sem guardar a referência o event loop só segura a fraca de `asyncio.create_task`,
+        que pode sumir no meio)."""
+
+        def _log_se_falhou(task: asyncio.Task[None]) -> None:
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc is not None:
+                logger.error(
+                    "Desmonte do worker MPC do flow %s / bloco '%s' falhou com exceção não tratada",
+                    flow_id,
+                    block_id,
+                    exc_info=exc,
+                )
+
+        task = asyncio.get_running_loop().create_task(host.stop())
+        runtime.mpc_stop_tasks.add(task)
+        task.add_done_callback(runtime.mpc_stop_tasks.discard)
+        task.add_done_callback(_log_se_falhou)
+
+    async def revert_armed_mpc(self, runtime: _FlowRuntime, *, flow_id: int) -> None:
+        """Devolve o PID (`mode_cmd=auto`) de todo bloco MPC armado do runtime — metade do
+        antigo `shutdown_mpc` que NÃO espera processo nenhum (spec F5 §6.3, tarefa 4.2
+        F5a — F-1): extraída para `Supervisor._stop` poder terminar de devolver o PID e só
+        DEPOIS desmontar o(s) host(s) em segundo plano (`stop_host_background`), sem
+        segurar quem chama pelo build/kill/join do processo. Idempotente (guarda por
+        `block.local_remote`, mesma garantia do `shutdown_mpc` original)."""
         for block_id, (_, block) in list(runtime.blocks.items()):
             if not isinstance(block, MpcBlock):
                 continue
@@ -369,6 +413,21 @@ class MpcOrchestrator:
                     "auto",
                     source=mpc_block_origin(flow_id, block_id),
                 )
+
+    async def shutdown_mpc(self, runtime: _FlowRuntime, *, flow_id: int) -> None:
+        """Devolve o PID de todo bloco MPC armado (`revert_armed_mpc`) e mata os workers
+        da tarefa, de forma SÍNCRONA — usado por `_force_stop`/`_teardown`/pelo redeploy
+        de `_deploy`, que precisam do processo realmente morto antes de seguir (nenhum dos
+        três compete pelo MESMO canal sequencial de `flow.commands` do jeito que
+        `_stop`/hot-swap competem — spec F5 §6.3, tarefa 4.2 F5a — F-1). `Supervisor._stop`
+        e `reconcile_mpc_hosts` (hot-swap) usam a variante destacada (`detach_hosts` +
+        `stop_host_background`) em vez desta função.
+
+        Idempotente: repetir numa `_FlowRuntime` já tratada não escreve `mode_cmd` de novo
+        nem falha ao re-parar host (`MpcHost.stop()` já é idempotente) — é o que deixa o
+        supervisor chamar de novo sem se importar se já rodou antes (achado 1 da revisão
+        F4: falha interna do flow sem handback anunciado, `_handback_failed_mpc`)."""
+        await self.revert_armed_mpc(runtime, flow_id=flow_id)
         for host in runtime.hosts.values():
             await host.stop()
 
@@ -416,5 +475,5 @@ class MpcOrchestrator:
                     )
                 if block_id in new_hosts:  # substituído (config mudou), não removido do grafo
                     swapped.append(block_id)
-            await old_host.stop()
+            self.stop_host_background(runtime, old_host, flow_id=flow_id, block_id=block_id)
         return swapped
