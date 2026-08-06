@@ -1,9 +1,10 @@
 # PRD — OttimaSystem (reescrita, v1)
 
 **Produto:** OttimaSystem — plataforma on-premise de Controle Avançado de Processos (APC) com MPC
-**Versão do documento:** 1.2 · 2026-08-04 · **Status:** aprovado para implementação (F1 e F2 concluídas)
+**Versão do documento:** 1.3 · 2026-08-06 · **Status:** aprovado para implementação (F1 e F2 concluídas)
 **Changelog 1.1:** adicionado o requisito de **ordem de execução explícita por bloco** (`exec_order`) — RF-307 e RF-401 revisados, ADR-024 criado (altera ADR-007). Sem impacto retroativo em F1/F2; efetivo a partir da F3.
 **Changelog 1.2:** payload do canal `flow.status.<flow_id>` estendido com `ports` (valores de porta por varredura, para o canvas ao vivo) — resolve a lacuna do RF-404, que exigia publicar valores de portas sem definir onde. Decisão aprovada no brainstorm da F3 (2026-08-04, `docs/specs/F3-motor-canvas.md` Anexo A-3).
+**Changelog 1.3:** payload do canal `mpc.state.<flow_id>.<block_id>` ganha `ts` e `prediction.ts`; consumidor `recorder` adicionado (§7.1); nova hypertable `MpcSample` (§4, retenção 1 mês, CAgg `mpc_samples_1m`); RF-703 passa a citar a fonte concreta (`mpc_samples`/`mpc_samples_1m`). PRD avança de 1.2 para v1.3 — decisão A-2 · F5R-01/11/26 (spec F5 §1.3-1, `docs/specs/F5-operacao.md`, 2026-08-06).
 **Autor:** Luciano França Rocha (LFR Automação), consolidado em sessão de grilling
 **Documentos-irmãos (normativos):** `adr/ADR-001 … ADR-024` · `GLOSSARY.md`
 
@@ -67,6 +68,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 - **Block/Edge** — dentro de `graph_json` (React Flow): nós tipados {opc_read, opc_write, mpc, script, tfs} com `config` própria — incluindo **`exec_order`** (int, 1..N, único no flow; ADR-024); arestas ligam portas tipadas (ADR-005)
 - **Event** — hypertable (ts, severidade, origem, mensagem, payload JSON), retenção 1 mês (ADR-020)
 - **Sample** — hypertable (ts, tag_id, valor, qualidade), retenção 1 mês + continuous aggregate 1 min (ADR-003)
+- **MpcSample** — hypertable (ts, flow_id, block_id, var_id, v, sp, auto), retenção 1 mês + continuous aggregate `mpc_samples_1m` (ADR-003)
 
 ## 5. Requisitos funcionais
 
@@ -140,7 +142,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 ### 5.11 Tela de operação (ADR-016)
 - **RF-701** Tela dedicada por bloco MPC (seletor de MPC ativo): **faceplate principal** (LOCAL/REMOTO, MAN/AUTO, status de watchdog/solver, contador de overrun, comandos) no topo.
 - **RF-702** **Faceplates menores** na base: um por variável do MPC — CV (PV + entrada de SP), MV (valor + entrada manual quando MAN), Restrição (valor + faixa), DV (somente leitura) — com EU e limites.
-- **RF-703** **Centro — tendência (uPlot):** histórico das variáveis selecionadas (via Timescale/continuous aggregate) **+ overlay da predição** de PVs e MVs no horizonte Np, a partir de "agora"; janela de tempo ajustável.
+- **RF-703** **Centro — tendência (uPlot):** histórico das variáveis selecionadas (`mpc_samples`/`mpc_samples_1m`) **+ overlay da predição** de PVs e MVs no horizonte Np, a partir de "agora"; janela de tempo ajustável.
 - **RF-704** Comandos de operação fluem: UI → REST (autorizado a operador) → `flow.commands` → runtime → estado republicado; todos geram evento de auditoria. (ADR-020)
 - **RF-705** **Banner de alarmes ativos** (condições vigentes: watchdog, overrun, script em falha, conexão caída), sem ACK. (ADR-020)
 
@@ -171,7 +173,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 | `opc.writes` | flow-runtime, api | opc-worker | {conn_id, tag_id, value, source, ts} |
 | `flow.status.<flow_id>` | flow-runtime | api(WS) | {state, scan_ms, overruns, ts, ports{block_id→{porta:{v, ok}}}} |
 | `flow.commands` | api | flow-runtime | {flow_id, cmd, args, user, ts} |
-| `mpc.state.<flow_id>.<block_id>` | flow-runtime | api(WS) | {modes, status, vars, cost, prediction{t[], cv[][], mv[][]}} |
+| `mpc.state.<flow_id>.<block_id>` | flow-runtime | api(WS), recorder | {ts, modes, status, vars, cost, prediction{ts, t[], cv[][], mv[][]}} |
 | `events` | todos | api(WS→banner), gravação | {ts, severity, origin, message, payload} |
 
 ### 7.2 JSON de projeto (export/import) (ADR-012)
