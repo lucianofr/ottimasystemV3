@@ -312,8 +312,8 @@ class Supervisor:
         # lock global — estagia e retorna; o build (spawn + montagem do-mpc) roda em
         # segundo plano e o flow varre desde a 1a fronteira, publicando `building` (§6.2)
         # até o host ficar pronto.
-        for host in staged.hosts.values():
-            self._mpc.start_host_background(runtime, host)
+        for block_id, host in staged.hosts.items():
+            self._mpc.start_host_background(runtime, host, flow_id=flow_id, block_id=block_id)
         self._state.track(flow_id, task)
         await task.start(user=command.user)
         await publish_flow_deployed(self._redis, flow_id=flow_id, user=command.user)

@@ -298,7 +298,9 @@ class MpcOrchestrator:
     # Ciclo de vida do host MPC (spec F5 §6.1, tarefa 4.1 F5a — F-1: boot assíncrono)
     # ----------------------------------------------------------------------------------
 
-    def start_host_background(self, runtime: _FlowRuntime, host: MpcHost) -> None:
+    def start_host_background(
+        self, runtime: _FlowRuntime, host: MpcHost, *, flow_id: int, block_id: str
+    ) -> None:
         """Sobe `host.start()` como task de fundo, FORA do caminho síncrono do lock global
         do supervisor: quem chama (`Supervisor._deploy`/`reconcile_mpc_hosts`, os DOIS
         caminhos que montam `MpcHost`, spec F5 §6.1) estagia e retorna sem pagar o build
@@ -308,14 +310,39 @@ class MpcOrchestrator:
         A task entra em `runtime.mpc_boot_tasks` (mesmo idioma de `mpc_watchdogs` logo
         abaixo, e do `self._background` interno do próprio `MpcHost`): sem guardar a
         referência o event loop só segura a fraca de `asyncio.create_task`, que pode sumir
-        no meio (docs do stdlib). `host.start()` nunca levanta — boot falho vira log e
-        `ready` permanece `False` (`mpc/host.py::_spawn_and_wait_ready`) — então não
-        precisa de tratamento de exceção aqui; e `MpcHost.stop()` já espera sozinho o boot
-        em voo antes de desligar o processo (`mpc/host.py::stop`), então nada aqui
-        precisa cancelar ou aguardar essa task por fora."""
+        no meio (docs do stdlib). `MpcHost.stop()` já espera sozinho o boot em voo antes de
+        desligar o processo (`mpc/host.py::stop`), então nada aqui precisa cancelar ou
+        aguardar essa task por fora.
+
+        `host.start()` não levanta pelo caminho normal (handshake ausente/atrasado vira log
+        + `ready` permanece `False`, `mpc/host.py::_spawn_and_wait_ready`) — mas
+        `_spawn_worker` (`mpc/host.py::_spawn_worker`, `Pipe`/`Process.start()`) não tem
+        `try/except`: uma falha rara aí (recursos do SO esgotados etc.) propaga até esta
+        task. Como ninguém a `await`, ela nunca seria observada — "Task exception was never
+        retrieved" sem `flow_id`/`block_id` nenhum (achado do fix round 1). O callback
+        abaixo observa `task.exception()` e loga com contexto; o bloco segue em `building`
+        para sempre nesse caso (mesmo destino documentado de um handshake falho — sem laço
+        de respawn automático, `mpc/host.py::_spawn_and_wait_ready`), só que agora com
+        sinal operacional em vez de silêncio."""
+
+        def _log_se_falhou(task: asyncio.Task[None]) -> None:
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc is not None:
+                logger.error(
+                    "Boot do worker MPC do flow %s / bloco '%s' falhou com exceção não "
+                    "tratada — host segue indisponível (building nunca alcança idle/ok "
+                    "até uma intervenção externa)",
+                    flow_id,
+                    block_id,
+                    exc_info=exc,
+                )
+
         task = asyncio.get_running_loop().create_task(host.start())
         runtime.mpc_boot_tasks.add(task)
         task.add_done_callback(runtime.mpc_boot_tasks.discard)
+        task.add_done_callback(_log_se_falhou)
 
     async def shutdown_mpc(self, runtime: _FlowRuntime, *, flow_id: int) -> None:
         """Devolve o PID (`mode_cmd=auto`) de todo bloco MPC armado e mata os workers da
@@ -371,7 +398,7 @@ class MpcOrchestrator:
         new_hosts = staged.hosts
         for block_id, host in new_hosts.items():
             if old_hosts.get(block_id) is not host:
-                self.start_host_background(runtime, host)
+                self.start_host_background(runtime, host, flow_id=flow_id, block_id=block_id)
         swapped: list[str] = []
         for block_id, old_host in old_hosts.items():
             if new_hosts.get(block_id) is old_host:

@@ -18,6 +18,7 @@ que nunca chegam à saída por modo do bloco).
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 
 import pytest
@@ -1069,3 +1070,62 @@ async def test_building_publicado_em_local_arm_failed_na_janela_e_idle_ao_ficar_
         lambda: _last_mpc_state(mpc_states).status.solver == "idle",
         timeout_s=MPC_SLOW_BUILD_DELAY_S + AWAIT_TIMEOUT_S,
     )
+
+
+# --------------------------------------------------------------------------------------
+# 20: fix round 1 (achado Important) — `_spawn_worker` sem `try/except` (`mpc/host.py`)
+#     propagando exceção até a task de fundo de `start_host_background`: sem observar
+#     `task.exception()`, isso virava "Task exception was never retrieved" sem contexto
+#     nenhum de flow/bloco. Agora é logado com contexto; o bloco segue em `building`
+#     para sempre (documentado — mesmo destino de um handshake falho, sem laço de
+#     respawn automático).
+# --------------------------------------------------------------------------------------
+
+
+async def test_excecao_em_spawn_worker_e_logada_com_contexto_e_nao_fica_muda(
+    harness_factory: Factory,
+    collect: Collect,
+    session_factory: Sessions,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Fix round 1: `MpcHost._spawn_worker` (`mpc/host.py:349-361`, `Pipe`/`Process.start()`)
+    não tem `try/except` — uma exceção rara ali propaga por `_spawn_and_wait_ready` e por
+    `MpcHost.start()` até a task que `MpcOrchestrator.start_host_background` cria e NUNCA
+    `await`a. Sem o `done_callback` que observa `task.exception()`, essa exceção vira
+    "Task exception was never retrieved" sem `flow_id`/`block_id` nenhum — e o operador não
+    tem NENHUM sinal de por que o bloco travou em `building` para sempre.
+
+    `monkeypatch` em `MpcHost._spawn_worker` (não em `_BOOT_TIMEOUT_S`/handshake — este é o
+    caminho de exceção DIFERENTE do handshake ausente, que já tem cobertura em
+    `test_man_para_auto_falha_worker_not_ready`) simula a falha rara sem precisar esgotar
+    recursos do SO de verdade."""
+    import ottima_flow_runtime.mpc.host as host_module
+
+    def _spawn_quebrado(self: object) -> tuple[object, object]:
+        raise OSError("recurso do SO esgotado (simulado pelo teste)")
+
+    monkeypatch.setattr(host_module.MpcHost, "_spawn_worker", _spawn_quebrado)
+
+    scenario = await _scenario(session_factory)
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+
+    with caplog.at_level(logging.ERROR, logger="ottima_flow_runtime.supervisor_mpc"):
+        await harness.command("deploy", scenario["flow_id"])
+        await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
+
+        await await_until(
+            lambda: str(scenario["flow_id"]) in caplog.text and "'m1'" in caplog.text,
+            timeout_s=AWAIT_TIMEOUT_S,
+        )
+
+    erro = next(r for r in caplog.records if r.levelno >= logging.ERROR)
+    assert erro.exc_info is not None, "a exceção real precisa vir anexada ao log (exc_info)"
+    assert isinstance(erro.exc_info[1], OSError)
+
+    # Comportamento resultante documentado (não corrigido nesta tarefa): o host nunca
+    # completa o boot — `building` para sempre, sem laço de respawn automático (mesmo
+    # destino de um handshake falho, `mpc/host.py::_spawn_and_wait_ready`).
+    runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    block = runtime.blocks["m1"][1]
+    assert block.host.ready is False
