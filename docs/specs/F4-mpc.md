@@ -147,9 +147,13 @@ O config vive inteiro no nó React Flow, como Script/TFS (export/import e hot-sw
 - Ordem das linhas de `prediction.cv[][]` = CVs na ordem do config, depois Restrições; `mv[][]` = MVs na ordem do config; `t[]` em segundos relativos a "agora" (0, Ts_mpc, …, Np×Ts_mpc). Fora de AUTO, `prediction` vazia (`t: []`). O consumidor mapeia pela ordem do `graph_json` — nenhuma chave além do PRD.
 - O stub `MpcState` do `bus.py` (F3) refina `vars` para o objeto acima — a forma externa do PRD (`{modes, status, vars, cost, prediction}`) não muda.
 
+> Nota (spec F5 §6.2): emenda a F4 §4.2 (item 2 — "fora de AUTO... `status.solver = "idle"`") e §5.1 (enum `solver`) — `status.solver = "building"` passa a ser publicado sempre que o host MPC não estiver pronto, em qualquer modo, precedendo `idle` (spec F5 §6.2).
+
 ### 5.2 Publicação
 
 A cada execução do MPC (cadência Ts_mpc, inclusive fora de AUTO — modos/valores vivos) **e** imediatamente em: mudança de modo, escrita de SP/MV materializada, transição de `status.solver`. Fire-and-forget (RNF-05). **Recorder ignora `mpc.state`** — predições nunca persistidas (ADR-016).
+
+> Nota (spec F5 §2.2-7): a frase "Recorder ignora `mpc.state`" está revogada — o recorder passa a assinar `mpc.state`; a proibição de persistir predição/custo/status permanece em vigor (spec F5 §2.2-7).
 
 ### 5.3 Vocabulário `kind` novo (extensão da tabela F3 §4.3; `origin = flow:<fid>/block:<bid>`; `user` no payload quando houver comandante — emenda F3 de 2026-08-04)
 
@@ -162,6 +166,8 @@ A cada execução do MPC (cadência Ts_mpc, inclusive fora de AUTO — modos/val
 | `mpc_shed` | alarm | `mode_read` ≠ target por 2 execuções (§4.5) |
 | `mpc_arm_failed` | warning | `{axis, reason: no_confirm\|worker_not_ready\|cold_input\|invalid_input}` |
 | `mpc_input_invalid` | warning | solve pulado por entrada inválida; dedupe |
+
+> Nota (spec F5 §7.2-2): tabela ganha linha nova `script_recovered` (severity info), publicada no rearme do latch do Script após `script_timeout`/`script_error` (spec F5 §7.2-2).
 
 ---
 
@@ -176,6 +182,8 @@ A cada execução do MPC (cadência Ts_mpc, inclusive fora de AUTO — modos/val
 | `POST /api/operate/{flow_id}/{block_id}/mv` | `{var_id, value}` | var é MV do bloco; `value` dentro de `limits` |
 
 A API valida forma e faixa e publica `flow.commands`; **não** conhece o modo vigente (isso é estado publicado) — o runtime re-valida (§4.8) e é quem audita. Nenhum evento emitido pela API.
+
+> Nota (spec F5 §4.3-2): flow inexistente passa a responder 404 (`Flow não encontrado`), não mais 422, alinhado à convenção dos demais routers (spec F5 §4.3-2).
 
 ### 6.2 WebSocket `/ws` (mesmo protocolo da F3 §5.3)
 

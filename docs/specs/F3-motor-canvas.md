@@ -41,6 +41,8 @@ Este documento especifica **implementação**. Ele não redefine produto, arquit
 | Export/import, UI de certificados | F6 | PRD §8 |
 | Browse do address space (era "reavaliar na F3") | Segue adiado — RF-203 o marca "desejável"; node_id manual provado desde a F2. Reavaliar na F6 | RF-203 |
 
+> Nota (spec F5 §1.2): o registro de valores de tag é reapontado — fica F6 ou nunca, só com consumidor real; eventos (faixa anunciadora) seguem F5 (spec F5 §1.2).
+
 ---
 
 ## 2. Motor de execução (flow-runtime)

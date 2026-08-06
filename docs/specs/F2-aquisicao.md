@@ -47,6 +47,8 @@ Este documento especifica **implementação**. Ele não redefine produto, arquit
 | Heartbeat de workers visível na UI | F5 | RNF-07 |
 | Produtores de `opc.writes` em produção (flow-runtime, api `/operate`) | F3/F5 — na F2 o lado consumidor é exercitado via barramento nos testes | PRD §7.1 |
 
+> Nota (spec F5 §1.2): o registro de valores de tag (`opc.values.<conn_id>` no `/ws`) é reapontado — fica F6 ou nunca, só com consumidor real; eventos (faixa anunciadora com dados reais) seguem F5 (spec F5 §1.2).
+
 A tela de trend da F2 consome `GET /api/history` por **polling** (sem WS); "ao vivo" de verdade chega com o WS na F5. **[NOVA — implementação]**
 
 ---
