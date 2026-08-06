@@ -53,8 +53,10 @@ from ottima_core.bus import (
     KIND_MPC_MV_WRITTEN,
     KIND_MPC_SHED,
     KIND_MPC_SP_WRITTEN,
+    FlowStatus,
     MpcState,
     OpcWrite,
+    channel_flow_status,
     channel_mpc_state,
 )
 
@@ -234,6 +236,38 @@ async def test_deploy_de_flow_com_mpc_succeede(
 
     assert events.events("deploy_rejected") == []
     assert harness.flow_state(scenario["flow_id"]) == "running"
+
+
+# --------------------------------------------------------------------------------------
+# 0b: fix round 1 (achado 1) — MpcState.ts de execução é EXATAMENTE o ts publicado em
+#     flow.status da mesma varredura (mesmo relogio do scheduler, spec F5 SS2.1)
+# --------------------------------------------------------------------------------------
+
+
+async def test_mpc_state_ts_de_execucao_bate_bit_a_bit_com_flow_status(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    """spec F5 SS2.1: `ts` do quadro do MPC nas execucoes e a fronteira de varredura —
+    "mesmo relogio do ts de flow.status". Fix round 1 threou o `fired_ts` do scheduler
+    (`FlowTask._scan`) ate `MpcBlock.step(inputs, ts=...)`; antes desse fix o bloco usava
+    um clock proprio desacoplado, entao os dois `ts` so coincidiam por sorte de timing."""
+    scenario = await _scenario(session_factory)
+    flow_status = await collect(channel_flow_status(scenario["flow_id"]))
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+    mpc_states = await _deploy_and_warm(harness, collect, scenario)
+
+    await await_until(lambda: len(flow_status.received) >= 1, timeout_s=AWAIT_TIMEOUT_S)
+
+    execucao = _last_mpc_state(mpc_states)
+    tss_de_varredura = {
+        FlowStatus.model_validate_json(raw).ts
+        for raw in flow_status.received
+        if FlowStatus.model_validate_json(raw).ports  # so varreduras reais, nao transicao
+    }
+    assert execucao.ts in tss_de_varredura, (
+        "MpcState.ts de uma execucao de fronteira precisa bater bit a bit com o ts de "
+        "ALGUMA varredura publicada em flow.status — mesmo relogio (spec F5 SS2.1)"
+    )
 
 
 # --------------------------------------------------------------------------------------

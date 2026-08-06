@@ -51,7 +51,9 @@ class OpcWriteBlock(Block):
     def input_ports(self) -> tuple[str, ...]:
         return ("in",)
 
-    async def step(self, inputs: Mapping[str, PortSample]) -> dict[str, PortSample]:
+    async def step(
+        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
+    ) -> dict[str, PortSample]:
         reason = _suppression_reason(inputs.get("in"))
         if reason is not None:
             await self._report_suppression(reason)

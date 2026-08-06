@@ -15,6 +15,7 @@ nulas de qualquer forma.
 """
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 from redis.asyncio import Redis
@@ -68,7 +69,9 @@ class ScriptBlock(Block):
     def output_ports(self) -> tuple[str, ...]:
         return self._output_ports
 
-    async def step(self, inputs: Mapping[str, PortSample]) -> dict[str, PortSample]:
+    async def step(
+        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
+    ) -> dict[str, PortSample]:
         if has_cold_input(inputs):
             return null_outputs(self._output_ports)
 

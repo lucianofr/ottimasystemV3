@@ -16,6 +16,7 @@ cada bloco compõe as peças conforme a própria semântica.
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,8 +47,16 @@ class Block(ABC):
         return ()
 
     @abstractmethod
-    async def step(self, inputs: Mapping[str, PortSample]) -> dict[str, PortSample]:
-        """Executa uma varredura e devolve os valores das portas de saída."""
+    async def step(
+        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
+    ) -> dict[str, PortSample]:
+        """Executa uma varredura e devolve os valores das portas de saída.
+
+        `ts` é o instante da fronteira desta varredura — o MESMO relógio publicado em
+        `flow.status.ts` (`FlowTask._run`, spec F5 §2.1): o scheduler passa `fired_ts`
+        para TODO bloco em toda varredura. A maioria dos blocos não carimba nada por si e
+        ignora o parâmetro; hoje só o MPC usa (spec §2.1/§3.5, `ts`/`prediction.ts` de
+        `mpc.state`)."""
 
     # B027: o corpo vazio é o contrato, não um stub — o OPC-Read não tem estado para zerar e
     # o scheduler chama `reset()` em todo bloco no deploy/stop sem perguntar o tipo.

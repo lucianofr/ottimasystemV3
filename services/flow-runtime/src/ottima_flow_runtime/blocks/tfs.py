@@ -17,6 +17,7 @@ por chamada num caminho que roda inline no laço de varredura, sensível a jitte
 import math
 from collections import deque
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 
 from ottima_core.flowgraph import IopdtParams, SopdtParams, TfsElement
 
@@ -146,7 +147,9 @@ class TfsBlock(Block):
     def output_ports(self) -> tuple[str, ...]:
         return OUTPUT_PORTS
 
-    async def step(self, inputs: Mapping[str, PortSample]) -> dict[str, PortSample]:
+    async def step(
+        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
+    ) -> dict[str, PortSample]:
         if has_cold_input(inputs):
             return null_outputs(OUTPUT_PORTS)
 

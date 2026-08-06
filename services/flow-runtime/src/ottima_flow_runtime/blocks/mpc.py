@@ -108,9 +108,11 @@ class MpcBlock(Block):
         self._publish = publish
         self._write_opc = write_opc
         self._emit_event = emit_event
-        # Clock injetável (spec F5 §2.1, achado da tarefa 1.2): testes controlam o avanço
-        # do relógio para provar `ts` crescente e a âncora de `prediction.ts` na fronteira
-        # do dispatch (§3.5) sem depender de tempo real; em produção, UTC real.
+        # Clock injetável (spec F5 §2.1, achado da tarefa 1.2): fallback para quando `step()`
+        # não recebe `ts` do scheduler (publicações imediatas, que não têm fronteira; e
+        # testes de unidade que chamam `step()` direto). Em produção o scheduler SEMPRE passa
+        # `ts` na fronteira (fix round 1, achado 1) — este clock nunca é a fonte da verdade
+        # de `flow.status.ts` em produção.
         self._now: Callable[[], datetime] = now if now is not None else lambda: datetime.now(UTC)
         # `flow_id` entra só para compor `_source` no padrão F3 (`flow:<fid>/block:<bid>`,
         # igual a `OpcWriteBlock`) — achado do carry-over da tarefa 2.1: o bloco nasceu
@@ -244,13 +246,18 @@ class MpcBlock(Block):
     # Varredura
     # ------------------------------------------------------------------------------
 
-    async def step(self, inputs: Mapping[str, PortSample]) -> dict[str, PortSample]:
+    async def step(
+        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
+    ) -> dict[str, PortSample]:
         is_frontier = self._n % self._multiplier == 0
         self._n += 1
-        # Carimbo real da fronteira (spec F5 §2.1-1): um só `self._now()` por varredura,
-        # reaproveitado em toda publicação e no guardado de `_dispatch_ts` desta mesma
-        # fronteira — nunca recomputado por chamada.
-        ts = self._now() if is_frontier else None
+        # Carimbo real da fronteira (spec F5 §2.1-1, fix round 1 achado 1): `ts` vem do
+        # scheduler (`FlowTask._scan`, o MESMO relógio de `flow.status.ts`) — nunca o clock
+        # próprio do bloco quando o scheduler o fornece. `self._now()` só entra como
+        # fallback (unidade sem scheduler, publicações imediatas fora deste método). Um só
+        # valor por varredura, reaproveitado em toda publicação e no guardado de
+        # `_dispatch_ts` desta mesma fronteira — nunca recomputado por chamada.
+        ts = (ts if ts is not None else self._now()) if is_frontier else None
 
         samples = {pid: inputs.get(pid, PortSample(None, False)) for pid in self._entrada_ids}
         if has_cold_input(samples):
@@ -306,7 +313,7 @@ class MpcBlock(Block):
         """
         result = self._host.poll()
         if result is not None:
-            await self._apply_result(result)
+            await self._apply_result(result, ts)
 
         if self._in_auto:
             request = SolveRequest(
@@ -332,7 +339,9 @@ class MpcBlock(Block):
                 # pelo caminho de `poll()` quando o host sintetizar o resultado.
                 self._overruns += 1
 
-    async def _apply_result(self, result: SolveResult) -> None:
+    async def _apply_result(self, result: SolveResult, ts: datetime) -> None:
+        """`ts` é a fronteira que consumiu este resultado (a de `_run_frontier`) — usada só
+        como fallback de `_dispatch_ts` (ver abaixo)."""
         if result.status != "overrun":
             self._overrun_reported = False
 
@@ -354,9 +363,10 @@ class MpcBlock(Block):
                 # Âncora do overlay (spec §3.5, F5R-01): a fronteira em que ESTE resultado
                 # foi despachado, guardada por `_run_frontier` — nunca o ts do quadro
                 # atual, que já avançou (pelo menos) uma fronteira além do dispatch.
-                # Fallback em `_now()` só cobre um host devolvendo resultado sem dispatch
-                # prévio deste bloco (double de teste/hot-swap com host reaproveitado).
-                ts=self._dispatch_ts if self._dispatch_ts is not None else self._now(),
+                # Fallback no `ts` desta fronteira (parâmetro do método, não `self._now()`)
+                # só cobre um host devolvendo resultado sem dispatch prévio deste bloco
+                # (double de teste/hot-swap com host reaproveitado).
+                ts=self._dispatch_ts if self._dispatch_ts is not None else ts,
                 t=result.prediction_t,
                 cv=result.prediction_cv,
                 mv=result.prediction_mv,
