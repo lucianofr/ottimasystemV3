@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { api, getToken, type EventOut, type FlowDetail } from "../lib/api";
+import { api, ApiError, getToken, type EventOut, type FlowDetail } from "../lib/api";
 import type { MpcState } from "../lib/contracts.gen";
 import {
   atrasoReconexao,
@@ -431,6 +431,20 @@ function blocosScriptDoFlow(flow: FlowDetail): OrigemBlocoScript[] {
     .map((no) => ({ flowId: flow.id, blockId: no.id }));
 }
 
+/** Fix round 3, gap 2: uma `FlowDetail` que falha não pode ficar muda — mesma regra do
+ *  `logarFalha` de `bootstrapAlarmes.ts` (path + `status`/mensagem quando é `ApiError`),
+ *  aqui identificando o flow em vez do path. Sem isto, um flow com `script_error`
+ *  latchado cujo `graph_json` falhe ao carregar perderia a cobertura da emenda em
+ *  silêncio, sem rastro nenhum (não há `onError` global — `router.tsx` usa
+ *  `new QueryClient()` sem config). */
+function logarFalhaGraphJson(flowId: number, motivo: unknown): void {
+  const detalhe =
+    motivo instanceof ApiError ? `${String(motivo.status)} ${motivo.message}` : String(motivo);
+  console.error(
+    `CanalAoVivoProvider: falha ao buscar graph_json do flow ${String(flowId)} para blocos Script (${detalhe})`,
+  );
+}
+
 /** Montado no `AppShell`: um socket por aba, vivo enquanto a sessão durar. `events` sempre
  *  assinado (o banner é do shell). Dois contexts, não um: `estado` muda a cada mensagem do
  *  socket, e um componente que só chama `useAssinatura` (registra e esquece) não precisa
@@ -450,7 +464,9 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
    *  o editor se o operador abrir o mesmo flow depois. Uma falha isolada (rede, 404) não
    *  trava as outras nem o bootstrap — `pronto` só espera cada consulta assentar
    *  (sucesso OU erro), nunca as bloqueia entre si (mesmo espírito do
-   *  `Promise.allSettled` de `bootstrapAlarmes`). */
+   *  `Promise.allSettled` de `bootstrapAlarmes`) — mas também não fica muda: `falhas`
+   *  sai daqui (combine tem que ficar puro) e um efeito à parte loga cada uma
+   *  (`logarFalhaGraphJson`, fix round 3, gap 2). */
   const idsParaBlocosScript = (flows.data ?? []).slice(0, TETO_FLOWS).map((flow) => flow.id);
   const detalhesFlow = useQueries({
     queries: idsParaBlocosScript.map((id) => ({
@@ -462,8 +478,21 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
       scriptBlocks: resultados.flatMap((resultado) =>
         resultado.data ? blocosScriptDoFlow(resultado.data) : [],
       ),
+      falhas: resultados.flatMap((resultado, indice) =>
+        resultado.isError
+          ? [{ flowId: idsParaBlocosScript[indice], motivo: resultado.error }]
+          : [],
+      ),
     }),
   });
+  const falhasLogadasRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    for (const { flowId, motivo } of detalhesFlow.falhas) {
+      if (falhasLogadasRef.current.has(flowId)) continue;
+      falhasLogadasRef.current.add(flowId);
+      logarFalhaGraphJson(flowId, motivo);
+    }
+  }, [detalhesFlow.falhas]);
   const [cacheBootstrap] = useState(() => criarCacheBootstrapAlarmes());
   const bootstrapFeitoRef = useRef(false);
 

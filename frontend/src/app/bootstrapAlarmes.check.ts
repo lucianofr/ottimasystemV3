@@ -315,23 +315,48 @@ test("script_error como último evento na origem de bloco: resolverAlarmes acha 
   ]);
 });
 
-test("script_error seguido de script_recovered na mesma origem de bloco: resolverAlarmes não acha condição ativa", async () => {
-  const origemBloco = "flow:9/block:script_a1b2c3d4";
+test("script_error seguido de script_recovered num bloco Script fica inativo, mas não silencia outro bloco Script com script_error em aberto", async () => {
+  // Discriminante contra "nunca buscou nada": se a consulta por bloco Script não
+  // acontecer, os dois blocos ficam sem eventos e `condicoes` sai `[]` — o mesmo `[]`
+  // que este cenário produziria se só testasse o bloco fechado sozinho (fix round 3,
+  // gap 1). Com a origem aberta no meio, só um bootstrap que realmente consultou os
+  // DOIS blocos produz a condição esperada, não-vazia.
+  const origemFechada = "flow:9/block:script_a1b2c3d4";
+  const origemAberta = "flow:9/block:script_e5f6a7b8";
   const { ambiente } = ambienteFake({
     "/api/events?origin=flow:9/block:script_a1b2c3d4&limit=20": [
-      evento("script_recovered", origemBloco, { ts: "2026-01-01T11:30:00.000Z" }),
-      evento("script_error", origemBloco, { ts: "2026-01-01T11:00:00.000Z" }),
+      evento("script_recovered", origemFechada, { ts: "2026-01-01T11:30:00.000Z" }),
+      evento("script_error", origemFechada, { ts: "2026-01-01T11:00:00.000Z" }),
+    ],
+    "/api/events?origin=flow:9/block:script_e5f6a7b8&limit=20": [
+      evento("script_error", origemAberta, { ts: "2026-01-01T11:15:00.000Z" }),
     ],
     [AVISO]: [],
     [ALARME]: [],
   });
 
   const eventos = await bootstrapAlarmes(
-    { flowIds: [], connectionIds: [], scriptBlocks: [{ flowId: 9, blockId: "script_a1b2c3d4" }] },
+    {
+      flowIds: [],
+      connectionIds: [],
+      scriptBlocks: [
+        { flowId: 9, blockId: "script_a1b2c3d4" },
+        { flowId: 9, blockId: "script_e5f6a7b8" },
+      ],
+    },
     AGORA,
     ambiente,
   );
   const condicoes = resolverAlarmes(eventos, new Map(), new Map(), AGORA);
 
-  expect(condicoes).toEqual([]);
+  expect(condicoes).toEqual([
+    {
+      familia: "par",
+      kind: "script_error",
+      origin: origemAberta,
+      desde: "2026-01-01T11:15:00.000Z",
+      severity: "alarm",
+      message: "mensagem de script_error",
+    },
+  ]);
 });
