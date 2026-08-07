@@ -1,0 +1,2041 @@
+{
+  "arredondamento_bankers": [
+    {
+      "esperado": 0,
+      "valor": 0.0
+    },
+    {
+      "esperado": 0,
+      "valor": 0.5
+    },
+    {
+      "esperado": 2,
+      "valor": 1.5
+    },
+    {
+      "esperado": 2,
+      "valor": 2.5
+    },
+    {
+      "esperado": 4,
+      "valor": 3.5
+    },
+    {
+      "esperado": 2,
+      "valor": 2.3
+    },
+    {
+      "esperado": 3,
+      "valor": 2.7
+    },
+    {
+      "esperado": 100,
+      "valor": 99.5
+    },
+    {
+      "esperado": 100,
+      "valor": 100.5
+    }
+  ],
+  "dimensao_estado": [
+    {
+      "esperado": 3,
+      "modelos": {
+        "cv_a": {
+          "mv_a": {
+            "enabled": true,
+            "params": {
+              "K": 1.0,
+              "tau1": 10.0,
+              "tau2": 0.0,
+              "theta": 0.0
+            }
+          }
+        }
+      },
+      "nome": "simples_sopdt_sem_atraso",
+      "ts_mpc": 1.0,
+      "variaveis": {
+        "constraints": [],
+        "cvs": [
+          {
+            "eu": "",
+            "id": "cv_a",
+            "kind": "selfreg",
+            "name": "",
+            "sp_limits": {
+              "max": 100.0,
+              "min": 0.0
+            },
+            "tss": 30.0,
+            "weight": 1.0
+          }
+        ],
+        "dvs": [],
+        "mvs": [
+          {
+            "du_max": 1.0,
+            "eu": "",
+            "id": "mv_a",
+            "initial_value": 0.0,
+            "limits": {
+              "max": 100.0,
+              "min": 0.0
+            },
+            "name": "",
+            "pid": null
+          }
+        ]
+      }
+    },
+    {
+      "esperado": 5,
+      "modelos": {
+        "cv_a": {
+          "mv_a": {
+            "enabled": true,
+            "params": {
+              "K": 1.0,
+              "tau1": 10.0,
+              "tau2": 0.0,
+              "theta": 2.5
+            }
+          }
+        }
+      },
+      "nome": "atraso_com_banker_meio_par",
+      "ts_mpc": 1.0,
+      "variaveis": {
+        "constraints": [],
+        "cvs": [
+          {
+            "eu": "",
+            "id": "cv_a",
+            "kind": "selfreg",
+            "name": "",
+            "sp_limits": {
+              "max": 100.0,
+              "min": 0.0
+            },
+            "tss": 30.0,
+            "weight": 1.0
+          }
+        ],
+        "dvs": [],
+        "mvs": [
+          {
+            "du_max": 1.0,
+            "eu": "",
+            "id": "mv_a",
+            "initial_value": 0.0,
+            "limits": {
+              "max": 100.0,
+              "min": 0.0
+            },
+            "name": "",
+            "pid": null
+          }
+        ]
+      }
+    },
+    {
+      "esperado": 2,
+      "modelos": {
+        "cv_a": {
+          "mv_a": {
+            "enabled": true,
+            "params": {
+              "Ki": 1.0,
+              "theta": 0.0
+            }
+          }
+        }
+      },
+      "nome": "iopdt_soma_um_estado",
+      "ts_mpc": 1.0,
+      "variaveis": {
+        "constraints": [],
+        "cvs": [
+          {
+            "eu": "",
+            "id": "cv_a",
+            "kind": "integrating",
+            "name": "",
+            "sp_limits": {
+              "max": 100.0,
+              "min": 0.0
+            },
+            "tss": 30.0,
+            "weight": 1.0
+          }
+        ],
+        "dvs": [],
+        "mvs": [
+          {
+            "du_max": 1.0,
+            "eu": "",
+            "id": "mv_a",
+            "initial_value": 0.0,
+            "limits": {
+              "max": 100.0,
+              "min": 0.0
+            },
+            "name": "",
+            "pid": null
+          }
+        ]
+      }
+    },
+    {
+      "esperado": 1,
+      "modelos": {
+        "cv_a": {
+          "mv_a": {
+            "enabled": false,
+            "params": {
+              "K": 1.0,
+              "tau1": 10.0,
+              "tau2": 0.0,
+              "theta": 2.5
+            }
+          }
+        }
+      },
+      "nome": "par_desabilitado_nao_soma_estado",
+      "ts_mpc": 1.0,
+      "variaveis": {
+        "constraints": [],
+        "cvs": [
+          {
+            "eu": "",
+            "id": "cv_a",
+            "kind": "selfreg",
+            "name": "",
+            "sp_limits": {
+              "max": 100.0,
+              "min": 0.0
+            },
+            "tss": 30.0,
+            "weight": 1.0
+          }
+        ],
+        "dvs": [],
+        "mvs": [
+          {
+            "du_max": 1.0,
+            "eu": "",
+            "id": "mv_a",
+            "initial_value": 0.0,
+            "limits": {
+              "max": 100.0,
+              "min": 0.0
+            },
+            "name": "",
+            "pid": null
+          }
+        ]
+      }
+    }
+  ],
+  "horizontes": [
+    {
+      "multiplier": 5,
+      "nc": 30,
+      "np": 120,
+      "ts_flow": 1.0,
+      "ts_mpc": 5.0,
+      "tss": [
+        600.0
+      ]
+    },
+    {
+      "multiplier": 10,
+      "nc": 2,
+      "np": 1,
+      "ts_flow": 100.0,
+      "ts_mpc": 1000.0,
+      "tss": [
+        600.0
+      ]
+    },
+    {
+      "multiplier": 1,
+      "nc": 250,
+      "np": 1000,
+      "ts_flow": 1.0,
+      "ts_mpc": 1.0,
+      "tss": [
+        1000.0
+      ]
+    }
+  ],
+  "validacao": [
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 0
+      },
+      "regra": "config_minima_valida_sem_erro_nem_aviso",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            },
+            "mv_b": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            },
+            "mv_c": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            },
+            "mv_d": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            },
+            "mv_e": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            },
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_b",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            },
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_c",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            },
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_d",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            },
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_e",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "caps_mv_acima_do_teto",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          },
+          "cv_b": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          },
+          "cv_c": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          },
+          "cv_d": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          },
+          "cv_e": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          },
+          "cv_f": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          },
+          "cv_g": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_b",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_c",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_d",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_e",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_f",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_g",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "caps_cv_mais_restricao_acima_do_teto",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "dv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            },
+            "dv_b": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            },
+            "dv_c": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            },
+            "dv_d": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            },
+            "dv_e": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            },
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [
+            {
+              "eu": "",
+              "id": "dv_a",
+              "name": ""
+            },
+            {
+              "eu": "",
+              "id": "dv_b",
+              "name": ""
+            },
+            {
+              "eu": "",
+              "id": "dv_c",
+              "name": ""
+            },
+            {
+              "eu": "",
+              "id": "dv_d",
+              "name": ""
+            },
+            {
+              "eu": "",
+              "id": "dv_e",
+              "name": ""
+            }
+          ],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "caps_dv_acima_do_teto",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 0.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "matrix_par_habilitado_com_params_invalidos",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {},
+          "cv_b": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_b",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "matrix_linha_sem_par_mv",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            },
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_b",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "matrix_mv_sem_par_habilitado",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [
+            {
+              "eu": "",
+              "id": "dv_a",
+              "name": ""
+            }
+          ],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "matrix_dv_sem_par_habilitado",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 50.0,
+                "min": 100.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "numbers_mv_limits_min_nao_menor_que_max",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 0.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "numbers_mv_du_max_nao_positivo",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          },
+          "cv_b": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_b",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 0.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "numbers_cv_tss_nao_positivo",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 50.0,
+                "min": 100.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "numbers_cv_sp_limits_min_nao_menor_que_max",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 0.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "numbers_cv_weight_nao_positivo",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "co_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          },
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [
+            {
+              "eu": "",
+              "id": "co_a",
+              "kind": "selfreg",
+              "name": "",
+              "priority": 1,
+              "range": {
+                "high": 100.0,
+                "low": 0.0
+              },
+              "tss": 0.0
+            }
+          ],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "numbers_co_tss_nao_positivo",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "co_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [
+            {
+              "eu": "",
+              "id": "co_a",
+              "kind": "selfreg",
+              "name": "",
+              "priority": 1,
+              "range": {
+                "high": 50.0,
+                "low": 100.0
+              },
+              "tss": 30.0
+            }
+          ],
+          "cvs": [],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "numbers_co_range_low_nao_menor_que_high",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 100,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "horizons_np_abaixo_do_piso",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 1000.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 1
+      },
+      "regra": "horizons_np_acima_do_teto",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 100.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 1,
+        "erros": 0
+      },
+      "regra": "horizons_np_acima_de_60_e_aviso",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_b": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_c": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_d": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            }
+          },
+          "cv_b": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_b": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_c": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_d": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            }
+          },
+          "cv_c": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_b": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_c": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_d": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            }
+          },
+          "cv_d": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_b": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_c": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_d": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            }
+          },
+          "cv_e": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_b": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_c": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_d": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            }
+          },
+          "cv_f": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_b": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_c": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            },
+            "mv_d": {
+              "enabled": true,
+              "params": {
+                "K": 1.0,
+                "tau1": 10.0,
+                "tau2": 0.0,
+                "theta": 3.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "eu": "",
+              "id": "cv_a",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_b",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_c",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_d",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_e",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            },
+            {
+              "eu": "",
+              "id": "cv_f",
+              "kind": "selfreg",
+              "name": "",
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "tss": 30.0,
+              "weight": 1.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            },
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_b",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            },
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_c",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            },
+            {
+              "du_max": 1.0,
+              "eu": "",
+              "id": "mv_d",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "name": "",
+              "pid": null
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 1,
+        "erros": 0
+      },
+      "regra": "horizons_dimensao_de_estados_acima_de_120_e_aviso",
+      "ts_flow_segundos": 1.0
+    }
+  ]
+}
