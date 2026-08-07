@@ -161,7 +161,7 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
         : false;
 
   async function enviar(): Promise<void> {
-    if (rascunho === null || faixa === null) return;
+    if (!editavel || rascunho === null || faixa === null) return;
     const bruto = Number(rascunho.replace(",", "."));
     if (!Number.isFinite(bruto)) {
       setErro("Valor inválido");
@@ -239,7 +239,11 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
           <Input
             id={`faceplate-${tipo === "mv" ? "mv" : "sp"}-input-${definicao.id}`}
             data-testid={`faceplate-${tipo === "mv" ? "mv" : "sp"}-input-${definicao.id}`}
-            className={cn("process-value", pendenciaAtiva !== null && "border-accent text-fg-muted")}
+            className={cn(
+              "process-value",
+              !editavel && "text-fg-muted",
+              pendenciaAtiva !== null && "border-accent text-fg-muted",
+            )}
             disabled={!editavel}
             value={valorInput}
             onChange={(evento) => {
