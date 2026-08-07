@@ -113,6 +113,12 @@ E2E_ADMIN_USERNAME=$(grep -m1 '^OTTIMA_ADMIN_USERNAME=' deploy/.env|cut -d= -f2-
 # Envs novos: OTTIMA_HEALTH_URL_OPC_WORKER/_FLOW_RUNTIME/_RECORDER (defaults
 # http://opc-worker:8001/health, http://flow-runtime:8002/health, http://recorder:8003/health)
 # e OTTIMA_MPC_QUEUE_MAX (default 100000, teto do buffer de mpc_samples no recorder).
+# Telas da F5b (operador; admin herda): /operacao (seletor; 1 MPC redireciona direto),
+# /operacao/:flowId/:blockId (faceplate principal + faceplates de variável + trend com
+# predição) e /eventos. Nav do shell em dois grupos: Operação · Eventos | engenharia.
+# data-testid: operate-*, faceplate-*, eventos-*, home-* (o roteiro L3 depende deles).
+# Ambiente do L3: `uv run python scripts/setup-l3.py` (idempotente) cria projeto ativo,
+# conexão opcsim-l3, flow MPC↔TFS deployado e o usuário operador_e2e.
 cd frontend && npm run e2e                          # regressão Playwright da F1 (specs novas não)
 # A L2 e o Playwright NÃO podem rodar juntos: o E2E-16 publica project_activated duas vezes e
 # derruba os cenários E2E-F3-03/04/08. Serialize.
