@@ -36,7 +36,3 @@ services:
     depends_on:
       opcsim:
         condition: service_healthy
-
-  timescaledb:
-    ports:
-      - "127.0.0.1:${OTTIMA_E2E_POSTGRES_PORT:-5433}:5432"
