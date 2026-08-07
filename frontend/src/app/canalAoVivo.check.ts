@@ -7,11 +7,14 @@ import {
   aplicarInteresse,
   comandoAssinatura,
   criarRegistroInteresses,
+  criarSincronizadorCondicoes,
+  interesseDeCondicoes,
   TETO_EVENTOS,
   type CicloVidaCanal,
   type EstadoDoCanal,
   type RegistroInteresses,
 } from "./CanalAoVivo";
+import type { CondicaoAtiva } from "./alarmes";
 
 /** O `Location` do browser tem muito mais superfície do que a URL do WS precisa. */
 function origem(protocol: string, host: string): Location {
@@ -480,4 +483,140 @@ test("eventos entram mais novo primeiro e respeitam o teto de memória", () => {
   expect(b.estado().eventos).toHaveLength(TETO_EVENTOS);
   expect(b.estado().eventos[0].message).toBe(`evento ${String(TETO_EVENTOS + 4)}`);
   expect(b.estado().eventos[TETO_EVENTOS - 1].message).toBe("evento 5");
+});
+
+// ----------------------------------------------------------------------------------------
+// Assinatura sob demanda por condição ativa (tarefa 2.3, spec F5 §7.1-5; F5R-04)
+// ----------------------------------------------------------------------------------------
+
+function condicaoAtiva(familia: CondicaoAtiva["familia"], origin: string, kind = "x"): CondicaoAtiva {
+  return {
+    familia,
+    kind,
+    origin,
+    desde: "2026-01-01T00:00:00.000Z",
+    severity: "alarm",
+    message: "mensagem",
+  };
+}
+
+test("interesseDeCondicoes: condição de família 'estado' com origem de bloco MPC assina só mpc_state", () => {
+  const alvo = interesseDeCondicoes([condicaoAtiva("estado", "flow:3/block:mpc", "mpc_solver_error")]);
+
+  expect(alvo).toEqual({ flow_status: [], mpc_state: ["3/mpc"] });
+});
+
+test("interesseDeCondicoes: condição de família 'contador' com origem de flow (flow_overrun) assina flow_status", () => {
+  const alvo = interesseDeCondicoes([condicaoAtiva("contador", "flow:7", "flow_overrun")]);
+
+  expect(alvo).toEqual({ flow_status: [7], mpc_state: [] });
+});
+
+test("interesseDeCondicoes: condição de família 'contador' com origem de bloco (mpc_overrun) assina mpc_state", () => {
+  const alvo = interesseDeCondicoes([condicaoAtiva("contador", "flow:7/block:mpc", "mpc_overrun")]);
+
+  expect(alvo).toEqual({ flow_status: [], mpc_state: ["7/mpc"] });
+});
+
+test("interesseDeCondicoes: famílias 'par' e 'ttl' nunca entram no agregado — nunca assina flow_status de todos os flows", () => {
+  const alvo = interesseDeCondicoes([
+    condicaoAtiva("par", "flow:9", "flow_failed"),
+    condicaoAtiva("ttl", "flow:2/block:mpc", "mpc_arm_failed"),
+  ]);
+
+  expect(alvo).toEqual({ flow_status: [], mpc_state: [] });
+});
+
+test("interesseDeCondicoes: sem condição nenhuma, agregado vazio", () => {
+  expect(interesseDeCondicoes([])).toEqual({ flow_status: [], mpc_state: [] });
+});
+
+test("interesseDeCondicoes: duas condições da mesma origem não duplicam o id", () => {
+  const alvo = interesseDeCondicoes([
+    condicaoAtiva("estado", "flow:3/block:mpc", "mpc_solver_error"),
+    condicaoAtiva("estado", "flow:3/block:mpc", "mpc_shed"),
+  ]);
+
+  expect(alvo).toEqual({ flow_status: [], mpc_state: ["3/mpc"] });
+});
+
+test("sincronizador: condição ativa gera subscribe da origem correspondente", () => {
+  const b = bancada();
+  const ciclo = b.abrir();
+  b.sockets[0].abrir();
+  b.sockets[0].enviados = [];
+  const sincronizador = criarSincronizadorCondicoes();
+
+  sincronizador.sincronizar([condicaoAtiva("estado", "flow:3/block:mpc", "mpc_solver_error")], b.registro, ciclo);
+
+  expect(b.sockets[0].enviados).toEqual(['{"subscribe":{"mpc_state":["3/mpc"]}}']);
+  expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: ["3/mpc"] });
+});
+
+test("sincronizador: cessação (condição sai da varredura) gera unsubscribe da origem", () => {
+  const b = bancada();
+  const ciclo = b.abrir();
+  b.sockets[0].abrir();
+  const sincronizador = criarSincronizadorCondicoes();
+  sincronizador.sincronizar([condicaoAtiva("estado", "flow:3/block:mpc", "mpc_solver_error")], b.registro, ciclo);
+  b.sockets[0].enviados = [];
+
+  sincronizador.sincronizar([], b.registro, ciclo);
+
+  expect(b.sockets[0].enviados).toEqual(['{"unsubscribe":{"mpc_state":["3/mpc"]}}']);
+  expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: [] });
+});
+
+test("sincronizador: sem condição nenhuma, nada além de events é assinado no connect", () => {
+  const b = bancada();
+  const ciclo = b.abrir();
+  b.sockets[0].abrir();
+  const sincronizador = criarSincronizadorCondicoes();
+  b.sockets[0].enviados = [];
+
+  sincronizador.sincronizar([], b.registro, ciclo);
+
+  expect(b.sockets[0].enviados).toEqual([]);
+  expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: [] });
+});
+
+test("sincronizador: varredura repetida com a mesma condição ativa não reincrementa o refcount", () => {
+  const b = bancada();
+  const ciclo = b.abrir();
+  b.sockets[0].abrir();
+  const sincronizador = criarSincronizadorCondicoes();
+  sincronizador.sincronizar([condicaoAtiva("estado", "flow:3/block:mpc", "mpc_solver_error")], b.registro, ciclo);
+  b.sockets[0].enviados = [];
+
+  sincronizador.sincronizar([condicaoAtiva("estado", "flow:3/block:mpc", "mpc_solver_error")], b.registro, ciclo);
+
+  expect(b.sockets[0].enviados).toEqual([]);
+});
+
+test("sincronizador: coexistência com interesse de página — origem pedida pelos dois só é desassinada quando ambos soltam", () => {
+  const b = bancada();
+  const ciclo = b.abrir();
+  b.sockets[0].abrir();
+  b.sockets[0].enviados = [];
+  const sincronizador = criarSincronizadorCondicoes();
+
+  // A página pede o mesmo bloco primeiro (`useAssinatura` real chamaria `aplicarInteresse`).
+  aplicarInteresse(b.registro, ciclo, "subscribe", { mpc_state: ["3/mpc"] });
+  expect(b.sockets[0].enviados).toEqual(['{"subscribe":{"mpc_state":["3/mpc"]}}']);
+  b.sockets[0].enviados = [];
+
+  // A condição liga na mesma origem: refcount sobe pra 2, sem novo comando (já assinado).
+  sincronizador.sincronizar([condicaoAtiva("estado", "flow:3/block:mpc", "mpc_solver_error")], b.registro, ciclo);
+  expect(b.sockets[0].enviados).toEqual([]);
+  expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: ["3/mpc"] });
+
+  // A página solta: refcount cai pra 1 (a condição ainda quer) — nada sai do socket.
+  aplicarInteresse(b.registro, ciclo, "unsubscribe", { mpc_state: ["3/mpc"] });
+  expect(b.sockets[0].enviados).toEqual([]);
+  expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: ["3/mpc"] });
+
+  // A condição cessa: agora sim, ninguém mais quer — unsubscribe sai.
+  sincronizador.sincronizar([], b.registro, ciclo);
+  expect(b.sockets[0].enviados).toEqual(['{"unsubscribe":{"mpc_state":["3/mpc"]}}']);
+  expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: [] });
 });

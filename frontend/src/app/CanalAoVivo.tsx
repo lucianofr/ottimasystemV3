@@ -32,6 +32,7 @@ import {
   type EscopoBootstrap,
   type OrigemBlocoScript,
 } from "./bootstrapAlarmes";
+import { resolverAlarmes, type CondicaoAtiva } from "./alarmes";
 
 /**
  * Canal ao vivo da sessão (spec F5 §7.1-1/2/3; decisão A-6; F5R-22): **um** WebSocket por
@@ -422,6 +423,81 @@ export function aplicarInteresse(
   ciclo?.notificarInteresse({ [acao]: delta });
 }
 
+// --------------------------------------------------------------------------------------
+// Assinatura sob demanda por condição ativa (tarefa 2.3, spec F5 §7.1-5; F5R-04)
+// --------------------------------------------------------------------------------------
+
+const ORIGEM_BLOCO_MPC = /^flow:(\d+)\/block:(.+)$/;
+const ORIGEM_FLOW = /^flow:(\d+)$/;
+
+/** Deriva o `Interesse` que as famílias "estado" e "contador" de `resolverAlarmes` (2.1,
+ *  `alarmes.ts`) exigem assinar: origem de bloco MPC (`flow:<id>/block:<id>`) assina
+ *  `mpc_state`; origem de flow (`flow:<id>`) assina `flow_status`. Famílias "par"/"ttl" não
+ *  têm estado publicado nenhum pra seguir — ficam de fora por design, e nenhuma origem além
+ *  das que `resolverAlarmes` já achou ativas entra aqui: nunca assina `flow_status` de
+ *  todos os flows por precaução (spec §7.1-5). */
+export function interesseDeCondicoes(condicoes: readonly CondicaoAtiva[]): Interesse {
+  const flowIds = new Set<number>();
+  const mpcChaves = new Set<string>();
+  for (const condicao of condicoes) {
+    if (condicao.familia !== "estado" && condicao.familia !== "contador") continue;
+    const bloco = ORIGEM_BLOCO_MPC.exec(condicao.origin);
+    if (bloco !== null) {
+      mpcChaves.add(`${bloco[1]}/${bloco[2]}`);
+      continue;
+    }
+    const flow = ORIGEM_FLOW.exec(condicao.origin);
+    if (flow !== null) flowIds.add(Number(flow[1]));
+  }
+  return { flow_status: [...flowIds], mpc_state: [...mpcChaves] };
+}
+
+export interface SincronizadorCondicoes {
+  /** Compara o alvo desta varredura com o da anterior e manda só o delta que entrou/saiu —
+   *  a mesma origem pode também estar pedida por uma página (`useAssinatura`); o
+   *  unsubscribe do lado da condição só sai quando ESTA condição cessou, e o refcount do
+   *  `RegistroInteresses` compartilhado garante que o socket só desliga o id quando ninguém
+   *  mais (nem página, nem outra condição) ainda quer. */
+  sincronizar: (
+    condicoes: readonly CondicaoAtiva[],
+    registro: RegistroInteresses,
+    ciclo: CicloVidaCanal | null,
+  ) => void;
+}
+
+/** Uma instância por `CanalAoVivoProvider` (mesmo padrão de `criarRegistroInteresses`):
+ *  guarda o alvo da varredura anterior para nunca reincrementar o refcount de um id que já
+ *  está sob assinatura por condição, e para saber exatamente o que soltar quando a condição
+ *  cessa — sem isto, cada nova varredura chamaria `registro.adicionar` de novo para o mesmo
+ *  id e o refcount nunca voltaria a zero. */
+export function criarSincronizadorCondicoes(): SincronizadorCondicoes {
+  let flowAtual = new Set<number>();
+  let mpcAtual = new Set<string>();
+
+  return {
+    sincronizar(condicoes, registro, ciclo) {
+      const alvo = interesseDeCondicoes(condicoes);
+      const flowAlvo = new Set(alvo.flow_status ?? []);
+      const mpcAlvo = new Set(alvo.mpc_state ?? []);
+
+      const flowEntrando = [...flowAlvo].filter((id) => !flowAtual.has(id));
+      const flowSaindo = [...flowAtual].filter((id) => !flowAlvo.has(id));
+      const mpcEntrando = [...mpcAlvo].filter((chave) => !mpcAtual.has(chave));
+      const mpcSaindo = [...mpcAtual].filter((chave) => !mpcAlvo.has(chave));
+
+      if (flowEntrando.length > 0 || mpcEntrando.length > 0) {
+        aplicarInteresse(registro, ciclo, "subscribe", { flow_status: flowEntrando, mpc_state: mpcEntrando });
+      }
+      if (flowSaindo.length > 0 || mpcSaindo.length > 0) {
+        aplicarInteresse(registro, ciclo, "unsubscribe", { flow_status: flowSaindo, mpc_state: mpcSaindo });
+      }
+
+      flowAtual = flowAlvo;
+      mpcAtual = mpcAlvo;
+    },
+  };
+}
+
 /** Blocos Script de um flow (emenda ao bootstrap, fix round 2, achado 2): `deGraphJson`
  *  já é a leitura tolerante e testada do `graph_json` (`graph.ts`) — nó ilegível vira
  *  descarte lá, nunca quebra aqui. Reaproveitada para não duplicar o parse. */
@@ -540,6 +616,19 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
       ciclo.desmontar();
     };
   }, [registro]);
+
+  /** Assinatura sob demanda por condição ativa (tarefa 2.3, spec F5 §7.1-5; F5R-04): a cada
+   *  varredura de `eventos`/`flowStatus`/`mpcStates`, `resolverAlarmes` (2.1) reavalia as
+   *  famílias "estado"/"contador" e o sincronizador assina/desassina a origem correspondente
+   *  — depende só do estado do canal, nunca de qual página está aberta. `cicloRef.current`
+   *  pode estar `null` no primeiro commit (mesma corrida documentada em `aplicarInteresse`
+   *  acima); o registro fica correto de qualquer forma e a varredura seguinte, já com o
+   *  socket aberto, herda o alvo normalmente. */
+  const [sincronizadorCondicoes] = useState(() => criarSincronizadorCondicoes());
+  useEffect(() => {
+    const condicoes = resolverAlarmes(estado.eventos, estado.flowStatus, estado.mpcStates, new Date());
+    sincronizadorCondicoes.sincronizar(condicoes, registro, cicloRef.current);
+  }, [estado.eventos, estado.flowStatus, estado.mpcStates, registro, sincronizadorCondicoes]);
 
   /** Bootstrap de alarmes (tarefa 2.2, spec F5 §7.2-3, emenda do fix round 2 — blocos
    *  Script): roda uma vez, quando o projeto ativo e (se houver um) seus flows/conexões
