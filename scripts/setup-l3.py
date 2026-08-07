@@ -269,18 +269,25 @@ def main() -> None:
             flow_id = int(r.json()["id"])
             print(f"[+] Flow criado: id={flow_id}", file=sys.stderr)
 
-            # Upload do grafo (reusa grafo_mpc_tfs de conftest)
-            print("[*] Atualizando grafo do flow...", file=sys.stderr)
-            grafo = grafo_mpc_tfs(ambiente, mpc_id="mpc1")
-            r = admin.put(f"/api/flows/{flow_id}", json={"graph_json": grafo})
-            if r.status_code != 200:
-                print(
-                    "[!] Falha ao atualizar grafo: "
-                    f"HTTP {r.status_code} {r.text}",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-            print("[+] Grafo atualizado", file=sys.stderr)
+        # SEMPRE atualizar grafo (idempotente: PUT com mesmo grafo é seguro)
+        print("[*] Atualizando grafo do flow...", file=sys.stderr)
+        grafo = grafo_mpc_tfs(ambiente, mpc_id="mpc1")
+        r = admin.put(f"/api/flows/{flow_id}", json={"graph_json": grafo})
+        if r.status_code != 200:
+            print(
+                "[!] Falha ao atualizar grafo: "
+                f"HTTP {r.status_code} {r.text}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print("[+] Grafo atualizado", file=sys.stderr)
+
+        # Verifica que o grafo foi salvo
+        r = admin.get(f"/api/flows/{flow_id}")
+        if r.status_code == 200:
+            flow_data = r.json()
+            num_nodes = len(flow_data.get("graph_json", {}).get("nodes", []))
+            print(f"[+] Grafo verificado: {num_nodes} nó(s)", file=sys.stderr)
 
         # ====================================================================
         # 5. Deploy do flow
@@ -300,6 +307,19 @@ def main() -> None:
                 print("[+] Flow running", file=sys.stderr)
                 break
             time.sleep(1.0)
+
+        # Verifica que o MPC está disponível em /api/operate/mpcs
+        print("[*] Verificando MPC em /api/operate/mpcs...", file=sys.stderr)
+        r = admin.get("/api/operate/mpcs")
+        if r.status_code == 200:
+            mpcs = r.json()
+            mpc_found = any(
+                m.get("flow_id") == flow_id and m.get("block_id") == "mpc1" for m in mpcs
+            )
+            if mpc_found:
+                print("[+] MPC registrado em /api/operate/mpcs", file=sys.stderr)
+            else:
+                print("[!] Aviso: MPC não encontrado em /api/operate/mpcs", file=sys.stderr)
 
         # ====================================================================
         # 6. Usuário operador
