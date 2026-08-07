@@ -22,6 +22,9 @@ import {
   type FlowStatus,
   type PortsPorBloco,
 } from "../features/flows/useFlowStatus";
+import { useActiveProject, useConnections } from "../features/connections/useConnections";
+import { useFlows } from "../features/flows/useFlows";
+import { criarCacheBootstrapAlarmes } from "./bootstrapAlarmes";
 
 /**
  * Canal ao vivo da sessão (spec F5 §7.1-1/2/3; decisão A-6; F5R-22): **um** WebSocket por
@@ -420,6 +423,12 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
   const [estado, setEstado] = useState<EstadoDoCanal>(ESTADO_INICIAL);
   const [registro] = useState(() => criarRegistroInteresses());
   const cicloRef = useRef<CicloVidaCanal | null>(null);
+  const projetoAtivo = useActiveProject();
+  const projectId = projetoAtivo.data?.id ?? null;
+  const flows = useFlows(projectId);
+  const conexoes = useConnections(projectId);
+  const [cacheBootstrap] = useState(() => criarCacheBootstrapAlarmes());
+  const bootstrapFeitoRef = useRef(false);
 
   useEffect(() => {
     const ciclo = abrirCanalSessao((transformacao) => setEstado(transformacao), registro.agregado);
@@ -429,6 +438,41 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
       ciclo.desmontar();
     };
   }, [registro]);
+
+  /** Bootstrap de alarmes (tarefa 2.2, spec F5 §7.2-3): roda uma vez, quando o projeto
+   *  ativo e (se houver um) seus flows/conexões terminam de carregar — nunca de novo por
+   *  causa de um refetch em segundo plano da lista. Sem projeto ativo, o escopo por
+   *  origem fica vazio e só o grupo 2 (severidade/janela, global) traz algo. Depois
+   *  disto, só WS: os eventos ao vivo já chegam via `reduzir` acima. */
+  useEffect(() => {
+    if (bootstrapFeitoRef.current) return;
+    if (projetoAtivo.isPending) return;
+    if (projectId !== null && (flows.isPending || conexoes.isPending)) return;
+    bootstrapFeitoRef.current = true;
+    const escopo = {
+      flowIds: (flows.data ?? []).map((flow) => flow.id),
+      connectionIds: (conexoes.data ?? []).map((conexao) => conexao.id),
+    };
+    cacheBootstrap
+      .obter(escopo, new Date())
+      .then((eventos) => {
+        setEstado((atual) => ({
+          ...atual,
+          eventos: [...atual.eventos, ...eventos].slice(0, TETO_EVENTOS),
+        }));
+      })
+      .catch(() => {
+        // best-effort: falha no bootstrap não impede o canal ao vivo, o WS segue cobrindo o resto da sessão.
+      });
+  }, [
+    projetoAtivo.isPending,
+    projectId,
+    flows.isPending,
+    flows.data,
+    conexoes.isPending,
+    conexoes.data,
+    cacheBootstrap,
+  ]);
 
   const contexto = useMemo<ContextoAssinatura>(
     () => ({
