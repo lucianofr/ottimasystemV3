@@ -1,21 +1,97 @@
 import { Navigate, useParams } from "react-router";
 
+import { useAssinatura, useCanalAoVivo } from "../../app/CanalAoVivo";
 import { Card } from "../../components/ui/card";
-import { useAssinatura } from "../../app/CanalAoVivo";
-import { useMpcs } from "./useMpcs";
+import type { MpcState } from "../../lib/contracts.gen";
+import { FaceplatePrincipal } from "./FaceplatePrincipal";
+import FaceplateVariavel, { type FaceplateVariavelProps } from "./FaceplateVariavel";
+import { useMpcs, type MpcNodeOut } from "./useMpcs";
 
 /**
- * Casca real da tela de operação (spec §7.4-1/2; RF-701): plaqueta do bloco MPC aberto
- * (nome do bloco · flow), assinatura no canal ao vivo (`mpc_state` do bloco + `flow_status`
- * do flow, via `useAssinatura`) e os estados de carregando/erro/ausente da descoberta
- * (`GET /api/operate/mpcs`, revalidada ao montar/focar pelo default do react-query).
+ * Casca real da tela de operação (spec §7.4-1/2/3/5; RF-701/702): resolve o MPC de
+ * `useMpcs`, assina o canal ao vivo (`mpc_state` do bloco + `flow_status` do flow, via
+ * `useAssinatura`) e trata os estados de carregando/erro/ausente da descoberta
+ * (`GET /api/operate/mpcs`, revalidada ao montar/focar pelo default do react-query). A
+ * plaqueta `nome · flow` mora dentro do faceplate principal (tarefa 4.3); a fileira de
+ * faceplates de variável (tarefa 4.4) monta na ordem MV → CV → Restrição → DV (§7.4-5).
  *
- * Faceplates e trend com predição (conteúdo do MPC em si) chegam nas tarefas 4.3-5.3 — nada
- * aqui simula valor de bloco.
+ * Trend com predição (5.x) chega na próxima tarefa.
  */
+
+/** Monta a lista de props de `FaceplateVariavel` na ordem fixada pelo spec (MV → CV →
+ *  Restrição → DV) a partir de `GET /api/operate/mpcs` (definição) e `mpc.state.vars`
+ *  (valor ao vivo). `modos` cai no default de partida do deploy (LOCAL/MAN) enquanto o
+ *  primeiro `mpc.state` não chega — mantém todo campo de escrita desabilitado até então,
+ *  nunca finge um modo que ainda não foi confirmado. */
+function gradeDeVariaveis(
+  mpc: MpcNodeOut,
+  mpcState: MpcState | undefined,
+  flowId: number,
+  blockId: string,
+): (FaceplateVariavelProps & { key: string })[] {
+  const modos = mpcState?.modes ?? { local_remote: "local" as const, man_auto: "man" as const };
+  const tsMpcSegundos = mpc.flow_ts_seconds * mpc.multiplier;
+  const comum = { flowId, blockId, tsMpcSegundos, modos };
+  return [
+    ...mpc.variables.mvs.map((mv) => ({
+      key: `mv-${mv.id}`,
+      tipo: "mv" as const,
+      definicao: {
+        id: mv.id,
+        name: mv.name,
+        eu: mv.eu,
+        limits: mv.limits,
+        sp_limits: null,
+        range: null,
+        du_max: mv.du_max,
+      },
+      valor: mpcState?.vars[mv.id],
+      ...comum,
+    })),
+    ...mpc.variables.cvs.map((cv) => ({
+      key: `cv-${cv.id}`,
+      tipo: "cv" as const,
+      definicao: {
+        id: cv.id,
+        name: cv.name,
+        eu: cv.eu,
+        limits: null,
+        sp_limits: cv.sp_limits,
+        range: null,
+        du_max: null,
+      },
+      valor: mpcState?.vars[cv.id],
+      ...comum,
+    })),
+    ...mpc.variables.constraints.map((restricao) => ({
+      key: `constraint-${restricao.id}`,
+      tipo: "constraint" as const,
+      definicao: {
+        id: restricao.id,
+        name: restricao.name,
+        eu: restricao.eu,
+        limits: null,
+        sp_limits: null,
+        range: restricao.range,
+        du_max: null,
+      },
+      valor: mpcState?.vars[restricao.id],
+      ...comum,
+    })),
+    ...mpc.variables.dvs.map((dv) => ({
+      key: `dv-${dv.id}`,
+      tipo: "dv" as const,
+      definicao: { id: dv.id, name: dv.name, eu: dv.eu, limits: null, sp_limits: null, range: null, du_max: null },
+      valor: mpcState?.vars[dv.id],
+      ...comum,
+    })),
+  ];
+}
+
 function OperacaoDoMpc({ flowId, blockId }: { flowId: number; blockId: string }) {
   const mpcs = useMpcs();
   useAssinatura({ flow_status: [flowId], mpc_state: [`${String(flowId)}/${blockId}`] });
+  const canal = useCanalAoVivo();
 
   if (mpcs.isPending) {
     return (
@@ -47,14 +123,23 @@ function OperacaoDoMpc({ flowId, blockId }: { flowId: number; blockId: string })
       />
     );
   }
+  const mpcState = canal.mpcStates.get(`${String(flowId)}/${blockId}`);
 
   return (
-    <Card className="max-w-lg p-6" data-testid="operate-page">
-      <h2 className="plaqueta text-xs text-fg-muted">{mpc.flow_name}</h2>
-      <p className="mt-2 text-lg" data-testid="operate-mpc-nome">
-        {mpc.name}
-      </p>
-    </Card>
+    <div data-testid="operate-page">
+      <FaceplatePrincipal
+        mpc={mpc}
+        flowStatus={canal.flowStatus.get(flowId)}
+        mpcState={mpcState}
+        flowId={flowId}
+        blockId={blockId}
+      />
+      <div data-testid="operate-variaveis" className="mt-4 flex flex-wrap gap-3">
+        {gradeDeVariaveis(mpc, mpcState, flowId, blockId).map(({ key, ...props }) => (
+          <FaceplateVariavel key={key} {...props} />
+        ))}
+      </div>
+    </div>
   );
 }
 
