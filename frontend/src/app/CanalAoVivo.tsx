@@ -445,6 +445,18 @@ function logarFalhaGraphJson(flowId: number, motivo: unknown): void {
   );
 }
 
+/** Fix round 4, mesma classe do achado 1/gap 2: `projetoAtivo`/`flows`/`conexoes`
+ *  falhando (rede, 404) não pode virar bootstrap silenciosamente vazio. A política
+ *  continua best-effort — o gate libera o bootstrap com o escopo que der (parcial ou
+ *  vazio, nunca trava a sessão) — mas a perda de origem tem que deixar rastro. */
+function logarFalhaConsulta(nome: string, motivo: unknown): void {
+  const detalhe =
+    motivo instanceof ApiError ? `${String(motivo.status)} ${motivo.message}` : String(motivo);
+  console.error(
+    `CanalAoVivoProvider: falha ao carregar ${nome} para o bootstrap de alarmes (${detalhe})`,
+  );
+}
+
 /** Montado no `AppShell`: um socket por aba, vivo enquanto a sessão durar. `events` sempre
  *  assinado (o banner é do shell). Dois contexts, não um: `estado` muda a cada mensagem do
  *  socket, e um componente que só chama `useAssinatura` (registra e esquece) não precisa
@@ -457,6 +469,30 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
   const projectId = projetoAtivo.data?.id ?? null;
   const flows = useFlows(projectId);
   const conexoes = useConnections(projectId);
+  /** Fix round 4: `projetoAtivo`/`flows`/`conexoes` falhando não pode passar batido —
+   *  o bootstrap abaixo segue best-effort com o escopo que tiver (política inalterada),
+   *  mas cada falha é logada uma única vez (mesmo desenho do efeito de `detalhesFlow`
+   *  acima: nenhum efeito colateral dentro de `combine`/render). */
+  const falhasConsultaLogadasRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const falhas: { chave: string; nome: string; motivo: unknown }[] = [
+      ...(projetoAtivo.isError
+        ? [{ chave: "projeto", nome: "o projeto ativo", motivo: projetoAtivo.error }]
+        : []),
+      ...(flows.isError
+        ? [{ chave: "flows", nome: "os flows do projeto ativo", motivo: flows.error }]
+        : []),
+      ...(conexoes.isError
+        ? [{ chave: "conexoes", nome: "as conexões do projeto ativo", motivo: conexoes.error }]
+        : []),
+    ];
+    for (const { chave, nome, motivo } of falhas) {
+      if (falhasConsultaLogadasRef.current.has(chave)) continue;
+      falhasConsultaLogadasRef.current.add(chave);
+      logarFalhaConsulta(nome, motivo);
+    }
+  }, [projetoAtivo.isError, projetoAtivo.error, flows.isError, flows.error, conexoes.isError, conexoes.error]);
+
   /** Flows cujo `graph_json` é buscado para achar blocos Script (emenda ao bootstrap,
    *  fix round 2, achado 2) — mesmo teto de flows do grupo 1 (`TETO_FLOWS`), corte
    *  determinístico (`flows.data` já chega ordenado por nome, `routers/flows.py`).
