@@ -6,9 +6,11 @@ import {
   JANELAS_OPERACAO,
   JANELA_PADRAO_ID,
   OPCOES_DEGRAU_MV,
+  TETO_PENAS_OPERACAO,
   dividirSpPorAuto,
   mesclarSeriesVivas,
   montarOverlayPrevisao,
+  selecionarPenasDefault,
   type AmostraViva,
 } from "./trendOperacao";
 import { chaveHistoricoOperacao } from "./useHistoryMpc";
@@ -149,4 +151,38 @@ test("SP dessaturada: null original nunca vira valor em nenhum dos dois traços"
   const divisao = dividirSpPorAuto([null, 5], [false, true]);
   expect(divisao.comandado).toEqual([null, 5]);
   expect(divisao.rastreado).toEqual([null, null]);
+});
+
+test("defaults: CVs (PV+SP, 2 penas cada) ligam na ordem do config até o teto de 8 penas", () => {
+  const cvs = [{ id: "cv_a" }, { id: "cv_b" }, { id: "cv_c" }, { id: "cv_d" }, { id: "cv_e" }];
+  const selecao = selecionarPenasDefault(cvs, [], [], []);
+
+  expect(selecao.map((p) => p.id)).toEqual(["cv_a", "cv_b", "cv_c", "cv_d", "cv_e"]);
+  expect(selecao.map((p) => p.ligada)).toEqual([true, true, true, true, false]);
+  // A 5ª CV custaria 2 penas, mas só sobrava 0 depois das 4 primeiras (4×2 = 8 = teto).
+  expect(selecao.map((p) => p.excedente)).toEqual([false, false, false, false, true]);
+});
+
+test("defaults: Restrições (banda, 1 pena) preenchem o que sobrou do teto depois das CVs, na ordem do config", () => {
+  const cvs = [{ id: "cv_1" }, { id: "cv_2" }, { id: "cv_3" }]; // 3×2 = 6 penas
+  const constraints = [{ id: "co_1" }, { id: "co_2" }, { id: "co_3" }]; // sobram 2 penas
+  const selecao = selecionarPenasDefault(cvs, constraints, [], []);
+  const restricoes = selecao.filter((p) => p.categoria === "constraint");
+
+  expect(restricoes.map((p) => p.id)).toEqual(["co_1", "co_2", "co_3"]);
+  expect(restricoes.map((p) => p.ligada)).toEqual([true, true, false]);
+  expect(restricoes.map((p) => p.excedente)).toEqual([false, false, true]);
+});
+
+test("defaults: MVs e DVs nascem desligadas (opt-in pela legenda), mesmo com o teto livre", () => {
+  const selecao = selecionarPenasDefault([], [], [{ id: "mv_1" }], [{ id: "dv_1" }]);
+
+  expect(selecao).toEqual([
+    { id: "mv_1", categoria: "mv", ligada: false, excedente: false },
+    { id: "dv_1", categoria: "dv", ligada: false, excedente: false },
+  ]);
+});
+
+test("teto de penas de operação é 8 (distinto do teto de 6 do trend de engenharia)", () => {
+  expect(TETO_PENAS_OPERACAO).toBe(8);
 });

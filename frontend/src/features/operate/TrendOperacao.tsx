@@ -2,20 +2,26 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
+import { Card } from "../../components/ui/card";
 import { Select } from "../../components/ui/select";
 import type { MpcState } from "../../lib/contracts.gen";
 import { FORMATO_VALOR, lerTemaTrend, type TemaTrend } from "../trend/trendTheme";
 import "../trend/trend.css";
 import {
+  CUSTO_PENAS,
   JANELAS_OPERACAO,
   JANELA_PADRAO_ID,
   OPCOES_DEGRAU_MV,
+  TETO_PENAS_OPERACAO,
   dividirSpPorAuto,
   mesclarSeriesVivas,
   montarOverlayPrevisao,
+  selecionarPenasDefault,
   type AmostraViva,
+  type CategoriaVarOperacao,
   type JanelaOperacao,
   type OverlayPrevisao,
+  type PenaLegenda,
   type SerieOperacao,
 } from "./trendOperacao";
 import { useHistoryMpc } from "./useHistoryMpc";
@@ -24,10 +30,11 @@ import type { MpcNodeOut } from "./useMpcs";
 /**
  * Trend central com predição (spec F5 §7.4-6; plano F5b tarefas 5.1-5.3). uPlot re-vestido
  * no molde de `features/trend/TrendChart.tsx`/`trendTheme.ts`: mesma separação entre
- * "estrutura" (recriada só quando a janela ou o conjunto de variáveis muda) e "dados ao vivo"
- * (aplicados via `setData`, sem recriar a instância — o zoom do operador sobrevive ao poll e
- * à borda viva). Este arquivo faz a montagem visual; `trendOperacao.ts` guarda a lógica pura
- * testada em `trendOperacao.check.ts` (regra global 3: asserts leem dados, nunca pixel).
+ * "estrutura" (recriada só quando a janela ou o conjunto de penas ligadas muda) e "dados ao
+ * vivo" (aplicados via `setData`, sem recriar a instância — o zoom do operador sobrevive ao
+ * poll e à borda viva). Este arquivo faz a montagem visual; `trendOperacao.ts` guarda a
+ * lógica pura testada em `trendOperacao.check.ts` (regra global 3: asserts leem dados, nunca
+ * pixel).
  */
 
 const ALTURA = 420;
@@ -39,6 +46,15 @@ const FORMATO_HORA = new Intl.DateTimeFormat("pt-BR", {
   minute: "2-digit",
   second: "2-digit",
 });
+
+/** Mesmos rótulos de `FaceplateVariavel.tsx` (`ROTULO_TIPO`, não exportado de lá — duplicar
+ *  um record de 4 linhas é mais barato que acoplar dois arquivos de tarefas diferentes). */
+const ROTULO_CATEGORIA: Record<CategoriaVarOperacao, string> = {
+  mv: "MV",
+  cv: "CV",
+  constraint: "Restrição",
+  dv: "DV",
+};
 
 // ----------------------------------------------------------------------------------------
 // Cor: paleta de série (matiz mais claro + fade ao horizonte) via `color-mix` nativo do CSS
@@ -105,9 +121,24 @@ function pluginLinhaAgora(agoraRef: { current: number | null }, tema: TemaTrend)
   };
 }
 
+/** Cor de cada variável — id fixo na ordem MV→CV→Restrição→DV de `mpc.variables` (mesma
+ *  ordem de `FaceplateVariavel`/`gradeDeVariaveis`), independente de qual pena está ligada:
+ *  ligar/desligar pela legenda nunca reatribui a cor de uma variável já visível. Compartilhada
+ *  entre o gráfico (`montarColunas`) e a legenda, para o traço e o marcador nunca divergirem. */
+function atribuirCoresPenas(mpc: MpcNodeOut, tema: TemaTrend): ReadonlyMap<string, string> {
+  const ids = [
+    ...mpc.variables.cvs.map((v) => v.id),
+    ...mpc.variables.constraints.map((v) => v.id),
+    ...mpc.variables.mvs.map((v) => v.id),
+    ...mpc.variables.dvs.map((v) => v.id),
+  ];
+  return new Map(ids.map((id, i) => [id, tema.penas[i % tema.penas.length]]));
+}
+
 // ----------------------------------------------------------------------------------------
 // Montagem das colunas do uPlot (eixo x único, união de histórico + horizonte da predição —
 // é isso que dimensiona "o eixo futuro por Np×Ts_mpc": o próprio último ponto de `tAbs`).
+// Só as penas em `ligadas` viram série — as demais ficam de fora da estrutura (brief 5.3).
 // ----------------------------------------------------------------------------------------
 
 interface ColunasOperacao {
@@ -121,6 +152,8 @@ function montarColunas(
   seriesHistoricas: readonly SerieOperacao[],
   overlay: OverlayPrevisao,
   tema: TemaTrend,
+  cores: ReadonlyMap<string, string>,
+  ligadas: ReadonlySet<string>,
 ): ColunasOperacao {
   const porId = new Map(seriesHistoricas.map((serie) => [serie.id, serie]));
   const eixoX = [...new Set([...seriesHistoricas.flatMap((s) => s.t), ...overlay.tAbs])].sort(
@@ -135,7 +168,6 @@ function montarColunas(
   const dados: (number | null)[][] = [];
   const series: uPlot.Series[] = [{ label: "Tempo" }];
   const bands: uPlot.Band[] = [];
-  let corIndice = 0;
 
   function pushSerie(
     t: readonly number[],
@@ -147,11 +179,12 @@ function montarColunas(
     return series.length - 1;
   }
 
-  // CVs (PV + SP) — linhas = CVs na ordem do config, depois Restrições (spec F4 §5.1/F5 §3.2).
+  // CVs (PV + SP) — linhas de `overlay.cv` = CVs na ordem do config, depois Restrições
+  // (spec F4 §5.1/F5 §3.2); o índice de linha é sempre o da posição no config, ligada ou não.
   mpc.variables.cvs.forEach((cv, indiceLinha) => {
+    if (!ligadas.has(cv.id)) return;
     const historica = porId.get(cv.id) ?? SERIE_VAZIA(cv.id);
-    const cor = tema.penas[corIndice % tema.penas.length];
-    corIndice++;
+    const cor = cores.get(cv.id) ?? tema.penas[0];
     pushSerie(historica.t, historica.v, {
       label: `${cv.name} PV`,
       stroke: cor,
@@ -185,9 +218,9 @@ function montarColunas(
   // banda em si não é uma pena adicional.
   mpc.variables.constraints.forEach((restricao, indiceRestricao) => {
     const indiceLinha = mpc.variables.cvs.length + indiceRestricao;
+    if (!ligadas.has(restricao.id)) return;
     const historica = porId.get(restricao.id) ?? SERIE_VAZIA(restricao.id);
-    const cor = tema.penas[corIndice % tema.penas.length];
-    corIndice++;
+    const cor = cores.get(restricao.id) ?? tema.penas[0];
     pushSerie(historica.t, historica.v, {
       label: `${restricao.name} PV`,
       stroke: cor,
@@ -216,11 +249,11 @@ function montarColunas(
   });
 
   // MVs — degrau fantasma stepped align:-1 (§3.3; `OPCOES_DEGRAU_MV` é a única fonte do
-  // `align`, nunca `+1`).
+  // `align`, nunca `+1`). Opt-in pela legenda (brief 5.3): nasce fora de `ligadas`.
   mpc.variables.mvs.forEach((mv, indiceMv) => {
+    if (!ligadas.has(mv.id)) return;
     const historica = porId.get(mv.id) ?? SERIE_VAZIA(mv.id);
-    const cor = tema.penas[corIndice % tema.penas.length];
-    corIndice++;
+    const cor = cores.get(mv.id) ?? tema.penas[0];
     pushSerie(historica.t, historica.v, {
       label: `${mv.name} PV`,
       stroke: cor,
@@ -237,6 +270,20 @@ function montarColunas(
         (uPlot.paths.stepped as (opts: typeof OPCOES_DEGRAU_MV) => uPlot.Series.PathBuilder)(
           OPCOES_DEGRAU_MV,
         )(u, seriesIdx, idx0, idx1),
+      points: { show: false },
+    });
+  });
+
+  // DVs — somente leitura, sem predição (não entram em `overlay`, §5.1 do F4). Opt-in.
+  mpc.variables.dvs.forEach((dv) => {
+    if (!ligadas.has(dv.id)) return;
+    const historica = porId.get(dv.id) ?? SERIE_VAZIA(dv.id);
+    const cor = cores.get(dv.id) ?? tema.penas[0];
+    pushSerie(historica.t, historica.v, {
+      label: `${dv.name} PV`,
+      stroke: cor,
+      width: 1.5,
+      spanGaps: false,
       points: { show: false },
     });
   });
@@ -299,11 +346,15 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   const [janelaId, setJanelaId] = useState<JanelaOperacao["id"]>(JANELA_PADRAO_ID);
   const janela = JANELAS_OPERACAO.find((item) => item.id === janelaId) ?? JANELAS_OPERACAO[1];
 
+  // Todas as variáveis são buscadas de uma vez (teto de 14 do `/api/history/mpc` cobre o
+  // teto de config do bloco inteiro — 4 MV + 6 CV/Restr + 4 DV): ligar uma pena pela legenda
+  // nunca dispara requisição nova, só muda o que a estrutura do gráfico desenha.
   const idsHistorico = useMemo(
     () => [
       ...mpc.variables.cvs.map((cv) => cv.id),
       ...mpc.variables.constraints.map((c) => c.id),
       ...mpc.variables.mvs.map((mv) => mv.id),
+      ...mpc.variables.dvs.map((dv) => dv.id),
     ],
     [mpc],
   );
@@ -336,10 +387,65 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   );
 
   const tema = useMemo(() => lerTemaTrend(), []);
+  const cores = useMemo(() => atribuirCoresPenas(mpc, tema), [mpc, tema]);
+
+  // Defaults (decisão A-11, F5R-16): calculados uma vez por MPC aberto — recalcular a cada
+  // refetch de `useMpcs()` religaria penas que o operador tinha desligado deliberadamente.
+  const defaults = useMemo(
+    () =>
+      selecionarPenasDefault(
+        mpc.variables.cvs,
+        mpc.variables.constraints,
+        mpc.variables.mvs,
+        mpc.variables.dvs,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mpc.flow_id, mpc.block_id],
+  );
+  const porIdDefinicao = useMemo(
+    () =>
+      new Map(
+        [
+          ...mpc.variables.cvs,
+          ...mpc.variables.constraints,
+          ...mpc.variables.mvs,
+          ...mpc.variables.dvs,
+        ].map((v) => [v.id, v]),
+      ),
+    [mpc],
+  );
+
+  const [ligadas, setLigadas] = useState<ReadonlySet<string>>(
+    () => new Set(defaults.filter((pena) => pena.ligada).map((pena) => pena.id)),
+  );
+  const [aviso, setAviso] = useState<string | null>(null);
+
+  /** Clique na legenda (brief 5.3): desligar nunca é bloqueado; ligar respeita o mesmo teto
+   *  de 8 penas dos defaults — sem isso o operador furaria o teto pena por pena. */
+  function alternarPena(pena: PenaLegenda): void {
+    if (ligadas.has(pena.id)) {
+      const proxima = new Set(ligadas);
+      proxima.delete(pena.id);
+      setLigadas(proxima);
+      setAviso(null);
+      return;
+    }
+    const custoAtual = defaults.reduce(
+      (soma, item) => soma + (ligadas.has(item.id) ? CUSTO_PENAS[item.categoria] : 0),
+      0,
+    );
+    if (custoAtual + CUSTO_PENAS[pena.categoria] > TETO_PENAS_OPERACAO) {
+      setAviso(`Máximo de ${String(TETO_PENAS_OPERACAO)} penas por gráfico`);
+      return;
+    }
+    setLigadas(new Set([...ligadas, pena.id]));
+    setAviso(null);
+  }
 
   const colunas = useMemo(
-    () => (seriesMescladas ? montarColunas(mpc, seriesMescladas, overlay, tema) : null),
-    [mpc, seriesMescladas, overlay, tema],
+    () =>
+      seriesMescladas ? montarColunas(mpc, seriesMescladas, overlay, tema, cores, ligadas) : null,
+    [mpc, seriesMescladas, overlay, tema, cores, ligadas],
   );
 
   const container = useRef<HTMLDivElement>(null);
@@ -349,7 +455,8 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   const colunasAtuais = useRef(colunas);
   colunasAtuais.current = colunas;
 
-  const estrutura = `${janela.id}|${idsHistorico.join(",")}`;
+  const idsEstrutura = defaults.filter((pena) => ligadas.has(pena.id)).map((pena) => pena.id);
+  const estrutura = `${janela.id}|${idsEstrutura.join(",")}`;
 
   useEffect(() => {
     const alvo = container.current;
@@ -423,6 +530,52 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
         >
           <div ref={container} className="w-full" />
         </div>
+      )}
+
+      <Card data-testid="operate-trend-legend" className="divide-y divide-hairline">
+        {defaults.map((pena) => {
+          const definicao = porIdDefinicao.get(pena.id);
+          const ligada = ligadas.has(pena.id);
+          return (
+            <label
+              key={pena.id}
+              data-testid="operate-trend-legend-item"
+              data-var-id={pena.id}
+              className="flex cursor-pointer items-center gap-3 px-3 py-1.5"
+            >
+              <input
+                type="checkbox"
+                className="accent-accent"
+                checked={ligada}
+                onChange={() => {
+                  alternarPena(pena);
+                }}
+              />
+              <span
+                aria-hidden="true"
+                className="h-1 w-6 shrink-0"
+                style={{ backgroundColor: cores.get(pena.id) }}
+              />
+              <span className="plaqueta grow text-xs">
+                {ROTULO_CATEGORIA[pena.categoria]} · {definicao?.name ?? pena.id}
+              </span>
+              {pena.excedente && !ligada && (
+                <span
+                  data-testid="operate-trend-legend-teto"
+                  className="plaqueta rounded-panel border border-warn px-1.5 text-xs text-warn"
+                >
+                  Acima do teto
+                </span>
+              )}
+            </label>
+          );
+        })}
+      </Card>
+
+      {aviso && (
+        <p role="alert" data-testid="operate-trend-aviso" className="text-xs text-warn">
+          {aviso}
+        </p>
       )}
     </div>
   );

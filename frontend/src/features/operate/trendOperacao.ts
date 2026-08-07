@@ -152,3 +152,61 @@ export function dividirSpPorAuto(
     rastreado: sp.map((valor, i) => (auto[i] ? null : valor)),
   };
 }
+
+// ----------------------------------------------------------------------------------------
+// 5.3 — Defaults e legenda (spec F5 §7.4-6 item 4; decisão A-11; F5R-16)
+// ----------------------------------------------------------------------------------------
+
+/** Teto de penas do trend de operação — distinto do teto de 6 tags do trend de engenharia
+ *  (`features/trend/trendTheme.ts`, `LIMITE_PENAS`), que serve outro caso de uso. */
+export const TETO_PENAS_OPERACAO = 8;
+
+export type CategoriaVarOperacao = "cv" | "constraint" | "mv" | "dv";
+
+/** Custo em penas de cada categoria: CV soma PV+SP (2 traços na mesma legenda); Restrição
+ *  soma só o traço de PV — a banda low/high não é uma pena adicional (brief 5.3); MV/DV
+ *  custam 1 quando o operador liga pela legenda. */
+export const CUSTO_PENAS: Readonly<Record<CategoriaVarOperacao, number>> = {
+  cv: 2,
+  constraint: 1,
+  mv: 1,
+  dv: 1,
+};
+
+export interface PenaLegenda {
+  readonly id: string;
+  readonly categoria: CategoriaVarOperacao;
+  readonly ligada: boolean;
+  /** A seleção default ligaria esta pena, mas o teto cortou — a legenda precisa dizer isso,
+   *  não só mostrar "desligada" como se fosse escolha do operador (brief 5.3). */
+  readonly excedente: boolean;
+}
+
+/**
+ * Seleção default de penas (decisão A-11, F5R-16): CVs (PV+SP) ligam na ordem do config até
+ * o teto; Restrições ligam como banda (PV conta no teto) com o que sobrar; MVs e DVs nascem
+ * desligadas — são opt-in pela legenda, mesmo com o teto livre. Pura: a UI (`TrendOperacao.tsx`)
+ * decide o que fazer com um clique depois; esta função só decide o estado inicial.
+ */
+export function selecionarPenasDefault(
+  cvs: readonly { readonly id: string }[],
+  constraints: readonly { readonly id: string }[],
+  mvs: readonly { readonly id: string }[],
+  dvs: readonly { readonly id: string }[],
+): PenaLegenda[] {
+  let restante = TETO_PENAS_OPERACAO;
+
+  function comTeto(id: string, categoria: "cv" | "constraint"): PenaLegenda {
+    const custo = CUSTO_PENAS[categoria];
+    const ligada = custo <= restante;
+    if (ligada) restante -= custo;
+    return { id, categoria, ligada, excedente: !ligada };
+  }
+
+  return [
+    ...cvs.map((cv) => comTeto(cv.id, "cv")),
+    ...constraints.map((c) => comTeto(c.id, "constraint")),
+    ...mvs.map((mv) => ({ id: mv.id, categoria: "mv" as const, ligada: false, excedente: false })),
+    ...dvs.map((dv) => ({ id: dv.id, categoria: "dv" as const, ligada: false, excedente: false })),
+  ];
+}
