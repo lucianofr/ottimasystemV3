@@ -93,17 +93,19 @@ export function mesclarPorts(anterior: PortsPorBloco, recebido: PortsPorBloco): 
   return Object.keys(recebido).length === 0 ? anterior : recebido;
 }
 
-function objeto(valor: unknown): Record<string, unknown> | null {
+/** Exportado para reuso em `CanalAoVivo.tsx` (§7.1): o mesmo formato `{block_id: {porta:
+ *  PortValue}}` chega por `flow.status.*`, agora roteado pelo provider da sessão. */
+export function objeto(valor: unknown): Record<string, unknown> | null {
   return typeof valor === "object" && valor !== null && !Array.isArray(valor)
     ? (valor as Record<string, unknown>)
     : null;
 }
 
-function ehEstado(valor: unknown): valor is EstadoFlow {
+export function ehEstado(valor: unknown): valor is EstadoFlow {
   return valor === "running" || valor === "stopped" || valor === "failed";
 }
 
-function lerPortValue(bruto: unknown): PortValue | null {
+export function lerPortValue(bruto: unknown): PortValue | null {
   const item = objeto(bruto);
   if (item === null || typeof item.ok !== "boolean") return null;
   const v = item.v;
@@ -111,7 +113,7 @@ function lerPortValue(bruto: unknown): PortValue | null {
   return { v, ok: item.ok };
 }
 
-function lerPorts(bruto: unknown): PortsPorBloco {
+export function lerPorts(bruto: unknown): PortsPorBloco {
   const mapa = objeto(bruto);
   if (mapa === null) return SEM_PORTS;
   const portsPorBloco: Record<string, Record<string, PortValue>> = {};
