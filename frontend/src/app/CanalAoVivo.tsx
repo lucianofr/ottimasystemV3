@@ -462,7 +462,10 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
         }));
       })
       .catch(() => {
-        // best-effort: falha no bootstrap não impede o canal ao vivo, o WS segue cobrindo o resto da sessão.
+        // bootstrapAlarmes já é resiliente por dentro (Promise.allSettled, uma origem que
+        // falha não derruba as outras nem impede o resto do estado retroativo de entrar).
+        // Este catch só existe para nunca deixar uma promise sem handler se algo realmente
+        // inesperado estourar aqui fora — não é o caminho normal de falha de origem.
       });
   }, [
     projetoAtivo.isPending,

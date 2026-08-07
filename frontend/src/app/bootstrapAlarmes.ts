@@ -1,4 +1,4 @@
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import type { EventMessage } from "./CanalAoVivo";
 
 /**
@@ -60,9 +60,21 @@ function mesclar(grupos: readonly EventMessage[][]): EventMessage[] {
   return unicos.sort((a, b) => b.ts.localeCompare(a.ts));
 }
 
+/** Uma origem falhando (rede, 401, 500...) nunca pode apagar as outras: regra
+ *  normativa A-4, já documentada em `alarmes.ts` — "condição ativa, nunca silenciosa".
+ *  Loga path + status/detail (`ApiError`, `lib/api.ts`) para diagnóstico; a origem que
+ *  falhou simplesmente não contribui evento nenhum neste ciclo. */
+function logarFalha(caminho: string, motivo: unknown): void {
+  const detalhe =
+    motivo instanceof ApiError ? `${String(motivo.status)} ${motivo.message}` : String(motivo);
+  console.error(`bootstrapAlarmes: falha ao buscar ${caminho} (${detalhe})`);
+}
+
 /** Fetch dos dois grupos, sem cache — `criarCacheBootstrapAlarmes` embrulha isto com o
  *  TTL de 60 s. Exportada à parte para o teste isolar o comportamento de rede do de
- *  cache. */
+ *  cache. `Promise.allSettled`, não `Promise.all`: uma origem que falha não pode
+ *  derrubar as até 16 outras — a condição ativa que ela carregava ficaria invisível
+ *  até o próximo bootstrap ou evento ao vivo (regra A-4). Esta função nunca rejeita. */
 export async function bootstrapAlarmes(
   escopo: EscopoBootstrap,
   agora: Date,
@@ -73,16 +85,22 @@ export async function bootstrapAlarmes(
   const inicioJanela = new Date(agora.getTime() - JANELA_MS).toISOString();
   const janela = new URLSearchParams({ start: inicioJanela, limit: String(LIMITE_JANELA) });
 
-  const grupos = await Promise.all([
-    ...flowIds.map((id) =>
-      ambiente.buscar(`/api/events?origin=flow:${String(id)}&limit=${String(LIMITE_PAR)}`),
-    ),
-    ...connectionIds.map((id) =>
-      ambiente.buscar(`/api/events?origin=conn:${String(id)}&limit=${String(LIMITE_PAR)}`),
-    ),
-    ambiente.buscar(`/api/events?severity=warning&${janela.toString()}`),
-    ambiente.buscar(`/api/events?severity=alarm&${janela.toString()}`),
-  ]);
+  const caminhos = [
+    ...flowIds.map((id) => `/api/events?origin=flow:${String(id)}&limit=${String(LIMITE_PAR)}`),
+    ...connectionIds.map((id) => `/api/events?origin=conn:${String(id)}&limit=${String(LIMITE_PAR)}`),
+    `/api/events?severity=warning&${janela.toString()}`,
+    `/api/events?severity=alarm&${janela.toString()}`,
+  ];
+
+  const resultados = await Promise.allSettled(caminhos.map((caminho) => ambiente.buscar(caminho)));
+  const grupos: EventMessage[][] = [];
+  for (const [indice, resultado] of resultados.entries()) {
+    if (resultado.status === "rejected") {
+      logarFalha(caminhos[indice], resultado.reason);
+      continue;
+    }
+    grupos.push(resultado.value);
+  }
 
   return mesclar(grupos);
 }

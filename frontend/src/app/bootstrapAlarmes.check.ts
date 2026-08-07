@@ -120,6 +120,23 @@ test("mescla os grupos por ts desc e remove duplicatas exatas entre eles", async
   expect(eventos).toEqual([maisNovo, duplicado]);
 });
 
+test("uma chamada rejeitada não derruba as outras: bootstrapAlarmes nunca rejeita", async () => {
+  const sobrevivente = evento("comm_failure", "conn:1", { ts: "2026-01-01T11:00:00.000Z" });
+  const ambiente: AmbienteBootstrap = {
+    buscar: (path) => {
+      if (path === "/api/events?origin=flow:9&limit=20") {
+        return Promise.reject(new Error("falha de rede"));
+      }
+      if (path === ALARME) return Promise.resolve([sobrevivente]);
+      return Promise.resolve([]);
+    },
+  };
+
+  const eventos = await bootstrapAlarmes({ flowIds: [9], connectionIds: [] }, AGORA, ambiente);
+
+  expect(eventos).toEqual([sobrevivente]);
+});
+
 // ----------------------------------------------------------------------------------------
 // Cache de 60 s
 // ----------------------------------------------------------------------------------------
