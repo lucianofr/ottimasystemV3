@@ -1,19 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 
 import { Card } from "../components/ui/card";
 import { useActiveProject } from "../features/connections/useConnections";
 import { useFlows } from "../features/flows/useFlows";
 import { useLastFlowState, type UltimoEstadoFlow } from "../features/flows/useLastFlowState";
-import { api } from "../lib/api";
-import type { components } from "../lib/api-types";
+import { useMpcs, type MpcNodeOut } from "../features/operate/useMpcs";
 import { derivarLampadas, useWorkersHealth, type LampadaWorker } from "./useWorkersHealth";
-
-/** `MpcNodeOut` já é gerado em `lib/api-types.ts` a partir de `/api/operate/mpcs`, mas
- *  `lib/api.ts` (onde o resto do app importa tipos de API) é infraestrutura compartilhada fora
- *  do escopo desta tarefa — a tarefa 3.3 do mesmo plano também consome `/api/operate/mpcs` em
- *  paralelo. Import direto do gerado evita as duas tarefas colidirem no mesmo arquivo. */
-type MpcNodeOut = components["schemas"]["MpcNodeOut"];
 
 /** Agrupa os blocos MPC projetados por flow — um flow pode ter mais de um bloco `mpc`
  *  (plano F5b tarefa 3.2: "atalho por flow para a operação quando houver MPC"). */
@@ -137,10 +129,7 @@ export function HomePage() {
   const linhas = flows.data ?? [];
   const estados = useLastFlowState(linhas.map((flow) => flow.id));
 
-  const mpcs = useQuery({
-    queryKey: ["operate", "mpcs"],
-    queryFn: () => api<MpcNodeOut[]>("/api/operate/mpcs"),
-  });
+  const mpcs = useMpcs();
   const mpcsPorFlow = agruparMpcsPorFlow(mpcs.data ?? []);
 
   const workers = useWorkersHealth();
