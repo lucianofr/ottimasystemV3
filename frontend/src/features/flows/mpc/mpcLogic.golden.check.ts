@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
 import { expect, test } from "@playwright/test";
+
+import goldenData from "./mpcLogic.golden.json" with { type: "json" };
 
 import type { ParModeloMpc, VariaveisMpc } from "../graph";
 import {
@@ -65,8 +64,12 @@ interface Golden {
   validacao: CasoValidacao[];
 }
 
-const CAMINHO_GOLDEN = fileURLToPath(new URL("./mpcLogic.golden.json", import.meta.url));
-const golden = JSON.parse(readFileSync(CAMINHO_GOLDEN, "utf-8")) as Golden;
+// Import attribute `with { type: "json" }` (TS 5.3+/Node 20.10+): evita `node:fs`/
+// `node:url`, que quebravam a imagem de produção (o Dockerfile builda sem devDependencies
+// como `@types/node` — fix round 1). Tipagem verbatim do JSON não bate 1:1 com `Golden`
+// (Pydantic dump infere tipos mais específicos por campo, ex.: literais numéricos por
+// `kind`), daí o cast via `unknown`.
+const golden = goldenData as unknown as Golden;
 
 for (const caso of golden.arredondamento_bankers) {
   test(`golden arredondarBankers: ${String(caso.valor)} -> ${String(caso.esperado)}`, () => {
