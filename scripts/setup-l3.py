@@ -45,6 +45,14 @@ CONNECTION_NAME = "opcsim-l3"
 OPERATOR_USERNAME = "operador_e2e"
 OPERATOR_PASSWORD = "OperadorE2E#2026"
 
+# OPC-UA node IDs corretos (de tests/opcsim/src/opcsim/server.py)
+# Nós graváveis:
+NODE_W_FLOAT = "ns=2;s=sim.w.float"
+NODE_W_INT = "ns=2;s=sim.w.int"
+# Espelhos de leitura (não-graváveis):
+NODE_MIRROR_FLOAT = "ns=2;s=sim.mirror.float"
+NODE_MIRROR_INT = "ns=2;s=sim.mirror.int"
+
 
 def _deploy_env() -> dict[str, str]:
     """Lê pares do `deploy/.env` sem exportar."""
@@ -80,8 +88,8 @@ ADMIN_PASS = _conf("E2E_ADMIN_PASSWORD", _conf("OTTIMA_ADMIN_PASSWORD", ""))
 
 
 def _criar_tag(admin: Client, conn_id: int, nome: str, node_id: str, direcao: str) -> int:
-    """Cria tag ou retorna existente (idempotente por nome)."""
-    # Tenta criar
+    """Cria tag ou retorna existente, corrigindo node_id se divergente (idempotente)."""
+    # Primeiro tenta criar
     r = admin.post(
         "/api/tags",
         json={
@@ -94,13 +102,53 @@ def _criar_tag(admin: Client, conn_id: int, nome: str, node_id: str, direcao: st
     )
     if r.status_code == 201:
         return int(r.json()["id"])
+
     if r.status_code == 409:
-        # Já existe; recupera via GET
+        # Tag já existe; busca por nome e verifica node_id
         r = admin.get(f"/api/tags?connection_id={conn_id}")
         if r.status_code == 200:
             for tag in r.json():
                 if tag["name"] == nome:
-                    return int(tag["id"])
+                    tag_id = int(tag["id"])
+                    existente_node_id = tag.get("node_id", "")
+
+                    # Se node_id está ERRADO, deleta e recria
+                    if existente_node_id != node_id:
+                        print(
+                            f"[*] Tag '{nome}' existe com node_id errado "
+                            f"({existente_node_id}). Corrigindo...",
+                            file=sys.stderr,
+                        )
+                        r_del = admin.delete(f"/api/tags/{tag_id}")
+                        if r_del.status_code != 204:
+                            print(
+                                f"[!] Falha ao deletar tag: HTTP {r_del.status_code}",
+                                file=sys.stderr,
+                            )
+                            sys.exit(1)
+                        # Recria com node_id correto
+                        r_new = admin.post(
+                            "/api/tags",
+                            json={
+                                "connection_id": conn_id,
+                                "name": nome,
+                                "node_id": node_id,
+                                "direction": direcao,
+                                "data_type": "float",
+                            },
+                        )
+                        if r_new.status_code != 201:
+                            print(
+                                f"[!] Falha ao recriar tag: "
+                                f"HTTP {r_new.status_code}",
+                                file=sys.stderr,
+                            )
+                            sys.exit(1)
+                        tag_id = int(r_new.json()["id"])
+                        print(f"[+] Tag corrigida: {nome} (id={tag_id})", file=sys.stderr)
+
+                    return tag_id
+
     raise RuntimeError(f"Falha ao criar/recuperar tag {nome}: HTTP {r.status_code} {r.text}")
 
 
@@ -210,17 +258,13 @@ def main() -> None:
             time.sleep(1.0)
 
         # ====================================================================
-        # 3. Tags do PID de mv_pid (reusa constantes de conftest)
+        # 3. Tags do PID de mv_pid (com node_ids corretos!)
         # ====================================================================
         print("[*] Criando/verificando tags...", file=sys.stderr)
-        tag_write = _criar_tag(admin, conn_id, "mv-pid-write", "ns=2;s=sim.output.float", "w")
-        tag_mode_cmd = _criar_tag(admin, conn_id, "mv-pid-mode-cmd", "ns=2;s=sim.output.int", "w")
-        tag_readback = _criar_tag(
-            admin, conn_id, "mv-pid-readback", "ns=2;s=sim.mirror.float", "r"
-        )
-        tag_mode_read = _criar_tag(
-            admin, conn_id, "mv-pid-mode-read", "ns=2;s=sim.mirror.int", "r"
-        )
+        tag_write = _criar_tag(admin, conn_id, "mv-pid-write", NODE_W_FLOAT, "w")
+        tag_mode_cmd = _criar_tag(admin, conn_id, "mv-pid-mode-cmd", NODE_W_INT, "w")
+        tag_readback = _criar_tag(admin, conn_id, "mv-pid-readback", NODE_MIRROR_FLOAT, "r")
+        tag_mode_read = _criar_tag(admin, conn_id, "mv-pid-mode-read", NODE_MIRROR_INT, "r")
         print(
             f"[+] Tags: write={tag_write}, mode_cmd={tag_mode_cmd}, "
             f"readback={tag_readback}, mode_read={tag_mode_read}",
