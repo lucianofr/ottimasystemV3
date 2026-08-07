@@ -103,9 +103,22 @@ OTTIMA_E2E=1 bash deploy/smoke.sh                   # L1 — stack, retenção, 
 # O check de boot parado exige flow-runtime recem-subido: ele assere flows={}, e um deploy/stop
 # deixa o flow no mapa como stopped. Re-rodar o L1 depois da L2 da vermelho falso; nesse caso
 # `docker compose ... restart flow-runtime` antes.
-uv run pytest -m e2e tests/e2e -v                   # L2 — 34 cenários (5 F1 + 9 F2 + 10 F3 + 10 F4)
+E2E_ADMIN_USERNAME=$(grep -m1 '^OTTIMA_ADMIN_USERNAME=' deploy/.env|cut -d= -f2-) E2E_ADMIN_PASSWORD=$(grep -m1 '^OTTIMA_ADMIN_PASSWORD=' deploy/.env|cut -d= -f2-) uv run pytest -m e2e tests/e2e -v
+                                                     # L2 — 41 cenários (5 F1 + 9 F2 + 10 F3 + 10 F4 + 7 F5)
+# tests/e2e/test_api_e2e.py (F1) lê credenciais só de os.environ (default ""), nunca de
+# deploy/.env: a bateria completa exige o env inline acima (não basta o deploy/.env preenchido).
 # F4: POST /api/operate/{flow_id}/{block_id}/mode|sp|mv publica FlowCommand (202); o runtime
 # materializa e audita — a API não emite evento (spec F4 §6.1).
+# F5: GET /api/history/mpc, GET /api/operate/mpcs, GET /api/health/workers (todas require_operator).
+# Envs novos: OTTIMA_HEALTH_URL_OPC_WORKER/_FLOW_RUNTIME/_RECORDER (defaults
+# http://opc-worker:8001/health, http://flow-runtime:8002/health, http://recorder:8003/health)
+# e OTTIMA_MPC_QUEUE_MAX (default 100000, teto do buffer de mpc_samples no recorder).
+# Telas da F5b (operador; admin herda): /operacao (seletor; 1 MPC redireciona direto),
+# /operacao/:flowId/:blockId (faceplate principal + faceplates de variável + trend com
+# predição) e /eventos. Nav do shell em dois grupos: Operação · Eventos | engenharia.
+# data-testid: operate-*, faceplate-*, eventos-*, home-* (o roteiro L3 depende deles).
+# Ambiente do L3: `uv run python scripts/setup-l3.py` (idempotente) cria projeto ativo,
+# conexão opcsim-l3, flow MPC↔TFS deployado e o usuário operador_e2e.
 cd frontend && npm run e2e                          # regressão Playwright da F1 (specs novas não)
 # A L2 e o Playwright NÃO podem rodar juntos: o E2E-16 publica project_activated duas vezes e
 # derruba os cenários E2E-F3-03/04/08. Serialize.

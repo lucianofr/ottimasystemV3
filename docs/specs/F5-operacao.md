@@ -183,6 +183,8 @@ O PRD tem regra explícita de correção (`PRD.md` §nota inicial); specs anteri
 2. **`script_recovered`** (F5R-02b): kind novo em `bus.py` (severity `info`), publicado pelo runtime no ponto onde o latch do Script já rearma (`blocks/script.py:95` — o primeiro sucesso após `script_timeout`/`script_error`); linha nova na tabela de kinds da F4 §5.3 (§1.3-6). Quem latcha, anuncia o rearme.
 3. **Bootstrap na montagem do shell (F5R-03)** — os eventos de cessação são `info`, então buscar só warning/alarm criaria alarmes-fantasma de até 1 mês no reload. Dois grupos:
    - **Famílias "par de eventos"** (condição derivada do último evento por origem, independente de severidade): `GET /api/events?origin=flow:<id>&limit=20` por flow do projeto ativo e `GET /api/events?origin=conn:<id>&limit=20` por conexão (≤10 + ≤5 chamadas, cache 60 s — mesmo padrão de `useLastFlowState`, F3 §6.1). A condição está ativa se o **último** evento da família naquela origem for o de abertura.
+
+     > Emenda (execução da F5, aprovada pelo dono do plano em 2026-08-07): o grupo consulta **também** `GET /api/events?origin=flow:<id>/block:<id>&limit=20` para os blocos **Script** dos flows do projeto ativo, com teto de 20 blocos. Motivo: o Script publica com origem de bloco (`blocks/script.py:62`, `flow:<id>/block:<id>`) e a API filtra `origin` por igualdade exata (`routers/events.py:44`), então `origin=flow:<id>` nunca casa com `script_timeout`/`script_error`/`script_recovered`; como o Script latcha (publica uma vez e só reemite no rearme), um `script_error` ativo há mais de 2 h também escapava do segundo grupo — o alarme ficava invisível na faixa após um reload.
    - **Famílias "estado publicado", "contador publicado" e TTL**: `GET /api/events?severity=warning&start=<agora−2h>&limit=500` + idem `alarm` (o endpoint aceita uma severidade por chamada). Janela de 2 h: essas famílias cessam por estado vivo (primeiro quadro chega ≤ Ts_mpc após a assinatura §7.1-5) ou por decaimento de 60 s — evento mais velho já se resolveu.
    Depois disso, só WS. `resolverAlarmes(eventos, flowStatus, mpcStates, agora)` é função pura com check próprio (sem parâmetro de períodos: nenhuma família depende de Ts após F5R-02).
 4. Renderização (DESIGN §Layout): colapsada em 1 linha quando vazio; com condições ativas, contagem por severidade + lista expansível (cor + ícone + texto — Regra do Canal Redundante); clique navega a `/eventos`. Sem ACK (ADR-020).
@@ -230,7 +232,7 @@ O PRD tem regra explícita de correção (`PRD.md` §nota inicial); specs anteri
 
 | # | Débito (relatório gate F4 §8.2) | Veredito F5 | Onde |
 |---|---|---|---|
-| F-1 | Boot de worker síncrono sob o lock do supervisor (deploy **e** reload; stop esperava build em voo com o lock) | **Fecha na F5** (boot assíncrono em todos os caminhos + lock reescopado ao mapa) | §6 · plano F5a |
+| F-1 | Boot de worker síncrono sob o lock do supervisor (deploy **e** reload; stop esperava build em voo com o lock) | **Fecha na F5** nos três caminhos de comando (`_deploy`, `_stop`, `reconcile_mpc_hosts`); ver o débito residual abaixo | §6 · plano F5a |
 | F-3 | Regras client-side espelhadas à mão | **Fecha na F5** (golden amplo, drift bidirecional) | §7.6 · plano F5b |
 | — | `_empty_result` duplicado (assinaturas divergentes) | **Fecha na F5** (Etapa 0; assinatura kw-only do host) | §4.3-3 |
 | — | 422 de enum como lista FastAPI | **Fecha na F5** (handler global) | §4.3-1 |
@@ -240,6 +242,7 @@ O PRD tem regra explícita de correção (`PRD.md` §nota inicial); specs anteri
 | — | `mpc_state_dimension` conservador | Fica (letra da spec F4 §2.2-7) | §1.2 |
 | — | Protocolo `Commandable`/`Healthy` | Fica (revisitar no 2º bloco comandável) | §1.2 |
 | — | EU nas portas de Script/TFS | Diferido F6 (schema novo) | §1.2 |
+| — | `shutdown_mpc` síncrono sob o lock em `_force_stop` (`on_project_activated`), `_pass`/`_reconcile_flow` e `_handback_failed_mpc` | Fica (herdado da F4, **não** é regressão da F5): se o host estiver em build, esses caminhos ainda seguram o lock por até `_BOOT_TIMEOUT_S = 30 s`. O reescopo de §6-3 vale para os três caminhos de comando (deploy/stop/reload), não para estes | §6.3 · achado da revisão de fechamento da F5 |
 
 ---
 

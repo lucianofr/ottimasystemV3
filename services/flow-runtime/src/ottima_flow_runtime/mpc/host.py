@@ -78,7 +78,7 @@ from typing import Any, Final
 
 from ottima_core.flowgraph import MpcConfig, derive_horizons
 
-from .worker import SolveRequest, SolveResult, worker_main
+from .worker import SolveRequest, SolveResult, empty_result, worker_main
 
 _READY: Final[str] = "ready"
 _JOIN_TIMEOUT_S: Final[float] = 2.0
@@ -123,21 +123,6 @@ def _shutdown_worker(proc: SpawnProcess, conn: Connection) -> None:
             proc.close()
         except (OSError, ValueError):
             pass
-
-
-def _empty_result(*, status: str, detail: str, wall_ms: float) -> SolveResult:
-    """Resultado sintético (nunca veio do filho) — mesmo formato vazio de
-    `worker._empty_result`, duplicado aqui porque aquele é privado do módulo do worker."""
-    return SolveResult(
-        u_plan={},
-        prediction_t=[],
-        prediction_cv=[],
-        prediction_mv=[],
-        cost=0.0,
-        status=status,
-        wall_ms=wall_ms,
-        detail=detail,
-    )
 
 
 class MpcHost:
@@ -286,7 +271,7 @@ class MpcHost:
 
         if outcome is None:
             # Deadline de 0.7xTs_mpc estourado, medido do dispatch (spec §4.2).
-            self._pending_result = _empty_result(
+            self._pending_result = empty_result(
                 status="overrun",
                 detail="orçamento de 70% do Ts_mpc excedido",
                 wall_ms=self._deadline_s * 1000.0,
@@ -295,7 +280,7 @@ class MpcHost:
             return
 
         if outcome is _CRASHED:
-            self._pending_result = _empty_result(status="error", detail="crash", wall_ms=0.0)
+            self._pending_result = empty_result(status="error", detail="crash", wall_ms=0.0)
             self._schedule_respawn()
             return
 

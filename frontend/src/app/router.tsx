@@ -4,8 +4,11 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { LoginPage } from "../features/auth/LoginPage";
 import { AuthProvider } from "../features/auth/useAuth";
 import { ConnectionsPage } from "../features/connections/ConnectionsPage";
+import { EventsPage } from "../features/events/EventsPage";
 import { FlowEditorPage } from "../features/flows/FlowEditorPage";
 import { FlowsPage } from "../features/flows/FlowsPage";
+import { OperatePage } from "../features/operate/OperatePage";
+import { OperateSelectorPage } from "../features/operate/OperateSelectorPage";
 import { TagsPage } from "../features/tags/TagsPage";
 import { TrendPage } from "../features/trend/TrendPage";
 import { AppShell } from "./AppShell";
@@ -24,6 +27,9 @@ export function App() {
             <Route element={<AuthGuard />}>
               <Route element={<AppShell />}>
                 <Route path="/" element={<HomePage />} />
+                <Route path="/operacao" element={<OperateSelectorPage />} />
+                <Route path="/operacao/:flowId/:blockId" element={<OperatePage />} />
+                <Route path="/eventos" element={<EventsPage />} />
                 <Route path="/engenharia/conexoes" element={<ConnectionsPage />} />
                 <Route path="/engenharia/tags" element={<TagsPage />} />
                 <Route path="/engenharia/flows" element={<FlowsPage />} />

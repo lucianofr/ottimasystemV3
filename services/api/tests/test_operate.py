@@ -1,8 +1,8 @@
-"""Rotas `/api/operate` — modo, SP e MV do bloco MPC (spec F4 §6.1, plano F4b tarefa 3.1).
+"""Rotas `/api/operate` — modo, SP e MV do bloco MPC (spec F4 §6.1; emenda §1.3-3).
 
-A API valida só forma e faixa contra o `graph_json` (Regra do Estado Publicado): não conhece
-o modo vigente, então "flow existe" / "bloco é mpc" / faixa entram no mesmo canal 422 pt-BR
-string única das demais reprovações de domínio (spec §6.1, brief da tarefa). Sucesso publica
+A API valida forma e faixa contra o `graph_json` (Regra do Estado Publicado): não conhece o
+modo vigente. Flow inexistente é 404 (mesma constante de `flows.py`, decisão A-9); "bloco é
+mpc" / faixa / categoria seguem no canal 422 pt-BR string única (spec §6.1). Sucesso publica
 `FlowCommand` em `flow.commands` e responde 202 sem emitir evento (§4.8) — o runtime audita.
 
 O cenário (`_cenario`) sempre nasce com `admin_headers` (PUT do grafo exige admin, F3 §5.1);
@@ -10,11 +10,13 @@ as rotas `/operate` em si são exercitadas com `operator_headers` — o papel qu
 """
 
 import json
+import logging
 
 import pytest
 from redis.asyncio import Redis
 
 from ottima_core.bus import CHANNEL_FLOW_COMMANDS
+from ottima_core.models import Flow
 
 # ------------------------------------------------------------------------- fixtures locais
 
@@ -286,13 +288,13 @@ async def test_mode_valor_invalido_422(client, admin_headers, operator_headers, 
     assert await comandos() == []
 
 
-async def test_mode_flow_inexistente_422(client, operator_headers, comandos):
+async def test_mode_flow_inexistente_404(client, operator_headers, comandos):
     r = await client.post(
         "/api/operate/999999/m1/mode",
         json={"axis": "local_remote", "value": "remote"},
         headers=operator_headers,
     )
-    assert r.status_code == 422
+    assert r.status_code == 404
     assert "Flow" in _mensagem(r)
     assert await comandos() == []
 
@@ -335,6 +337,17 @@ async def test_mode_nao_emite_evento(client, admin_headers, operator_headers, co
 
 
 # --------------------------------------------------------------------------------- /sp
+
+
+async def test_sp_flow_inexistente_404(client, operator_headers, comandos):
+    r = await client.post(
+        "/api/operate/999999/m1/sp",
+        json={"var_id": "cv_a", "value": 100.0},
+        headers=operator_headers,
+    )
+    assert r.status_code == 404
+    assert "Flow" in _mensagem(r)
+    assert await comandos() == []
 
 
 async def test_sp_operator_publica_comando_202(client, admin_headers, operator_headers, comandos):
@@ -390,6 +403,17 @@ async def test_sp_var_inexistente_422(client, admin_headers, operator_headers, c
 # --------------------------------------------------------------------------------- /mv
 
 
+async def test_mv_flow_inexistente_404(client, operator_headers, comandos):
+    r = await client.post(
+        "/api/operate/999999/m1/mv",
+        json={"var_id": "mv_a", "value": 50.0},
+        headers=operator_headers,
+    )
+    assert r.status_code == 404
+    assert "Flow" in _mensagem(r)
+    assert await comandos() == []
+
+
 async def test_mv_operator_publica_comando_202(client, admin_headers, operator_headers, comandos):
     flow_id, block_id = await _cenario(client, admin_headers, "MvOk")
     r = await client.post(
@@ -438,3 +462,237 @@ async def test_mv_var_inexistente_422(client, admin_headers, operator_headers, c
     assert r.status_code == 422
     assert "mv_nope" in _mensagem(r)
     assert await comandos() == []
+
+
+# --------------------------------------------------------------------------------- /mpcs
+
+
+async def test_mpcs_anonimo_401(client):
+    """Sem token, `require_operator` reprova antes de qualquer leitura no banco (spec §6.1)."""
+    r = await client.get("/api/operate/mpcs")
+    assert r.status_code == 401
+
+
+async def test_mpcs_sem_projeto_ativo_lista_vazia(client, admin_headers, operator_headers):
+    """Existe bloco `mpc` no banco, mas nenhum projeto foi ativado (spec §4.1-4)."""
+    await _cenario(client, admin_headers, "MpcsSemAtivo")
+
+    r = await client.get("/api/operate/mpcs", headers=operator_headers)
+
+    assert r.status_code == 200, r.text
+    assert r.json() == []
+
+
+async def test_mpcs_so_do_projeto_ativo(client, admin_headers, operator_headers):
+    """Dois projetos com bloco `mpc`; só o ativo aparece na projeção (spec §4.1, decisão A-7)."""
+    flow_a, block_a = await _cenario(client, admin_headers, "MpcsAtivo")
+    await _cenario(client, admin_headers, "MpcsInativo")
+    detalhe = await client.get(f"/api/flows/{flow_a}", headers=admin_headers)
+    project_a = detalhe.json()["project_id"]
+    r = await client.post(f"/api/projects/{project_a}/activate", headers=admin_headers)
+    assert r.status_code == 200, r.text
+
+    r = await client.get("/api/operate/mpcs", headers=operator_headers)
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [item["flow_id"] for item in body] == [flow_a]
+    assert body[0]["block_id"] == block_a
+
+
+async def test_mpcs_projecao_verbatim_sem_pid_nem_models(client, admin_headers, operator_headers):
+    """Response §4.1-1 verbatim: mvs/cvs/constraints/dvs projetados, sem `pid`/`models`/pesos/
+    TSS/`initial_value` (§4.1-3) — a MV `mv_a` tem `pid` amarrado de propósito, para provar que
+    ele nunca vaza."""
+    project_id = await _projeto(client, admin_headers, "MpcsProjecao")
+    conn_id = await _conexao(client, admin_headers, project_id, "plc-projecao")
+    flow = await _flow(client, admin_headers, project_id, "MpcsProjecao")
+
+    tag_in_cv = await _tag(client, admin_headers, conn_id, "IN-CV", "r")
+    tag_in_co = await _tag(client, admin_headers, conn_id, "IN-CO", "r")
+    tag_in_dv = await _tag(client, admin_headers, conn_id, "IN-DV", "r")
+    tag_pid_w = await _tag(client, admin_headers, conn_id, "PID-W", "w")
+    tag_pid_cmd = await _tag(client, admin_headers, conn_id, "PID-CMD", "w")
+    tag_pid_rb = await _tag(client, admin_headers, conn_id, "PID-RB", "r")
+
+    mv_a = _mv(
+        "a",
+        pid={
+            "write_tag_id": tag_pid_w,
+            "target_mode": "cas",
+            "mode_cmd_tag_id": tag_pid_cmd,
+            "readback_tag_id": tag_pid_rb,
+            "mode_values": {"auto": 0, "target": 1},
+        },
+    )
+    mv_b = _mv("b")
+    cv_a = _cv("a")
+    co_a = {
+        "id": "co_a",
+        "name": "Restrição A",
+        "eu": "kPa",
+        "kind": "selfreg",
+        "tss": 20.0,
+        "range": {"low": 0.0, "high": 10.0},
+        "priority": 1,
+    }
+    dv_a = {"id": "dv_a", "name": "DV A", "eu": "C"}
+    params = _selfreg_params()
+
+    data = {
+        "name": "MPC Projecao",
+        "multiplier": 1,
+        "variables": {"mvs": [mv_a, mv_b], "cvs": [cv_a], "constraints": [co_a], "dvs": [dv_a]},
+        "models": {
+            "cv_a": {
+                "mv_a": {"enabled": True, "params": params},
+                "mv_b": {"enabled": True, "params": params},
+                "dv_a": {"enabled": True, "params": params},
+            },
+            "co_a": {"mv_a": {"enabled": True, "params": params}},
+        },
+    }
+    graph = {
+        "nodes": [
+            _no("r1", "opc_read", 1, tag_id=tag_in_cv),
+            _no("r2", "opc_read", 2, tag_id=tag_in_co),
+            _no("r3", "opc_read", 3, tag_id=tag_in_dv),
+            _no("m1", "mpc", 4, **data),
+        ],
+        "edges": [
+            _aresta("r1", "out", "m1", "cv_a", id_="e1"),
+            _aresta("r2", "out", "m1", "co_a", id_="e2"),
+            _aresta("r3", "out", "m1", "dv_a", id_="e3"),
+        ],
+    }
+    await _salvar(client, admin_headers, flow["id"], graph)
+    r = await client.post(f"/api/projects/{project_id}/activate", headers=admin_headers)
+    assert r.status_code == 200, r.text
+
+    r = await client.get("/api/operate/mpcs", headers=operator_headers)
+
+    assert r.status_code == 200, r.text
+    assert r.json() == [
+        {
+            "flow_id": flow["id"],
+            "flow_name": "MpcsProjecao",
+            "flow_ts_seconds": 1.0,
+            "block_id": "m1",
+            "name": "MPC Projecao",
+            "multiplier": 1,
+            "variables": {
+                "mvs": [
+                    {
+                        "id": "mv_a",
+                        "name": "MV a",
+                        "eu": "m3/h",
+                        "limits": {"min": 0.0, "max": 100.0},
+                        "du_max": 5.0,
+                    },
+                    {
+                        "id": "mv_b",
+                        "name": "MV b",
+                        "eu": "m3/h",
+                        "limits": {"min": 0.0, "max": 100.0},
+                        "du_max": 5.0,
+                    },
+                ],
+                "cvs": [
+                    {
+                        "id": "cv_a",
+                        "name": "CV a",
+                        "eu": "C",
+                        "sp_limits": {"min": 80.0, "max": 120.0},
+                    }
+                ],
+                "constraints": [
+                    {
+                        "id": "co_a",
+                        "name": "Restrição A",
+                        "eu": "kPa",
+                        "range": {"low": 0.0, "high": 10.0},
+                    }
+                ],
+                "dvs": [{"id": "dv_a", "name": "DV A", "eu": "C"}],
+            },
+        }
+    ]
+
+
+async def test_mpcs_graph_invalido_pulado_com_log(
+    client, admin_headers, operator_headers, db_session, caplog
+):
+    """`graph_json` que não parseia é pulado, nunca 5xx — o resto da projeção segue normal
+    (spec §4.1-4, defesa em profundidade)."""
+    project_id = await _projeto(client, admin_headers, "MpcsGraphInvalido")
+    r = await client.post(f"/api/projects/{project_id}/activate", headers=admin_headers)
+    assert r.status_code == 200, r.text
+
+    # Inserido direto no banco: só assim o `graph_json` fica estruturalmente inválido, já que
+    # `PUT /api/flows/{id}` nunca grava um grafo que não passe por `parse_graph`/`validate_graph`.
+    flow_corrompido = Flow(
+        project_id=project_id,
+        name="Corrompido",
+        ts_seconds=1,
+        graph_json={"nodes": "not-a-list", "edges": []},
+    )
+    db_session.add(flow_corrompido)
+    await db_session.commit()
+    await db_session.refresh(flow_corrompido)
+
+    with caplog.at_level(logging.WARNING, logger="ottima_api.routers.operate"):
+        r = await client.get("/api/operate/mpcs", headers=operator_headers)
+
+    assert r.status_code == 200, r.text
+    assert r.json() == []
+    assert any(
+        record.levelno == logging.WARNING and str(flow_corrompido.id) in record.getMessage()
+        for record in caplog.records
+    )
+
+
+async def test_mpcs_bloco_mpc_invalido_pulado_com_log(
+    client, admin_headers, operator_headers, db_session, caplog
+):
+    """`graph_json` estruturalmente válido (passa por `parse_graph`), mas o bloco `mpc` não
+    tem `variables` — `MpcConfig.model_validate` rejeita com `pydantic.ValidationError`. Só é
+    possível gravar assim inserindo direto no banco: `PUT /api/flows/{id}` roda
+    `validate_graph` (que já tipa o bloco via `MpcConfig`) antes de gravar. Mesma postura de
+    `test_mpcs_graph_invalido_pulado_com_log`, agora no nível do bloco, não do grafo inteiro."""
+    project_id = await _projeto(client, admin_headers, "MpcsBlocoInvalido")
+    r = await client.post(f"/api/projects/{project_id}/activate", headers=admin_headers)
+    assert r.status_code == 200, r.text
+
+    graph = {
+        "nodes": [
+            {
+                "id": "m1",
+                "type": "mpc",
+                "position": {"x": 0.0, "y": 0.0},
+                "data": {
+                    "exec_order": 1,
+                    "name": "MPC Quebrado",
+                    "multiplier": 1,
+                    "models": {},
+                    # 'variables' ausente de propósito: campo obrigatório de MpcConfig.
+                },
+            }
+        ],
+        "edges": [],
+    }
+    flow_corrompido = Flow(
+        project_id=project_id, name="BlocoInvalido", ts_seconds=1, graph_json=graph
+    )
+    db_session.add(flow_corrompido)
+    await db_session.commit()
+    await db_session.refresh(flow_corrompido)
+
+    with caplog.at_level(logging.WARNING, logger="ottima_api.routers.operate"):
+        r = await client.get("/api/operate/mpcs", headers=operator_headers)
+
+    assert r.status_code == 200, r.text
+    assert r.json() == []
+    assert any(
+        record.levelno == logging.WARNING and str(flow_corrompido.id) in record.getMessage()
+        for record in caplog.records
+    )

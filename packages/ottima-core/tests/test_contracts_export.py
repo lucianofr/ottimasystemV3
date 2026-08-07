@@ -1,6 +1,12 @@
 import json
+import re
+from pathlib import Path
 
 from ottima_core.contracts_export import build_contracts, main
+
+# frontend/src/lib/contracts.gen.ts: gerado a partir daqui via `npm run generate:contracts`
+# (tarefa 1.3, débito 0.2 da F4) — fonte única = build_contracts(), não editar à mão.
+GEN_TS_PATH = Path(__file__).resolve().parents[3] / "frontend" / "src" / "lib" / "contracts.gen.ts"
 
 
 def test_json_tem_os_5_tipos_de_bloco():
@@ -63,3 +69,16 @@ def test_main_imprime_json_valido_com_as_duas_secoes(capsys):
     corpo = json.loads(capsys.readouterr().out)
     assert set(corpo) == {"port_contracts", "ws_payloads"}
     assert corpo == build_contracts()
+
+
+def test_gen_ts_tem_campo_ts_em_mpcstate_e_mpcprediction():
+    # tarefa 1.3 (débito 0.2 da F4): `MpcState.ts`/`MpcPrediction.ts` (bus.py, tarefas
+    # 1.1/1.2) precisam sobreviver à regeneração do TS. Trava o `contracts.gen.ts`
+    # commitado — não só o JSON intermediário — para pegar regen esquecida.
+    texto = GEN_TS_PATH.read_text(encoding="utf-8")
+    for nome in ("MpcState", "MpcPrediction"):
+        corpo = re.search(rf"export interface {nome} \{{(.*?)\n\}}", texto, re.DOTALL)
+        assert corpo, f"interface {nome} não encontrada em {GEN_TS_PATH}"
+        assert re.search(r"\bts: string;", corpo.group(1)), (
+            f"{nome} sem campo `ts` em {GEN_TS_PATH} — rode npm run generate:contracts"
+        )

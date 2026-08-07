@@ -894,6 +894,12 @@ def armar_ate_remoto(
     janela de confirmação (2×Ts_mpc) — reverter seria `mpc_arm_failed{reason:no_confirm}`,
     o oposto do que este helper afirma. Mesmo padrão de `_armar_ate_remoto` em
     `test_f4_mpc.py` (tarefa 4.1), aqui compartilhado entre os arquivos da tarefa 4.2."""
+    # Precondição (tarefa 4.1): aguardar host pronto antes de armar
+    fluxo.esperar(
+        lambda e: e.get("status", {}).get("solver") != "building",
+        timeout=60.0,
+        descricao=f"{block_id} host ready (não building)",
+    )
     operar_modo(admin, flow_id, block_id, "local_remote", "remote")
     fluxo.esperar(
         lambda e: e["modes"]["local_remote"] == "remote",
@@ -918,6 +924,12 @@ def armar_remoto_direto(
     """LOCAL→REMOTO(MAN) para um bloco sem nenhuma MV com `pid`+`mode_read`: sem alvo pra
     confirmar, `watch_arm` devolve na hora (spec §4.4/§4.5 — "sem mode_read, sem shed") e a
     transição nunca reverte, então não há janela de confirmação a esperar aqui."""
+    # Precondição (tarefa 4.1): aguardar host pronto antes de armar
+    fluxo.esperar(
+        lambda e: e.get("status", {}).get("solver") != "building",
+        timeout=60.0,
+        descricao=f"{block_id} host ready (não building)",
+    )
     operar_modo(admin, flow_id, block_id, "local_remote", "remote")
     fluxo.esperar(
         lambda e: e["modes"]["local_remote"] == "remote",

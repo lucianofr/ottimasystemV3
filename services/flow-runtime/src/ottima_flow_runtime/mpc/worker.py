@@ -235,7 +235,7 @@ def _extract_prediction(
     return t, prediction_cv, prediction_mv
 
 
-def _empty_result(status: str, detail: str, *, wall_ms: float = 0.0) -> SolveResult:
+def empty_result(*, status: str, detail: str = "", wall_ms: float) -> SolveResult:
     return SolveResult(
         u_plan={},
         prediction_t=[],
@@ -294,7 +294,7 @@ def _handle(runtime: _Runtime, request: SolveRequest) -> SolveResult:
         return _solve(runtime, request)
     except Exception as exc:  # noqa: BLE001 - fronteira do processo: nunca deixa o laço morrer
         detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-        return _empty_result("error", detail)
+        return empty_result(status="error", detail=detail, wall_ms=0.0)
 
 
 def worker_main(conn: Connection, config_json: str, ts_flow: float) -> None:

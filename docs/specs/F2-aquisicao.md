@@ -49,6 +49,8 @@ Este documento especifica **implementação**. Ele não redefine produto, arquit
 
 A tela de trend da F2 consome `GET /api/history` por **polling** (sem WS); "ao vivo" de verdade chega com o WS na F5. **[NOVA — implementação]**
 
+> Nota (spec F5 §1.2): o registro de valores de tag (`opc.values.<conn_id>` no `/ws`) é reapontado — fica F6 ou nunca, só com consumidor real; eventos (faixa anunciadora com dados reais) seguem F5.
+
 ---
 
 ## 2. opc-worker — arquitetura interna

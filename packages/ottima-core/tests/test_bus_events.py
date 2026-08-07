@@ -39,6 +39,7 @@ from ottima_core.bus import (
     KIND_RECORDER_BACKPRESSURE,
     KIND_RELOAD_REJECTED,
     KIND_SCRIPT_ERROR,
+    KIND_SCRIPT_RECOVERED,
     KIND_SCRIPT_TIMEOUT,
     KIND_TAG_CREATED,
     KIND_TAG_DELETED,
@@ -211,9 +212,10 @@ def test_mpc_var_state_sp_e_opcional_e_default_none():
 
 
 def test_mpc_state_round_trip_payload_verbatim_spec_51_vars_com_e_sem_sp():
-    # Payload literal da spec F4 §5.1 (RF-625), enums concretizados: CV carrega `sp`, MV não;
-    # `armed = (local_remote == "remote")`.
+    # Payload literal da spec F4 §5.1 (RF-625)/F5 §2.1 (`ts`/`prediction.ts`), enums
+    # concretizados: CV carrega `sp`, MV não; `armed = (local_remote == "remote")`.
     payload = {
+        "ts": "2026-08-06T12:00:00Z",
         "modes": {"local_remote": "remote", "man_auto": "auto"},
         "status": {
             "solver": "ok",
@@ -228,6 +230,7 @@ def test_mpc_state_round_trip_payload_verbatim_spec_51_vars_com_e_sem_sp():
         },
         "cost": 0.184,
         "prediction": {
+            "ts": "2026-08-06T11:59:55Z",
             "t": [0.0, 5.0, 10.0],
             "cv": [[12.1, 12.4, 12.6]],
             "mv": [[45.0, 44.0, 43.0]],
@@ -241,8 +244,10 @@ def test_mpc_state_round_trip_payload_verbatim_spec_51_vars_com_e_sem_sp():
 
 
 def test_mpc_state_prediction_vazia_fora_de_auto_round_trip():
-    # spec F4 §5.1: fora de AUTO o worker fica ocioso — `prediction` viaja vazia.
+    # spec F5 §2.1-2: fora de AUTO o worker fica ocioso — `prediction` viaja vazia com
+    # `prediction.ts == ts` do quadro (nunca um instante próprio).
     payload = {
+        "ts": "2026-08-06T12:00:00Z",
         "modes": {"local_remote": "local", "man_auto": "man"},
         "status": {
             "solver": "idle",
@@ -253,15 +258,17 @@ def test_mpc_state_prediction_vazia_fora_de_auto_round_trip():
         },
         "vars": {"cv_a1b2": {"v": 20.0, "sp": None}},
         "cost": 0.0,
-        "prediction": {"t": [], "cv": [], "mv": []},
+        "prediction": {"ts": "2026-08-06T12:00:00Z", "t": [], "cv": [], "mv": []},
     }
     state = MpcState.model_validate_json(json.dumps(payload))
     assert state.model_dump(mode="json") == payload
     assert state.status.armed == (state.modes.local_remote == "remote")
+    assert state.prediction.ts == state.ts
+    assert state.prediction.t == []
 
 
 # Consumidores (recorder, API) fazem match por string de `kind`. Trocar um valor é quebra de
-# contrato silenciosa; as duas tabelas abaixo travam o vocabulário nas strings normativas.
+# contrato silenciosa; as tabelas abaixo travam o vocabulário nas strings normativas.
 VOCABULARIO_F3 = [
     (KIND_FLOW_DEPLOYED, "flow_deployed"),
     (KIND_FLOW_STOPPED, "flow_stopped"),
@@ -305,6 +312,10 @@ VOCABULARIO_F4 = [
     (KIND_MPC_INPUT_INVALID, "mpc_input_invalid"),
 ]
 
+VOCABULARIO_F5 = [
+    (KIND_SCRIPT_RECOVERED, "script_recovered"),
+]
+
 
 def test_vocabulario_kind_novo_da_f3_spec_43():
     assert [constante for constante, _ in VOCABULARIO_F3] == [
@@ -321,4 +332,10 @@ def test_vocabulario_kind_da_f2_nao_mudou_spec_f2_73():
 def test_vocabulario_kind_novo_do_mpc_spec_53():
     assert [constante for constante, _ in VOCABULARIO_F4] == [
         esperado for _, esperado in VOCABULARIO_F4
+    ]
+
+
+def test_vocabulario_kind_novo_da_f5_spec_722():
+    assert [constante for constante, _ in VOCABULARIO_F5] == [
+        esperado for _, esperado in VOCABULARIO_F5
     ]

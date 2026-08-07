@@ -116,6 +116,20 @@ class _FlowRuntime:
     hosts: dict[str, MpcHost] = field(default_factory=dict)
     """`block_id -> MpcHost`, só dos blocos `mpc` (plano F4b, tarefa 2.2) — o supervisor é
     dono do ciclo de vida deles."""
+    mpc_boot_tasks: set[asyncio.Task[None]] = field(default_factory=set)
+    """Tasks de `MpcOrchestrator.start_host_background` (spec F5 §6.1, tarefa 4.1 F5a —
+    F-1): `host.start()` roda em segundo plano, fora do lock; a referência mora aqui
+    (mesmo idioma de `mpc_watchdogs` abaixo) para o event loop nunca segurar só a
+    referência fraca de `asyncio.create_task` — `MpcHost.stop()` já espera o boot em voo
+    por conta própria (`mpc/host.py`), então nada aqui precisa cancelar/aguardar por fora;
+    é só o que evita a task desaparecer no meio."""
+    mpc_stop_tasks: set[asyncio.Task[None]] = field(default_factory=set)
+    """Tasks de `MpcOrchestrator.stop_host_background` (spec F5 §6.3/§6.5, tarefa 4.2 F5a
+    — F-1): `host.stop()` roda em segundo plano, fora do lock e fora do caminho síncrono
+    de `flow.commands` — mesmo idioma/motivo de `mpc_boot_tasks` acima, mas para o
+    desmonte (`Supervisor._stop`, `reconcile_mpc_hosts` do hot-swap) em vez do boot.
+    `_teardown` aguarda o que sobrar aqui antes de considerar o flow desmontado, para o
+    desligamento do serviço nunca abandonar um kill/join ainda em voo."""
     mpc_write_opc: Any = None
     """`write_opc` com `conn_id` já resolvido (`definition._make_write_opc`) — reusado para
     escrever `mode_cmd` fora do `step()` do bloco (transições §4.4/§4.5)."""
@@ -290,11 +304,8 @@ class Supervisor:
                 )
                 return
 
-        for host in staged.hosts.values():
-            await host.start()
-
         task = FlowTask(staged.definition, redis_client=self._redis)
-        self._runtimes[flow_id] = _FlowRuntime(
+        runtime = _FlowRuntime(
             task=task,
             ts_seconds=staged.ts_seconds,
             updated_at=flow.updated_at,
@@ -303,6 +314,13 @@ class Supervisor:
             hosts=staged.hosts,
             mpc_write_opc=staged.mpc_write_opc,
         )
+        self._runtimes[flow_id] = runtime
+        # F-1 (spec F5 §6.1, tarefa 4.1 F5a): `host.start()` sai do caminho síncrono do
+        # lock global — estagia e retorna; o build (spawn + montagem do-mpc) roda em
+        # segundo plano e o flow varre desde a 1a fronteira, publicando `building` (§6.2)
+        # até o host ficar pronto.
+        for block_id, host in staged.hosts.items():
+            self._mpc.start_host_background(runtime, host, flow_id=flow_id, block_id=block_id)
         self._state.track(flow_id, task)
         await task.start(user=command.user)
         await publish_flow_deployed(self._redis, flow_id=flow_id, user=command.user)
@@ -325,7 +343,14 @@ class Supervisor:
         if runtime is None or runtime.task.state != "running":
             # Parado, em falha ou desconhecido: nada a materializar, nenhum evento.
             return
-        await self._mpc.shutdown_mpc(runtime, flow_id=flow_id)
+        await self._mpc.revert_armed_mpc(runtime, flow_id=flow_id)
+        # F-1 (spec F5 §6.3/§6.5, tarefa 4.2 F5a): o host sai do mapa e o desmonte — que
+        # pode esperar um build em voo até `_BOOT_TIMEOUT_S = 30s`, `mpc/host.py::stop` —
+        # roda destacado. Sem isso o bloqueio que a tarefa 4.1 tirou do deploy só
+        # migraria para o stop, no MESMO canal sequencial de `flow.commands` (docstring de
+        # `MpcOrchestrator.stop_host_background`).
+        for block_id, host in self._mpc.detach_hosts(runtime).items():
+            self._mpc.stop_host_background(runtime, host, flow_id=flow_id, block_id=block_id)
         await runtime.task.stop(user=command.user, reason=REASON_USER)
         await publish_flow_stopped(
             self._redis, flow_id=flow_id, reason=REASON_USER, user=command.user
@@ -616,6 +641,12 @@ class Supervisor:
             if runtime is not None:
                 was_running = runtime.task.state == "running"
                 await self._mpc.shutdown_mpc(runtime, flow_id=flow_id)
+                if runtime.mpc_stop_tasks:
+                    # Desligamento do serviço: espera até o fim qualquer desmonte de host
+                    # que um `_stop` anterior tenha destacado (`stop_host_background`) e
+                    # ainda estivesse em voo — sem isso o processo do worker poderia
+                    # sobreviver ao `Supervisor.stop()` (spec F5 §6.5, tarefa 4.2 F5a).
+                    await asyncio.gather(*runtime.mpc_stop_tasks, return_exceptions=True)
                 await runtime.task.stop(user=SYSTEM_ACTOR, reason=REASON_SHUTDOWN)
                 if was_running:
                     # Sem usuário comandando um desligamento: a chave `user` é omitida, como

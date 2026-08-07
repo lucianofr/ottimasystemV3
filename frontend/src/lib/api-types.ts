@@ -400,6 +400,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operate/mpcs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mpcs
+         * @description Projeta os blocos MPC de todos os flows do projeto ativo (spec §4.1; decisão A-7).
+         *
+         *     Sem projeto ativo, lista vazia (§4.1-4) — não há 404, o recurso é a projeção do projeto
+         *     vigente, não um flow identificado. Estado rodando/parado do flow não entra na projeção.
+         */
+        get: operations["list_mpcs_api_operate_mpcs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/events": {
         parameters: {
             query?: never;
@@ -432,6 +455,30 @@ export interface paths {
          * @description Uma série por tag pedida, sempre; ordem temporal crescente (uPlot exige x monotônico).
          */
         get: operations["get_history_api_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/history/mpc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get History Mpc
+         * @description Histórico do bloco MPC (spec F5 §2.4): uma série por var_id pedida, sempre.
+         *
+         *     Validação de forma (`var_ids`/janela) roda antes de tocar o banco; só então o flow é
+         *     carregado (404 se inexistente) e o bloco validado contra o `graph_json` (422 se
+         *     inexistente ou não-`mpc`) — mesma ordem de `operate.py::_mpc_config`.
+         */
+        get: operations["get_history_mpc_api_history_mpc_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -672,6 +719,44 @@ export interface components {
             /** Watchdog Period Ms */
             watchdog_period_ms?: number | null;
         };
+        /**
+         * ConstraintOut
+         * @description Projeção de uma Restrição do bloco (spec §4.1-1) — sem `tss`/`priority`/`kind`.
+         */
+        ConstraintOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Eu */
+            eu: string;
+            range: components["schemas"]["Range"];
+        };
+        /**
+         * CvOut
+         * @description Projeção de uma CV do bloco (spec §4.1-1) — sem `weight`/`tss`/`kind` (§4.1-3).
+         */
+        CvOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Eu */
+            eu: string;
+            sp_limits: components["schemas"]["Limits"];
+        };
+        /**
+         * DvOut
+         * @description Projeção de uma DV do bloco (spec §4.1-1).
+         */
+        DvOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Eu */
+            eu: string;
+        };
         /** EventOut */
         EventOut: {
             /**
@@ -812,6 +897,16 @@ export interface components {
             /** V Max */
             v_max?: number[] | null;
         };
+        /**
+         * Limits
+         * @description Faixa `{min, max}` — limites de MV (`limits`) ou setpoint de CV (`sp_limits`).
+         */
+        Limits: {
+            /** Min */
+            min: number;
+            /** Max */
+            max: number;
+        };
         /** LoginIn */
         LoginIn: {
             /** Username */
@@ -846,12 +941,99 @@ export interface components {
              */
             value: "local" | "remote" | "man" | "auto";
         };
+        /** MpcHistoryResponse */
+        MpcHistoryResponse: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "raw" | "1m";
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Series */
+            series: components["schemas"]["MpcHistorySeries"][];
+        };
+        /**
+         * MpcHistorySeries
+         * @description Mesma forma de `HistorySeries`, com `var_id` no lugar de `tag_id`; `sp`/`auto`
+         *     alinhados a `t` (spec F5 §2.4) — sem `q`, que não existe em `mpc_samples`.
+         */
+        MpcHistorySeries: {
+            /** Var Id */
+            var_id: string;
+            /** T */
+            t: string[];
+            /** V */
+            v: number[];
+            /** Sp */
+            sp: (number | null)[];
+            /** Auto */
+            auto: boolean[];
+            /** V Min */
+            v_min?: number[] | null;
+            /** V Max */
+            v_max?: number[] | null;
+        };
+        /**
+         * MpcNodeOut
+         * @description Um bloco `mpc` projetado (spec §4.1-1) — sem `models`/pesos/TSS (§4.1-3); estado
+         *     rodando/parado do flow não entra (§4.1-4).
+         */
+        MpcNodeOut: {
+            /** Flow Id */
+            flow_id: number;
+            /** Flow Name */
+            flow_name: string;
+            /** Flow Ts Seconds */
+            flow_ts_seconds: number;
+            /** Block Id */
+            block_id: string;
+            /** Name */
+            name: string;
+            /** Multiplier */
+            multiplier: number;
+            variables: components["schemas"]["MpcVariablesOut"];
+        };
+        /** MpcVariablesOut */
+        MpcVariablesOut: {
+            /** Mvs */
+            mvs: components["schemas"]["MvOut"][];
+            /** Cvs */
+            cvs: components["schemas"]["CvOut"][];
+            /** Constraints */
+            constraints: components["schemas"]["ConstraintOut"][];
+            /** Dvs */
+            dvs: components["schemas"]["DvOut"][];
+        };
         /** MvCommand */
         MvCommand: {
             /** Var Id */
             var_id: string;
             /** Value */
             value: number;
+        };
+        /**
+         * MvOut
+         * @description Projeção de uma MV do bloco (spec §4.1-1) — sem `pid`/`initial_value` (§4.1-3).
+         */
+        MvOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Eu */
+            eu: string;
+            limits: components["schemas"]["Limits"];
+            /** Du Max */
+            du_max: number;
         };
         /** ProjectCreate */
         ProjectCreate: {
@@ -890,6 +1072,16 @@ export interface components {
             name?: string | null;
             /** Description */
             description?: string | null;
+        };
+        /**
+         * Range
+         * @description Faixa `{low, high}` de uma Restrição.
+         */
+        Range: {
+            /** Low */
+            low: number;
+            /** High */
+            high: number;
         };
         /** ServerCertificateOut */
         ServerCertificateOut: {
@@ -2172,6 +2364,26 @@ export interface operations {
             };
         };
     };
+    list_mpcs_api_operate_mpcs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MpcNodeOut"][];
+                };
+            };
+        };
+    };
     list_events_api_events_get: {
         parameters: {
             query?: {
@@ -2227,6 +2439,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_history_mpc_api_history_mpc_get: {
+        parameters: {
+            query: {
+                flow_id: number;
+                block_id: string;
+                var_ids: string;
+                start?: string | null;
+                end?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MpcHistoryResponse"];
                 };
             };
             /** @description Validation Error */

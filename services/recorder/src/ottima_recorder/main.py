@@ -79,6 +79,7 @@ async def health() -> dict:
         "version": VERSION,
         "buffered_samples": getattr(pipeline, "buffered_samples", 0),
         "buffered_events": getattr(pipeline, "buffered_events", 0),
+        "buffered_mpc_samples": getattr(pipeline, "buffered_mpc_samples", 0),
         "dropped_total": getattr(pipeline, "dropped_total", 0),
         "last_flush_ts": last_flush_ts.isoformat() if last_flush_ts is not None else None,
         "db_ok": db_ok,

@@ -17,6 +17,8 @@ export type FlowSaved = components["schemas"]["FlowSaved"];
 export type EventOut = components["schemas"]["EventOut"];
 export type HistoryResponse = components["schemas"]["HistoryResponse"];
 export type HistorySeries = components["schemas"]["HistorySeries"];
+export type MpcHistoryResponse = components["schemas"]["MpcHistoryResponse"];
+export type MpcHistorySeries = components["schemas"]["MpcHistorySeries"];
 
 const TOKEN_KEY = "ottima.token";
 

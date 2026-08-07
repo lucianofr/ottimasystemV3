@@ -231,7 +231,7 @@ def test_e2e_f4_10_ws_fanout_e_hot_swap(
         amostra = fluxo1.esperar(
             lambda _e: True, timeout=30.0, descricao="1ª amostra de mpc1 pós-deploy"
         )
-        assert set(amostra.keys()) == {"modes", "status", "vars", "cost", "prediction"}
+        assert set(amostra.keys()) == {"modes", "status", "vars", "cost", "prediction", "ts"}
         assert set(amostra["modes"].keys()) == {"local_remote", "man_auto"}
         assert set(amostra["status"].keys()) == {
             "solver",
@@ -240,7 +240,7 @@ def test_e2e_f4_10_ws_fanout_e_hot_swap(
             "armed",
             "input_valid",
         }
-        assert set(amostra["prediction"].keys()) == {"t", "cv", "mv"}
+        assert set(amostra["prediction"].keys()) == {"t", "cv", "mv", "ts"}
         for estado_var in amostra["vars"].values():
             assert set(estado_var.keys()) == {"v", "sp"}
 

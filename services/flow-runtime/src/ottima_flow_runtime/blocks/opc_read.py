@@ -5,6 +5,7 @@ se lê o espelho alimentado por `opc.values.*` (tarefa 1.1), que é síncrono e 
 """
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Literal
 
 from ..snapshot import ValueSnapshot
@@ -36,7 +37,9 @@ class OpcReadBlock(Block):
     def output_ports(self) -> tuple[str, ...]:
         return ("out",)
 
-    async def step(self, inputs: Mapping[str, PortSample]) -> dict[str, PortSample]:
+    async def step(
+        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
+    ) -> dict[str, PortSample]:
         tag_value = self._snapshot.get(self._tag_id)
         if tag_value is None:
             return {"out": PortSample(None, False)}

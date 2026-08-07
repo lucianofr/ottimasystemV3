@@ -20,11 +20,17 @@ from ottima_core.bus import (
     KIND_RECORDER_BACKPRESSURE,
     KIND_TAG_CREATED,
     EventMessage,
+    MpcModes,
+    MpcPrediction,
+    MpcState,
+    MpcStatus,
+    MpcVarState,
     OpcValue,
+    channel_mpc_state,
     channel_opc_values,
     publish_event,
 )
-from ottima_core.models import events_table, samples_table
+from ottima_core.models import events_table, mpc_samples_table, samples_table
 from ottima_recorder import main as main_module
 from ottima_recorder.pipeline import RecorderPipeline
 from testkit.await_until import await_until
@@ -40,6 +46,7 @@ HEALTH_KEYS = {
     "version",
     "buffered_samples",
     "buffered_events",
+    "buffered_mpc_samples",
     "dropped_total",
     "last_flush_ts",
     "db_ok",
@@ -49,6 +56,18 @@ HEALTH_KEYS = {
 def sample(tag_id: int, *, offset: int = 0, value: float = 1.5, quality: int = 0) -> OpcValue:
     return OpcValue(
         tag_id=tag_id, ts=BASE_TS + timedelta(seconds=offset), value=value, quality=quality
+    )
+
+
+def mpc_state(*, offset: int = 0, v: float = 1.5) -> MpcState:
+    ts = BASE_TS + timedelta(seconds=offset)
+    return MpcState(
+        ts=ts,
+        modes=MpcModes(local_remote="remote", man_auto="auto"),
+        status=MpcStatus(solver="ok", overruns=0, last_solve_ms=0.0, armed=True, input_valid=True),
+        vars={"mv_a": MpcVarState(v=v)},
+        cost=0.0,
+        prediction=MpcPrediction(ts=ts, t=[], cv=[], mv=[]),
     )
 
 
@@ -68,6 +87,14 @@ async def sample_values(factory: Any) -> list[float]:
     async with factory() as session:
         rows = (await session.execute(select(samples_table).order_by(samples_table.c.ts))).all()
     return [row.value for row in rows]
+
+
+async def mpc_values(factory: Any) -> list[float]:
+    async with factory() as session:
+        rows = (
+            await session.execute(select(mpc_samples_table).order_by(mpc_samples_table.c.ts))
+        ).all()
+    return [row.v for row in rows]
 
 
 async def event_payloads(factory: Any, kind: str) -> list[dict[str, Any]]:
@@ -114,12 +141,14 @@ class StubPipeline:
         *,
         buffered_samples: int = 0,
         buffered_events: int = 0,
+        buffered_mpc_samples: int = 0,
         dropped_total: int = 0,
         last_flush_ts: datetime | None = None,
         db_ok: bool = True,
     ) -> None:
         self.buffered_samples = buffered_samples
         self.buffered_events = buffered_events
+        self.buffered_mpc_samples = buffered_mpc_samples
         self.dropped_total = dropped_total
         self.last_flush_ts = last_flush_ts
         self.db_ok = db_ok
@@ -133,6 +162,7 @@ async def factory(migrated_database_url):
     async with real() as session:
         await session.execute(delete(samples_table))
         await session.execute(delete(events_table))
+        await session.execute(delete(mpc_samples_table))
         await session.commit()
     await engine.dispose()
 
@@ -232,6 +262,25 @@ async def test_overflow_de_samples_descarta_o_mais_antigo_e_conta(
     await wait_rows(factory, samples_table, 10)
     # As 5 mais antigas sumiram: sobraram exatamente as 10 mais frescas.
     assert await sample_values(factory) == [float(i) for i in range(5, 15)]
+
+
+async def test_overflow_de_mpc_samples_descarta_o_mais_antigo_e_conta(
+    redis_client, factory, make_pipeline, monkeypatch
+):
+    spy_retry_delay(monkeypatch)
+    pipeline = await make_pipeline(factory, flush_interval_s=FAST_INTERVAL_S, mpc_queue_max=10)
+    factory.up = False
+
+    channel = channel_mpc_state(1, "b1")
+    for i in range(15):
+        await redis_client.publish(channel, mpc_state(offset=i, v=float(i)).model_dump_json())
+    await await_until(lambda: pipeline.dropped_total == 5)
+    assert pipeline.buffered_mpc_samples == 10
+
+    factory.up = True
+    await wait_rows(factory, mpc_samples_table, 10)
+    # As 5 mais antigas sumiram: sobraram exatamente as 10 mais frescas.
+    assert await mpc_values(factory) == [float(i) for i in range(5, 15)]
 
 
 async def test_recuperacao_emite_um_unico_evento_de_backpressure(
@@ -407,7 +456,12 @@ async def test_health_sem_pipeline_usa_defaults(health_app):
     body = response.json()
     assert set(body) == HEALTH_KEYS
     assert body["service"] == "recorder"
-    assert (body["buffered_samples"], body["buffered_events"], body["dropped_total"]) == (0, 0, 0)
+    assert (
+        body["buffered_samples"],
+        body["buffered_events"],
+        body["buffered_mpc_samples"],
+        body["dropped_total"],
+    ) == (0, 0, 0, 0)
     assert body["last_flush_ts"] is None
     assert body["db_ok"] is False
     assert body["status"] == "degraded"
@@ -416,7 +470,12 @@ async def test_health_sem_pipeline_usa_defaults(health_app):
 async def test_health_ok_exige_redis_e_banco(health_app):
     health_app.state.redis_ok = True
     health_app.state.pipeline = StubPipeline(
-        buffered_samples=7, buffered_events=2, dropped_total=5, last_flush_ts=BASE_TS, db_ok=True
+        buffered_samples=7,
+        buffered_events=2,
+        buffered_mpc_samples=4,
+        dropped_total=5,
+        last_flush_ts=BASE_TS,
+        db_ok=True,
     )
 
     body = (await get_health(health_app)).json()
@@ -425,6 +484,7 @@ async def test_health_ok_exige_redis_e_banco(health_app):
     assert body["status"] == "ok"
     assert body["buffered_samples"] == 7
     assert body["buffered_events"] == 2
+    assert body["buffered_mpc_samples"] == 4
     assert body["dropped_total"] == 5
     assert body["last_flush_ts"] == BASE_TS.isoformat()
     assert body["db_ok"] is True

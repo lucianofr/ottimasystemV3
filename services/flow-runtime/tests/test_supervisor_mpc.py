@@ -18,11 +18,13 @@ que nunca chegam à saída por modo do bloco).
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 
 import pytest
 from runtime_test_helpers import (
     AWAIT_TIMEOUT_S,
+    MPC_SLOW_BUILD_DELAY_S,
     QUIET_WINDOW_S,
     TS_SECONDS,
     USER,
@@ -38,9 +40,11 @@ from runtime_test_helpers import (
     mpc_host_echo_plan_worker,
     mpc_host_echo_worker,
     mpc_host_never_ready_worker,
+    mpc_host_slow_build_worker,
     node,
     publish_tag_value,
     read_node,
+    read_only_graph,
     save_graph,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -53,8 +57,10 @@ from ottima_core.bus import (
     KIND_MPC_MV_WRITTEN,
     KIND_MPC_SHED,
     KIND_MPC_SP_WRITTEN,
+    FlowStatus,
     MpcState,
     OpcWrite,
+    channel_flow_status,
     channel_mpc_state,
 )
 
@@ -200,18 +206,28 @@ def _arm_args(block_id: str = "m1") -> dict:
 
 
 async def _deploy_and_warm(harness: Harness, collect: Collect, scenario: dict) -> Collector:
-    """Sobe o flow e garante ao menos uma varredura com CV válida ("entrada quente") e o
-    readback do `pid` no snapshot antes de qualquer comando de modo — o gate de MAN->AUTO
-    e o de LOCAL->REMOTO (`auto_arm_blocked_reason()`, achado 2 da revisão F4) partem de um
-    flow já rodando com dado real, não de um deploy ainda frio."""
+    """Sobe o flow e garante ao menos uma varredura com CV válida ("entrada quente"), o
+    readback do `pid` no snapshot e o host MPC pronto antes de qualquer comando de modo —
+    o gate de MAN->AUTO e o de LOCAL->REMOTO (`auto_arm_blocked_reason()`, achado 2 da
+    revisão F4) partem de um flow já rodando com dado real, não de um deploy ainda frio.
+
+    F-1 (spec F5 §6.1, tarefa 4.1 F5a): o boot do host roda em segundo plano — `deploy`
+    não garante mais `host.ready` como garantia antes (`blocks/mpc.py::_build_state`
+    publica `building` até o boot terminar, spec F5 §6.2). Os testes que armam REMOTO/
+    AUTO logo depois precisam da MESMA garantia que o deploy síncrono dava antes."""
     mpc_states = await collect(channel_mpc_state(scenario["flow_id"], "m1"))
     await harness.command("deploy", scenario["flow_id"])
     await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
+    runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    await await_until(lambda: runtime.blocks["m1"][1].host.ready, timeout_s=DEPLOY_TIMEOUT_S)
     await publish_tag_value(harness.redis, scenario["connection_id"], scenario["cv_tag_id"], 90.0)
     await publish_tag_value(
         harness.redis, scenario["connection_id"], scenario["readback_tag_id"], 10.0
     )
-    await await_until(lambda: len(mpc_states.received) >= 1, timeout_s=AWAIT_TIMEOUT_S)
+    await await_until(
+        lambda: bool(mpc_states.received) and _last_mpc_state(mpc_states).status.input_valid,
+        timeout_s=AWAIT_TIMEOUT_S,
+    )
     return mpc_states
 
 
@@ -234,6 +250,38 @@ async def test_deploy_de_flow_com_mpc_succeede(
 
     assert events.events("deploy_rejected") == []
     assert harness.flow_state(scenario["flow_id"]) == "running"
+
+
+# --------------------------------------------------------------------------------------
+# 0b: fix round 1 (achado 1) — MpcState.ts de execução é EXATAMENTE o ts publicado em
+#     flow.status da mesma varredura (mesmo relogio do scheduler, spec F5 SS2.1)
+# --------------------------------------------------------------------------------------
+
+
+async def test_mpc_state_ts_de_execucao_bate_bit_a_bit_com_flow_status(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    """spec F5 SS2.1: `ts` do quadro do MPC nas execucoes e a fronteira de varredura —
+    "mesmo relogio do ts de flow.status". Fix round 1 threou o `fired_ts` do scheduler
+    (`FlowTask._scan`) ate `MpcBlock.step(inputs, ts=...)`; antes desse fix o bloco usava
+    um clock proprio desacoplado, entao os dois `ts` so coincidiam por sorte de timing."""
+    scenario = await _scenario(session_factory)
+    flow_status = await collect(channel_flow_status(scenario["flow_id"]))
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+    mpc_states = await _deploy_and_warm(harness, collect, scenario)
+
+    await await_until(lambda: len(flow_status.received) >= 1, timeout_s=AWAIT_TIMEOUT_S)
+
+    execucao = _last_mpc_state(mpc_states)
+    tss_de_varredura = {
+        FlowStatus.model_validate_json(raw).ts
+        for raw in flow_status.received
+        if FlowStatus.model_validate_json(raw).ports  # so varreduras reais, nao transicao
+    }
+    assert execucao.ts in tss_de_varredura, (
+        "MpcState.ts de uma execucao de fronteira precisa bater bit a bit com o ts de "
+        "ALGUMA varredura publicada em flow.status — mesmo relogio (spec F5 SS2.1)"
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -287,15 +335,8 @@ async def test_local_para_remoto_sem_confirmacao_em_2xtsmpc_reverte_e_arm_failed
     scenario = await _scenario(session_factory)
     events = await collect(CHANNEL_EVENTS)
     writes = await collect(CHANNEL_OPC_WRITES)
-    mpc_states_collector = await collect(channel_mpc_state(scenario["flow_id"], "m1"))
     harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
-    await harness.command("deploy", scenario["flow_id"])
-    await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
-    await publish_tag_value(harness.redis, scenario["connection_id"], scenario["cv_tag_id"], 90.0)
-    await publish_tag_value(
-        harness.redis, scenario["connection_id"], scenario["readback_tag_id"], 10.0
-    )
-    await await_until(lambda: len(mpc_states_collector.received) >= 1, timeout_s=AWAIT_TIMEOUT_S)
+    mpc_states_collector = await _deploy_and_warm(harness, collect, scenario)
 
     # nunca publica mode_read == target: a confirmação nunca bate.
     await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
@@ -454,6 +495,8 @@ async def test_man_para_auto_falha_cold_input(
     await harness.command("deploy", scenario["flow_id"])
     await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
     # CV NUNCA publicada: entrada fria pra sempre (`_last_measured` nunca populado).
+    runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    await await_until(lambda: runtime.blocks["m1"][1].host.ready, timeout_s=DEPLOY_TIMEOUT_S)
 
     await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
 
@@ -919,6 +962,9 @@ async def test_local_para_remoto_com_entrada_fria_e_bloqueado_e_depois_aquecido_
     await harness.command("deploy", scenario["flow_id"])
     await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
     # CV e readback NUNCA publicadas: entrada fria pra sempre.
+    runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    block = runtime.blocks["m1"][1]
+    await await_until(lambda: block.host.ready, timeout_s=DEPLOY_TIMEOUT_S)
 
     await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
 
@@ -930,9 +976,6 @@ async def test_local_para_remoto_com_entrada_fria_e_bloqueado_e_depois_aquecido_
     assert falha.payload["reason"] == "cold_input"
     assert writes_of(writes, tag_id=scenario["mode_cmd_tag_id"]) == []
     assert events.events(KIND_MPC_MODE_CHANGED) == []
-
-    runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
-    block = runtime.blocks["m1"][1]
     assert block.local_remote == "local"  # nunca transicionou (sem salto de MV possível)
 
     # Aquece e tenta de novo: o gate não é permanente.
@@ -945,3 +988,144 @@ async def test_local_para_remoto_com_entrada_fria_e_bloqueado_e_depois_aquecido_
     await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
     await await_until(lambda: len(events.events(KIND_MPC_MODE_CHANGED)) == 1)
     assert len(writes_of(writes, tag_id=scenario["mode_cmd_tag_id"])) == 1
+
+
+# --------------------------------------------------------------------------------------
+# 19: tarefa 4.1 (F5a; spec F5 §6.1/§6.2/§6.4) — boot assíncrono do worker MPC. `_deploy`
+#     (supervisor.py) e `reconcile_mpc_hosts` (supervisor_mpc.py, hot-swap) estagiam e
+#     retornam sem pagar o build; `building` publicado em qualquer modo, precedendo
+#     `idle`; as invariantes de armar (`mpc_arm_failed{worker_not_ready}`) intocadas.
+# --------------------------------------------------------------------------------------
+
+
+async def test_deploy_de_flow_mpc_com_build_lento_nao_bloqueia_stop_de_outro_flow(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    """spec F5 §6.1 (tarefa 4.1, F-1; emenda letra F4 §4.1): `host.start()` sai do caminho
+    síncrono do lock global em `_deploy` (`supervisor.py:293-294` antes da tarefa). O canal
+    `flow.commands` tem um único consumidor sequencial
+    (`ottima_core.pubsub._ResilientSubscriber._listen`, `async for message in pubsub.
+    listen(): await self._safe_dispatch(message)`): o `stop` do flow B, publicado logo
+    depois do `deploy` do flow A na MESMA fila, só é lido depois que o handler do `deploy`
+    solta `self._lock`. Antes da tarefa, esse handler ficava preso em `await host.start()`
+    pelo boot inteiro — aqui, `MPC_SLOW_BUILD_DELAY_S` (7s, bem além de `AWAIT_TIMEOUT_S`)
+    antes do worker mandar o handshake."""
+    scenario = await _scenario(session_factory)
+    other_tag_id = await create_tag(
+        session_factory, scenario["connection_id"], name="outro", direction="r"
+    )
+    flow_b_id = await create_flow(
+        session_factory,
+        scenario["project_id"],
+        graph=read_only_graph(other_tag_id),
+        name="Flow B",
+        ts_seconds=TS_SECONDS,
+    )
+    harness = await harness_factory(mpc_worker_target=mpc_host_slow_build_worker)
+
+    await harness.command("deploy", flow_b_id)
+    await harness.await_state(flow_b_id, "running", timeout_s=DEPLOY_TIMEOUT_S)
+
+    await harness.command("deploy", scenario["flow_id"])  # host leva MPC_SLOW_BUILD_DELAY_S
+    await harness.command("stop", flow_b_id)  # mesma fila, logo depois
+
+    await harness.await_state(flow_b_id, "stopped", timeout_s=AWAIT_TIMEOUT_S)
+
+
+async def test_building_publicado_em_local_arm_failed_na_janela_e_idle_ao_ficar_pronto(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    """spec F5 §6.2/§6.4 (tarefa 4.1): `building` publicado em LOCAL desde a primeira
+    fronteira do deploy — precede `idle` (spec F4 §4.2/§5.1 emendados, `blocks/mpc.py::
+    _build_state`). Armar `local_remote` na janela de build ⇒
+    `mpc_arm_failed{reason: worker_not_ready}` — invariante F4 preservada byte a byte
+    (`supervisor_mpc.py:109,151-152`, mesmo predicado `auto_arm_blocked_reason()` dos dois
+    eixos, intocado por esta tarefa). A transição building->idle acontece assim que
+    `mpc_host_slow_build_worker` termina o boot — em LOCAL, sem exigir REMOTO/AUTO nenhum
+    (ao contrário de antes da tarefa, em que só o caminho AUTO alcançava `building`)."""
+    scenario = await _scenario(session_factory)
+    events = await collect(CHANNEL_EVENTS)
+    mpc_states = await collect(channel_mpc_state(scenario["flow_id"], "m1"))
+    harness = await harness_factory(mpc_worker_target=mpc_host_slow_build_worker)
+
+    await harness.command("deploy", scenario["flow_id"])
+    await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
+    await publish_tag_value(harness.redis, scenario["connection_id"], scenario["cv_tag_id"], 90.0)
+
+    await await_until(lambda: len(mpc_states.received) >= 1, timeout_s=AWAIT_TIMEOUT_S)
+    building_estado = _last_mpc_state(mpc_states)
+    assert building_estado.modes.local_remote == "local"
+    assert building_estado.status.solver == "building"
+
+    await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
+    await await_until(
+        lambda: len(events.events(KIND_MPC_ARM_FAILED)) == 1, timeout_s=AWAIT_TIMEOUT_S
+    )
+    falha = events.events(KIND_MPC_ARM_FAILED)[0]
+    assert falha.payload["axis"] == "local_remote"
+    assert falha.payload["reason"] == "worker_not_ready"
+    assert events.events(KIND_MPC_MODE_CHANGED) == []
+
+    await await_until(
+        lambda: _last_mpc_state(mpc_states).status.solver == "idle",
+        timeout_s=MPC_SLOW_BUILD_DELAY_S + AWAIT_TIMEOUT_S,
+    )
+
+
+# --------------------------------------------------------------------------------------
+# 20: fix round 1 (achado Important) — `_spawn_worker` sem `try/except` (`mpc/host.py`)
+#     propagando exceção até a task de fundo de `start_host_background`: sem observar
+#     `task.exception()`, isso virava "Task exception was never retrieved" sem contexto
+#     nenhum de flow/bloco. Agora é logado com contexto; o bloco segue em `building`
+#     para sempre (documentado — mesmo destino de um handshake falho, sem laço de
+#     respawn automático).
+# --------------------------------------------------------------------------------------
+
+
+async def test_excecao_em_spawn_worker_e_logada_com_contexto_e_nao_fica_muda(
+    harness_factory: Factory,
+    collect: Collect,
+    session_factory: Sessions,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Fix round 1: `MpcHost._spawn_worker` (`mpc/host.py:349-361`, `Pipe`/`Process.start()`)
+    não tem `try/except` — uma exceção rara ali propaga por `_spawn_and_wait_ready` e por
+    `MpcHost.start()` até a task que `MpcOrchestrator.start_host_background` cria e NUNCA
+    `await`a. Sem o `done_callback` que observa `task.exception()`, essa exceção vira
+    "Task exception was never retrieved" sem `flow_id`/`block_id` nenhum — e o operador não
+    tem NENHUM sinal de por que o bloco travou em `building` para sempre.
+
+    `monkeypatch` em `MpcHost._spawn_worker` (não em `_BOOT_TIMEOUT_S`/handshake — este é o
+    caminho de exceção DIFERENTE do handshake ausente, que já tem cobertura em
+    `test_man_para_auto_falha_worker_not_ready`) simula a falha rara sem precisar esgotar
+    recursos do SO de verdade."""
+    import ottima_flow_runtime.mpc.host as host_module
+
+    def _spawn_quebrado(self: object) -> tuple[object, object]:
+        raise OSError("recurso do SO esgotado (simulado pelo teste)")
+
+    monkeypatch.setattr(host_module.MpcHost, "_spawn_worker", _spawn_quebrado)
+
+    scenario = await _scenario(session_factory)
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+
+    with caplog.at_level(logging.ERROR, logger="ottima_flow_runtime.supervisor_mpc"):
+        await harness.command("deploy", scenario["flow_id"])
+        await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
+
+        await await_until(
+            lambda: str(scenario["flow_id"]) in caplog.text and "'m1'" in caplog.text,
+            timeout_s=AWAIT_TIMEOUT_S,
+        )
+
+    erro = next(r for r in caplog.records if r.levelno >= logging.ERROR)
+    assert erro.exc_info is not None, "a exceção real precisa vir anexada ao log (exc_info)"
+    assert isinstance(erro.exc_info[1], OSError)
+
+    # Comportamento resultante documentado (não corrigido nesta tarefa): o host nunca
+    # completa o boot — `building` para sempre, sem laço de respawn automático (mesmo
+    # destino de um handshake falho, `mpc/host.py::_spawn_and_wait_ready`).
+    runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    block = runtime.blocks["m1"][1]
+    assert block.host.ready is False

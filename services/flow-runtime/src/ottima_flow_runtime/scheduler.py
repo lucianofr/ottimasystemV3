@@ -193,7 +193,7 @@ class FlowTask:
                     index = self._adopt_staged(self._staged, index)
                 fired_at = self._clock.monotonic()
                 fired_ts = self._clock.now()
-                await self._scan()
+                await self._scan(fired_ts)
                 self._scan_ms = (self._clock.monotonic() - fired_at) * 1000.0
                 self._last_scan_ts = fired_ts
                 # A grade se acerta ANTES de publicar: a varredura que estourou tem de levar o
@@ -205,8 +205,14 @@ class FlowTask:
         except Exception:
             await self._handle_loop_failure()
 
-    async def _scan(self) -> None:
-        """Uma varredura: blocos na ordem da tupla, lendo e escrevendo a tabela de portas."""
+    async def _scan(self, ts: datetime) -> None:
+        """Uma varredura: blocos na ordem da tupla, lendo e escrevendo a tabela de portas.
+
+        `ts` é a fronteira desta varredura (`fired_ts` de `_run`, o MESMO instante publicado
+        em `flow.status.ts` logo abaixo) — repassado a todo bloco via `step(inputs, ts=ts)`
+        (spec F5 §2.1): quem carimba algo próprio (hoje só o MPC, `ts`/`prediction.ts` de
+        `mpc.state`) usa exatamente este relógio, nunca um `datetime.now(UTC)` desacoplado.
+        """
         wiring = self._definition.wiring
         for block in self._definition.blocks:
             ports = self._ports[block.block_id]
@@ -217,7 +223,7 @@ class FlowTask:
                 # A entrada também vai para a tabela: o canvas desenha os dois lados da
                 # aresta (§4.2). Só o dict `inputs` é restrito às portas conectadas.
                 ports[handle] = sample
-            for handle, sample in (await block.step(inputs)).items():
+            for handle, sample in (await block.step(inputs, ts=ts)).items():
                 ports[handle] = sample
 
     async def _settle_grid(self, index: int) -> int:

@@ -67,11 +67,14 @@ _LocalRemote = Literal["local", "remote"]
 _ManAuto = Literal["man", "auto"]
 _SolverStatus = Literal["ok", "overrun", "error"]
 
-_EMPTY_PREDICTION = MpcPrediction(t=[], cv=[], mv=[])
-
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
+
+
+def _empty_prediction(ts: datetime) -> MpcPrediction:
+    """Predição vazia fora de AUTO (spec F5 §2.1-2): `prediction.ts == ts` do quadro, `t: []`."""
+    return MpcPrediction(ts=ts, t=[], cv=[], mv=[])
 
 
 class MpcBlock(Block):
@@ -97,6 +100,7 @@ class MpcBlock(Block):
         publish: Callable[[MpcState], Awaitable[None]],
         write_opc: Callable[[OpcWrite], Awaitable[None]],
         emit_event: Callable[..., Awaitable[None]],
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         super().__init__(block_id)
         self._snapshot = snapshot
@@ -104,6 +108,12 @@ class MpcBlock(Block):
         self._publish = publish
         self._write_opc = write_opc
         self._emit_event = emit_event
+        # Clock injetável (spec F5 §2.1, achado da tarefa 1.2): fallback para quando `step()`
+        # não recebe `ts` do scheduler (publicações imediatas, que não têm fronteira; e
+        # testes de unidade que chamam `step()` direto). Em produção o scheduler SEMPRE passa
+        # `ts` na fronteira (fix round 1, achado 1) — este clock nunca é a fonte da verdade
+        # de `flow.status.ts` em produção.
+        self._now: Callable[[], datetime] = now if now is not None else lambda: datetime.now(UTC)
         # `flow_id` entra só para compor `_source` no padrão F3 (`flow:<fid>/block:<bid>`,
         # igual a `OpcWriteBlock`) — achado do carry-over da tarefa 2.1: o bloco nasceu
         # isolado (host/snapshot falsos, sem Redis) e não tinha o `flow_id` à mão; quem
@@ -211,7 +221,11 @@ class MpcBlock(Block):
         self._plan: dict[str, float] | None = None
         self._sp: dict[str, float] = dict.fromkeys(self._cv_ids, 0.0)
         self._last_measured: dict[str, float] = {}
-        self._last_prediction = _EMPTY_PREDICTION
+        self._last_prediction = _empty_prediction(self._now())
+        # Guarda a fronteira do último `host.dispatch()` aceito (spec §3.5): a âncora que
+        # `_apply_result` aplica ao resultado correspondente, consumido no `poll()` da
+        # fronteira seguinte — nunca o ts do quadro que está consumindo o resultado.
+        self._dispatch_ts: datetime | None = None
         # Honesto por padrão (achado da tarefa 4.2, E2E F4b): só vira "ok" via
         # `_apply_result` sob evidência real (`SolveResult.status == "ok"` aplicado) —
         # nunca antes do primeiro solve genuíno concluído.
@@ -232,9 +246,18 @@ class MpcBlock(Block):
     # Varredura
     # ------------------------------------------------------------------------------
 
-    async def step(self, inputs: Mapping[str, PortSample]) -> dict[str, PortSample]:
+    async def step(
+        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
+    ) -> dict[str, PortSample]:
         is_frontier = self._n % self._multiplier == 0
         self._n += 1
+        # Carimbo real da fronteira (spec F5 §2.1-1, fix round 1 achado 1): `ts` vem do
+        # scheduler (`FlowTask._scan`, o MESMO relógio de `flow.status.ts`) — nunca o clock
+        # próprio do bloco quando o scheduler o fornece. `self._now()` só entra como
+        # fallback (unidade sem scheduler, publicações imediatas fora deste método). Um só
+        # valor por varredura, reaproveitado em toda publicação e no guardado de
+        # `_dispatch_ts` desta mesma fronteira — nunca recomputado por chamada.
+        ts = (ts if ts is not None else self._now()) if is_frontier else None
 
         samples = {pid: inputs.get(pid, PortSample(None, False)) for pid in self._entrada_ids}
         if has_cold_input(samples):
@@ -244,7 +267,7 @@ class MpcBlock(Block):
                 # frame honesto (achado F-5): sem isso, um flow recém-implantado fica
                 # mudo em `mpc.state.*` até a 1a varredura totalmente quente.
                 self._input_ok = False
-                await self._publish(self._build_state())
+                await self._publish(self._build_state(ts))
             return null_outputs(self._mv_ids)
 
         valid = all(sample.ok for sample in samples.values())
@@ -260,7 +283,7 @@ class MpcBlock(Block):
             await self._report_input_invalid()
 
         if is_frontier and valid:
-            await self._run_frontier()
+            await self._run_frontier(ts)
 
         outputs = self._compute_outputs(ok=valid)
         self._mv_last = {mv_id: float(sample.v) for mv_id, sample in outputs.items()}  # type: ignore[arg-type]
@@ -271,21 +294,26 @@ class MpcBlock(Block):
             # `vars.<mv_id>.v` reportar a MV da varredura ANTERIOR enquanto
             # `vars.<cv_id>.v` já reportava a atual — skew de uma varredura que corrompe
             # o overlay de trend do F5 (spec §5.2, "publicação a cada execução").
-            await self._publish(self._build_state())
+            await self._publish(self._build_state(ts))
 
         return outputs
 
-    async def _run_frontier(self) -> None:
+    async def _run_frontier(self, ts: datetime) -> None:
         """Consome um resultado pendente (se houver) e dispara o próximo, se em AUTO.
 
         `host.poll()` só é chamado aqui — nunca fora de fronteira — então um resultado que
         o worker termina "no meio" de um ciclo do multiplicador fica retido no buffer de
         uma posição do próprio `host` até a PRÓXIMA fronteira: é assim que a porta nunca
         muda no meio da varredura (RF-401) sem o bloco precisar de um buffer próprio.
+
+        `ts` é o instante DESTA fronteira: guardado em `_dispatch_ts` só quando o
+        `dispatch()` abaixo é de fato aceito (spec §3.5) — ocupado ⇒ `False` ⇒ o instante
+        guardado permanece o da última dispatch aceita, a mesma que o `poll()` de uma
+        fronteira futura vai consumir.
         """
         result = self._host.poll()
         if result is not None:
-            await self._apply_result(result)
+            await self._apply_result(result, ts)
 
         if self._in_auto:
             request = SolveRequest(
@@ -303,13 +331,17 @@ class MpcBlock(Block):
                 reinit=self._reinit_pending,
             )
             self._reinit_pending = False
-            if not self._host.dispatch(request):
+            if self._host.dispatch(request):
+                self._dispatch_ts = ts
+            else:
                 # Worker indisponível na fronteira (não pronto/ocupado/morto): conta e
                 # pula, sem novo evento (spec §4.2) — o `mpc_overrun` já saiu (ou sairá)
                 # pelo caminho de `poll()` quando o host sintetizar o resultado.
                 self._overruns += 1
 
-    async def _apply_result(self, result: SolveResult) -> None:
+    async def _apply_result(self, result: SolveResult, ts: datetime) -> None:
+        """`ts` é a fronteira que consumiu este resultado (a de `_run_frontier`) — usada só
+        como fallback de `_dispatch_ts` (ver abaixo)."""
         if result.status != "overrun":
             self._overrun_reported = False
 
@@ -328,7 +360,16 @@ class MpcBlock(Block):
             self._plan = dict(result.u_plan)
             self._cost = result.cost
             self._last_prediction = MpcPrediction(
-                t=result.prediction_t, cv=result.prediction_cv, mv=result.prediction_mv
+                # Âncora do overlay (spec §3.5, F5R-01): a fronteira em que ESTE resultado
+                # foi despachado, guardada por `_run_frontier` — nunca o ts do quadro
+                # atual, que já avançou (pelo menos) uma fronteira além do dispatch.
+                # Fallback no `ts` desta fronteira (parâmetro do método, não `self._now()`)
+                # só cobre um host devolvendo resultado sem dispatch prévio deste bloco
+                # (double de teste/hot-swap com host reaproveitado).
+                ts=self._dispatch_ts if self._dispatch_ts is not None else ts,
+                t=result.prediction_t,
+                cv=result.prediction_cv,
+                mv=result.prediction_mv,
             )
             self._solver_status = "ok"
         elif result.status == "overrun":
@@ -499,7 +540,7 @@ class MpcBlock(Block):
             kind=KIND_MPC_MODE_CHANGED,
             payload={"axis": axis, "from": old, "to": new, "user": user},
         )
-        await self._publish(self._build_state())
+        await self._publish(self._build_state(self._now()))
 
     async def _command_sp(self, args: dict, user: str | None) -> None:
         if not self._in_auto:
@@ -519,7 +560,7 @@ class MpcBlock(Block):
             kind=KIND_MPC_SP_WRITTEN,
             payload={"var_id": var_id, "value": clamped, "user": user},
         )
-        await self._publish(self._build_state())
+        await self._publish(self._build_state(self._now()))
 
     async def _command_mv(self, args: dict, user: str | None) -> None:
         if self._local_remote != "remote" or self._man_auto != "man":
@@ -539,13 +580,16 @@ class MpcBlock(Block):
             kind=KIND_MPC_MV_WRITTEN,
             payload={"var_id": var_id, "value": clamped, "user": user},
         )
-        await self._publish(self._build_state())
+        await self._publish(self._build_state(self._now()))
 
     # ------------------------------------------------------------------------------
     # Estado publicado (spec §5.1) e `/health` (spec §4.10, tarefa 2.3)
     # ------------------------------------------------------------------------------
 
-    def _build_state(self) -> MpcState:
+    def _build_state(self, ts: datetime) -> MpcState:
+        """`ts` vem de quem chama: a fronteira de varredura nas publicações de fronteira
+        (spec F5 §2.1-1), o instante da própria publicação nas imediatas (mudança de modo,
+        SP/MV materializada — F4 §5.2). Nunca decidido aqui."""
         armed = self._local_remote == "remote"
         auto = self._in_auto
         cv_id_set = set(self._cv_ids)
@@ -561,10 +605,16 @@ class MpcBlock(Block):
         for mv_id in self._mv_ids:
             var_state[mv_id] = MpcVarState(v=self._mv_last.get(mv_id, 0.0))
 
-        if not auto:
-            solver: _SolverStatus | Literal["building", "idle"] = "idle"
-        elif not self._host.ready:
-            solver = "building"
+        if not self._host.ready:
+            # spec F5 §6.2 (emenda F4 §4.2/§5.1, tarefa 4.1 F5a — F-1): `building` precede
+            # `idle` em QUALQUER modo, LOCAL/REMOTO+MAN inclusive — não só AUTO. `idle`
+            # fica reservado a "worker pronto e ocioso fora de AUTO". Antes desta tarefa o
+            # `not auto` abaixo saía primeiro e forçava `idle` sem olhar `host.ready`: como
+            # o deploy nasce sempre LOCAL (RNF-03), `building` nunca era alcançado — o
+            # operador não tinha nenhum estado publicado que explicasse a janela de boot.
+            solver: _SolverStatus | Literal["building", "idle"] = "building"
+        elif not auto:
+            solver = "idle"
         elif self._solver_status == "ok" and self._plan is None:
             # Defesa em profundidade (achado da tarefa 4.2): "ok" sem `_plan` aplicado
             # seria o rótulo sem evidência — mantém o valor honesto anterior (o padrão
@@ -576,6 +626,7 @@ class MpcBlock(Block):
 
         stats = self._host.stats()
         return MpcState(
+            ts=ts,
             modes=MpcModes(local_remote=self._local_remote, man_auto=self._man_auto),
             status=MpcStatus(
                 solver=solver,
@@ -586,7 +637,7 @@ class MpcBlock(Block):
             ),
             vars=var_state,
             cost=self._cost,
-            prediction=self._last_prediction if auto else _EMPTY_PREDICTION,
+            prediction=self._last_prediction if auto else _empty_prediction(ts),
         )
 
     def health(self) -> dict:

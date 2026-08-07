@@ -1,15 +1,17 @@
-"""WebSocket `/ws`: fanout de `flow.status.<id>` e `mpc.state.<flow_id>.<block_id>` para o
-cliente ao vivo (RF-305, spec F3 §5.3; fanout de `mpc.state` — spec F4 §6.2, decisão A-6).
+"""WebSocket `/ws`: fanout de `flow.status.<id>`, `mpc.state.<flow_id>.<block_id>` e do canal
+`events` para o cliente ao vivo (RF-305, spec F3 §5.3; fanout de `mpc.state` — spec F4 §6.2,
+decisão A-6; canal `events` — spec F5 §5, decisão A-5).
 
-Duas assinaturas Redis por processo, uma por barramento (`flow.status.*` e `mpc.state.*`):
-duas dúzias de editores abertos não podem virar duas dúzias de conexões Redis por canal.
+Três assinaturas Redis por processo, uma por barramento/canal (`flow.status.*`, `mpc.state.*`
+e `events`): duas dúzias de editores abertos não podem virar duas dúzias de conexões Redis
+por canal.
 
 O laço que lê cada barramento nunca aguarda um socket — ele só enfileira, e cada socket tem a
 sua task de envio com fila limitada. Um TCP travado de um operador não pode congelar os
 valores ao vivo dos demais (RNF-05).
 
 Sem replay: assinar não entrega o último valor conhecido, o cliente espera a próxima
-varredura/execução. É isso que mantém a API sem estado de flow.
+varredura/execução/evento. É isso que mantém a API sem estado de flow.
 """
 
 from __future__ import annotations
@@ -25,9 +27,10 @@ from fastapi import APIRouter, WebSocket
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ottima_core.bus import CHANNEL_EVENTS
 from ottima_core.config import Settings
 from ottima_core.models import User
-from ottima_core.pubsub import PatternListener
+from ottima_core.pubsub import ChannelListener, PatternListener
 from ottima_core.security import decode_access_token
 
 logger = logging.getLogger(__name__)
@@ -50,12 +53,14 @@ histórico (RNF-05, fire-and-forget)."""
 
 
 class Subscriber:
-    """Um socket inscrito: os flows/blocos que ele quer, a fila que o protege e a task de envio."""
+    """Um socket inscrito: os flows/blocos que ele quer, se está no canal `events`, a fila
+    que o protege e a task de envio."""
 
     def __init__(self, socket: WebSocket) -> None:
         self._socket = socket
         self.flow_ids: set[int] = set()
         self.mpc_ids: set[tuple[int, str]] = set()
+        self.events: bool = False
         self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=QUEUE_MAX)
         self._task: asyncio.Task[None] | None = None
 
@@ -100,12 +105,14 @@ class Subscriber:
 
 
 class FlowStatusHub:
-    """Assinatura única de `flow.status.*` e `mpc.state.*` roteando aos sockets inscritos
-    (§5.3; fanout de `mpc.state` — spec F4 §6.2).
+    """Assinatura única de `flow.status.*`, `mpc.state.*` e do canal `events` roteando aos
+    sockets inscritos (§5.3; fanout de `mpc.state` — spec F4 §6.2, decisão A-6; canal
+    `events` — spec F5 §5, decisão A-5).
 
-    Duas escutas resilientes (`PatternListener`), uma por barramento, sobre o mesmo cliente
-    Redis: o invariante de UMA assinatura por processo (§5.3/§6.2) vale por barramento, nunca
-    uma segunda conexão para o mesmo padrão.
+    Três escutas resilientes (dois `PatternListener` e um `ChannelListener`), uma por
+    barramento/canal, sobre o mesmo cliente Redis: o invariante de UMA assinatura por
+    processo (§5.3/§6.2) vale por barramento/canal, nunca uma segunda conexão para o mesmo
+    padrão ou canal.
     """
 
     def __init__(self, redis_client: Redis) -> None:
@@ -116,20 +123,26 @@ class FlowStatusHub:
         self._mpc_listener = PatternListener(
             redis_client, MPC_STATE_PATTERN, self._dispatch_mpc_state, name="api-mpc-state-hub"
         )
+        self._events_listener = ChannelListener(
+            redis_client, CHANNEL_EVENTS, self._dispatch_events, name="api-events-hub"
+        )
 
     async def start(self) -> None:
-        """Assina os dois padrões e sobe as tasks de leitura; retorna já. Idempotente.
+        """Assina os dois padrões e o canal `events`, e sobe as tasks de leitura; retorna já.
+        Idempotente.
 
-        O P/SUBSCRIBE acontece aqui, e não dentro das tasks: quem chamou `start()` precisa
-        poder contar com as inscrições ativas em seguida.
+        O P/SUBSCRIBE e o SUBSCRIBE acontecem aqui, e não dentro das tasks: quem chamou
+        `start()` precisa poder contar com as inscrições ativas em seguida.
         """
         await self._listener.start()
         await self._mpc_listener.start()
+        await self._events_listener.start()
 
     async def stop(self) -> None:
         """Para os laços, encerra as inscrições e fecha os sockets restantes. Nunca levanta."""
         await self._listener.stop()
         await self._mpc_listener.stop()
+        await self._events_listener.stop()
         subs, self._subs = self._subs, set()
         for sub in subs:
             await sub.close()
@@ -153,6 +166,18 @@ class FlowStatusHub:
         mpc_id = _mpc_id_of(channel)
         if mpc_id is not None:
             await self._fanout(channel, raw, "mpc_ids", mpc_id)
+
+    async def _dispatch_events(self, raw: str) -> None:
+        """Fanout do canal `events`: sem id, entrega a quem ligou `sub.events` (§5, F5R-15)."""
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("Payload inválido descartado no fanout de events: %.200s", raw)
+            return
+        text = json.dumps({"channel": CHANNEL_EVENTS, "data": data})
+        for sub in self._subs:
+            if sub.events:
+                sub.offer(text)
 
     async def _fanout(self, channel: str, raw: str, attr_name: str, wanted: object) -> None:
         """Roteia uma publicação para quem pediu aquele flow/bloco.
@@ -210,9 +235,18 @@ def _mpc_ids(ids: Any) -> set[tuple[int, str]]:
     return parsed
 
 
+def _apply_events(sub: Subscriber, action: str, value: Any) -> None:
+    """Ramo booleano do canal `events` (§5, F5R-15): só o literal `True` liga/desliga —
+    qualquer outro valor é logado e ignorado, sem inverter a ação."""
+    if value is not True:
+        logger.info("Valor inesperado em events no /ws, ignorado: %.200s", value)
+        return
+    sub.events = action == "subscribe"
+
+
 def _apply_client_message(sub: Subscriber, raw: str) -> None:
-    """Aplica `subscribe`/`unsubscribe` de `flow_status`/`mpc_state`; o resto é logado e
-    ignorado. Mensagem malformada nunca derruba o socket (§5.3/§6.2).
+    """Aplica `subscribe`/`unsubscribe` de `flow_status`/`mpc_state`/`events`; o resto é
+    logado e ignorado. Mensagem malformada nunca derruba o socket (§5.3/§6.2; `events` — §5).
     """
     try:
         message = json.loads(raw)
@@ -234,6 +268,9 @@ def _apply_client_message(sub: Subscriber, raw: str) -> None:
                 attr_name, parse = "flow_ids", _flow_ids
             elif key == "mpc_state":
                 attr_name, parse = "mpc_ids", _mpc_ids
+            elif key == "events":
+                _apply_events(sub, action, ids)
+                continue
             else:
                 logger.info("Canal %s fora do escopo do /ws, ignorado", key)
                 continue
@@ -263,8 +300,8 @@ router = APIRouter()
 
 @router.websocket("/ws")
 async def flow_status_ws(websocket: WebSocket, token: str | None = None) -> None:
-    """Canal ao vivo do canvas: `?token=` de operador e `subscribe`/`unsubscribe` de flows e
-    blocos MPC (`flow_status`/`mpc_state`)."""
+    """Canal ao vivo do canvas: `?token=` de operador e `subscribe`/`unsubscribe` de flows,
+    blocos MPC e do canal `events` (`flow_status`/`mpc_state`/`events`)."""
     # Aceitar antes de recusar é deliberado: fechar sem aceitar vira um 403 HTTP que o
     # cliente WS não distingue de falha de rede, e o canvas precisa saber que foi auth.
     await websocket.accept()

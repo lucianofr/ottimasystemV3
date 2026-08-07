@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
-
-import { getToken, type FlowOut } from "../../lib/api";
+import type { FlowOut } from "../../lib/api";
 import type { FlowStatus as FlowStatusGerado, PortValue } from "../../lib/contracts.gen";
+import { useAssinatura, useCanalAoVivo, type EstadoDoCanal } from "../../app/CanalAoVivo";
 
 /**
- * Canvas ao vivo (RF-305, spec F3 §5.3/§6.2): um socket por editor aberto, assinando o
- * `flow_status` do flow da URL e morrendo com a página.
+ * Canvas ao vivo (RF-305, spec F3 §5.3/§6.2, F5 §7.1-2/4): um editor por flow aberto,
+ * registrando interesse em `flow_status` no canal único da sessão (`CanalAoVivo.tsx`) —
+ * socket, reconexão e backoff moram no provider; este hook só recorta o estado agregado
+ * para o flow da URL, com a mesma assinatura pública de antes do provider.
  *
  * `/ws` não aparece no OpenAPI (WebSocket não existe em OpenAPI 3.0); `FlowStatus`/`PortValue`
  * vêm de `contracts.gen.ts` (fonte: `ottima_core.bus`, débito 2+4 do plano F4a). `EstadoFlow`
@@ -49,16 +50,13 @@ export const ROTULO_ESTADO: Record<EstadoFlow, string> = {
 /** Fechamento por sessão inválida (§5.3); qualquer outro código é queda de rede. */
 export const CODIGO_SESSAO_INVALIDA = 1008;
 
-const PREFIXO_CANAL = "flow.status.";
 const ATRASO_BASE_MS = 1000;
 const ATRASO_TETO_MS = 15000;
 
 const SEM_PORTS: PortsPorBloco = {};
 
-const INICIAL: CanvasAoVivo = { conexao: "conectando", status: null, ports: SEM_PORTS };
-
 // --------------------------------------------------------------------------------------
-// Protocolo (§5.3) — puro, testado em `useFlowStatus.check.ts`
+// Protocolo (§5.3) — puro, reusado pelo provider da sessão (`CanalAoVivo.tsx`, §7.1)
 // --------------------------------------------------------------------------------------
 
 /**
@@ -69,10 +67,6 @@ const INICIAL: CanvasAoVivo = { conexao: "conectando", status: null, ports: SEM_
 export function urlDoWs(origem: Location, token: string): string {
   const protocolo = origem.protocol === "https:" ? "wss:" : "ws:";
   return `${protocolo}//${origem.host}/ws?token=${encodeURIComponent(token)}`;
-}
-
-export function comandoAssinatura(acao: "subscribe" | "unsubscribe", flowId: number): string {
-  return JSON.stringify({ [acao]: { flow_status: [flowId] } });
 }
 
 /** Backoff crescente e limitado: só para queda de rede, nunca para 1008. */
@@ -93,17 +87,19 @@ export function mesclarPorts(anterior: PortsPorBloco, recebido: PortsPorBloco): 
   return Object.keys(recebido).length === 0 ? anterior : recebido;
 }
 
-function objeto(valor: unknown): Record<string, unknown> | null {
+/** Exportado para reuso em `CanalAoVivo.tsx` (§7.1): o mesmo formato `{block_id: {porta:
+ *  PortValue}}` chega por `flow.status.*`, roteado pelo provider da sessão. */
+export function objeto(valor: unknown): Record<string, unknown> | null {
   return typeof valor === "object" && valor !== null && !Array.isArray(valor)
     ? (valor as Record<string, unknown>)
     : null;
 }
 
-function ehEstado(valor: unknown): valor is EstadoFlow {
+export function ehEstado(valor: unknown): valor is EstadoFlow {
   return valor === "running" || valor === "stopped" || valor === "failed";
 }
 
-function lerPortValue(bruto: unknown): PortValue | null {
+export function lerPortValue(bruto: unknown): PortValue | null {
   const item = objeto(bruto);
   if (item === null || typeof item.ok !== "boolean") return null;
   const v = item.v;
@@ -111,7 +107,7 @@ function lerPortValue(bruto: unknown): PortValue | null {
   return { v, ok: item.ok };
 }
 
-function lerPorts(bruto: unknown): PortsPorBloco {
+export function lerPorts(bruto: unknown): PortsPorBloco {
   const mapa = objeto(bruto);
   if (mapa === null) return SEM_PORTS;
   const portsPorBloco: Record<string, Record<string, PortValue>> = {};
@@ -126,42 +122,6 @@ function lerPorts(bruto: unknown): PortsPorBloco {
     portsPorBloco[blockId] = valores;
   }
   return portsPorBloco;
-}
-
-export interface MensagemStatus {
-  flowId: number;
-  status: FlowStatus;
-}
-
-/**
- * Roteamento por `channel` (§5.3): o socket é um só e o fanout do servidor carimba o flow
- * no nome do canal. Mensagem de outro canal, malformada ou de outro flow é descartada sem
- * derrubar nada — o mesmo contrato de tolerância que o servidor aplica ao cliente.
- */
-export function analisarMensagem(raw: string): MensagemStatus | null {
-  let bruto: unknown;
-  try {
-    bruto = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  const envelope = objeto(bruto);
-  if (envelope === null || typeof envelope.channel !== "string") return null;
-  if (!envelope.channel.startsWith(PREFIXO_CANAL)) return null;
-  const sufixo = envelope.channel.slice(PREFIXO_CANAL.length);
-  if (!/^\d+$/.test(sufixo)) return null;
-
-  const data = objeto(envelope.data);
-  if (data === null) return null;
-  const { state, scan_ms, overruns, ts } = data;
-  if (!ehEstado(state)) return null;
-  if (typeof scan_ms !== "number" || typeof overruns !== "number") return null;
-  if (typeof ts !== "string") return null;
-
-  return {
-    flowId: Number(sufixo),
-    status: { state, scan_ms, overruns, ts, ports: lerPorts(data.ports) },
-  };
 }
 
 // --------------------------------------------------------------------------------------
@@ -181,12 +141,14 @@ export function formatarValorPorta(valor: PortValue): string {
 }
 
 // --------------------------------------------------------------------------------------
-// Ciclo de vida do socket
+// Ambiente do socket (§7.1): quem abre e mantém o socket é o provider (`CanalAoVivo.tsx`);
+// o formato mora aqui porque `urlDoWs`/`atrasoReconexao`/`deveReconectar` também moram.
 // --------------------------------------------------------------------------------------
 
 /**
  * Socket, relógio e sessão como dependências. Em produção são os do browser; no check de
- * desmonte são dublês, que é como se prova que nada sobrou aberto ou agendado.
+ * desmonte (`canalAoVivo.check.ts`) são dublês, que é como se prova que nada sobrou aberto
+ * ou agendado.
  */
 export interface AmbienteAoVivo {
   criarSocket: (url: string) => WebSocket;
@@ -196,103 +158,24 @@ export interface AmbienteAoVivo {
   cancelar: (id: number) => void;
 }
 
-const AMBIENTE_BROWSER: AmbienteAoVivo = {
-  criarSocket: (url) => new WebSocket(url),
-  token: getToken,
-  origem: () => window.location,
-  agendar: (acao, atrasoMs) => window.setTimeout(acao, atrasoMs),
-  cancelar: (id) => {
-    window.clearTimeout(id);
-  },
-};
+// --------------------------------------------------------------------------------------
+// React: um editor por flow, sobre o canal único da sessão (§7.1)
+// --------------------------------------------------------------------------------------
 
-export type AplicarAoVivo = (transformacao: (atual: CanvasAoVivo) => CanvasAoVivo) => void;
-
-/**
- * Abre o canal do flow e devolve o desmonte. Um socket por chamada, assinando só este flow.
- *
- * Vazar socket por navegação é o defeito clássico deste hook, então o desmonte é a primeira
- * coisa escrita aqui: ele desfaz tudo o que `conectar` cria (socket e timer de reconexão) e
- * `ativo` neutraliza os callbacks que ainda estiverem em voo.
- */
-export function abrirCanalAoVivo(
-  flowId: number,
-  aplicar: AplicarAoVivo,
-  ambiente: AmbienteAoVivo = AMBIENTE_BROWSER,
-): () => void {
-  let ativo = true;
-  let socket: WebSocket | null = null;
-  let religar: number | null = null;
-  let tentativa = 0;
-
-  function desmontar(): void {
-    ativo = false;
-    if (religar !== null) {
-      ambiente.cancelar(religar);
-      religar = null;
-    }
-    if (socket === null) return;
-    // Desassinar antes de fechar: o `unregister` do servidor limpa de qualquer jeito, mas o
-    // `unsubscribe` é o contrato do §5.3 e vale para o socket que ainda vai fechar.
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(comandoAssinatura("unsubscribe", flowId));
-    }
-    socket.close(1000, "Editor fechado");
-    socket = null;
-  }
-
-  function conectar(): void {
-    // O `cancelar` do desmonte não alcança um religamento que o relógio já entregou à fila
-    // de tarefas: sem esta guarda, esse timer abriria um socket que ninguém mais fecha.
-    if (!ativo) return;
-    const token = ambiente.token();
-    if (token === null) {
-      aplicar((atual) => ({ ...atual, conexao: "sessao_invalida" }));
-      return;
-    }
-    const ws = ambiente.criarSocket(urlDoWs(ambiente.origem(), token));
-    socket = ws;
-
-    ws.onopen = () => {
-      if (!ativo) return;
-      tentativa = 0;
-      ws.send(comandoAssinatura("subscribe", flowId));
-      aplicar((atual) => ({ ...atual, conexao: "aberta" }));
-    };
-
-    ws.onmessage = (evento: MessageEvent<unknown>) => {
-      if (!ativo || typeof evento.data !== "string") return;
-      const recebido = analisarMensagem(evento.data);
-      if (recebido === null || recebido.flowId !== flowId) return;
-      aplicar((atual) => ({
-        conexao: atual.conexao,
-        status: recebido.status,
-        ports: mesclarPorts(atual.ports, recebido.status.ports),
-      }));
-    };
-
-    ws.onclose = (evento: CloseEvent) => {
-      socket = null;
-      if (!ativo) return;
-      if (!deveReconectar(evento.code)) {
-        aplicar((atual) => ({ ...atual, conexao: "sessao_invalida" }));
-        return;
-      }
-      aplicar((atual) => ({ ...atual, conexao: "reconectando" }));
-      religar = ambiente.agendar(conectar, atrasoReconexao(tentativa));
-      tentativa += 1;
-    };
-  }
-
-  conectar();
-  return desmontar;
+/** Recorte do estado agregado do canal para o flow do editor: `status`/`ports` já vêm
+ *  mesclados pelo redutor do provider (§4.2) — preservar valores na transição não é mais
+ *  responsabilidade deste hook. "aberto" do canal (multi-canal, `CanalAoVivo.tsx`) vira
+ *  "aberta" da conexão (por-flow): mesmo desfecho, só o rótulo que a assinatura pública
+ *  deste hook já usava antes do provider existir. */
+export function selecionarCanvas(estado: EstadoDoCanal, flowId: number): CanvasAoVivo {
+  const status = estado.flowStatus.get(flowId) ?? null;
+  const conexao = estado.estado === "aberto" ? "aberta" : estado.estado;
+  return { conexao, status, ports: status?.ports ?? SEM_PORTS };
 }
 
-/** Um socket por editor aberto (§5.3): nasce com o flow da URL e morre com a página. */
+/** Um editor por flow aberto (§5.3): registra `flow_status` do flow da URL no canal único
+ *  da sessão (§7.1) e desassina no unmount — `useAssinatura` cuida do ciclo de vida. */
 export function useFlowStatus(flowId: number): CanvasAoVivo {
-  const [aoVivo, setAoVivo] = useState<CanvasAoVivo>(INICIAL);
-
-  useEffect(() => abrirCanalAoVivo(flowId, setAoVivo), [flowId]);
-
-  return aoVivo;
+  useAssinatura({ flow_status: [flowId] });
+  return selecionarCanvas(useCanalAoVivo(), flowId);
 }

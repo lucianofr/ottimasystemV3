@@ -122,7 +122,9 @@ class SpyBlock(Block):
     def output_ports(self) -> tuple[str, ...]:
         return self._outputs
 
-    async def step(self, inputs: Mapping[str, PortSample]) -> dict[str, PortSample]:
+    async def step(
+        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
+    ) -> dict[str, PortSample]:
         self.fired.append(self._clock.monotonic())
         self.seen.append(dict(inputs))
         self.calls.append(self.block_id)
@@ -137,7 +139,9 @@ class SpyBlock(Block):
 class BoomBlock(Block):
     """Bloco que levanta: gatilho do isolamento de falha (RF-402)."""
 
-    async def step(self, inputs: Mapping[str, PortSample]) -> dict[str, PortSample]:
+    async def step(
+        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
+    ) -> dict[str, PortSample]:
         raise RuntimeError("bloco-duplo explodiu de proposito")
 
 

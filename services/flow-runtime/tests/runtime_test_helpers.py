@@ -57,6 +57,11 @@ SLOW_POLL_S = 60.0
 FAST_POLL_S = 0.05
 # Janela para provar que algo NÃO acontece (cobre várias passadas do poll curto e 1 Ts).
 QUIET_WINDOW_S = 0.8
+# Atraso real e finito do boot de `mpc_host_slow_build_worker` (tarefa 4.1, F5a — F-1):
+# bem além de `AWAIT_TIMEOUT_S` (a janela em que os testes provam "ainda building"/"não
+# bloqueou outro flow" precisa fechar ANTES do host ficar pronto), mas dentro do
+# `_BOOT_TIMEOUT_S` real de 30 s (o handshake tem de chegar, não estourar o deadline).
+MPC_SLOW_BUILD_DELAY_S = 7.0
 
 
 # --------------------------------------------------------------------------------------
@@ -256,13 +261,14 @@ def counter_graph(node_id: str = "s1") -> dict:
     return graph([script_node(node_id, 1)])
 
 
-def mpc_graph_valido(tag_id: int, *, node_id: str = "m1") -> dict:
+def mpc_graph_valido(tag_id: int, *, node_id: str = "m1", du_max: float = 5.0) -> dict:
     """Esqueleto mínimo válido do §2.1 (spec F4): 1 MV direta + 1 CV, matriz cheia.
 
-    Compartilhado entre `test_supervisor.py` (deploy) e `test_hotswap.py` (reload) — os
-    dois exercícios da ponte de deploy da tarefa 3.1 do F4a (`REMOVER na tarefa 2.2 do
-    F4b`). A CV entra pela porta obrigatória (decisão A-10): precisa de 1 leitor OPC
-    dedicado.
+    Compartilhado entre `test_supervisor.py` (deploy), `test_hotswap.py` (reload) e
+    `test_mpc_boot_async.py` (tarefa 4.2 F5a — F-1, reload com host novo: `du_max`
+    muda config funcional sem afetar horizontes/validação, §4.1-3, mesmo truque de
+    `test_supervisor_mpc.py::mpc_graph_com_pid`). A CV entra pela porta obrigatória
+    (decisão A-10): precisa de 1 leitor OPC dedicado.
     """
     mpc = node(
         node_id,
@@ -278,7 +284,7 @@ def mpc_graph_valido(tag_id: int, *, node_id: str = "m1") -> dict:
                         "name": "MV a",
                         "eu": "m3/h",
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 5.0,
+                        "du_max": du_max,
                         "initial_value": 0.0,
                     }
                 ],
@@ -544,3 +550,35 @@ def mpc_host_never_ready_worker(conn: Connection, config_json: str, ts_flow: flo
 
     while True:
         time.sleep(3600)
+
+
+def mpc_host_slow_build_worker(conn: Connection, config_json: str, ts_flow: float) -> None:
+    """Atraso real e finito (`MPC_SLOW_BUILD_DELAY_S`) antes do handshake `("ready", n_x)`
+    — prova o boot assíncrono do host MPC (spec F5 §6.1/§6.2, tarefa 4.1 F5a — F-1): fica
+    "building" por um tempo bem além de `AWAIT_TIMEOUT_S`, mas termina o boot de verdade
+    (ao contrário de `mpc_host_never_ready_worker`) e passa a ecoar `status=ok` com
+    `u_plan = u_applied` do próprio pedido — mesmo corpo de `mpc_host_echo_plan_worker`,
+    só com o atraso na frente."""
+    import time
+
+    time.sleep(MPC_SLOW_BUILD_DELAY_S)
+    conn.send(("ready", 1))
+    try:
+        while True:
+            request = conn.recv()
+            if request is None:
+                return
+            conn.send(
+                SolveResult(
+                    u_plan=dict(request.u_applied),
+                    prediction_t=[],
+                    prediction_cv=[],
+                    prediction_mv=[],
+                    cost=0.0,
+                    status="ok",
+                    wall_ms=1.0,
+                    detail="",
+                )
+            )
+    except (EOFError, OSError):
+        return

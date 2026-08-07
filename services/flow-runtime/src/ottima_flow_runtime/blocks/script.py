@@ -15,11 +15,17 @@ nulas de qualquer forma.
 """
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 from redis.asyncio import Redis
 
-from ottima_core.bus import KIND_SCRIPT_ERROR, KIND_SCRIPT_TIMEOUT, publish_event
+from ottima_core.bus import (
+    KIND_SCRIPT_ERROR,
+    KIND_SCRIPT_RECOVERED,
+    KIND_SCRIPT_TIMEOUT,
+    publish_event,
+)
 
 from ..script_pool import ScriptPool, ScriptResult
 from .base import Block, PortSample, has_cold_input, null_outputs
@@ -30,7 +36,8 @@ class ScriptBlock(Block):
 
     Eventos de falha são deduplicados por bloco por período de falha, guardando o último
     `kind` emitido: um script que alterna timeout e exceção avisa nas transições, não a cada
-    varredura, e um sucesso re-arma os dois.
+    varredura, e um sucesso re-arma os dois. O primeiro sucesso após uma falha latchada
+    publica `script_recovered` uma vez por rearme — quem latcha, anuncia o rearme.
     """
 
     def __init__(
@@ -68,7 +75,9 @@ class ScriptBlock(Block):
     def output_ports(self) -> tuple[str, ...]:
         return self._output_ports
 
-    async def step(self, inputs: Mapping[str, PortSample]) -> dict[str, PortSample]:
+    async def step(
+        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
+    ) -> dict[str, PortSample]:
         if has_cold_input(inputs):
             return null_outputs(self._output_ports)
 
@@ -91,7 +100,17 @@ class ScriptBlock(Block):
         self._last_outputs = {
             port: PortSample(result.outputs[port], ok) for port in self._output_ports
         }
+        houve_falha_latchada = self._reported_kind is not None
         self._reported_kind = None
+        if houve_falha_latchada:
+            await publish_event(
+                self._redis,
+                severity="info",
+                origin=self._source,
+                message=f"Script do bloco {self.block_id} recuperado após falha",
+                kind=KIND_SCRIPT_RECOVERED,
+                payload={"block_id": self.block_id},
+            )
         return dict(self._last_outputs)
 
     def reset(self) -> None:

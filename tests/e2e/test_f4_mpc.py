@@ -135,9 +135,9 @@ def test_e2e_f4_01_deploy_publica_mpc_state_e_boot_em_local(
     opcsim_client: OpcSim,
 ) -> None:
     """E2E-F4-01 (spec §9.2): `mpc.state` publica em cadência ~Ts_mpc; boot sempre em LOCAL
-    (RNF-03, decisão A-4). `status.solver` fica `idle` fora de AUTO — `_build_state` só olha
-    `host.ready` (que daria `building`) DENTRO de AUTO; em LOCAL é sempre `idle` (confirmado
-    lendo `MpcBlock._build_state`, não é uma folga do teste)."""
+    (RNF-03, decisão A-4). `status.solver` fica `building`/`idle` fora de AUTO — nunca um
+    status de solver ativo (spec F5 §6.2, tarefa 4.1 F5a — F-1: `building` precede `idle`
+    em QUALQUER modo enquanto o host não estiver pronto, LOCAL inclusive)."""
     resetar_atuador_mpc(opcsim_client)
     flow_id = criar_flow_mpc("f4-01", grafo=grafo_mpc_tfs(ambiente_mpc))
 
@@ -156,9 +156,16 @@ def test_e2e_f4_01_deploy_publica_mpc_state_e_boot_em_local(
     primeira = amostras[0]
     assert primeira["modes"] == {"local_remote": "local", "man_auto": "man"}
     assert primeira["status"]["armed"] is False
-    assert primeira["prediction"] == {"t": [], "cv": [], "mv": []}
+    assert primeira["prediction"] == {
+        "t": [],
+        "cv": [],
+        "mv": [],
+        "ts": primeira["prediction"]["ts"],
+    }
     solvers = [e["status"]["solver"] for e in amostras]
-    assert all(s == "idle" for s in solvers), f"solver fora de 'idle' em LOCAL: {solvers}"
+    assert all(s in ("building", "idle") for s in solvers), (
+        f"solver fora de building/idle em LOCAL: {solvers}"
+    )
 
     deltas = [b - a for a, b in zip(chegada, chegada[1:], strict=False)]
     assert all(TS_MPC * 0.7 <= d <= TS_MPC * 1.5 for d in deltas), (
@@ -265,6 +272,12 @@ def _armar_ate_remoto(admin: httpx.Client, fluxo: Any, flow_id: int, block_id: s
     depois confere que ela NÃO reverte dentro da janela de confirmação (2×Ts_mpc, spec
     §4.4): reverter é `mpc_arm_failed{reason: no_confirm}`, o oposto do que este helper
     afirma."""
+    # Precondição (tarefa 4.1): aguardar host pronto antes de armar
+    fluxo.esperar(
+        lambda e: e.get("status", {}).get("solver") != "building",
+        timeout=60.0,
+        descricao=f"{block_id} host ready (não building)",
+    )
     operar_modo(admin, flow_id, block_id, "local_remote", "remote")
     fluxo.esperar(
         lambda e: e["modes"]["local_remote"] == "remote",

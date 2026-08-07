@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     admin_name: str = "Administrador"
     log_level: str = "INFO"
     certs_dir: Path = Path("/certs")  # volume `certs` do compose (spec F2 §5.4)
+    mpc_queue_max: int = 100_000  # teto do buffer de mpc_samples no recorder (spec F5 §2.3-3)
+    # URLs do /health de cada worker, para o agregador GET /api/health/workers (spec F5 §4.2,
+    # decisão A-8); defaults batem com os nomes de serviço e portas do compose (F5R-09).
+    health_url_opc_worker: str = "http://opc-worker:8001/health"
+    health_url_flow_runtime: str = "http://flow-runtime:8002/health"
+    health_url_recorder: str = "http://recorder:8003/health"
 
 
 @lru_cache

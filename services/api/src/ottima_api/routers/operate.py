@@ -1,11 +1,11 @@
-"""Rotas `/api/operate`: modo, SP e MV do bloco MPC (spec F4 §4.8/§6.1, decisão A-2).
+"""Rotas `/api/operate`: modo, SP e MV do bloco MPC (spec F4 §4.8/§6.1, decisão A-2; emenda §1.3-3).
 
 Regra do Estado Publicado (DESIGN.md): a API não conhece o modo vigente do bloco — só valida
 forma e faixa contra o `graph_json` já persistido (sempre válido: `PUT /api/flows/{id}` só
-grava grafo que passou por `validate_graph`, spec F3 §5.2). Toda reprovação daqui — flow
-inexistente, bloco inexistente/errado, enum incompatível, var fora de categoria, valor fora
-de faixa — sai pelo mesmo canal 422 pt-BR string única (spec §6.1): estas rotas comandam,
-não identificam um recurso CRUD, então "flow existe" não é 404 aqui como em `flows.py`.
+grava grafo que passou por `validate_graph`, spec F3 §5.2). Flow inexistente é 404, mesma
+constante de `flows.py` (emenda §1.3-3, decisão A-9): identifica o recurso comandado, igual
+ao CRUD. Bloco inexistente/errado, enum incompatível, var fora de categoria e valor fora de
+faixa seguem no canal 422 pt-BR string única (spec §6.1).
 
 Sucesso publica `FlowCommand{cmd: mpc_mode|mpc_sp|mpc_mv}` em `flow.commands` e responde 202
 — nenhum evento sai daqui; quem materializa e audita (`mpc_mode_changed`/`mpc_sp_written`/
@@ -17,14 +17,24 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_api.deps import get_db, get_redis, require_operator
+from ottima_api.messages import MSG_FLOW_NAO_ENCONTRADO
 from ottima_core.bus import CHANNEL_FLOW_COMMANDS, FlowCommand
-from ottima_core.flowgraph import CvVar, MpcConfig, MvVar, parse_graph
-from ottima_core.models import Flow, User
+from ottima_core.flowgraph import (
+    CvVar,
+    GraphParseError,
+    Limits,
+    MpcConfig,
+    MvVar,
+    Range,
+    parse_graph,
+)
+from ottima_core.models import Flow, Project, User
 from ottima_core.schemas.flows import MAX_BIGINT
 
 logger = logging.getLogger(__name__)
@@ -42,8 +52,6 @@ _VALORES_DO_EIXO: dict[Axis, frozenset[AxisValue]] = {
     "man_auto": frozenset({"man", "auto"}),
 }
 
-MSG_FLOW_NAO_ENCONTRADO = "Flow não encontrado"
-
 
 class ModeCommand(BaseModel):
     axis: Axis
@@ -60,16 +68,72 @@ class MvCommand(BaseModel):
     value: float
 
 
+class MvOut(BaseModel):
+    """Projeção de uma MV do bloco (spec §4.1-1) — sem `pid`/`initial_value` (§4.1-3)."""
+
+    id: str
+    name: str
+    eu: str
+    limits: Limits
+    du_max: float
+
+
+class CvOut(BaseModel):
+    """Projeção de uma CV do bloco (spec §4.1-1) — sem `weight`/`tss`/`kind` (§4.1-3)."""
+
+    id: str
+    name: str
+    eu: str
+    sp_limits: Limits
+
+
+class ConstraintOut(BaseModel):
+    """Projeção de uma Restrição do bloco (spec §4.1-1) — sem `tss`/`priority`/`kind`."""
+
+    id: str
+    name: str
+    eu: str
+    range: Range
+
+
+class DvOut(BaseModel):
+    """Projeção de uma DV do bloco (spec §4.1-1)."""
+
+    id: str
+    name: str
+    eu: str
+
+
+class MpcVariablesOut(BaseModel):
+    mvs: list[MvOut]
+    cvs: list[CvOut]
+    constraints: list[ConstraintOut]
+    dvs: list[DvOut]
+
+
+class MpcNodeOut(BaseModel):
+    """Um bloco `mpc` projetado (spec §4.1-1) — sem `models`/pesos/TSS (§4.1-3); estado
+    rodando/parado do flow não entra (§4.1-4)."""
+
+    flow_id: int
+    flow_name: str
+    flow_ts_seconds: float
+    block_id: str
+    name: str
+    multiplier: int
+    variables: MpcVariablesOut
+
+
 def _reprovado(mensagem: str) -> HTTPException:
     """422 de domínio com `detail` string única, como no resto da API (padrão `flows.py`)."""
     return HTTPException(status_code=422, detail=mensagem)
 
 
 async def _mpc_config(db: AsyncSession, flow_id: int, block_id: str) -> MpcConfig:
-    """Bloco `mpc` tipado, ou 422 (spec §6.1)."""
+    """Bloco `mpc` tipado, ou 404 (flow inexistente) / 422 (bloco, spec §6.1)."""
     flow = await db.get(Flow, flow_id)
     if flow is None:
-        raise _reprovado(MSG_FLOW_NAO_ENCONTRADO)
+        raise HTTPException(status_code=404, detail=MSG_FLOW_NAO_ENCONTRADO)
     graph = parse_graph(flow.graph_json)
     try:
         node = graph.node(block_id)
@@ -182,3 +246,76 @@ async def set_mv(
         {"block_id": block_id, "var_id": body.var_id, "value": body.value},
     )
     return Response(status_code=202)
+
+
+def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
+    """Projeta os blocos `mpc` de um flow (spec §4.1-1). `graph_json` que não parseia, ou
+    cujo bloco `mpc` não tipa como `MpcConfig` (grafo estruturalmente válido mas conteúdo do
+    bloco incompleto/inválido — `parse_graph` não valida o conteúdo do `mpc`, só a forma
+    alheia a ele), é pulado com log, nunca 5xx: a listagem é melhor-esforço, não um recurso
+    identificado por id que mereça 404/422 (mesma postura de defesa em profundidade do resto
+    do domínio — ver Regra do Estado Publicado no topo do módulo).
+    """
+    saida: list[MpcNodeOut] = []
+    try:
+        graph = parse_graph(flow.graph_json)
+        for node in graph.nodes:
+            if node.type != "mpc":
+                continue
+            config = MpcConfig.model_validate(node.config.model_dump())
+            saida.append(
+                MpcNodeOut(
+                    flow_id=flow.id,
+                    flow_name=flow.name,
+                    flow_ts_seconds=float(flow.ts_seconds),
+                    block_id=node.id,
+                    name=config.name,
+                    multiplier=config.multiplier,
+                    variables=MpcVariablesOut(
+                        mvs=[
+                            MvOut(
+                                id=mv.id, name=mv.name, eu=mv.eu, limits=mv.limits, du_max=mv.du_max
+                            )
+                            for mv in config.variables.mvs
+                        ],
+                        cvs=[
+                            CvOut(id=cv.id, name=cv.name, eu=cv.eu, sp_limits=cv.sp_limits)
+                            for cv in config.variables.cvs
+                        ],
+                        constraints=[
+                            ConstraintOut(id=co.id, name=co.name, eu=co.eu, range=co.range)
+                            for co in config.variables.constraints
+                        ],
+                        dvs=[
+                            DvOut(id=dv.id, name=dv.name, eu=dv.eu) for dv in config.variables.dvs
+                        ],
+                    ),
+                )
+            )
+    except (GraphParseError, ValidationError):
+        logger.warning(
+            "Flow %s ('%s') com graph_json inválido; ignorado na projeção de MPCs",
+            flow.id,
+            flow.name,
+        )
+        return []
+    return saida
+
+
+@router.get("/mpcs", response_model=list[MpcNodeOut], dependencies=[Depends(require_operator)])
+async def list_mpcs(db: AsyncSession = Depends(get_db)) -> list[MpcNodeOut]:
+    """Projeta os blocos MPC de todos os flows do projeto ativo (spec §4.1; decisão A-7).
+
+    Sem projeto ativo, lista vazia (§4.1-4) — não há 404, o recurso é a projeção do projeto
+    vigente, não um flow identificado. Estado rodando/parado do flow não entra na projeção.
+    """
+    project_id = await db.scalar(select(Project.id).where(Project.is_active))
+    if project_id is None:
+        return []
+    flows = list(
+        await db.scalars(select(Flow).where(Flow.project_id == project_id).order_by(Flow.name))
+    )
+    saida: list[MpcNodeOut] = []
+    for flow in flows:
+        saida.extend(_mpc_nodes(flow))
+    return saida

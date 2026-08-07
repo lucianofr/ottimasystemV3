@@ -11,12 +11,19 @@ e sob invalidez · SP congela ao entrar em AUTO. Mais alguns testes de reforço,
 próprio comportamento §4.8/§4.2 descrito na brief: `command()` idempotente e
 `man_auto` ignorado em LOCAL, worker indisponível conta overrun sem novo evento, cold start
 produz saídas nulas (padrão F3 §3.0).
+
+Carimbo real de `ts`/`prediction.ts` (spec F5 §2.1/§3.5, F5R-01, tarefa 1.2): clock
+controlado (`FakeClock`) substitui os 3 sítios `datetime.now(UTC)` interinos da 1.1 —
+`ts` crescente, `prediction.ts` ancorado na fronteira do `host.dispatch()` (nunca o ts do
+quadro que consome o resultado) e publicação imediata (mudança de modo) carimbando o
+próprio instante.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -146,6 +153,21 @@ class FakeSnapshot:
         return self._values.get(tag_id)
 
 
+class FakeClock:
+    """Clock controlado (spec F5 §2.1, tarefa 1.2): cada chamada devolve o próximo
+    instante de uma sequência fixa e crescente — os testes de `ts`/`prediction.ts` não
+    podem depender de tempo real (§9.1)."""
+
+    def __init__(self, start: datetime, step: timedelta) -> None:
+        self._next = start
+        self._step = step
+
+    def __call__(self) -> datetime:
+        ts = self._next
+        self._next = self._next + self._step
+        return ts
+
+
 class Publishes:
     def __init__(self) -> None:
         self.states: list[MpcState] = []
@@ -174,7 +196,7 @@ class Events:
 
 
 def _block(
-    *, multiplier: int = 1
+    *, multiplier: int = 1, now: Callable[[], datetime] | None = None
 ) -> tuple[MpcBlock, FakeHost, FakeSnapshot, Publishes, Writes, Events]:
     host = FakeHost()
     snapshot = FakeSnapshot()
@@ -191,6 +213,7 @@ def _block(
         publish=publish,
         write_opc=write_opc,
         emit_event=emit_event,
+        now=now,
     )
     return block, host, snapshot, publish, write_opc, emit_event
 
@@ -279,6 +302,58 @@ async def test_solver_status_nao_e_ok_antes_do_primeiro_resultado_real() -> None
     assert publish.states[-1].status.solver == "idle"
 
     await block.step(entradas(20.0))  # fronteira: dispara o solve, ainda sem resultado
+    assert publish.states[-1].status.solver == "idle"
+
+    host.pending = _resultado_ok({"mv_pid": 33.0, "mv_direto": -4.0})
+    await block.step(entradas(20.0))  # fronteira seguinte: consome o resultado real
+    assert publish.states[-1].status.solver == "ok"
+
+
+# --------------------------------------------------------------------------------------
+# 1c. `building` publicado em QUALQUER modo, precedendo `idle` (tarefa 4.1, F5a; spec F5
+#     §6.2 — emenda F4 §4.2/§5.1). Antes desta tarefa, `_build_state` forçava `idle` fora
+#     de AUTO sem checar `host.ready` — o operador não tinha nenhum estado publicado que
+#     explicasse a janela de boot do worker em LOCAL/REMOTO+MAN (deploy nasce sempre LOCAL,
+#     RNF-03).
+# --------------------------------------------------------------------------------------
+
+
+async def test_building_publicado_em_local_quando_host_ainda_nao_esta_pronto() -> None:
+    block, host, _, publish, _, _ = _block()
+    host.ready = False
+    await block.step(entradas(20.0))
+    assert publish.states[-1].status.solver == "building"
+
+
+async def test_transicao_building_para_idle_em_local_quando_host_fica_pronto() -> None:
+    block, host, _, publish, _, _ = _block()
+    host.ready = False
+    await block.step(entradas(20.0))
+    assert publish.states[-1].status.solver == "building"
+
+    host.ready = True
+    await block.step(entradas(20.0))
+    assert publish.states[-1].status.solver == "idle"
+
+
+async def test_transicao_building_para_ok_em_auto_quando_host_fica_pronto() -> None:
+    """A mesma emenda vale em AUTO — este caminho já funcionava antes da tarefa (reforço
+    de não-regressão do reordenamento em `_build_state`): `building` enquanto o host não
+    está pronto mesmo já armado REMOTO+AUTO, `idle` sem plano aplicado, `ok` só depois do
+    primeiro `SolveResult` genuíno (espelha `test_solver_status_nao_e_ok_antes_do_
+    primeiro_resultado_real`, partindo de um host ainda não pronto)."""
+    block, host, _, publish, _, _ = _block()
+    host.ready = False
+    host.accept = False  # `MpcHost.dispatch()` real recusa sem `ready` — espelha o double
+    await _entra_remoto_auto(block)
+    assert publish.states[-1].status.solver == "building"
+
+    await block.step(entradas(20.0))  # fronteira: host ainda não pronto, dispatch recusado
+    assert publish.states[-1].status.solver == "building"
+
+    host.ready = True
+    host.accept = True
+    await block.step(entradas(20.0))  # fronteira: host pronto, dispara o solve sem resultado
     assert publish.states[-1].status.solver == "idle"
 
     host.pending = _resultado_ok({"mv_pid": 33.0, "mv_direto": -4.0})
@@ -693,3 +768,141 @@ async def test_auto_arm_blocked_reason_exige_readback_do_pid() -> None:
 
     snapshot.set(503, 42.0)  # readback chega
     assert block.auto_arm_blocked_reason() is None
+
+
+# --------------------------------------------------------------------------------------
+# Tarefa 1.2: carimbo real de ts/prediction.ts no runtime (spec F5 §2.1/§3.5, F5R-01)
+# --------------------------------------------------------------------------------------
+
+
+def _resultado_com_predicao(
+    u_plan: dict[str, float], *, prediction_mv: list[list[float]]
+) -> SolveResult:
+    """Como `_resultado_ok`, mas com `prediction_mv` populado — os testes de ts precisam
+    do valor real que `prediction.mv[i][0]` carrega, não só o formato vazio."""
+    return SolveResult(
+        u_plan=u_plan,
+        prediction_t=[0.0],
+        prediction_cv=[],
+        prediction_mv=prediction_mv,
+        cost=1.0,
+        status="ok",
+        wall_ms=5.0,
+    )
+
+
+async def test_ts_do_quadro_e_crescente_entre_fronteiras() -> None:
+    """Clock controlado (spec F5 §2.1-1): `ts` publicado em cada fronteira vem do relógio
+    injetado — não mais o `datetime.now(UTC)` interino da 1.1 — e cresce a cada varredura,
+    espaçado exatamente pelo `Ts_mpc` (prova de que é o clock controlado que governa, não
+    qualquer fonte monotônica)."""
+    inicio = datetime(2026, 1, 1, tzinfo=UTC)
+    clock = FakeClock(inicio, timedelta(seconds=1.0))
+    block, *_, publish, _, _ = _block(now=clock)
+
+    for _ in range(3):
+        await block.step(entradas(20.0))
+
+    tss = [estado.ts for estado in publish.states]
+    assert tss == sorted(tss) and len(set(tss)) == len(tss), "ts precisa crescer a cada fronteira"
+    passo = timedelta(seconds=block.ts_mpc)
+    assert tss[1] - tss[0] == passo
+    assert tss[2] - tss[1] == passo
+
+
+async def test_publicacao_imediata_carimba_o_instante_da_propria_publicacao() -> None:
+    """Mudança de modo publica fora da fronteira (spec F4 §5.2): `ts` é o instante da
+    PRÓPRIA publicação — cada chamada consome um tick novo do relógio, nunca reaproveita
+    o carimbo da última varredura (spec F5 §2.1-1)."""
+    inicio = datetime(2026, 1, 1, tzinfo=UTC)
+    clock = FakeClock(inicio, timedelta(seconds=1.0))
+    block, *_, publish, _, _ = _block(now=clock)
+
+    await block.command("mpc_mode", {"axis": "local_remote", "value": "remote"}, OPERADOR)
+    ts_publicacao_imediata = publish.states[-1].ts
+
+    await block.step(entradas(20.0))  # 1a fronteira: consome o PRÓXIMO tick do clock
+    ts_fronteira = publish.states[-1].ts
+
+    passo = timedelta(seconds=block.ts_mpc)
+    assert ts_fronteira - ts_publicacao_imediata == passo, (
+        "cada publicação consome seu próprio tick do relógio — nunca reaproveita ts alheio"
+    )
+    assert ts_publicacao_imediata != ts_fronteira
+
+
+async def test_fora_de_auto_prediction_ts_e_igual_ao_ts_do_quadro() -> None:
+    """Fora de AUTO, `prediction` é vazia e ancorada no PRÓPRIO `ts` do quadro — nunca a
+    fronteira de um dispatch que não existe (spec F5 §2.1-2, já correto desde a 1.1;
+    travado aqui com o clock controlado da 1.2)."""
+    inicio = datetime(2026, 1, 1, tzinfo=UTC)
+    clock = FakeClock(inicio, timedelta(seconds=1.0))
+    block, *_, publish, _, _ = _block(now=clock)
+
+    await block.step(entradas(20.0))
+
+    estado = publish.states[-1]
+    assert estado.prediction.ts == estado.ts
+    assert estado.prediction.t == []
+
+
+async def test_prediction_ancora_no_dispatch_e_mv0_bate_com_o_quadro_anterior() -> None:
+    """`prediction.ts` é a fronteira em que `host.dispatch()` foi chamado — nunca o `ts`
+    do quadro que está consumindo o resultado (spec §3.5, F5R-01). Em regime,
+    `prediction.ts == ts - Ts_mpc` E o primeiro ponto da predição de cada MV bate com
+    `vars.<mv_id>.v` do quadro anterior a essa fronteira: sem este teste, um overlay
+    deslocado de uma fronteira fica invisível (§9.1)."""
+    inicio = datetime(2026, 1, 1, tzinfo=UTC)
+    clock = FakeClock(inicio, timedelta(seconds=1.0))
+    block, host, _, publish, _, _ = _block(now=clock)
+    await _entra_remoto_auto(block)
+    ts_mpc = timedelta(seconds=block.ts_mpc)
+    mv_index = block.output_ports.index("mv_direto")
+
+    await block.step(entradas(20.0))  # frame 0: dispara o 1o solve
+
+    host.pending = _resultado_com_predicao(
+        {"mv_pid": 33.0, "mv_direto": -4.0},
+        prediction_mv=[[999.0], [host.requests[0].u_applied["mv_direto"]]],
+    )
+    await block.step(entradas(20.0))  # frame 1: consome o resultado 0, dispara o 2o
+
+    host.pending = _resultado_com_predicao(
+        {"mv_pid": 35.0, "mv_direto": -6.0},
+        prediction_mv=[[999.0], [host.requests[1].u_applied["mv_direto"]]],
+    )
+    await block.step(entradas(20.0))  # frame 2 ("regime"): consome o resultado 1
+
+    vars_por_ts = {estado.ts: estado.vars["mv_direto"].v for estado in publish.states}
+    estado = publish.states[-1]
+    assert estado.prediction.ts == estado.ts - ts_mpc
+    quadro_anterior_ts = estado.prediction.ts - ts_mpc
+    assert estado.prediction.mv[mv_index][0] == vars_por_ts[quadro_anterior_ts]
+
+
+async def test_dispatch_ocupado_nao_atualiza_o_instante_guardado() -> None:
+    """`host.dispatch()` recusando (worker ocupado/morto, spec §3.5) não pode mover a
+    âncora: o instante guardado tem de continuar sendo o da última dispatch ACEITA, senão
+    o resultado dela — quando finalmente chegar — carimba `prediction.ts` com a fronteira
+    errada."""
+    inicio = datetime(2026, 1, 1, tzinfo=UTC)
+    clock = FakeClock(inicio, timedelta(seconds=1.0))
+    block, host, _, publish, _, _ = _block(now=clock)
+    await _entra_remoto_auto(block)
+
+    await block.step(entradas(20.0))  # frame 0: dispatch aceito, guarda este ts
+    ts_dispatch_aceito = publish.states[-1].ts
+
+    host.accept = False
+    await block.step(entradas(20.0))  # frame 1: recusado, não pode sobrescrever a guarda
+
+    host.accept = True
+    host.pending = _resultado_com_predicao(
+        {"mv_pid": 33.0, "mv_direto": -4.0},
+        prediction_mv=[[999.0], [host.requests[0].u_applied["mv_direto"]]],
+    )
+    await block.step(entradas(20.0))  # frame 2: consome o resultado disparado em frame 0
+
+    assert publish.states[-1].prediction.ts == ts_dispatch_aceito, (
+        "a fronteira recusada (frame 1) não pode ter sobrescrito o instante guardado"
+    )

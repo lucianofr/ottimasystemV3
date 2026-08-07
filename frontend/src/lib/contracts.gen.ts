@@ -99,7 +99,7 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "tfs" 
   },
   "mpc": {
     "dynamic": true,
-    "source": "config.cvs + config.constraints + config.dvs (entrada) / config.mvs (saída) — spec F4 §2.2, plano F4a tarefa 1.2",
+    "source": "config.variables.cvs + config.variables.constraints + config.variables.dvs (entrada) / config.variables.mvs (saída) — nome de porta = id da variável, por instância (spec F4 §2.1-5, decisão A-10; derivado em flowgraph.validate._input_handles/_output_handles, plano F4a tarefa 1.2)",
     "rules": [
       {
         "direction": "input",
@@ -138,6 +138,7 @@ export interface MpcModes {
 }
 
 export interface MpcPrediction {
+  ts: string;
   t: number[];
   cv: number[][];
   mv: number[][];
@@ -157,6 +158,7 @@ export interface MpcVarState {
 }
 
 export interface MpcState {
+  ts: string;
   modes: MpcModes;
   status: MpcStatus;
   vars: Record<string, MpcVarState>;

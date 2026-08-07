@@ -50,10 +50,26 @@ TOKEN=$(curl -fsS -X POST "${BASE}/api/auth/login" -H 'Content-Type: application
   | python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])')
 curl -fsS -H "Authorization: Bearer ${TOKEN}" "${BASE}/api/auth/me" | grep -q '"role"'
 
-echo "E2E-03: retention policies de 1 mês (aceite: retenção ativa)..."
+echo "E2E-03: GET /api/health/workers com os 3 workers up:true (F5R-09)..."
+curl -fsS -H "Authorization: Bearer ${TOKEN}" "${BASE}/api/health/workers" | python3 -c '
+import json, sys
+corpo = json.load(sys.stdin)
+for nome in ("opc_worker", "flow_runtime", "recorder"):
+    assert corpo[nome]["up"] is True, corpo
+'
+
+echo "E2E-04: retenção de 1 mês ativa (samples/events/samples_1m/mpc_samples/mpc_samples_1m — F5R-07)..."
+# a CAgg aparece em timescaledb_information.jobs pelo nome interno do hypertable
+# materializado (_materialized_hypertable_N), não pelo view_name -- por isso o LEFT JOIN
+# resolve o nome público antes de filtrar (mesmo padrão de packages/ottima-core/tests/test_timescale.py).
 "${COMPOSE[@]}" exec -T timescaledb psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -tAc \
-  "SELECT count(*) FROM timescaledb_information.jobs WHERE proc_name = 'policy_retention' AND (config->>'drop_after')::interval = INTERVAL '1 month'" \
-  | grep -qx 3
+  "SELECT count(*) FROM timescaledb_information.jobs j
+   LEFT JOIN timescaledb_information.continuous_aggregates ca
+     ON ca.materialization_hypertable_name = j.hypertable_name
+   WHERE j.proc_name = 'policy_retention'
+     AND (j.config->>'drop_after')::interval = INTERVAL '1 month'
+     AND COALESCE(ca.view_name, j.hypertable_name) IN ('samples','events','samples_1m','mpc_samples','mpc_samples_1m')" \
+  | grep -qx 5
 
 if [ "${E2E}" = "1" ]; then
   echo "E2E-F2-L1a: opcsim healthy..."
