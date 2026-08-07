@@ -31,7 +31,7 @@ def test_e2e_f5_01_mpc_samples_cadencia_local_sp_ts(
     opcsim_client: OpcSim,
 ) -> None:
     """E2E-F5-01: mpc_samples grava na cadência Ts_mpc, em LOCAL com auto=false, sp=NULL não-CV.
-    
+
     Prova via /api/history/mpc (tabela mpc_samples):
     (a) linhas em cadência ~Ts_mpc
     (b) auto=false em LOCAL
@@ -47,7 +47,7 @@ def test_e2e_f5_01_mpc_samples_cadencia_local_sp_ts(
         # Coleta 6 amostras WS + seus timestamps
         amostras_ws = []
         for i in range(6):
-            a = fluxo.esperar(lambda _e: True, timeout=30.0, descricao=f"amostra WS {i+1}")
+            a = fluxo.esperar(lambda _e: True, timeout=30.0, descricao=f"amostra WS {i + 1}")
             amostras_ws.append(a)
             # (d) ts do payload em ISO-8601
             assert "ts" in a, f"amostra {i}: falta ts"
@@ -120,9 +120,7 @@ def test_e2e_f5_01_mpc_samples_cadencia_local_sp_ts(
         for i, amostra_ws in enumerate(amostras_ws[:3]):  # Verifica primeiras 3
             ts_payload = datetime.fromisoformat(amostra_ws["ts"]).timestamp()
             # Busca ts mais próximo
-            ts_mais_proximo = min(
-                ts_floats, key=lambda t: abs(t - ts_payload)
-            )
+            ts_mais_proximo = min(ts_floats, key=lambda t: abs(t - ts_payload))
             delta_ts = abs(ts_mais_proximo - ts_payload)
             assert delta_ts < TS_MPC / 2, (
                 f"amostra WS {i}: ts_payload não encontrado em /api/history/mpc "
@@ -137,7 +135,7 @@ def test_e2e_f5_02_history_mpc_raw_cagg_teto_404_rbac(
     opcsim_client: OpcSim,
 ) -> None:
     """E2E-F5-02: /api/history/mpc bruto ≤2h; 1m >2h; teto 14; 422s; 404; RBAC.
-    
+
     (a) bruto ≤2h retorna mode='raw'
     (b) >2h retorna mode='1m' (CAgg materializada)
     (c) teto 14 var_ids => 422
@@ -257,8 +255,6 @@ def test_e2e_f5_02_history_mpc_raw_cagg_teto_404_rbac(
                     "var_ids": "cv_1",
                 },
             )
-            assert r.status_code == 401, (
-                f"anônimo: esperava 401, obteve {r.status_code}"
-            )
+            assert r.status_code == 401, f"anônimo: esperava 401, obteve {r.status_code}"
         finally:
             client_anon.close()

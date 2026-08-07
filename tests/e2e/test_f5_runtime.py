@@ -34,7 +34,7 @@ def test_e2e_f5_05_deploy_building_arm_failed(
     eventos: Any,
 ) -> None:
     """E2E-F5-05: F-1 deploy assíncrono; building em LOCAL; arm_failed em build.
-    
+
     (a) deploy MPC pesado NÃO bloqueia stop de outro flow (latência < 5s)
     (b) building observável em mpc.state no deploy em LOCAL, antes de idle
     (c) armar para REMOTO durante building ⇒ mpc_arm_failed {worker_not_ready}
@@ -62,8 +62,7 @@ def test_e2e_f5_05_deploy_building_arm_failed(
 
             # (a) latência <= 5 s (não foi bloqueado pelo lock do deploy)
             assert latencia_stop < 5.0, (
-                f"stop demorou {latencia_stop:.2f}s (deve ser < 5s, "
-                "indica bloqueio pelo deploy)"
+                f"stop demorou {latencia_stop:.2f}s (deve ser < 5s, indica bloqueio pelo deploy)"
             )
 
             # (b) Aguarda building
@@ -94,20 +93,14 @@ def test_e2e_f5_05_deploy_building_arm_failed(
                 time.sleep(0.1)
 
             # (b) building foi observado antes de idle
-            assert building_encontrado, (
-                f"building nunca observado. Estados: {estados_vistos}"
-            )
-            assert idle_encontrado, (
-                f"idle nunca observado. Estados: {estados_vistos}"
-            )
+            assert building_encontrado, f"building nunca observado. Estados: {estados_vistos}"
+            assert idle_encontrado, f"idle nunca observado. Estados: {estados_vistos}"
 
             # (b) ordem: building < idle
             if "building" in estados_vistos and "idle" in estados_vistos:
                 idx_b = estados_vistos.index("building")
                 idx_i = estados_vistos.index("idle")
-                assert idx_b < idx_i, (
-                    f"building({idx_b}) deve vir antes de idle({idx_i})"
-                )
+                assert idx_b < idx_i, f"building({idx_b}) deve vir antes de idle({idx_i})"
 
             # (c) Armar para REMOTO durante building
             # Reinicia deploy se já passou de building
@@ -153,7 +146,7 @@ def test_e2e_f5_06_ts_prediction_regime(
     opcsim_client: OpcSim,
 ) -> None:
     """E2E-F5-06: ts monotônico; prediction_ts presente; em regime: ≈ ts − Ts_mpc.
-    
+
     (b) ts presente em mpc.state, ISO-8601
     (c) prediction_ts presente em mpc.state quando em AUTO
     (d) ts monotônico (nunca regride)
@@ -170,7 +163,7 @@ def test_e2e_f5_06_ts_prediction_regime(
         amostras = []
         for i in range(15):
             try:
-                a = fluxo.esperar(lambda _e: True, timeout=30.0, descricao=f"amostra {i+1}")
+                a = fluxo.esperar(lambda _e: True, timeout=30.0, descricao=f"amostra {i + 1}")
                 amostras.append(a)
             except AssertionError:
                 break
@@ -190,7 +183,7 @@ def test_e2e_f5_06_ts_prediction_regime(
         ts_valores = [datetime.fromisoformat(a["ts"]) for a in amostras]
         for i in range(1, len(ts_valores)):
             assert ts_valores[i] >= ts_valores[i - 1], (
-                f"ts regrediu: {ts_valores[i-1]} -> {ts_valores[i]}"
+                f"ts regrediu: {ts_valores[i - 1]} -> {ts_valores[i]}"
             )
 
         # (c) prediction_ts presente quando aplicável
@@ -203,9 +196,7 @@ def test_e2e_f5_06_ts_prediction_regime(
                 pts = datetime.fromisoformat(amostra["prediction_ts"])
                 assert isinstance(pts, datetime)
             except ValueError:
-                pytest.fail(
-                    f"prediction_ts não é ISO-8601: {amostra['prediction_ts']}"
-                )
+                pytest.fail(f"prediction_ts não é ISO-8601: {amostra['prediction_ts']}")
 
         # (e) em regime (AUTO): prediction_ts ≈ ts − Ts_mpc
         # Só validar se temos pelo menos 3 amostras com prediction_ts

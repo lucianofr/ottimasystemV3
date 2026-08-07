@@ -34,7 +34,7 @@ def test_e2e_f5_03_operate_mpcs_seguro_404(
     opcsim_client: OpcSim,
 ) -> None:
     """E2E-F5-03: /api/operate/mpcs projeta config seguro (sem pid/models); 404 flow inexistente.
-    
+
     (a) /api/operate/mpcs retorna projeção segura (sem pid/models/pesos/tss/initial_value)
     (b) flow inexistente => 404 ou lista vazia
     """
@@ -91,7 +91,7 @@ def test_e2e_f5_04_ws_events_subscribe_unsubscribe(
     opcsim_client: OpcSim,
 ) -> None:
     """E2E-F5-04: WS /ws events subscribe ⇒ chega; unsubscribe ⇒ para.
-    
+
     (a) subscribe {"events": true} ⇒ evento publicado chega via WS
     (b) unsubscribe {"events": true} ⇒ evento para de chegar
     """
@@ -168,7 +168,7 @@ def test_e2e_f5_07_operate_mode_enum_422_pt_br(
     opcsim_client: OpcSim,
 ) -> None:
     """E2E-F5-07: /api/operate/mode enum inválido ⇒ 422 string única pt-BR.
-    
+
     Enum inválido em local_remote (aceita "local"|"remote") retorna 422 com
     detail como string única pt-BR (não lista FastAPI).
     """
@@ -184,30 +184,21 @@ def test_e2e_f5_07_operate_mode_enum_422_pt_br(
         json={"axis": "local_remote", "value": "INVALIDO"},
     )
 
-    assert r.status_code == 422, (
-        f"esperava 422 para enum inválido, obteve {r.status_code}"
-    )
+    assert r.status_code == 422, f"esperava 422 para enum inválido, obteve {r.status_code}"
 
     response = r.json()
     assert "detail" in response, f"falta 'detail': {response}"
 
     # detail é string única (não lista)
     detail = response["detail"]
-    assert isinstance(detail, str), (
-        f"detail deve ser string, obteve {type(detail).__name__}"
-    )
+    assert isinstance(detail, str), f"detail deve ser string, obteve {type(detail).__name__}"
 
     # pt-BR (contém palavras comuns de validação pt-BR)
     detail_lower = detail.lower()
     is_pt_br = any(
-        word in detail_lower
-        for word in ["valor", "inválido", "esperado", "deve", "não", "aceita"]
+        word in detail_lower for word in ["valor", "inválido", "esperado", "deve", "não", "aceita"]
     )
-    assert is_pt_br, (
-        f"detail não parece pt-BR: {detail}"
-    )
+    assert is_pt_br, f"detail não parece pt-BR: {detail}"
 
     # NÃO é lista FastAPI padrão
-    assert not detail.startswith("["), (
-        "detail parece ser lista FastAPI, não string pt-BR"
-    )
+    assert not detail.startswith("["), "detail parece ser lista FastAPI, não string pt-BR"
