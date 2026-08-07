@@ -212,26 +212,15 @@
   },
   "nodes": [
     {
-      "label": "AGENTS.md",
-      "file_type": "document",
-      "source_file": "AGENTS.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "agents",
-      "community": 273,
-      "community_name": "AGENTS.md",
-      "norm_label": "agents.md"
-    },
-    {
       "label": "F5a-operacao-dados.md",
       "file_type": "document",
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "f5a-operacao-dados.md",
-      "id": "docs_plans_f5a_operacao_dados"
+      "norm_label": "f5a-operacao-dados.md"
     },
     {
       "label": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
@@ -239,10 +228,10 @@
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "plano f5a \u2014 operacao: dados & servicos",
-      "id": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os"
+      "norm_label": "plano f5a \u2014 operacao: dados & servicos"
     },
     {
       "label": "Regras globais (valem para todas as tarefas)",
@@ -250,10 +239,10 @@
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L11",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados_regras_globais_valem_para_todas_as_tarefas",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "regras globais (valem para todas as tarefas)",
-      "id": "docs_plans_f5a_operacao_dados_regras_globais_valem_para_todas_as_tarefas"
+      "norm_label": "regras globais (valem para todas as tarefas)"
     },
     {
       "label": "Contratos verbatim (PRD \u00a77.1 v1.3 \u2014 vigente ap\u00f3s a tarefa 0.1)",
@@ -261,10 +250,10 @@
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L21",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados_contratos_verbatim_prd_7_1_v1_3_vigente_ap\u00f3s_a_tarefa_0_1",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "contratos verbatim (prd \u00a77.1 v1.3 \u2014 vigente apos a tarefa 0.1)",
-      "id": "docs_plans_f5a_operacao_dados_contratos_verbatim_prd_7_1_v1_3_vigente_ap\u00f3s_a_tarefa_0_1"
+      "norm_label": "contratos verbatim (prd \u00a77.1 v1.3 \u2014 vigente apos a tarefa 0.1)"
     },
     {
       "label": "Interfaces produzidas (consumidas pelo F5b \u2014 assinaturas exatas)",
@@ -272,10 +261,10 @@
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L31",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados_interfaces_produzidas_consumidas_pelo_f5b_assinaturas_exatas",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "interfaces produzidas (consumidas pelo f5b \u2014 assinaturas exatas)",
-      "id": "docs_plans_f5a_operacao_dados_interfaces_produzidas_consumidas_pelo_f5b_assinaturas_exatas"
+      "norm_label": "interfaces produzidas (consumidas pelo f5b \u2014 assinaturas exatas)"
     },
     {
       "label": "Etapa 0 \u2014 Emendas documentais e d\u00e9bitos de contrato (spec \u00a71.3 e \u00a74.3; antes de qualquer c\u00f3digo de feature)",
@@ -283,10 +272,10 @@
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L53",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados_etapa_0_emendas_documentais_e_d\u00e9bitos_de_contrato_spec_1_3_e_4_3_antes_de_qualquer_c\u00f3digo_de_feature",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "etapa 0 \u2014 emendas documentais e debitos de contrato (spec \u00a71.3 e \u00a74.3; antes de qualquer codigo de feature)",
-      "id": "docs_plans_f5a_operacao_dados_etapa_0_emendas_documentais_e_d\u00e9bitos_de_contrato_spec_1_3_e_4_3_antes_de_qualquer_c\u00f3digo_de_feature"
+      "norm_label": "etapa 0 \u2014 emendas documentais e debitos de contrato (spec \u00a71.3 e \u00a74.3; antes de qualquer codigo de feature)"
     },
     {
       "label": "Etapa 1 \u2014 Contratos: `ts` e `prediction.ts` (spec \u00a72.1; F5R-01)",
@@ -294,10 +283,10 @@
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L67",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados_etapa_1_contratos_ts_e_prediction_ts_spec_2_1_f5r_01",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "etapa 1 \u2014 contratos: `ts` e `prediction.ts` (spec \u00a72.1; f5r-01)",
-      "id": "docs_plans_f5a_operacao_dados_etapa_1_contratos_ts_e_prediction_ts_spec_2_1_f5r_01"
+      "norm_label": "etapa 1 \u2014 contratos: `ts` e `prediction.ts` (spec \u00a72.1; f5r-01)"
     },
     {
       "label": "Etapa 2 \u2014 Hypertable `mpc_samples` e recorder (spec \u00a72.2/\u00a72.3)",
@@ -305,10 +294,10 @@
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L79",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados_etapa_2_hypertable_mpc_samples_e_recorder_spec_2_2_2_3",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "etapa 2 \u2014 hypertable `mpc_samples` e recorder (spec \u00a72.2/\u00a72.3)",
-      "id": "docs_plans_f5a_operacao_dados_etapa_2_hypertable_mpc_samples_e_recorder_spec_2_2_2_3"
+      "norm_label": "etapa 2 \u2014 hypertable `mpc_samples` e recorder (spec \u00a72.2/\u00a72.3)"
     },
     {
       "label": "Etapa 3 \u2014 APIs novas, WS `events` e `script_recovered` (spec \u00a72.4/\u00a74.1/\u00a74.2/\u00a75/\u00a77.2-2)",
@@ -316,10 +305,10 @@
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L90",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados_etapa_3_apis_novas_ws_events_e_script_recovered_spec_2_4_4_1_4_2_5_7_2_2",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "etapa 3 \u2014 apis novas, ws `events` e `script_recovered` (spec \u00a72.4/\u00a74.1/\u00a74.2/\u00a75/\u00a77.2-2)",
-      "id": "docs_plans_f5a_operacao_dados_etapa_3_apis_novas_ws_events_e_script_recovered_spec_2_4_4_1_4_2_5_7_2_2"
+      "norm_label": "etapa 3 \u2014 apis novas, ws `events` e `script_recovered` (spec \u00a72.4/\u00a74.1/\u00a74.2/\u00a75/\u00a77.2-2)"
     },
     {
       "label": "Etapa 4 \u2014 F-1: boot ass\u00edncrono do worker e reescopo do lock (spec \u00a76; F5R-05/06)",
@@ -327,10 +316,10 @@
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L104",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados_etapa_4_f_1_boot_ass\u00edncrono_do_worker_e_reescopo_do_lock_spec_6_f5r_05_06",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "etapa 4 \u2014 f-1: boot assincrono do worker e reescopo do lock (spec \u00a76; f5r-05/06)",
-      "id": "docs_plans_f5a_operacao_dados_etapa_4_f_1_boot_ass\u00edncrono_do_worker_e_reescopo_do_lock_spec_6_f5r_05_06"
+      "norm_label": "etapa 4 \u2014 f-1: boot assincrono do worker e reescopo do lock (spec \u00a76; f5r-05/06)"
     },
     {
       "label": "Etapa 5 \u2014 Integra\u00e7\u00e3o L2 e fechamento do plano F5a",
@@ -338,10 +327,10 @@
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L117",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados_etapa_5_integra\u00e7\u00e3o_l2_e_fechamento_do_plano_f5a",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "etapa 5 \u2014 integracao l2 e fechamento do plano f5a",
-      "id": "docs_plans_f5a_operacao_dados_etapa_5_integra\u00e7\u00e3o_l2_e_fechamento_do_plano_f5a"
+      "norm_label": "etapa 5 \u2014 integracao l2 e fechamento do plano f5a"
     },
     {
       "label": "Ader\u00eancia (DoD do plano F5a)",
@@ -349,10 +338,10 @@
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L129",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados_ader\u00eancia_dod_do_plano_f5a",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "aderencia (dod do plano f5a)",
-      "id": "docs_plans_f5a_operacao_dados_ader\u00eancia_dod_do_plano_f5a"
+      "norm_label": "aderencia (dod do plano f5a)"
     },
     {
       "label": "Rastreabilidade (RF/decis\u00e3o por tarefa)",
@@ -360,10 +349,10 @@
       "source_file": "docs/plans/F5a-operacao-dados.md",
       "source_location": "L143",
       "_origin": "ast",
+      "id": "docs_plans_f5a_operacao_dados_rastreabilidade_rf_decis\u00e3o_por_tarefa",
       "community": 160,
       "community_name": "Plano F5a \u2014 Opera\u00e7\u00e3o: dados & servi\u00e7os",
-      "norm_label": "rastreabilidade (rf/decisao por tarefa)",
-      "id": "docs_plans_f5a_operacao_dados_rastreabilidade_rf_decis\u00e3o_por_tarefa"
+      "norm_label": "rastreabilidade (rf/decisao por tarefa)"
     },
     {
       "label": "F5b-tela-operacao.md",
@@ -371,10 +360,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "f5b-tela-operacao.md",
-      "id": "docs_plans_f5b_tela_operacao"
+      "norm_label": "f5b-tela-operacao.md"
     },
     {
       "label": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
@@ -382,10 +371,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "plano f5b \u2014 operacao: tela de operacao",
-      "id": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o"
+      "norm_label": "plano f5b \u2014 operacao: tela de operacao"
     },
     {
       "label": "Regras globais",
@@ -393,10 +382,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L11",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_regras_globais",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "regras globais",
-      "id": "docs_plans_f5b_tela_operacao_regras_globais"
+      "norm_label": "regras globais"
     },
     {
       "label": "Interfaces consumidas (produzidas no F5a \u2014 n\u00e3o redefinir)",
@@ -404,10 +393,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L20",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_interfaces_consumidas_produzidas_no_f5a_n\u00e3o_redefinir",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "interfaces consumidas (produzidas no f5a \u2014 nao redefinir)",
-      "id": "docs_plans_f5b_tela_operacao_interfaces_consumidas_produzidas_no_f5a_n\u00e3o_redefinir"
+      "norm_label": "interfaces consumidas (produzidas no f5a \u2014 nao redefinir)"
     },
     {
       "label": "Interfaces internas deste plano (consumidas entre tarefas \u2014 assinaturas exatas)",
@@ -415,10 +404,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L24",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_interfaces_internas_deste_plano_consumidas_entre_tarefas_assinaturas_exatas",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "interfaces internas deste plano (consumidas entre tarefas \u2014 assinaturas exatas)",
-      "id": "docs_plans_f5b_tela_operacao_interfaces_internas_deste_plano_consumidas_entre_tarefas_assinaturas_exatas"
+      "norm_label": "interfaces internas deste plano (consumidas entre tarefas \u2014 assinaturas exatas)"
     },
     {
       "label": "Etapa 1 \u2014 Canal \u00fanico de sess\u00e3o (spec \u00a77.1; F5R-04/22)",
@@ -426,10 +415,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L55",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_etapa_1_canal_\u00fanico_de_sess\u00e3o_spec_7_1_f5r_04_22",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "etapa 1 \u2014 canal unico de sessao (spec \u00a77.1; f5r-04/22)",
-      "id": "docs_plans_f5b_tela_operacao_etapa_1_canal_\u00fanico_de_sess\u00e3o_spec_7_1_f5r_04_22"
+      "norm_label": "etapa 1 \u2014 canal unico de sessao (spec \u00a77.1; f5r-04/22)"
     },
     {
       "label": "Etapa 2 \u2014 `resolverAlarmes` e faixa anunciadora real (spec \u00a77.2; F5R-02/03/19)",
@@ -437,10 +426,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L66",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_etapa_2_resolveralarmes_e_faixa_anunciadora_real_spec_7_2_f5r_02_03_19",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "etapa 2 \u2014 `resolveralarmes` e faixa anunciadora real (spec \u00a77.2; f5r-02/03/19)",
-      "id": "docs_plans_f5b_tela_operacao_etapa_2_resolveralarmes_e_faixa_anunciadora_real_spec_7_2_f5r_02_03_19"
+      "norm_label": "etapa 2 \u2014 `resolveralarmes` e faixa anunciadora real (spec \u00a77.2; f5r-02/03/19)"
     },
     {
       "label": "Etapa 3 \u2014 Navega\u00e7\u00e3o, Home e `/eventos` (spec \u00a77.3/\u00a77.5)",
@@ -448,10 +437,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L79",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_etapa_3_navega\u00e7\u00e3o_home_e_eventos_spec_7_3_7_5",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "etapa 3 \u2014 navegacao, home e `/eventos` (spec \u00a77.3/\u00a77.5)",
-      "id": "docs_plans_f5b_tela_operacao_etapa_3_navega\u00e7\u00e3o_home_e_eventos_spec_7_3_7_5"
+      "norm_label": "etapa 3 \u2014 navegacao, home e `/eventos` (spec \u00a77.3/\u00a77.5)"
     },
     {
       "label": "Etapa 4 \u2014 Tela `/operacao/:flowId/:blockId` (spec \u00a77.4; RF-701/702/704; ADR-016)",
@@ -459,10 +448,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L91",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_etapa_4_tela_operacao_flowid_blockid_spec_7_4_rf_701_702_704_adr_016",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "etapa 4 \u2014 tela `/operacao/:flowid/:blockid` (spec \u00a77.4; rf-701/702/704; adr-016)",
-      "id": "docs_plans_f5b_tela_operacao_etapa_4_tela_operacao_flowid_blockid_spec_7_4_rf_701_702_704_adr_016"
+      "norm_label": "etapa 4 \u2014 tela `/operacao/:flowid/:blockid` (spec \u00a77.4; rf-701/702/704; adr-016)"
     },
     {
       "label": "Etapa 5 \u2014 Trend central com predi\u00e7\u00e3o (spec \u00a77.4-6; \u00a73; decis\u00e3o A-11)",
@@ -470,10 +459,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L104",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_etapa_5_trend_central_com_predi\u00e7\u00e3o_spec_7_4_6_3_decis\u00e3o_a_11",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "etapa 5 \u2014 trend central com predicao (spec \u00a77.4-6; \u00a73; decisao a-11)",
-      "id": "docs_plans_f5b_tela_operacao_etapa_5_trend_central_com_predi\u00e7\u00e3o_spec_7_4_6_3_decis\u00e3o_a_11"
+      "norm_label": "etapa 5 \u2014 trend central com predicao (spec \u00a77.4-6; \u00a73; decisao a-11)"
     },
     {
       "label": "Etapa 6 \u2014 F-3: vetores-golden Python\u2192TS (spec \u00a77.6; decis\u00e3o A-9; F5R-13)",
@@ -481,10 +470,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L116",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_etapa_6_f_3_vetores_golden_python_ts_spec_7_6_decis\u00e3o_a_9_f5r_13",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "etapa 6 \u2014 f-3: vetores-golden python\u2192ts (spec \u00a77.6; decisao a-9; f5r-13)",
-      "id": "docs_plans_f5b_tela_operacao_etapa_6_f_3_vetores_golden_python_ts_spec_7_6_decis\u00e3o_a_9_f5r_13"
+      "norm_label": "etapa 6 \u2014 f-3: vetores-golden python\u2192ts (spec \u00a77.6; decisao a-9; f5r-13)"
     },
     {
       "label": "Etapa 7 \u2014 Gate final da fase F5",
@@ -492,10 +481,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L127",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_etapa_7_gate_final_da_fase_f5",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "etapa 7 \u2014 gate final da fase f5",
-      "id": "docs_plans_f5b_tela_operacao_etapa_7_gate_final_da_fase_f5"
+      "norm_label": "etapa 7 \u2014 gate final da fase f5"
     },
     {
       "label": "Ader\u00eancia ao aceite F5 (PRD \u00a78) \u2014 Definition of Done da FASE",
@@ -503,10 +492,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L136",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_ader\u00eancia_ao_aceite_f5_prd_8_definition_of_done_da_fase",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "aderencia ao aceite f5 (prd \u00a78) \u2014 definition of done da fase",
-      "id": "docs_plans_f5b_tela_operacao_ader\u00eancia_ao_aceite_f5_prd_8_definition_of_done_da_fase"
+      "norm_label": "aderencia ao aceite f5 (prd \u00a78) \u2014 definition of done da fase"
     },
     {
       "label": "Rastreabilidade (RF/decis\u00e3o por tarefa)",
@@ -514,10 +503,10 @@
       "source_file": "docs/plans/F5b-tela-operacao.md",
       "source_location": "L148",
       "_origin": "ast",
+      "id": "docs_plans_f5b_tela_operacao_rastreabilidade_rf_decis\u00e3o_por_tarefa",
       "community": 87,
       "community_name": "Plano F5b \u2014 Opera\u00e7\u00e3o: tela de opera\u00e7\u00e3o",
-      "norm_label": "rastreabilidade (rf/decisao por tarefa)",
-      "id": "docs_plans_f5b_tela_operacao_rastreabilidade_rf_decis\u00e3o_por_tarefa"
+      "norm_label": "rastreabilidade (rf/decisao por tarefa)"
     },
     {
       "label": "tests-e2e-f5.md",
@@ -525,10 +514,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "tests-e2e-f5.md",
-      "id": "docs_plans_tests_e2e_f5"
+      "norm_label": "tests-e2e-f5.md"
     },
     {
       "label": "Roteiro L3 \u2014 Testes E2E de browser (Fase F5 \u2014 Opera\u00e7\u00e3o)",
@@ -536,10 +525,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_roteiro_l3_testes_e2e_de_browser_fase_f5_opera\u00e7\u00e3o",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "roteiro l3 \u2014 testes e2e de browser (fase f5 \u2014 operacao)",
-      "id": "docs_plans_tests_e2e_f5_roteiro_l3_testes_e2e_de_browser_fase_f5_opera\u00e7\u00e3o"
+      "norm_label": "roteiro l3 \u2014 testes e2e de browser (fase f5 \u2014 operacao)"
     },
     {
       "label": "Regra de ferro",
@@ -547,10 +536,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L17",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_regra_de_ferro",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "regra de ferro",
-      "id": "docs_plans_tests_e2e_f5_regra_de_ferro"
+      "norm_label": "regra de ferro"
     },
     {
       "label": "1. Precondi\u00e7\u00f5es de ambiente",
@@ -558,10 +547,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L23",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_1_precondi\u00e7\u00f5es_de_ambiente",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "1. precondicoes de ambiente",
-      "id": "docs_plans_tests_e2e_f5_1_precondi\u00e7\u00f5es_de_ambiente"
+      "norm_label": "1. precondicoes de ambiente"
     },
     {
       "label": "2. Regras de execu\u00e7\u00e3o com a tool `browser`",
@@ -569,10 +558,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L61",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_2_regras_de_execu\u00e7\u00e3o_com_a_tool_browser",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "2. regras de execucao com a tool `browser`",
-      "id": "docs_plans_tests_e2e_f5_2_regras_de_execu\u00e7\u00e3o_com_a_tool_browser"
+      "norm_label": "2. regras de execucao com a tool `browser`"
     },
     {
       "label": "3. Evid\u00eancias",
@@ -580,10 +569,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L97",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_3_evid\u00eancias",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "3. evidencias",
-      "id": "docs_plans_tests_e2e_f5_3_evid\u00eancias"
+      "norm_label": "3. evidencias"
     },
     {
       "label": "4. Cen\u00e1rios",
@@ -591,10 +580,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L109",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_4_cen\u00e1rios",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "4. cenarios",
-      "id": "docs_plans_tests_e2e_f5_4_cen\u00e1rios"
+      "norm_label": "4. cenarios"
     },
     {
       "label": "B-F5-01 \u2014 Login operador, navega\u00e7\u00e3o ao grupo Opera\u00e7\u00e3o, seletor e redirect direto",
@@ -602,10 +591,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L113",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_b_f5_01_login_operador_navega\u00e7\u00e3o_ao_grupo_opera\u00e7\u00e3o_seletor_e_redirect_direto",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "b-f5-01 \u2014 login operador, navegacao ao grupo operacao, seletor e redirect direto",
-      "id": "docs_plans_tests_e2e_f5_b_f5_01_login_operador_navega\u00e7\u00e3o_ao_grupo_opera\u00e7\u00e3o_seletor_e_redirect_direto"
+      "norm_label": "b-f5-01 \u2014 login operador, navegacao ao grupo operacao, seletor e redirect direto"
     },
     {
       "label": "B-F5-02 \u2014 Faceplates: barras verticais, mono tabular, l\u00e2mpada `building` no deploy rec\u00e9m-feito",
@@ -613,10 +602,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L131",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_b_f5_02_faceplates_barras_verticais_mono_tabular_l\u00e2mpada_building_no_deploy_rec\u00e9m_feito",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "b-f5-02 \u2014 faceplates: barras verticais, mono tabular, lampada `building` no deploy recem-feito",
-      "id": "docs_plans_tests_e2e_f5_b_f5_02_faceplates_barras_verticais_mono_tabular_l\u00e2mpada_building_no_deploy_rec\u00e9m_feito"
+      "norm_label": "b-f5-02 \u2014 faceplates: barras verticais, mono tabular, lampada `building` no deploy recem-feito"
     },
     {
       "label": "B-F5-03 \u2014 Armar LOCAL\u2192REMOTO(MAN)\u2192AUTO; pendente-at\u00e9-confirmar",
@@ -624,10 +613,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L150",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_b_f5_03_armar_local_remoto_man_auto_pendente_at\u00e9_confirmar",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "b-f5-03 \u2014 armar local\u2192remoto(man)\u2192auto; pendente-ate-confirmar",
-      "id": "docs_plans_tests_e2e_f5_b_f5_03_armar_local_remoto_man_auto_pendente_at\u00e9_confirmar"
+      "norm_label": "b-f5-03 \u2014 armar local\u2192remoto(man)\u2192auto; pendente-ate-confirmar"
     },
     {
       "label": "B-F5-04 \u2014 SP em AUTO e MV em MAN: clamp, materializa\u00e7\u00e3o e auditoria em `/eventos`",
@@ -635,10 +624,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L169",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_b_f5_04_sp_em_auto_e_mv_em_man_clamp_materializa\u00e7\u00e3o_e_auditoria_em_eventos",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "b-f5-04 \u2014 sp em auto e mv em man: clamp, materializacao e auditoria em `/eventos`",
-      "id": "docs_plans_tests_e2e_f5_b_f5_04_sp_em_auto_e_mv_em_man_clamp_materializa\u00e7\u00e3o_e_auditoria_em_eventos"
+      "norm_label": "b-f5-04 \u2014 sp em auto e mv em man: clamp, materializacao e auditoria em `/eventos`"
     },
     {
       "label": "B-F5-05 \u2014 Trend: hist\u00f3rico s\u00f3lido \u2192 linha-agora \u2192 predi\u00e7\u00e3o sem degrau na emenda",
@@ -646,10 +635,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L191",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_b_f5_05_trend_hist\u00f3rico_s\u00f3lido_linha_agora_predi\u00e7\u00e3o_sem_degrau_na_emenda",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "b-f5-05 \u2014 trend: historico solido \u2192 linha-agora \u2192 predicao sem degrau na emenda",
-      "id": "docs_plans_tests_e2e_f5_b_f5_05_trend_hist\u00f3rico_s\u00f3lido_linha_agora_predi\u00e7\u00e3o_sem_degrau_na_emenda"
+      "norm_label": "b-f5-05 \u2014 trend: historico solido \u2192 linha-agora \u2192 predicao sem degrau na emenda"
     },
     {
       "label": "B-F5-06 \u2014 Watchdog congelado: alarme na faixa em qualquer tela; restaurar cessa",
@@ -657,10 +646,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L213",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_b_f5_06_watchdog_congelado_alarme_na_faixa_em_qualquer_tela_restaurar_cessa",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "b-f5-06 \u2014 watchdog congelado: alarme na faixa em qualquer tela; restaurar cessa",
-      "id": "docs_plans_tests_e2e_f5_b_f5_06_watchdog_congelado_alarme_na_faixa_em_qualquer_tela_restaurar_cessa"
+      "norm_label": "b-f5-06 \u2014 watchdog congelado: alarme na faixa em qualquer tela; restaurar cessa"
     },
     {
       "label": "B-F5-07 \u2014 `/eventos`: filtros, origem por select, prepend ao vivo, payload expans\u00edvel",
@@ -668,10 +657,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L248",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_b_f5_07_eventos_filtros_origem_por_select_prepend_ao_vivo_payload_expans\u00edvel",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "b-f5-07 \u2014 `/eventos`: filtros, origem por select, prepend ao vivo, payload expansivel",
-      "id": "docs_plans_tests_e2e_f5_b_f5_07_eventos_filtros_origem_por_select_prepend_ao_vivo_payload_expans\u00edvel"
+      "norm_label": "b-f5-07 \u2014 `/eventos`: filtros, origem por select, prepend ao vivo, payload expansivel"
     },
     {
       "label": "B-F5-08 \u2014 Home: l\u00e2mpadas dos 3 workers via polling; parar o recorder derruba a l\u00e2mpada",
@@ -679,10 +668,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L268",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_b_f5_08_home_l\u00e2mpadas_dos_3_workers_via_polling_parar_o_recorder_derruba_a_l\u00e2mpada",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "b-f5-08 \u2014 home: lampadas dos 3 workers via polling; parar o recorder derruba a lampada",
-      "id": "docs_plans_tests_e2e_f5_b_f5_08_home_l\u00e2mpadas_dos_3_workers_via_polling_parar_o_recorder_derruba_a_l\u00e2mpada"
+      "norm_label": "b-f5-08 \u2014 home: lampadas dos 3 workers via polling; parar o recorder derruba a lampada"
     },
     {
       "label": "B-F5-09 \u2014 RBAC: operador opera, mas n\u00e3o v\u00ea muta\u00e7\u00f5es de engenharia",
@@ -690,10 +679,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L288",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_b_f5_09_rbac_operador_opera_mas_n\u00e3o_v\u00ea_muta\u00e7\u00f5es_de_engenharia",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "b-f5-09 \u2014 rbac: operador opera, mas nao ve mutacoes de engenharia",
-      "id": "docs_plans_tests_e2e_f5_b_f5_09_rbac_operador_opera_mas_n\u00e3o_v\u00ea_muta\u00e7\u00f5es_de_engenharia"
+      "norm_label": "b-f5-09 \u2014 rbac: operador opera, mas nao ve mutacoes de engenharia"
     },
     {
       "label": "5. O que este roteiro N\u00c3O cobre",
@@ -701,10 +690,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L309",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_5_o_que_este_roteiro_n\u00e3o_cobre",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "5. o que este roteiro nao cobre",
-      "id": "docs_plans_tests_e2e_f5_5_o_que_este_roteiro_n\u00e3o_cobre"
+      "norm_label": "5. o que este roteiro nao cobre"
     },
     {
       "label": "6. Ordem de gate",
@@ -712,10 +701,10 @@
       "source_file": "docs/plans/tests-e2e-f5.md",
       "source_location": "L318",
       "_origin": "ast",
+      "id": "docs_plans_tests_e2e_f5_6_ordem_de_gate",
       "community": 76,
       "community_name": "4. Cen\u00e1rios",
-      "norm_label": "6. ordem de gate",
-      "id": "docs_plans_tests_e2e_f5_6_ordem_de_gate"
+      "norm_label": "6. ordem de gate"
     },
     {
       "label": "F5-operacao.md",
@@ -57810,9 +57799,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5a_operacao_dados",
-      "target": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os"
+      "target": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57821,9 +57810,9 @@
       "source_location": "L129",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
-      "target": "docs_plans_f5a_operacao_dados_ader\u00eancia_dod_do_plano_f5a"
+      "target": "docs_plans_f5a_operacao_dados_ader\u00eancia_dod_do_plano_f5a",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57832,9 +57821,9 @@
       "source_location": "L21",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
-      "target": "docs_plans_f5a_operacao_dados_contratos_verbatim_prd_7_1_v1_3_vigente_ap\u00f3s_a_tarefa_0_1"
+      "target": "docs_plans_f5a_operacao_dados_contratos_verbatim_prd_7_1_v1_3_vigente_ap\u00f3s_a_tarefa_0_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57843,9 +57832,9 @@
       "source_location": "L53",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
-      "target": "docs_plans_f5a_operacao_dados_etapa_0_emendas_documentais_e_d\u00e9bitos_de_contrato_spec_1_3_e_4_3_antes_de_qualquer_c\u00f3digo_de_feature"
+      "target": "docs_plans_f5a_operacao_dados_etapa_0_emendas_documentais_e_d\u00e9bitos_de_contrato_spec_1_3_e_4_3_antes_de_qualquer_c\u00f3digo_de_feature",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57854,9 +57843,9 @@
       "source_location": "L67",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
-      "target": "docs_plans_f5a_operacao_dados_etapa_1_contratos_ts_e_prediction_ts_spec_2_1_f5r_01"
+      "target": "docs_plans_f5a_operacao_dados_etapa_1_contratos_ts_e_prediction_ts_spec_2_1_f5r_01",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57865,9 +57854,9 @@
       "source_location": "L79",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
-      "target": "docs_plans_f5a_operacao_dados_etapa_2_hypertable_mpc_samples_e_recorder_spec_2_2_2_3"
+      "target": "docs_plans_f5a_operacao_dados_etapa_2_hypertable_mpc_samples_e_recorder_spec_2_2_2_3",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57876,9 +57865,9 @@
       "source_location": "L90",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
-      "target": "docs_plans_f5a_operacao_dados_etapa_3_apis_novas_ws_events_e_script_recovered_spec_2_4_4_1_4_2_5_7_2_2"
+      "target": "docs_plans_f5a_operacao_dados_etapa_3_apis_novas_ws_events_e_script_recovered_spec_2_4_4_1_4_2_5_7_2_2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57887,9 +57876,9 @@
       "source_location": "L104",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
-      "target": "docs_plans_f5a_operacao_dados_etapa_4_f_1_boot_ass\u00edncrono_do_worker_e_reescopo_do_lock_spec_6_f5r_05_06"
+      "target": "docs_plans_f5a_operacao_dados_etapa_4_f_1_boot_ass\u00edncrono_do_worker_e_reescopo_do_lock_spec_6_f5r_05_06",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57898,9 +57887,9 @@
       "source_location": "L117",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
-      "target": "docs_plans_f5a_operacao_dados_etapa_5_integra\u00e7\u00e3o_l2_e_fechamento_do_plano_f5a"
+      "target": "docs_plans_f5a_operacao_dados_etapa_5_integra\u00e7\u00e3o_l2_e_fechamento_do_plano_f5a",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57909,9 +57898,9 @@
       "source_location": "L31",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
-      "target": "docs_plans_f5a_operacao_dados_interfaces_produzidas_consumidas_pelo_f5b_assinaturas_exatas"
+      "target": "docs_plans_f5a_operacao_dados_interfaces_produzidas_consumidas_pelo_f5b_assinaturas_exatas",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57920,9 +57909,9 @@
       "source_location": "L143",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
-      "target": "docs_plans_f5a_operacao_dados_rastreabilidade_rf_decis\u00e3o_por_tarefa"
+      "target": "docs_plans_f5a_operacao_dados_rastreabilidade_rf_decis\u00e3o_por_tarefa",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57931,9 +57920,9 @@
       "source_location": "L11",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5a_operacao_dados_plano_f5a_opera\u00e7\u00e3o_dados_servi\u00e7os",
-      "target": "docs_plans_f5a_operacao_dados_regras_globais_valem_para_todas_as_tarefas"
+      "target": "docs_plans_f5a_operacao_dados_regras_globais_valem_para_todas_as_tarefas",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57942,9 +57931,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao",
-      "target": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o"
+      "target": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57953,9 +57942,9 @@
       "source_location": "L136",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
-      "target": "docs_plans_f5b_tela_operacao_ader\u00eancia_ao_aceite_f5_prd_8_definition_of_done_da_fase"
+      "target": "docs_plans_f5b_tela_operacao_ader\u00eancia_ao_aceite_f5_prd_8_definition_of_done_da_fase",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57964,9 +57953,9 @@
       "source_location": "L55",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
-      "target": "docs_plans_f5b_tela_operacao_etapa_1_canal_\u00fanico_de_sess\u00e3o_spec_7_1_f5r_04_22"
+      "target": "docs_plans_f5b_tela_operacao_etapa_1_canal_\u00fanico_de_sess\u00e3o_spec_7_1_f5r_04_22",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57975,9 +57964,9 @@
       "source_location": "L66",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
-      "target": "docs_plans_f5b_tela_operacao_etapa_2_resolveralarmes_e_faixa_anunciadora_real_spec_7_2_f5r_02_03_19"
+      "target": "docs_plans_f5b_tela_operacao_etapa_2_resolveralarmes_e_faixa_anunciadora_real_spec_7_2_f5r_02_03_19",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57986,9 +57975,9 @@
       "source_location": "L79",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
-      "target": "docs_plans_f5b_tela_operacao_etapa_3_navega\u00e7\u00e3o_home_e_eventos_spec_7_3_7_5"
+      "target": "docs_plans_f5b_tela_operacao_etapa_3_navega\u00e7\u00e3o_home_e_eventos_spec_7_3_7_5",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -57997,9 +57986,9 @@
       "source_location": "L91",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
-      "target": "docs_plans_f5b_tela_operacao_etapa_4_tela_operacao_flowid_blockid_spec_7_4_rf_701_702_704_adr_016"
+      "target": "docs_plans_f5b_tela_operacao_etapa_4_tela_operacao_flowid_blockid_spec_7_4_rf_701_702_704_adr_016",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58008,9 +57997,9 @@
       "source_location": "L104",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
-      "target": "docs_plans_f5b_tela_operacao_etapa_5_trend_central_com_predi\u00e7\u00e3o_spec_7_4_6_3_decis\u00e3o_a_11"
+      "target": "docs_plans_f5b_tela_operacao_etapa_5_trend_central_com_predi\u00e7\u00e3o_spec_7_4_6_3_decis\u00e3o_a_11",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58019,9 +58008,9 @@
       "source_location": "L116",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
-      "target": "docs_plans_f5b_tela_operacao_etapa_6_f_3_vetores_golden_python_ts_spec_7_6_decis\u00e3o_a_9_f5r_13"
+      "target": "docs_plans_f5b_tela_operacao_etapa_6_f_3_vetores_golden_python_ts_spec_7_6_decis\u00e3o_a_9_f5r_13",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58030,9 +58019,9 @@
       "source_location": "L127",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
-      "target": "docs_plans_f5b_tela_operacao_etapa_7_gate_final_da_fase_f5"
+      "target": "docs_plans_f5b_tela_operacao_etapa_7_gate_final_da_fase_f5",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58041,9 +58030,9 @@
       "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
-      "target": "docs_plans_f5b_tela_operacao_interfaces_consumidas_produzidas_no_f5a_n\u00e3o_redefinir"
+      "target": "docs_plans_f5b_tela_operacao_interfaces_consumidas_produzidas_no_f5a_n\u00e3o_redefinir",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58052,9 +58041,9 @@
       "source_location": "L24",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
-      "target": "docs_plans_f5b_tela_operacao_interfaces_internas_deste_plano_consumidas_entre_tarefas_assinaturas_exatas"
+      "target": "docs_plans_f5b_tela_operacao_interfaces_internas_deste_plano_consumidas_entre_tarefas_assinaturas_exatas",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58063,9 +58052,9 @@
       "source_location": "L148",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
-      "target": "docs_plans_f5b_tela_operacao_rastreabilidade_rf_decis\u00e3o_por_tarefa"
+      "target": "docs_plans_f5b_tela_operacao_rastreabilidade_rf_decis\u00e3o_por_tarefa",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58074,9 +58063,9 @@
       "source_location": "L11",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_f5b_tela_operacao_plano_f5b_opera\u00e7\u00e3o_tela_de_opera\u00e7\u00e3o",
-      "target": "docs_plans_f5b_tela_operacao_regras_globais"
+      "target": "docs_plans_f5b_tela_operacao_regras_globais",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58085,9 +58074,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5",
-      "target": "docs_plans_tests_e2e_f5_roteiro_l3_testes_e2e_de_browser_fase_f5_opera\u00e7\u00e3o"
+      "target": "docs_plans_tests_e2e_f5_roteiro_l3_testes_e2e_de_browser_fase_f5_opera\u00e7\u00e3o",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58096,9 +58085,9 @@
       "source_location": "L23",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_roteiro_l3_testes_e2e_de_browser_fase_f5_opera\u00e7\u00e3o",
-      "target": "docs_plans_tests_e2e_f5_1_precondi\u00e7\u00f5es_de_ambiente"
+      "target": "docs_plans_tests_e2e_f5_1_precondi\u00e7\u00f5es_de_ambiente",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58107,9 +58096,9 @@
       "source_location": "L61",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_roteiro_l3_testes_e2e_de_browser_fase_f5_opera\u00e7\u00e3o",
-      "target": "docs_plans_tests_e2e_f5_2_regras_de_execu\u00e7\u00e3o_com_a_tool_browser"
+      "target": "docs_plans_tests_e2e_f5_2_regras_de_execu\u00e7\u00e3o_com_a_tool_browser",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58118,9 +58107,9 @@
       "source_location": "L97",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_roteiro_l3_testes_e2e_de_browser_fase_f5_opera\u00e7\u00e3o",
-      "target": "docs_plans_tests_e2e_f5_3_evid\u00eancias"
+      "target": "docs_plans_tests_e2e_f5_3_evid\u00eancias",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58129,9 +58118,9 @@
       "source_location": "L109",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_roteiro_l3_testes_e2e_de_browser_fase_f5_opera\u00e7\u00e3o",
-      "target": "docs_plans_tests_e2e_f5_4_cen\u00e1rios"
+      "target": "docs_plans_tests_e2e_f5_4_cen\u00e1rios",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58140,9 +58129,9 @@
       "source_location": "L309",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_roteiro_l3_testes_e2e_de_browser_fase_f5_opera\u00e7\u00e3o",
-      "target": "docs_plans_tests_e2e_f5_5_o_que_este_roteiro_n\u00e3o_cobre"
+      "target": "docs_plans_tests_e2e_f5_5_o_que_este_roteiro_n\u00e3o_cobre",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58151,9 +58140,9 @@
       "source_location": "L318",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_roteiro_l3_testes_e2e_de_browser_fase_f5_opera\u00e7\u00e3o",
-      "target": "docs_plans_tests_e2e_f5_6_ordem_de_gate"
+      "target": "docs_plans_tests_e2e_f5_6_ordem_de_gate",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58162,9 +58151,9 @@
       "source_location": "L17",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_roteiro_l3_testes_e2e_de_browser_fase_f5_opera\u00e7\u00e3o",
-      "target": "docs_plans_tests_e2e_f5_regra_de_ferro"
+      "target": "docs_plans_tests_e2e_f5_regra_de_ferro",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58173,9 +58162,9 @@
       "source_location": "L113",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_4_cen\u00e1rios",
-      "target": "docs_plans_tests_e2e_f5_b_f5_01_login_operador_navega\u00e7\u00e3o_ao_grupo_opera\u00e7\u00e3o_seletor_e_redirect_direto"
+      "target": "docs_plans_tests_e2e_f5_b_f5_01_login_operador_navega\u00e7\u00e3o_ao_grupo_opera\u00e7\u00e3o_seletor_e_redirect_direto",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58184,9 +58173,9 @@
       "source_location": "L131",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_4_cen\u00e1rios",
-      "target": "docs_plans_tests_e2e_f5_b_f5_02_faceplates_barras_verticais_mono_tabular_l\u00e2mpada_building_no_deploy_rec\u00e9m_feito"
+      "target": "docs_plans_tests_e2e_f5_b_f5_02_faceplates_barras_verticais_mono_tabular_l\u00e2mpada_building_no_deploy_rec\u00e9m_feito",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58195,9 +58184,9 @@
       "source_location": "L150",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_4_cen\u00e1rios",
-      "target": "docs_plans_tests_e2e_f5_b_f5_03_armar_local_remoto_man_auto_pendente_at\u00e9_confirmar"
+      "target": "docs_plans_tests_e2e_f5_b_f5_03_armar_local_remoto_man_auto_pendente_at\u00e9_confirmar",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58206,9 +58195,9 @@
       "source_location": "L169",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_4_cen\u00e1rios",
-      "target": "docs_plans_tests_e2e_f5_b_f5_04_sp_em_auto_e_mv_em_man_clamp_materializa\u00e7\u00e3o_e_auditoria_em_eventos"
+      "target": "docs_plans_tests_e2e_f5_b_f5_04_sp_em_auto_e_mv_em_man_clamp_materializa\u00e7\u00e3o_e_auditoria_em_eventos",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58217,9 +58206,9 @@
       "source_location": "L191",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_4_cen\u00e1rios",
-      "target": "docs_plans_tests_e2e_f5_b_f5_05_trend_hist\u00f3rico_s\u00f3lido_linha_agora_predi\u00e7\u00e3o_sem_degrau_na_emenda"
+      "target": "docs_plans_tests_e2e_f5_b_f5_05_trend_hist\u00f3rico_s\u00f3lido_linha_agora_predi\u00e7\u00e3o_sem_degrau_na_emenda",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58228,9 +58217,9 @@
       "source_location": "L213",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_4_cen\u00e1rios",
-      "target": "docs_plans_tests_e2e_f5_b_f5_06_watchdog_congelado_alarme_na_faixa_em_qualquer_tela_restaurar_cessa"
+      "target": "docs_plans_tests_e2e_f5_b_f5_06_watchdog_congelado_alarme_na_faixa_em_qualquer_tela_restaurar_cessa",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58239,9 +58228,9 @@
       "source_location": "L248",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_4_cen\u00e1rios",
-      "target": "docs_plans_tests_e2e_f5_b_f5_07_eventos_filtros_origem_por_select_prepend_ao_vivo_payload_expans\u00edvel"
+      "target": "docs_plans_tests_e2e_f5_b_f5_07_eventos_filtros_origem_por_select_prepend_ao_vivo_payload_expans\u00edvel",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58250,9 +58239,9 @@
       "source_location": "L268",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_4_cen\u00e1rios",
-      "target": "docs_plans_tests_e2e_f5_b_f5_08_home_l\u00e2mpadas_dos_3_workers_via_polling_parar_o_recorder_derruba_a_l\u00e2mpada"
+      "target": "docs_plans_tests_e2e_f5_b_f5_08_home_l\u00e2mpadas_dos_3_workers_via_polling_parar_o_recorder_derruba_a_l\u00e2mpada",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -58261,9 +58250,9 @@
       "source_location": "L288",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_plans_tests_e2e_f5_4_cen\u00e1rios",
-      "target": "docs_plans_tests_e2e_f5_b_f5_09_rbac_operador_opera_mas_n\u00e3o_v\u00ea_muta\u00e7\u00f5es_de_engenharia"
+      "target": "docs_plans_tests_e2e_f5_b_f5_09_rbac_operador_opera_mas_n\u00e3o_v\u00ea_muta\u00e7\u00f5es_de_engenharia",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -199844,5 +199833,5 @@
       "source_file": "docs/ottimasystem-docsv1.1/adr/ADR-023-escopo-plataforma-v1.md"
     }
   ],
-  "built_at_commit": "1af0cf284d3fb7ba119a65e0f41ce400457ab283"
+  "built_at_commit": "2a55fcd3c1566c2a57ffb7a8caed330243e52dd1"
 }

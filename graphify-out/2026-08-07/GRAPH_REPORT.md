@@ -1,16 +1,16 @@
-# Graph Report - ottimaSystemV3  (2026-08-07)
+# Graph Report - ottimaSystemV3  (2026-08-06)
 
 ## Corpus Check
-- 389 files · ~329,997 words
+- 353 files · ~281,022 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 5048 nodes · 12287 edges · 275 communities (201 shown, 74 thin omitted)
+- 5047 nodes · 12287 edges · 274 communities (200 shown, 74 thin omitted)
 - Extraction: 93% EXTRACTED · 7% INFERRED · 0% AMBIGUOUS · INFERRED: 807 edges (avg confidence: 0.7)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `1af0cf28`
+- Built from commit: `2a55fcd3`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -324,7 +324,7 @@
 - **Flow execution semantics (scan cycle, exec_order, hot-swap, solver budget)** — docs_ottimasystem_docsv1_1_adr_adr_007_scan_cycle_ts_por_flow_scan_cycle, docs_ottimasystem_docsv1_1_adr_adr_024_ordem_execucao_explicita_exec_order, docs_ottimasystem_docsv1_1_adr_adr_011_hot_swap_sem_versionamento_hot_swap, docs_ottimasystem_docsv1_1_adr_adr_014_orcamento_solver_multiplicador_solver_budget [EXTRACTED 1.00]
 - **Docker Compose on-prem v1 service topology** — docs_ottimasystem_docsv1_1_adr_adr_023_escopo_plataforma_v1_docker_compose, docs_ottimasystem_docsv1_1_adr_adr_001_fastapi_all_in_fastapi, docs_ottimasystem_docsv1_1_adr_adr_002_barramento_redis_pubsub_redis_pubsub, docs_ottimasystem_docsv1_1_adr_adr_006_separacao_opc_worker_flow_runtime_recorder [EXTRACTED 1.00]
 
-## Communities (275 total, 74 thin omitted)
+## Communities (274 total, 74 thin omitted)
 
 ### Community 0 - "api.ts"
 Cohesion: 0.04
@@ -1099,10 +1099,10 @@ Nodes (11): publish_flow_stopped(), `user` ausente quando não há comando de us
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `await_until()` connect `await_until` to `Supervisor`, `FakeClock`, `MpcHost`, `processo_vivo`, `test_watchdog.py`, `collect`, `runtime_test_helpers.py`, `opc-worker/tests/test_security.py`, `Collector`, `harness_factory`, `test_failure.py`, `test_backpressure.py`, `ChannelListener`, `test_connection.py`, `test_writes.py`, `RecorderPipeline`, `test_heartbeat.py`, `test_pipeline.py`, `test_server.py`, `test_busy_loop_nao_trava_o_event_loop`, `test_dupla_cancelacao_durante_replace_nao_encolhe_o_pool`, `test_stats_conta_respawns_e_reflete_ocupacao`, `test_script.py`?**
-  _High betweenness centrality (0.032) - this node is a cross-community bridge._
+  _High betweenness centrality (0.029) - this node is a cross-community bridge._
 - **Why does `OpcWrite` connect `ConnectionRuntime` to `SolveResult`, `OpcWriteBlock`, `OpcSim`, `TagValue`, `MpcOrchestrator`, `Ambiente`, `ValueSnapshot`, `MpcBlock`, `bus.py`, `test_writes.py`, `collect`, `Any`?**
-  _High betweenness centrality (0.021) - this node is a cross-community bridge._
-- **Why does `ConnectionRuntime` connect `ConnectionRuntime` to `ottima_opc_worker/connection.py`, `describe_exception`, `Supervisor`, `WatchdogTask`, `ValueSubscription`, `ValueHeartbeat`, `ConnectionConfig`?**
+  _High betweenness centrality (0.018) - this node is a cross-community bridge._
+- **Why does `publish_event()` connect `publish_event` to `Supervisor`, `describe_exception`, `MpcOrchestrator`, `ottima_flow_runtime/main.py`, `publish_flow_stopped`, `FlowTask`, `ConnectionRuntime`, `blocks/base.py`, `OpcWriteBlock`, `harness_factory`, `test_backpressure.py`, `FlowCommand`, `RecorderPipeline`, `test_pipeline.py`, `routers/connections.py`, `ValueSubscription`, `bus.py`, `routers/projects.py`, `routers/tags.py`?**
   _High betweenness centrality (0.015) - this node is a cross-community bridge._
 - **Are the 136 inferred relationships involving `await_until()` (e.g. with `test_bloco_identico_mantem_o_estado_interno_do_tfs()` and `test_bloco_removido_desaparece_e_bloco_novo_nasce_null()`) actually correct?**
   _`await_until()` has 136 INFERRED edges - model-reasoned connections that need verification._

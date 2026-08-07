@@ -10,9 +10,9 @@
     "semantic_hash": "d3b3a4d4ece89e75085ee098ca8d5d0f"
   },
   "deploy/smoke.sh": {
-    "mtime": 1786113385.6577995,
-    "ast_hash": "f92882ed7b74a087a6286428b53f9b1a",
-    "semantic_hash": ""
+    "mtime": 1785974809.7452712,
+    "ast_hash": "2fe47eb76d75cd036bd733e72b615b2e",
+    "semantic_hash": "2fe47eb76d75cd036bd733e72b615b2e"
   },
   "frontend/e2e/fixtures.ts": {
     "mtime": 1785803706.5954165,
@@ -45,14 +45,14 @@
     "semantic_hash": "90e9c3068539b9ec0192c753ac513bcf"
   },
   "frontend/src/app/AnnunciatorBar.tsx": {
-    "mtime": 1786113385.7017984,
-    "ast_hash": "9b0d615e3037f5fbd3ff4dc83af2c1df",
-    "semantic_hash": ""
+    "mtime": 1785803706.5954165,
+    "ast_hash": "b0adf9fbe714243c213aa60f23db8a24",
+    "semantic_hash": "b0adf9fbe714243c213aa60f23db8a24"
   },
   "frontend/src/app/AppShell.tsx": {
-    "mtime": 1786113385.7057984,
-    "ast_hash": "494823ecc40bcf4bb69d160e8391fded",
-    "semantic_hash": ""
+    "mtime": 1785874485.0924082,
+    "ast_hash": "946d976bd9b7022d25d4b955f0b132c4",
+    "semantic_hash": "946d976bd9b7022d25d4b955f0b132c4"
   },
   "frontend/src/app/AuthGuard.tsx": {
     "mtime": 1785803706.5954165,
@@ -60,14 +60,14 @@
     "semantic_hash": "033decb6e1fedad34c036695c24bde16"
   },
   "frontend/src/app/HomePage.tsx": {
-    "mtime": 1786113385.7057984,
-    "ast_hash": "63f331c2e1c324f53e506c2ea40ce10b",
-    "semantic_hash": ""
+    "mtime": 1785803706.5954165,
+    "ast_hash": "6a9a613ec419fcaafb4e1d6cb7453ebd",
+    "semantic_hash": "6a9a613ec419fcaafb4e1d6cb7453ebd"
   },
   "frontend/src/app/router.tsx": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "d2a433149878101dedfee4cb628420c3",
-    "semantic_hash": ""
+    "mtime": 1785874485.0924082,
+    "ast_hash": "e4dd5fefc49873b04d73d6949afcab23",
+    "semantic_hash": "e4dd5fefc49873b04d73d6949afcab23"
   },
   "frontend/src/components/ui/button.tsx": {
     "mtime": 1785803706.5954165,
@@ -185,14 +185,14 @@
     "semantic_hash": "7c5f924781066d2a306a5bc3f5898eb2"
   },
   "frontend/src/features/flows/useFlowStatus.check.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "2d8714efe2dbbc323ca73b9dae3201ba",
-    "semantic_hash": ""
+    "mtime": 1785874485.0924082,
+    "ast_hash": "b92b7e9904bf4a49a2bb76c944cdefea",
+    "semantic_hash": "b92b7e9904bf4a49a2bb76c944cdefea"
   },
   "frontend/src/features/flows/useFlowStatus.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "e43083a5ab2fa9807f491298ed15b7c7",
-    "semantic_hash": ""
+    "mtime": 1785974809.7772703,
+    "ast_hash": "5d3d0383d20ae2f0a60c2cfdc0089f99",
+    "semantic_hash": "5d3d0383d20ae2f0a60c2cfdc0089f99"
   },
   "frontend/src/features/flows/useFlows.ts": {
     "mtime": 1785874485.0924082,
@@ -235,9 +235,9 @@
     "semantic_hash": "b0e11b5b7e4438219e73be7e8bea8ed0"
   },
   "frontend/src/features/trend/trendTheme.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "113c762fb7439284fea169f3917bb71d",
-    "semantic_hash": ""
+    "mtime": 1785850330.6598945,
+    "ast_hash": "7c547df072a012dbacc467d96e1283c8",
+    "semantic_hash": "7c547df072a012dbacc467d96e1283c8"
   },
   "frontend/src/features/trend/useHistory.check.ts": {
     "mtime": 1785850330.6638944,
@@ -250,14 +250,14 @@
     "semantic_hash": "c3ffda3e0d72939ba5094fdfe5aae4b6"
   },
   "frontend/src/lib/api-types.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "acde9ad2694867d29ee44b12c8ec9620",
-    "semantic_hash": ""
+    "mtime": 1785974809.7772703,
+    "ast_hash": "5a0527f36a3a615f724deff9933bcc94",
+    "semantic_hash": "5a0527f36a3a615f724deff9933bcc94"
   },
   "frontend/src/lib/api.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "ea023c1506340a5a67505579b61b88d0",
-    "semantic_hash": ""
+    "mtime": 1785874485.0924082,
+    "ast_hash": "890643b94ca28c1c2afd2f3b2898710b",
+    "semantic_hash": "890643b94ca28c1c2afd2f3b2898710b"
   },
   "frontend/src/lib/cn.ts": {
     "mtime": 1785803706.5954165,
@@ -270,7 +270,7 @@
     "semantic_hash": "6c86b4cfc1a2729fed7df8bb4a0d021b"
   },
   "frontend/tsconfig.json": {
-    "mtime": 1786113384.7698207,
+    "mtime": 1785803706.5954165,
     "ast_hash": "58e11e614122775fdb46572fd5159f7b",
     "semantic_hash": "58e11e614122775fdb46572fd5159f7b"
   },
@@ -280,9 +280,9 @@
     "semantic_hash": "fe09367d38dc0d8fcbf5a31f139582a7"
   },
   "packages/ottima-core/alembic/env.py": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "96af42d60f30ec5adcbcfc0acb5525ea",
-    "semantic_hash": ""
+    "mtime": 1785803706.5954165,
+    "ast_hash": "09b8783138730c2df9a1c76139ccba91",
+    "semantic_hash": "09b8783138730c2df9a1c76139ccba91"
   },
   "packages/ottima-core/alembic/versions/0001_relational.py": {
     "mtime": 1785803706.5954165,
@@ -305,9 +305,9 @@
     "semantic_hash": "07772b7f51b56de751985d12811565aa"
   },
   "packages/ottima-core/src/ottima_core/bus.py": {
-    "mtime": 1786113385.713798,
-    "ast_hash": "5bf0ba2f4bf324cb4f5b1719c641366a",
-    "semantic_hash": ""
+    "mtime": 1785974809.7772703,
+    "ast_hash": "635df372c2f1128cbb456cff4b8c2daa",
+    "semantic_hash": "635df372c2f1128cbb456cff4b8c2daa"
   },
   "packages/ottima-core/src/ottima_core/certs.py": {
     "mtime": 1785850330.7198927,
@@ -315,9 +315,9 @@
     "semantic_hash": "67bcd3129e7c2cc1aea9e481c57a87ef"
   },
   "packages/ottima-core/src/ottima_core/config.py": {
-    "mtime": 1786113385.713798,
-    "ast_hash": "5756029293338e1ad8972637ce9a0f2e",
-    "semantic_hash": ""
+    "mtime": 1785850330.7198927,
+    "ast_hash": "93e427551a3be2d23dfbae241f2c4b05",
+    "semantic_hash": "93e427551a3be2d23dfbae241f2c4b05"
   },
   "packages/ottima-core/src/ottima_core/db.py": {
     "mtime": 1785803706.5994165,
@@ -330,9 +330,9 @@
     "semantic_hash": "863623dcd67b660ab390dc8b2c6ddbb6"
   },
   "packages/ottima-core/src/ottima_core/models/__init__.py": {
-    "mtime": 1786113385.713798,
-    "ast_hash": "0fedbdca7dfdf1f80689b273e1e74077",
-    "semantic_hash": ""
+    "mtime": 1785850330.7598915,
+    "ast_hash": "2c8fdc9c55e771b717b6f93026fba612",
+    "semantic_hash": "2c8fdc9c55e771b717b6f93026fba612"
   },
   "packages/ottima-core/src/ottima_core/models/base.py": {
     "mtime": 1785803706.5994165,
@@ -360,9 +360,9 @@
     "semantic_hash": "84e15d82118ed55ebf1c45e023afad89"
   },
   "packages/ottima-core/src/ottima_core/models/timeseries.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "dcb75cb7d37dd09c3507e1b4ffd10978",
-    "semantic_hash": ""
+    "mtime": 1785850330.7598915,
+    "ast_hash": "7674ea2ab106a5153c924c075280349b",
+    "semantic_hash": "7674ea2ab106a5153c924c075280349b"
   },
   "packages/ottima-core/src/ottima_core/models/user.py": {
     "mtime": 1785803706.5994165,
@@ -400,9 +400,9 @@
     "semantic_hash": "5c6be10b308f82c7b050be8ee1e46a0e"
   },
   "packages/ottima-core/src/ottima_core/schemas/history.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "5b6f6481f123bd8b03fc1f7cc7144f05",
-    "semantic_hash": ""
+    "mtime": 1785850330.9318864,
+    "ast_hash": "9804fc61ecddb5bb505a8dcdb0060566",
+    "semantic_hash": "9804fc61ecddb5bb505a8dcdb0060566"
   },
   "packages/ottima-core/src/ottima_core/schemas/projects.py": {
     "mtime": 1785803706.5994165,
@@ -430,9 +430,9 @@
     "semantic_hash": "fa0edccd8a030dbdfe52efd3b20e8e15"
   },
   "packages/ottima-core/tests/test_bus_events.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "9070d5bef80b2f46ca7e30629bbaced2",
-    "semantic_hash": ""
+    "mtime": 1785974809.7812703,
+    "ast_hash": "3af14133ce9fa1976e13c0568b7f1fbe",
+    "semantic_hash": "3af14133ce9fa1976e13c0568b7f1fbe"
   },
   "packages/ottima-core/tests/test_certs.py": {
     "mtime": 1785850330.943886,
@@ -470,9 +470,9 @@
     "semantic_hash": "3c8cc2a4a536fe39947e7cf94c2609af"
   },
   "packages/ottima-core/tests/test_timescale.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "725f983554090108c751014cd236f1a2",
-    "semantic_hash": ""
+    "mtime": 1785803706.5994165,
+    "ast_hash": "2958b95f6890c02777d0c0abf0d50569",
+    "semantic_hash": "2958b95f6890c02777d0c0abf0d50569"
   },
   "pyproject.toml": {
     "mtime": 1785974809.7812703,
@@ -490,9 +490,9 @@
     "semantic_hash": "64ab1988796e1e2abdbb0897db993ab5"
   },
   "services/api/src/ottima_api/app.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "014aaf346d3a70db74dd171e8ec354e7",
-    "semantic_hash": ""
+    "mtime": 1785974809.7812703,
+    "ast_hash": "42181d4613ac62dd75b6387e38661c96",
+    "semantic_hash": "42181d4613ac62dd75b6387e38661c96"
   },
   "services/api/src/ottima_api/deps.py": {
     "mtime": 1785850331.0358832,
@@ -530,19 +530,19 @@
     "semantic_hash": "754e789e612c3236db6869adc8d24a5b"
   },
   "services/api/src/ottima_api/routers/flows.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "61c942677cb3fe71b030c6ce217e8558",
-    "semantic_hash": ""
+    "mtime": 1785974809.7812703,
+    "ast_hash": "0bd34173471243cf427e6d4ac52b5fd5",
+    "semantic_hash": "0bd34173471243cf427e6d4ac52b5fd5"
   },
   "services/api/src/ottima_api/routers/health.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "c1fdac508fde1decec98c5aa85b184de",
-    "semantic_hash": ""
+    "mtime": 1785803706.5994165,
+    "ast_hash": "a072ba7d8b16b944b305f3a577239e93",
+    "semantic_hash": "a072ba7d8b16b944b305f3a577239e93"
   },
   "services/api/src/ottima_api/routers/history.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "884cbcedd0c06846db8eda738b8eac23",
-    "semantic_hash": ""
+    "mtime": 1785850331.1278806,
+    "ast_hash": "c439de9911f7f43f1e364becbe0d9594",
+    "semantic_hash": "c439de9911f7f43f1e364becbe0d9594"
   },
   "services/api/src/ottima_api/routers/projects.py": {
     "mtime": 1785874485.1444066,
@@ -565,9 +565,9 @@
     "semantic_hash": "e16b2a3e1d7c4050feb1b4ec428ec342"
   },
   "services/api/src/ottima_api/ws.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "369fc041fc7d4273ec325668ddaa5238",
-    "semantic_hash": ""
+    "mtime": 1785974809.7812703,
+    "ast_hash": "3d570333b03c45de866b1a0ed1b87ad2",
+    "semantic_hash": "3d570333b03c45de866b1a0ed1b87ad2"
   },
   "services/api/tests/conftest.py": {
     "mtime": 1785850331.1558797,
@@ -610,9 +610,9 @@
     "semantic_hash": "e8fc475149f7f797ac8950fba3a2c6b0"
   },
   "services/api/tests/test_health.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "fcf5c7d409639182b1fa185140ee4386",
-    "semantic_hash": ""
+    "mtime": 1785803706.5994165,
+    "ast_hash": "257634b20cec0cd56d357454ef9dcbb4",
+    "semantic_hash": "257634b20cec0cd56d357454ef9dcbb4"
   },
   "services/api/tests/test_history.py": {
     "mtime": 1785850331.2398772,
@@ -655,29 +655,29 @@
     "semantic_hash": "d4e4c7a3909ea0ce91193eb90122513a"
   },
   "services/flow-runtime/src/ottima_flow_runtime/blocks/base.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "d043205cd14abd4e7d6e02c876c4106a",
-    "semantic_hash": ""
+    "mtime": 1785874485.1484065,
+    "ast_hash": "ae8e0286ead0d752147e5dbc36b66bb3",
+    "semantic_hash": "ae8e0286ead0d752147e5dbc36b66bb3"
   },
   "services/flow-runtime/src/ottima_flow_runtime/blocks/opc_read.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "08b6656d0a02caa7b01fceabebe797a3",
-    "semantic_hash": ""
+    "mtime": 1785874485.1484065,
+    "ast_hash": "d2c008570d90066122950da678d841ba",
+    "semantic_hash": "d2c008570d90066122950da678d841ba"
   },
   "services/flow-runtime/src/ottima_flow_runtime/blocks/opc_write.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "98866a1314a68465e46994c7c9f8f15d",
-    "semantic_hash": ""
+    "mtime": 1785874485.1484065,
+    "ast_hash": "c168fdc0c2144ab4e8df28cb72eb55bd",
+    "semantic_hash": "c168fdc0c2144ab4e8df28cb72eb55bd"
   },
   "services/flow-runtime/src/ottima_flow_runtime/blocks/script.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "bb60c71eab93f6630c1c7198a478213a",
-    "semantic_hash": ""
+    "mtime": 1785874485.1484065,
+    "ast_hash": "00010eb0dfcca566db1f5450b0f486f6",
+    "semantic_hash": "00010eb0dfcca566db1f5450b0f486f6"
   },
   "services/flow-runtime/src/ottima_flow_runtime/blocks/tfs.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "52a7d65c8ab25f4ec726c6b3fb2ca530",
-    "semantic_hash": ""
+    "mtime": 1785974809.7812703,
+    "ast_hash": "a3a278956193352bef44a97f2564bfae",
+    "semantic_hash": "a3a278956193352bef44a97f2564bfae"
   },
   "services/flow-runtime/src/ottima_flow_runtime/events.py": {
     "mtime": 1785974809.7812703,
@@ -690,9 +690,9 @@
     "semantic_hash": "88430aafdcadfd6fb06fa22a67fc2c13"
   },
   "services/flow-runtime/src/ottima_flow_runtime/scheduler.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "c2b21e875543293471e3f9f629b045dd",
-    "semantic_hash": ""
+    "mtime": 1785874485.1484065,
+    "ast_hash": "a997a0bc086c989047b7d309bae6909b",
+    "semantic_hash": "a997a0bc086c989047b7d309bae6909b"
   },
   "services/flow-runtime/src/ottima_flow_runtime/script_pool.py": {
     "mtime": 1785974809.78527,
@@ -710,9 +710,9 @@
     "semantic_hash": "8ffee934509a95d536a44916f92af26b"
   },
   "services/flow-runtime/src/ottima_flow_runtime/supervisor.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "adb936549af1a8bdb6e51be32368e74b",
-    "semantic_hash": ""
+    "mtime": 1785974809.78527,
+    "ast_hash": "cd38a212e9a2b3c44d88bd2044b600b4",
+    "semantic_hash": "cd38a212e9a2b3c44d88bd2044b600b4"
   },
   "services/flow-runtime/tests/conftest.py": {
     "mtime": 1785974809.78527,
@@ -740,14 +740,14 @@
     "semantic_hash": "98542d6a518b9e815db7d1c0f88beb8f"
   },
   "services/flow-runtime/tests/test_scheduler.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "8e157e7da48dd4d8867266e04bb6f77b",
-    "semantic_hash": ""
+    "mtime": 1785974809.78527,
+    "ast_hash": "db9a23f0a686835b577dda18d9a6908b",
+    "semantic_hash": "db9a23f0a686835b577dda18d9a6908b"
   },
   "services/flow-runtime/tests/test_script.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "c7f32192b415c7d7bae4e4c242be48cc",
-    "semantic_hash": ""
+    "mtime": 1785974809.78527,
+    "ast_hash": "c122cf7d180f10bbb3fc57dcdb41cdbb",
+    "semantic_hash": "c122cf7d180f10bbb3fc57dcdb41cdbb"
   },
   "services/flow-runtime/tests/test_snapshot.py": {
     "mtime": 1785974809.78527,
@@ -880,19 +880,19 @@
     "semantic_hash": "42ac80f2aeb4c4878681ab2904292949"
   },
   "services/recorder/src/ottima_recorder/main.py": {
-    "mtime": 1786113385.725798,
-    "ast_hash": "c79aff3956af08ec358093c0956bc2ee",
-    "semantic_hash": ""
+    "mtime": 1785850331.6358652,
+    "ast_hash": "cc69b79fca0965ecd72129d401ead6f3",
+    "semantic_hash": "cc69b79fca0965ecd72129d401ead6f3"
   },
   "services/recorder/src/ottima_recorder/pipeline.py": {
-    "mtime": 1786113385.725798,
-    "ast_hash": "acc19253363b48f8296472db2e4d96a6",
-    "semantic_hash": ""
+    "mtime": 1785974809.78927,
+    "ast_hash": "a68a98e3ebcb657d94a7ed28b3167aa1",
+    "semantic_hash": "a68a98e3ebcb657d94a7ed28b3167aa1"
   },
   "services/recorder/tests/test_backpressure.py": {
-    "mtime": 1786113385.725798,
-    "ast_hash": "aa050ad0e2b018652a9cfe5957c2445d",
-    "semantic_hash": ""
+    "mtime": 1785974809.78927,
+    "ast_hash": "04f7bc3ece3a69c4277810218c74a761",
+    "semantic_hash": "04f7bc3ece3a69c4277810218c74a761"
   },
   "services/recorder/tests/test_health.py": {
     "mtime": 1785803706.6034162,
@@ -900,14 +900,14 @@
     "semantic_hash": "670d52a7e6e49db96ad6b74f3723190c"
   },
   "services/recorder/tests/test_pipeline.py": {
-    "mtime": 1786113385.725798,
-    "ast_hash": "6063d52b7b535a6e16998642ee30ef9e",
-    "semantic_hash": ""
+    "mtime": 1785974809.78927,
+    "ast_hash": "5988d2c3135e24af313e317b8b1174a5",
+    "semantic_hash": "5988d2c3135e24af313e317b8b1174a5"
   },
   "tests/e2e/conftest.py": {
-    "mtime": 1786113385.725798,
-    "ast_hash": "7301e65f132b3f0699e65ea60bc9f851",
-    "semantic_hash": ""
+    "mtime": 1785974809.78927,
+    "ast_hash": "c496a6d3ed630c37f7cffce551cd84b9",
+    "semantic_hash": "c496a6d3ed630c37f7cffce551cd84b9"
   },
   "tests/e2e/f3_support.py": {
     "mtime": 1785874485.1524065,
@@ -970,9 +970,9 @@
     "semantic_hash": "d3e4c6e88ec43c3ff804335dcf63ed98"
   },
   "CLAUDE.md": {
-    "mtime": 1786113385.6577995,
-    "ast_hash": "ea92f7de60415c6c52d77b29dd350dfc",
-    "semantic_hash": ""
+    "mtime": 1785974809.7332714,
+    "ast_hash": "55eec1c73e05aa0d03a1e1a412739ec1",
+    "semantic_hash": "55eec1c73e05aa0d03a1e1a412739ec1"
   },
   "DESIGN.md": {
     "mtime": 1785775688.2543318,
@@ -1000,9 +1000,9 @@
     "semantic_hash": "3a638991ed9806d8feae4ad308eb8986"
   },
   "docs/PRD.md": {
-    "mtime": 1786113385.6577995,
-    "ast_hash": "79423a8f9ab5dcf72136d93d9a2b6e98",
-    "semantic_hash": ""
+    "mtime": 1785850249.6063461,
+    "ast_hash": "f3ff4f57a6ef8a6a04b4a3ef0719b36c",
+    "semantic_hash": "f3ff4f57a6ef8a6a04b4a3ef0719b36c"
   },
   "docs/README.md": {
     "mtime": 1785773488.0,
@@ -1400,14 +1400,14 @@
     "semantic_hash": "2cd38729a143635fe1d958388b94ca60"
   },
   "docs/specs/F2-aquisicao.md": {
-    "mtime": 1786113385.6977985,
-    "ast_hash": "b203fded3bff9bc3a8bd597df413b139",
-    "semantic_hash": ""
+    "mtime": 1785807253.9948504,
+    "ast_hash": "7ef99d9668e3c6d2c4b3315b40b15216",
+    "semantic_hash": "7ef99d9668e3c6d2c4b3315b40b15216"
   },
   "docs/specs/F3-motor-canvas.md": {
-    "mtime": 1786113385.6977985,
-    "ast_hash": "f4b022831c491416d5cbf8a02669c61e",
-    "semantic_hash": ""
+    "mtime": 1785879161.0594568,
+    "ast_hash": "a9d2ea0fd9333ef4094255683d6b5697",
+    "semantic_hash": "a9d2ea0fd9333ef4094255683d6b5697"
   },
   "docs/superpowers/plans/2026-08-03-F1-fundacao.md": {
     "mtime": 1785780161.8489811,
@@ -1425,8 +1425,28 @@
     "semantic_hash": "b4f0023db3ee5b95bf40faeed6dd9939"
   },
   "docs/specs/F4-mpc.md": {
-    "mtime": 1786113385.7017984,
-    "ast_hash": "4c674b3f6437bd0002274d6bfc7a4818",
+    "mtime": 1785880436.6037858,
+    "ast_hash": "e98fd7830dadc639ede36a0a903da656",
+    "semantic_hash": "e98fd7830dadc639ede36a0a903da656"
+  },
+  ".clinerules/caveman.md": {
+    "mtime": 1785881235.8822293,
+    "ast_hash": "b1cdbe1b6654ab792a3744966034dcf7",
+    "semantic_hash": ""
+  },
+  ".github/copilot-instructions.md": {
+    "mtime": 1785881235.8822293,
+    "ast_hash": "b1cdbe1b6654ab792a3744966034dcf7",
+    "semantic_hash": ""
+  },
+  ".opencode/AGENTS.md": {
+    "mtime": 1785881235.8822293,
+    "ast_hash": "b1cdbe1b6654ab792a3744966034dcf7",
+    "semantic_hash": ""
+  },
+  ".windsurf/rules/caveman.md": {
+    "mtime": 1785881235.8822293,
+    "ast_hash": "b439cfa81819754ec6be648d7e2073ca",
     "semantic_hash": ""
   },
   "AGENTS.md": {
@@ -1515,9 +1535,9 @@
     "semantic_hash": "7416f401617698f3058b65be8aea0de9"
   },
   "frontend/src/lib/contracts.gen.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "78eaf10b25ea80e15caad2dccca69ab7",
-    "semantic_hash": ""
+    "mtime": 1785974809.7772703,
+    "ast_hash": "56dc877751f5299be79224b3f2be9734",
+    "semantic_hash": "56dc877751f5299be79224b3f2be9734"
   },
   "packages/ottima-core/src/ottima_core/contracts_export.py": {
     "mtime": 1785974809.7772703,
@@ -1555,9 +1575,9 @@
     "semantic_hash": "e51f8edd4d0c26abe0380e1b44b059e2"
   },
   "packages/ottima-core/tests/test_contracts_export.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "8ad0064aeb91fa1b741e28f2d009233f",
-    "semantic_hash": ""
+    "mtime": 1785974809.7812703,
+    "ast_hash": "b33a44e32f83dd5ebaa8666c4833c047",
+    "semantic_hash": "b33a44e32f83dd5ebaa8666c4833c047"
   },
   "packages/ottima-core/tests/test_flowgraph_mpc.py": {
     "mtime": 1785974809.7812703,
@@ -1580,9 +1600,9 @@
     "semantic_hash": "ddb0045750f84830e9a9fdf2f6778001"
   },
   "services/api/src/ottima_api/routers/operate.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "dffd83f474e7fbabef87a43c85e28b49",
-    "semantic_hash": ""
+    "mtime": 1785974809.7812703,
+    "ast_hash": "64d754e230a185b41e8bc32c3d8840f1",
+    "semantic_hash": "64d754e230a185b41e8bc32c3d8840f1"
   },
   "services/api/tests/test_flows_mpc.py": {
     "mtime": 1785974809.7812703,
@@ -1590,19 +1610,19 @@
     "semantic_hash": "0c21557f15a611c81560f5d36889938b"
   },
   "services/api/tests/test_operate.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "4e03f3214bba1973cbd129f8de0a4973",
-    "semantic_hash": ""
+    "mtime": 1785974809.7812703,
+    "ast_hash": "c06633ec175e35b93011548d0386e9ae",
+    "semantic_hash": "c06633ec175e35b93011548d0386e9ae"
   },
   "services/api/tests/test_ws_mpc.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "0fe6e16198309ec0d21319d3de72e933",
-    "semantic_hash": ""
+    "mtime": 1785974809.7812703,
+    "ast_hash": "0cba679761b71fc2e52e79323166bbdb",
+    "semantic_hash": "0cba679761b71fc2e52e79323166bbdb"
   },
   "services/flow-runtime/src/ottima_flow_runtime/blocks/mpc.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "0dc277ea91c145eb49a714c8ed8cdbc8",
-    "semantic_hash": ""
+    "mtime": 1785974809.7812703,
+    "ast_hash": "0c9241b69a4c2b4288ecf14f6f9f0f12",
+    "semantic_hash": "0c9241b69a4c2b4288ecf14f6f9f0f12"
   },
   "services/flow-runtime/src/ottima_flow_runtime/definition.py": {
     "mtime": 1785974809.7812703,
@@ -1630,14 +1650,14 @@
     "semantic_hash": "4f1e42bcef33dddbdc453846e6d12fab"
   },
   "services/flow-runtime/src/ottima_flow_runtime/mpc/host.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "3fc2271d9aa197baff32a227ef10fd52",
-    "semantic_hash": ""
+    "mtime": 1785974809.7812703,
+    "ast_hash": "76874a9f2eebe7bb42b6de33d610554e",
+    "semantic_hash": "76874a9f2eebe7bb42b6de33d610554e"
   },
   "services/flow-runtime/src/ottima_flow_runtime/mpc/worker.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "9b2d1f094de7bb061e4a4460760f4a64",
-    "semantic_hash": ""
+    "mtime": 1785974809.7812703,
+    "ast_hash": "bd58efa370f430e6b6d70fee3422d0a2",
+    "semantic_hash": "bd58efa370f430e6b6d70fee3422d0a2"
   },
   "services/flow-runtime/src/ottima_flow_runtime/mpc_arming.py": {
     "mtime": 1785974809.78527,
@@ -1645,14 +1665,14 @@
     "semantic_hash": "76d56d359b9f08247b3dad8549aba8cb"
   },
   "services/flow-runtime/src/ottima_flow_runtime/supervisor_mpc.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "45b39fee98ef9cd7930184b8beab628e",
-    "semantic_hash": ""
+    "mtime": 1785974809.78527,
+    "ast_hash": "5ba79d982bc87cf57414e8b6e9f5a803",
+    "semantic_hash": "5ba79d982bc87cf57414e8b6e9f5a803"
   },
   "services/flow-runtime/tests/runtime_test_helpers.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "c1e8557a40707c3a10d4a7ac43ff25fa",
-    "semantic_hash": ""
+    "mtime": 1785974809.78527,
+    "ast_hash": "46daa20cc317876710977f212f6bab1f",
+    "semantic_hash": "46daa20cc317876710977f212f6bab1f"
   },
   "services/flow-runtime/tests/test_definition.py": {
     "mtime": 1785974809.78527,
@@ -1670,9 +1690,9 @@
     "semantic_hash": "c7c6b204ae4473157a9abf20d388998d"
   },
   "services/flow-runtime/tests/test_mpc_block.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "a05275924f2f31275ba3620744b8c84a",
-    "semantic_hash": ""
+    "mtime": 1785974809.78527,
+    "ast_hash": "2c9236c712fa7cc0e2f07aa3d90e2e03",
+    "semantic_hash": "2c9236c712fa7cc0e2f07aa3d90e2e03"
   },
   "services/flow-runtime/tests/test_mpc_builder.py": {
     "mtime": 1785974809.78527,
@@ -1705,9 +1725,9 @@
     "semantic_hash": "ffcdd7e12ba1195d7565b896747bba3e"
   },
   "services/flow-runtime/tests/test_supervisor_mpc.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "d889efb2216d0caffcd27aa5dafa7fa9",
-    "semantic_hash": ""
+    "mtime": 1785974809.78527,
+    "ast_hash": "5eee6d91246b7f11e0b8ab58bc4371c8",
+    "semantic_hash": "5eee6d91246b7f11e0b8ab58bc4371c8"
   },
   "services/opc-worker/tests/worker_test_helpers.py": {
     "mtime": 1785974809.78927,
@@ -1720,14 +1740,14 @@
     "semantic_hash": "ba37f505b4146f2e15a1fb8de9599119"
   },
   "tests/e2e/test_f4_mpc.py": {
-    "mtime": 1786113385.725798,
-    "ast_hash": "61fb6549662bdbfef350aa7f7441ec68",
-    "semantic_hash": ""
+    "mtime": 1785974809.78927,
+    "ast_hash": "2ec1dfb2d44bc093b370331655076f17",
+    "semantic_hash": "2ec1dfb2d44bc093b370331655076f17"
   },
   "tests/e2e/test_f4_ws.py": {
-    "mtime": 1786113385.725798,
-    "ast_hash": "e91fb96998b440ac859bef54dcd83c41",
-    "semantic_hash": ""
+    "mtime": 1785974809.78927,
+    "ast_hash": "e90f1830825bd21c2e395a1e5d049eac",
+    "semantic_hash": "e90f1830825bd21c2e395a1e5d049eac"
   },
   "tests/testkit/__init__.py": {
     "mtime": 1785974809.78927,
@@ -1739,9 +1759,14 @@
     "ast_hash": "877cf65e9857eefaff3ac79776dcdaef",
     "semantic_hash": "877cf65e9857eefaff3ac79776dcdaef"
   },
+  "Resume this session with.txt": {
+    "mtime": 1786003869.7955914,
+    "ast_hash": "e60429572be4b0752abce14498e51840",
+    "semantic_hash": ""
+  },
   "docs/specs/F5-operacao.md": {
-    "mtime": 1786113385.7017984,
-    "ast_hash": "ddfd8ce82dc69bc50734234e49ff3e1f",
+    "mtime": 1786022102.882516,
+    "ast_hash": "ba10650adb5cc991d120ce7489a327ec",
     "semantic_hash": ""
   },
   "docs/plans/F5a-operacao-dados.md": {
@@ -1757,206 +1782,6 @@
   "docs/plans/tests-e2e-f5.md": {
     "mtime": 1786024325.458417,
     "ast_hash": "7a63dc53712416da24e9df8a0903aa82",
-    "semantic_hash": ""
-  },
-  "frontend/src/app/AnnunciatorBar.check.ts": {
-    "mtime": 1786113385.7017984,
-    "ast_hash": "ded86d3de1465785a138dc375238d767",
-    "semantic_hash": ""
-  },
-  "frontend/src/app/CanalAoVivo.tsx": {
-    "mtime": 1786113385.7057984,
-    "ast_hash": "8bde1bc39fec7b8310df1d2a2b433523",
-    "semantic_hash": ""
-  },
-  "frontend/src/app/HomePage.check.ts": {
-    "mtime": 1786113385.7057984,
-    "ast_hash": "a30ab08ad932299ac5a94f673a0b56e6",
-    "semantic_hash": ""
-  },
-  "frontend/src/app/alarmes.check.ts": {
-    "mtime": 1786113385.7057984,
-    "ast_hash": "8a438ff62a8062eb7ba62db473d96fe7",
-    "semantic_hash": ""
-  },
-  "frontend/src/app/alarmes.ts": {
-    "mtime": 1786113385.7057984,
-    "ast_hash": "c5b9924335fb88f008fe48778098dc61",
-    "semantic_hash": ""
-  },
-  "frontend/src/app/bootstrapAlarmes.check.ts": {
-    "mtime": 1786113385.7057984,
-    "ast_hash": "ee42a6213913a63ee4c5cd1ac7efed33",
-    "semantic_hash": ""
-  },
-  "frontend/src/app/bootstrapAlarmes.ts": {
-    "mtime": 1786113385.7057984,
-    "ast_hash": "2b33245d67e4d7bad3ad58c91a3d923d",
-    "semantic_hash": ""
-  },
-  "frontend/src/app/canalAoVivo.check.ts": {
-    "mtime": 1786113385.7057984,
-    "ast_hash": "9e20551fd07877db40cb9ca39d3a866a",
-    "semantic_hash": ""
-  },
-  "frontend/src/app/useWorkersHealth.check.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "33755a09c057975ab5295e1a26a1c668",
-    "semantic_hash": ""
-  },
-  "frontend/src/app/useWorkersHealth.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "26e946c7e967884e88be6fbd2b265134",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/events/EventsPage.tsx": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "0a67ddc510dcd62aabb04d119af7d7b3",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/events/eventos.check.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "fa4f2cc28eb66bf8e2251ed40ef2303c",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/events/eventos.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "37b5e3cc28f65f53a3336f50b5111349",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/flows/mpc/mpcLogic.golden.check.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "ec691a77092621e7737d70ea8d0a485b",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/flows/mpc/mpcLogic.golden.json": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "5a4a12133158f6b04404efdc436f3e16",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/FaceplatePrincipal.tsx": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "8bb79682bd2013281915fc577bf29bb4",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/FaceplateVariavel.tsx": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "456f156ddfc4ad820c253fc5b79ed299",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/OperatePage.tsx": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "acc0980669b84ed6f3247f1d3ce00f91",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/OperateSelectorPage.tsx": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "382448faa47a90ede412c5c7257baff3",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/TrendOperacao.tsx": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "c627e07a3ac78594a45687b02924abf5",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/clamp.check.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "5b4c95f26bca4f37fe25d8d61c91c868",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/clamp.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "3f8e9a3251ab6d0b2696a8abfc885967",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/pendencia.check.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "61e4abf1a81d7efad0844f067ed33d2e",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/pendencia.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "d080c8e0f62a9d609f98c4531de695f7",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/trendOperacao.check.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "be4ab90a923c0a21a7c0bf22e47f96f2",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/trendOperacao.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "bdd0c78eca3e5adea26570295e71ff3d",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/useHistoryMpc.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "c522f26f4ffc43027b82710e6bfaca7b",
-    "semantic_hash": ""
-  },
-  "frontend/src/features/operate/useMpcs.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "c1b751273b7daa714535f32709dea555",
-    "semantic_hash": ""
-  },
-  "packages/ottima-core/alembic/versions/0003_mpc_samples.py": {
-    "mtime": 1786113385.713798,
-    "ast_hash": "16398e6c09fc252f26a9be8fec980fe9",
-    "semantic_hash": ""
-  },
-  "packages/ottima-core/src/ottima_core/mpc_golden_export.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "2c2ec80db4b4da91a9a9dd54cf55f300",
-    "semantic_hash": ""
-  },
-  "packages/ottima-core/tests/test_mpc_golden_export.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "fb4452edc6794bcb98ef818cd98852a4",
-    "semantic_hash": ""
-  },
-  "scripts/setup-l3.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "cf4094ead966b673451eb661533879c2",
-    "semantic_hash": ""
-  },
-  "services/api/src/ottima_api/messages.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "b45234eae9467b1cce436185be003265",
-    "semantic_hash": ""
-  },
-  "services/api/tests/test_history_mpc.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "09cfae1614b88c9d65dcbc1791c23949",
-    "semantic_hash": ""
-  },
-  "services/api/tests/test_validation_handler.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "244d113379bcc49cf78ce042249777a0",
-    "semantic_hash": ""
-  },
-  "services/api/tests/test_ws_events.py": {
-    "mtime": 1786113385.717798,
-    "ast_hash": "5f3e6f079bcde1a125c091cb8dba237c",
-    "semantic_hash": ""
-  },
-  "services/flow-runtime/tests/test_mpc_boot_async.py": {
-    "mtime": 1786113385.721798,
-    "ast_hash": "18c0be4acdb9feb6c077e0f0dbf839e2",
-    "semantic_hash": ""
-  },
-  "tests/e2e/test_f5_api.py": {
-    "mtime": 1786113385.725798,
-    "ast_hash": "543f42f808f03878eac58c8e53d6562b",
-    "semantic_hash": ""
-  },
-  "tests/e2e/test_f5_data.py": {
-    "mtime": 1786113385.725798,
-    "ast_hash": "afca263fbe528286017276c20271db17",
-    "semantic_hash": ""
-  },
-  "tests/e2e/test_f5_runtime.py": {
-    "mtime": 1786113385.725798,
-    "ast_hash": "7c928b559a3fa0edd75f7ee42f157d04",
     "semantic_hash": ""
   }
 }
