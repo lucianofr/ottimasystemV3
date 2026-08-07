@@ -4,6 +4,7 @@ import { CODIGO_SESSAO_INVALIDA, type AmbienteAoVivo } from "../features/flows/u
 import {
   abrirCanalSessao,
   analisarMensagemCanal,
+  aplicarInteresse,
   comandoAssinatura,
   criarRegistroInteresses,
   TETO_EVENTOS,
@@ -400,6 +401,42 @@ test("desmontar com socket aberto desassina o agregado inteiro antes de fechar",
     '{"unsubscribe":{"flow_status":[12],"mpc_state":["1/b1"],"events":true}}',
   ]);
   expect(b.sockets[0].fechamentos).toEqual([1000]);
+});
+
+// ----------------------------------------------------------------------------------------
+// `aplicarInteresse` (§7.1): registro nunca pode se perder por causa da ordem dos efeitos
+// ----------------------------------------------------------------------------------------
+
+test("registrar sem ciclo (socket ainda não aberto) não perde o interesse no agregado", () => {
+  const registro = criarRegistroInteresses();
+
+  // Reproduz a corrida real: o efeito de `useAssinatura` de uma página filha roda antes do
+  // efeito do `CanalAoVivoProvider` que abre o socket (React roda efeitos de filho para pai
+  // no mesmo commit ao abrir a URL do editor direto) — `ciclo` ainda é `null` aqui.
+  aplicarInteresse(registro, null, "subscribe", { flow_status: [461] });
+
+  expect(registro.agregado()).toEqual({ flow_status: [461], mpc_state: [] });
+});
+
+test("remover sem ciclo também atualiza o agregado, mesmo sem socket para notificar", () => {
+  const registro = criarRegistroInteresses();
+  registro.adicionar({ flow_status: [461] });
+
+  aplicarInteresse(registro, null, "unsubscribe", { flow_status: [461] });
+
+  expect(registro.agregado()).toEqual({ flow_status: [], mpc_state: [] });
+});
+
+test("com o ciclo já aberto, aplicarInteresse manda o delta na hora", () => {
+  const b = bancada();
+  const ciclo = b.abrir();
+  b.sockets[0].abrir();
+  b.sockets[0].enviados = [];
+
+  aplicarInteresse(b.registro, ciclo, "subscribe", { flow_status: [461] });
+
+  expect(b.sockets[0].enviados).toEqual(['{"subscribe":{"flow_status":[461]}}']);
+  expect(b.registro.agregado()).toEqual({ flow_status: [461], mpc_state: [] });
 });
 
 // ----------------------------------------------------------------------------------------

@@ -393,6 +393,25 @@ interface ContextoAssinatura {
 const AssinaturaContext = createContext<ContextoAssinatura | null>(null);
 const EstadoContext = createContext<EstadoDoCanal | null>(null);
 
+/**
+ * Atualiza o registro sempre, mesmo com `ciclo === null` (socket ainda não aberto): o
+ * efeito de `useAssinatura` de uma página filha pode disparar antes do efeito do
+ * `CanalAoVivoProvider` que abre o socket (React roda efeitos de filho para pai no mesmo
+ * commit — é o caso de abrir a URL do editor direto, sem navegação prévia). Se o registro só
+ * fosse atualizado atrás de `ciclo?.`, o interesse se perderia pra sempre e `conectar` nunca
+ * veria o flow em `agregado()`. `notificarInteresse` é o único passo condicional ao ciclo já
+ * existir: sem socket aberto ainda, o próprio `conectar` lê `agregado()` já atualizado.
+ */
+export function aplicarInteresse(
+  registro: RegistroInteresses,
+  ciclo: CicloVidaCanal | null,
+  acao: "subscribe" | "unsubscribe",
+  interesse: Interesse,
+): void {
+  const delta = acao === "subscribe" ? registro.adicionar(interesse) : registro.remover(interesse);
+  ciclo?.notificarInteresse({ [acao]: delta });
+}
+
 /** Montado no `AppShell`: um socket por aba, vivo enquanto a sessão durar. `events` sempre
  *  assinado (o banner é do shell). Dois contexts, não um: `estado` muda a cada mensagem do
  *  socket, e um componente que só chama `useAssinatura` (registra e esquece) não precisa
@@ -413,12 +432,8 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
 
   const contexto = useMemo<ContextoAssinatura>(
     () => ({
-      registrar: (interesse) => {
-        cicloRef.current?.notificarInteresse({ subscribe: registro.adicionar(interesse) });
-      },
-      remover: (interesse) => {
-        cicloRef.current?.notificarInteresse({ unsubscribe: registro.remover(interesse) });
-      },
+      registrar: (interesse) => aplicarInteresse(registro, cicloRef.current, "subscribe", interesse),
+      remover: (interesse) => aplicarInteresse(registro, cicloRef.current, "unsubscribe", interesse),
     }),
     [registro],
   );
