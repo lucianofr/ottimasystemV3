@@ -1,21 +1,24 @@
-"""Camada L2 da F5a (spec F5 §9.2, tarefa 5.1): /api/operate/mpcs, validação.
+"""L2 F5a (spec F5 9.2): /api/operate/mpcs, WS events, validação enum.
 
-Três cenários: projeção de nós MPC (E2E-F5-03), assinatura de eventos (E2E-F5-04),
-e validação de enum (E2E-F5-07).
+E2E-F5-03: /api/operate/mpcs seguro; 404 flow inexistente.
+E2E-F5-04: WS /ws real, subscribe/unsubscribe eventos.
+E2E-F5-07: /api/operate/mode enum inválido ⇒ 422 pt-BR string.
 """
 
+import json
 import time
 from typing import Any
 
 import httpx
 import pytest
+import websockets.sync.client
 
 from .conftest import (
+    BASE,
     TS_MPC,
     AmbienteMpc,
     OpcSim,
     deploy_flow,
-    evento_mpc,
     grafo_mpc_tfs,
     operar_modo,
     resetar_atuador_mpc,
@@ -30,23 +33,25 @@ def test_e2e_f5_03_operate_mpcs_projeta_seguro(
     criar_flow_mpc: Any,
     opcsim_client: OpcSim,
 ) -> None:
-    """E2E-F5-03 (spec §9.2): GET /api/operate/mpcs retorna MPCs sem pid/models."""
+    """I-01: /api/operate/mpcs sem pid/models; 404 flow inexistente."""
     resetar_atuador_mpc(opcsim_client)
     flow_id = criar_flow_mpc("f5-03", grafo=grafo_mpc_tfs(ambiente_mpc))
     deploy_flow(admin, flow_id)
 
+    # (a) Projeção segura
     r = admin.get(f"/api/operate/mpcs?flow_id={flow_id}")
     assert r.status_code == 200
     mpcs = r.json()
-    assert isinstance(mpcs, list)
-    assert len(mpcs) >= 1
-
+    assert isinstance(mpcs, list) and len(mpcs) >= 1
     mpc = mpcs[0]
     assert "block_id" in mpc
     assert "flow_id" in mpc
-    # Confidencial: não deve estar aqui
     assert "pid" not in mpc
     assert "models" not in mpc
+
+    # (b) I-01: 404 flow inexistente
+    r = admin.get("/api/operate/mpcs?flow_id=999999")
+    assert r.status_code == 404
 
 
 def test_e2e_f5_04_ws_events_subscribe_unsubscribe(
@@ -54,25 +59,58 @@ def test_e2e_f5_04_ws_events_subscribe_unsubscribe(
     ambiente_mpc: AmbienteMpc,
     criar_flow_mpc: Any,
     opcsim_client: OpcSim,
-    eventos: Any,
 ) -> None:
-    """E2E-F5-04 (spec §9.2): eventos no canal events via barramento."""
+    """C-03: WS /ws real, subscribe/unsubscribe eventos. Sem skips."""
     resetar_atuador_mpc(opcsim_client)
     flow_id = criar_flow_mpc("f5-04", grafo=grafo_mpc_tfs(ambiente_mpc))
     deploy_flow(admin, flow_id)
 
     time.sleep(TS_MPC + 0.5)
 
-    # Dispara operação
-    operar_modo(admin, flow_id, "mpc1", "local_remote", "remote")
+    # Extrai token
+    auth_header = admin.headers.get("Authorization", "")
+    token = auth_header.split()[-1] if "Bearer" in auth_header else ""
+    assert token, "sem token"
 
-    # Aguarda evento no barramento (evento_mpc retorna predicado para fluxo de modo)
+    # Abre WS real
+    ws_url = BASE.replace("http://", "ws://") + f"/ws?token={token}"
+    ws = websockets.sync.client.connect(ws_url)
+
     try:
-        pred = evento_mpc("mode_change", flow_id, "mpc1")
-        evento = eventos.esperar(pred, timeout=5.0, descricao="event")
-        assert evento is not None
-    except AssertionError:
-        pytest.skip("Sem evento (barramento throttled)")
+        # Subscribe a eventos
+        ws.send(json.dumps({"subscribe": {"events": True}}))
+        time.sleep(0.5)
+
+        # Dispara operação pra gerar evento
+        operar_modo(admin, flow_id, "mpc1", "local_remote", "remote")
+        time.sleep(0.5)
+
+        # Aguarda evento chegar
+        ws.settimeout(5.0)
+        msg = ws.recv()
+        evento = json.loads(msg)
+        assert (
+            "channel" in evento and evento["channel"] == "events"
+        ), f"evento inválido: {evento}"
+
+        # Unsubscribe
+        ws.send(json.dumps({"unsubscribe": {"events": True}}))
+        time.sleep(0.5)
+
+        # Dispara outra operação — não deve chegar evento
+        operar_modo(admin, flow_id, "mpc1", "local_remote", "local")
+        time.sleep(0.5)
+
+        # Tenta receber (deve dar timeout)
+        ws.settimeout(1.0)
+        try:
+            ws.recv()
+            pytest.fail("Evento após unsubscribe")
+        except TimeoutError:
+            # Esperado: sem unsubscribe, sem eventos
+            pass
+    finally:
+        ws.close()
 
 
 def test_e2e_f5_07_operate_mode_enum_invalido_422_pt_br(
@@ -81,17 +119,30 @@ def test_e2e_f5_07_operate_mode_enum_invalido_422_pt_br(
     criar_flow_mpc: Any,
     opcsim_client: OpcSim,
 ) -> None:
-    """E2E-F5-07 (spec §9.2): /api/operate/mode com enum inválido ⇒ 422 pt-BR."""
+    """I-02: /api/operate/mode enum inválido ⇒ 422 string pt-BR."""
     resetar_atuador_mpc(opcsim_client)
     flow_id = criar_flow_mpc("f5-07", grafo=grafo_mpc_tfs(ambiente_mpc))
     deploy_flow(admin, flow_id)
 
     time.sleep(TS_MPC + 0.5)
 
-    # Valor inválido
+    # Enum inválido
     r = admin.post(
         f"/api/operate/{flow_id}/mpc1/mode",
         json={"axis": "local_remote", "value": "INVALIDO"},
     )
     assert r.status_code == 422
-    assert "detail" in r.json()
+
+    response = r.json()
+    assert "detail" in response
+
+    # I-02: string pt-BR, não lista
+    detail = response["detail"]
+    assert isinstance(detail, str), f"detail tipo={type(detail)}"
+    assert len(detail) > 0
+    # Verifica se tem caracteres pt-BR
+    assert (
+        "valor" in detail.lower()
+        or "inválido" in detail.lower()
+        or "esperado" in detail.lower()
+    ), f"não pt-BR: {detail}"
