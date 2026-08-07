@@ -99,9 +99,20 @@ function condicoesPar(eventos: readonly EventMessage[]): CondicaoAtiva[] {
 // do bloco publica o estado de recuperação. Origem é sempre bloco MPC (`flow:<id>/block:<id>`).
 // ------------------------------------------------------------------------------------
 
-function chaveMpc(origin: string): string | null {
+export function chaveMpc(origin: string): string | null {
   const m = /^flow:(\d+)\/block:(.+)$/.exec(origin);
   return m === null ? null : `${m[1]}/${m[2]}`;
+}
+
+/** Só considera cessado se o estado publicado for ESTRITAMENTE POSTERIOR ao evento que abriu
+ *  a condição — mesma defesa de `flowOverrunCessou` abaixo, generalizada. Sem isto, um estado
+ *  "recuperado" antigo (o mapa nunca apaga entradas — `CanalAoVivo.tsx`, `reduzir`) silenciaria
+ *  a REOCORRÊNCIA do mesmo alarme: um evento novo chega pelo canal `events` (sempre assinado),
+ *  mas a leitura do estado publicado, sem checar frescor, concluiria "cessou" com base numa
+ *  recuperação anterior à nova ocorrência — viola a regra normativa A-4 ("nunca silenciosa").
+ *  Fix round 1, achado crítico (revisão da tarefa 2.3). */
+function estadoMaisNovoQueEvento(estadoTs: string, evento: EventMessage): boolean {
+  return new Date(estadoTs).getTime() > new Date(evento.ts).getTime();
 }
 
 interface EstadoDef {
@@ -124,7 +135,8 @@ function condicoesEstado(
     for (const [origin, evento] of maisRecentePorOrigem(eventos, { [def.kind]: true })) {
       const chave = chaveMpc(origin);
       const estado = chave === null ? undefined : mpcStates.get(chave);
-      if (estado === undefined || !def.cessou(estado)) {
+      const cessou = estado !== undefined && def.cessou(estado) && estadoMaisNovoQueEvento(estado.ts, evento);
+      if (!cessou) {
         condicoes.push(condicaoDe("estado", def.kind, evento));
       }
     }
@@ -149,7 +161,7 @@ function flowOverrunCessou(evento: EventMessage, estado: FlowStatus): boolean {
   const overrunsEvento = evento.payload.overruns;
   if (typeof overrunsEvento !== "number") return false;
   if (estado.overruns !== overrunsEvento) return false;
-  return new Date(estado.ts).getTime() > new Date(evento.ts).getTime();
+  return estadoMaisNovoQueEvento(estado.ts, evento);
 }
 
 function condicoesContador(
@@ -171,20 +183,28 @@ function condicoesContador(
   // payload `{}`) — sem valor de referência, a comparação de contador de `flow_overrun` não
   // se aplica aqui. `status.solver` é o espelho equivalente já publicado: só sai de
   // `"overrun"` no MESMO `_apply_result` que rearma o dedupe (`blocks/mpc.py:313`), o mesmo
-  // instante que "overruns inalterado" descreveria — sem precisar do contador.
+  // instante que "overruns inalterado" descreveria — sem precisar do contador. A checagem de
+  // frescor (`estadoMaisNovoQueEvento`, fix round 1) cobre a mesma reocorrência da família
+  // "estado" acima: sem ela, um `solver` já rearmado ANTES de uma nova ocorrência do mesmo
+  // `mpc_overrun` silenciaria a reincidência.
   //
-  // Borda conhecida (fix round 1, achado 2): `_build_state` (`blocks/mpc.py`) sobrepõe
-  // `solver` para "idle"/"building" fora de AUTO, INDEPENDENTE do `_overrun_reported`
-  // interno — então `solver !== "overrun"` pode virar verdadeiro por um motivo diferente
-  // do rearme (ex.: operador troca para MAN com o overrun ainda não rearmado por dentro).
-  // Autocorretivo: voltar a AUTO com o problema persistente publica `solver = "overrun"`
-  // de novo e a condição reativa. Aceitável para a tela (nunca fica presa fora do ar), mas
-  // quem consumir isto nas tarefas 2.2/2.3 deve saber que a cessação aqui não é 100%
-  // exclusiva do rearme — pode coincidir com uma troca de modo.
+  // Borda conhecida (fix round 1, achado 2 da tarefa 2.1): `_build_state` (`blocks/mpc.py`)
+  // sobrepõe `solver` para "idle"/"building" fora de AUTO, INDEPENDENTE do `_overrun_reported`
+  // interno — então `solver !== "overrun"` pode virar verdadeiro por um motivo diferente do
+  // rearme (ex.: operador troca para MAN com o overrun ainda não rearmado por dentro).
+  // Autocorretivo: voltar a AUTO com o problema persistente publica `solver = "overrun"` de
+  // novo e a condição reativa. Desde a tarefa 2.3, essa borda tem um efeito NOVO e real: cada
+  // toggle AUTO/MAN nessa condição gera um subscribe/unsubscribe de verdade no socket
+  // (`CanalAoVivo.tsx`, `criarSincronizadorCondicoes`) — consome um slot da fila de 8 do
+  // servidor (drop-oldest, `ws.py:45-48,68-74`). É disparado por ação do operador, não por
+  // oscilação automática, mas vale saber: um operador alternando modo repetidamente com um
+  // overrun pendente reassina a mesma origem repetidamente.
   for (const [origin, evento] of maisRecentePorOrigem(eventos, { mpc_overrun: true })) {
     const chave = chaveMpc(origin);
     const estado = chave === null ? undefined : mpcStates.get(chave);
-    if (estado === undefined || estado.status.solver === "overrun") {
+    const cessou =
+      estado !== undefined && estado.status.solver !== "overrun" && estadoMaisNovoQueEvento(estado.ts, evento);
+    if (!cessou) {
       condicoes.push(condicaoDe("contador", "mpc_overrun", evento));
     }
   }

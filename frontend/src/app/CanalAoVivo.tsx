@@ -32,7 +32,7 @@ import {
   type EscopoBootstrap,
   type OrigemBlocoScript,
 } from "./bootstrapAlarmes";
-import { resolverAlarmes, type CondicaoAtiva } from "./alarmes";
+import { chaveMpc, resolverAlarmes, type CondicaoAtiva } from "./alarmes";
 
 /**
  * Canal ao vivo da sessão (spec F5 §7.1-1/2/3; decisão A-6; F5R-22): **um** WebSocket por
@@ -427,23 +427,28 @@ export function aplicarInteresse(
 // Assinatura sob demanda por condição ativa (tarefa 2.3, spec F5 §7.1-5; F5R-04)
 // --------------------------------------------------------------------------------------
 
-const ORIGEM_BLOCO_MPC = /^flow:(\d+)\/block:(.+)$/;
 const ORIGEM_FLOW = /^flow:(\d+)$/;
 
 /** Deriva o `Interesse` que as famílias "estado" e "contador" de `resolverAlarmes` (2.1,
- *  `alarmes.ts`) exigem assinar: origem de bloco MPC (`flow:<id>/block:<id>`) assina
- *  `mpc_state`; origem de flow (`flow:<id>`) assina `flow_status`. Famílias "par"/"ttl" não
- *  têm estado publicado nenhum pra seguir — ficam de fora por design, e nenhuma origem além
- *  das que `resolverAlarmes` já achou ativas entra aqui: nunca assina `flow_status` de
- *  todos os flows por precaução (spec §7.1-5). */
+ *  `alarmes.ts`) exigem assinar: origem de bloco MPC (`flow:<id>/block:<id>`, `chaveMpc`)
+ *  assina `mpc_state`; origem de flow (`flow:<id>`) assina `flow_status`. Famílias
+ *  "par"/"ttl" não têm estado publicado nenhum pra seguir — ficam de fora por design, e
+ *  nenhuma origem além das que `resolverAlarmes` já achou ativas entra aqui: nunca assina
+ *  `flow_status` de todos os flows por precaução (spec §7.1-5).
+ *
+ *  Borda conhecida (documentada em `alarmes.ts`, `condicoesContador`): o toggle AUTO/MAN
+ *  com um `mpc_overrun` pendente pode fazer `solver` sair de `"overrun"` sem ser o rearme
+ *  de verdade — desde esta tarefa, isso gera um subscribe/unsubscribe REAL no socket (não
+ *  só uma leitura em memória), consumindo um slot da fila de 8 do servidor (drop-oldest,
+ *  `ws.py:45-48,68-74`). Disparado por ação do operador, não por oscilação automática. */
 export function interesseDeCondicoes(condicoes: readonly CondicaoAtiva[]): Interesse {
   const flowIds = new Set<number>();
   const mpcChaves = new Set<string>();
   for (const condicao of condicoes) {
     if (condicao.familia !== "estado" && condicao.familia !== "contador") continue;
-    const bloco = ORIGEM_BLOCO_MPC.exec(condicao.origin);
+    const bloco = chaveMpc(condicao.origin);
     if (bloco !== null) {
-      mpcChaves.add(`${bloco[1]}/${bloco[2]}`);
+      mpcChaves.add(bloco);
       continue;
     }
     const flow = ORIGEM_FLOW.exec(condicao.origin);
@@ -469,7 +474,18 @@ export interface SincronizadorCondicoes {
  *  guarda o alvo da varredura anterior para nunca reincrementar o refcount de um id que já
  *  está sob assinatura por condição, e para saber exatamente o que soltar quando a condição
  *  cessa — sem isto, cada nova varredura chamaria `registro.adicionar` de novo para o mesmo
- *  id e o refcount nunca voltaria a zero. */
+ *  id e o refcount nunca voltaria a zero.
+ *
+ *  Deliberadamente NÃO apaga a entrada de `mpcStates`/`flowStatus` quando desassina (fix
+ *  round 1, revisão da tarefa 2.3): a checagem de frescor de `resolverAlarmes`
+ *  (`estadoMaisNovoQueEvento`, `alarmes.ts`) já resolve a reocorrência sem isso — e apagar
+ *  criaria um problema PIOR: `mpc.state` é publicado a cada execução do bloco em AUTO
+ *  (`blocks/mpc.py:292-297`, "publicação a cada execução"), então a origem recém-cessada
+ *  voltaria a publicar quase imediatamente; sem o estado retido, a próxima varredura cairia
+ *  na regra A-4 ("sem estado ⇒ ativo"), reassinando na hora — e o ciclo se repetiria a cada
+ *  execução do bloco, um FLAP contínuo de subscribe/unsubscribe (o `/ws` nunca reenvia um
+ *  snapshot retido ao assinar, `ws.py:_apply_client_message`) — exatamente o tráfego que a
+ *  assinatura sob demanda existe para evitar (fila de 8, drop-oldest, F5R-22). */
 export function criarSincronizadorCondicoes(): SincronizadorCondicoes {
   let flowAtual = new Set<number>();
   let mpcAtual = new Set<string>();

@@ -14,7 +14,7 @@ import {
   type EstadoDoCanal,
   type RegistroInteresses,
 } from "./CanalAoVivo";
-import type { CondicaoAtiva } from "./alarmes";
+import { resolverAlarmes, type CondicaoAtiva } from "./alarmes";
 
 /** O `Location` do browser tem muito mais superfície do que a URL do WS precisa. */
 function origem(protocol: string, host: string): Location {
@@ -619,4 +619,79 @@ test("sincronizador: coexistência com interesse de página — origem pedida pe
   sincronizador.sincronizar([], b.registro, ciclo);
   expect(b.sockets[0].enviados).toEqual(['{"unsubscribe":{"mpc_state":["3/mpc"]}}']);
   expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: [] });
+});
+
+test("ciclo completo (WS real, não sintético): evento ativa/assina, estado confirma, recupera/cessa/desassina, REOCORRÊNCIA reativa e reassina (fix round 1, achado crítico)", () => {
+  const b = bancada();
+  const ciclo = b.abrir();
+  b.sockets[0].abrir();
+  b.sockets[0].enviados = [];
+  const sincronizador = criarSincronizadorCondicoes();
+  const AGORA = new Date("2026-01-01T01:00:00.000Z");
+
+  // Mesma varredura que o `useEffect` do provider roda a cada mudança de
+  // eventos/flowStatus/mpcStates: reavalia `resolverAlarmes` de verdade sobre o estado do
+  // canal (populado por `reduzir()`, via mensagens reais no socket) e sincroniza.
+  function varredura(): void {
+    const condicoes = resolverAlarmes(b.estado().eventos, b.estado().flowStatus, b.estado().mpcStates, AGORA);
+    sincronizador.sincronizar(condicoes, b.registro, ciclo);
+  }
+
+  // 1) 1a ocorrência chega pelo canal `events` (sempre assinado), sem estado publicado
+  //    ainda: ativa (regra A-4), assina a origem.
+  b.sockets[0].receber(
+    envelope("events", {
+      ts: "2026-01-01T00:00:01.000Z",
+      severity: "alarm",
+      origin: "flow:1/block:mpc",
+      message: "erro do solver",
+      payload: { kind: "mpc_solver_error" },
+    }),
+  );
+  varredura();
+  expect(b.sockets[0].enviados).toEqual(['{"subscribe":{"mpc_state":["1/mpc"]}}']);
+  b.sockets[0].enviados = [];
+
+  // 2) mpc.state confirma o erro (fresco, mais novo que o evento): continua ativa, sem
+  //    novo comando (já assinado).
+  b.sockets[0].receber(
+    envelope("mpc.state.1.mpc", {
+      ...MPC_STATE,
+      ts: "2026-01-01T00:00:02.000Z",
+      status: { ...MPC_STATE.status, solver: "error" },
+    }),
+  );
+  varredura();
+  expect(b.sockets[0].enviados).toEqual([]);
+
+  // 3) mpc.state publica a recuperação (fresca, mais nova que o evento de abertura): cessa,
+  //    desassina.
+  b.sockets[0].receber(
+    envelope("mpc.state.1.mpc", {
+      ...MPC_STATE,
+      ts: "2026-01-01T00:00:03.000Z",
+      status: { ...MPC_STATE.status, solver: "ok" },
+    }),
+  );
+  varredura();
+  expect(b.sockets[0].enviados).toEqual(['{"unsubscribe":{"mpc_state":["1/mpc"]}}']);
+  b.sockets[0].enviados = [];
+
+  // 4) REOCORRÊNCIA: novo evento do MESMO kind/origem, mais recente que o último mpc.state
+  //    conhecido — o "recuperado" de (3), retido para sempre (`reduzir` nunca apaga
+  //    entrada). Sem a checagem de frescor (fix round 1), `condicoesEstado` leria esse
+  //    estado obsoleto, concluiria "cessou" e IGNORARIA silenciosamente a reincidência —
+  //    nenhum novo mpc.state chegaria porque a origem está desassinada. Com o fix: reativa
+  //    e reassina.
+  b.sockets[0].receber(
+    envelope("events", {
+      ts: "2026-01-01T00:00:10.000Z",
+      severity: "alarm",
+      origin: "flow:1/block:mpc",
+      message: "erro do solver de novo",
+      payload: { kind: "mpc_solver_error" },
+    }),
+  );
+  varredura();
+  expect(b.sockets[0].enviados).toEqual(['{"subscribe":{"mpc_state":["1/mpc"]}}']);
 });

@@ -167,6 +167,28 @@ test("estado publicado: mpc_input_invalid cessa quando input_valid=true; mpc_she
   ]);
 });
 
+test("estado publicado: estado obsoleto (mais antigo que a REOCORRÊNCIA) não silencia o alarme reincidente (fix round 1, achado crítico)", () => {
+  const primeiraOcorrencia = evento("mpc_solver_error", "flow:1/block:mpc", { ts: "2026-01-01T00:00:01.000Z" });
+  // Estado "recuperado" é mais novo que a 1a ocorrência: cessa normalmente.
+  const recuperado = new Map([["1/mpc", mpcState({ solver: "ok" })]]); // ts padrão 00:00:05
+  expect(resolverAlarmes([primeiraOcorrencia], SEM_FLOW_STATUS, recuperado, AGORA)).toEqual([]);
+
+  // Reocorrência: novo evento, mais recente que o ÚLTIMO estado conhecido (o mesmo mapa
+  // `recuperado` de cima — nada publicou de novo, `reduzir()` nunca apaga entrada nenhuma).
+  // Sem checar frescor, esse estado obsoleto silenciaria a reincidência (viola A-4).
+  const reocorrencia = evento("mpc_solver_error", "flow:1/block:mpc", { ts: "2026-01-01T00:00:10.000Z" });
+  expect(resolverAlarmes([reocorrencia], SEM_FLOW_STATUS, recuperado, AGORA)).toEqual([
+    {
+      familia: "estado",
+      kind: "mpc_solver_error",
+      origin: "flow:1/block:mpc",
+      desde: "2026-01-01T00:00:10.000Z",
+      severity: "alarm",
+      message: "mensagem de mpc_solver_error",
+    },
+  ]);
+});
+
 // ----------------------------------------------------------------------------------------
 // Família 3 — contador publicado
 // ----------------------------------------------------------------------------------------
@@ -210,6 +232,23 @@ test("contador publicado (mpc_overrun): sem estado é ativa; ativa com solver='o
 
   const rearmado = new Map([["9/mpc", mpcState({ solver: "ok" })]]);
   expect(resolverAlarmes([evt], SEM_FLOW_STATUS, rearmado, AGORA)).toEqual([]);
+});
+
+test("contador publicado (mpc_overrun): estado obsoleto (mais antigo que a REOCORRÊNCIA) não silencia o alarme reincidente (fix round 1, achado crítico)", () => {
+  const primeiraOcorrencia = evento("mpc_overrun", "flow:9/block:mpc", {
+    ts: "2026-01-01T00:00:01.000Z",
+    severity: "warning",
+  });
+  const rearmado = new Map([["9/mpc", mpcState({ solver: "ok" })]]); // ts padrão 00:00:05
+  expect(resolverAlarmes([primeiraOcorrencia], SEM_FLOW_STATUS, rearmado, AGORA)).toEqual([]);
+
+  // Reocorrência mais recente que o mesmo estado "rearmado" retido — sem checar frescor,
+  // ficaria silenciosamente cessada para sempre.
+  const reocorrencia = evento("mpc_overrun", "flow:9/block:mpc", {
+    ts: "2026-01-01T00:00:10.000Z",
+    severity: "warning",
+  });
+  expect(resolverAlarmes([reocorrencia], SEM_FLOW_STATUS, rearmado, AGORA)).toHaveLength(1);
 });
 
 // ----------------------------------------------------------------------------------------
