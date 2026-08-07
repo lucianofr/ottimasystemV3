@@ -158,8 +158,12 @@ test("events vira mensagem de evento com os 5 campos do contrato", () => {
 
 test("canal fora do vocabulário, sufixo não numérico ou payload inválido são descartados", () => {
   expect(analisarMensagemCanal("não é json")).toBeNull();
+  expect(analisarMensagemCanal("[]")).toBeNull();
+  expect(analisarMensagemCanal(JSON.stringify({ data: VARREDURA }))).toBeNull();
   expect(analisarMensagemCanal(envelope("opc.values.3", VARREDURA))).toBeNull();
   expect(analisarMensagemCanal(envelope("flow.status.abc", VARREDURA))).toBeNull();
+  expect(analisarMensagemCanal(envelope("flow.status.1", { ...VARREDURA, state: "pausado" }))).toBeNull();
+  expect(analisarMensagemCanal(envelope("flow.status.1", { ...VARREDURA, scan_ms: "3.2" }))).toBeNull();
   expect(analisarMensagemCanal(envelope("mpc.state.abc.b1", MPC_STATE))).toBeNull();
   expect(analisarMensagemCanal(envelope("mpc.state.1.", MPC_STATE))).toBeNull();
   expect(analisarMensagemCanal(envelope("events", { ...EVENTO, severity: "critico" }))).toBeNull();
