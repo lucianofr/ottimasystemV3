@@ -1,0 +1,1787 @@
+{
+  "conftest.py": {
+    "mtime": 1785974809.7452712,
+    "ast_hash": "ae39171131e70aa00fa64c866db396b1",
+    "semantic_hash": "ae39171131e70aa00fa64c866db396b1"
+  },
+  "deploy/entrypoint-api.sh": {
+    "mtime": 1785803706.5914166,
+    "ast_hash": "d3b3a4d4ece89e75085ee098ca8d5d0f",
+    "semantic_hash": "d3b3a4d4ece89e75085ee098ca8d5d0f"
+  },
+  "deploy/smoke.sh": {
+    "mtime": 1785974809.7452712,
+    "ast_hash": "2fe47eb76d75cd036bd733e72b615b2e",
+    "semantic_hash": "2fe47eb76d75cd036bd733e72b615b2e"
+  },
+  "frontend/e2e/fixtures.ts": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "58b54c5b2a1119eb5699fcf190757033",
+    "semantic_hash": "58b54c5b2a1119eb5699fcf190757033"
+  },
+  "frontend/e2e/login.spec.ts": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "38b9d0acd7dd85f5773113d5c4a33daf",
+    "semantic_hash": "38b9d0acd7dd85f5773113d5c4a33daf"
+  },
+  "frontend/e2e/shell.spec.ts": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "f453cbfefb1b697a270c6ad5d1ff28cf",
+    "semantic_hash": "f453cbfefb1b697a270c6ad5d1ff28cf"
+  },
+  "frontend/package.json": {
+    "mtime": 1785974809.7732704,
+    "ast_hash": "2c63d12497d4f71635fbc86822c133a5",
+    "semantic_hash": "2c63d12497d4f71635fbc86822c133a5"
+  },
+  "frontend/playwright.config.ts": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "5be904b04572d4cd8953b62d4f555ea2",
+    "semantic_hash": "5be904b04572d4cd8953b62d4f555ea2"
+  },
+  "frontend/playwright.unit.config.ts": {
+    "mtime": 1785850330.4279015,
+    "ast_hash": "90e9c3068539b9ec0192c753ac513bcf",
+    "semantic_hash": "90e9c3068539b9ec0192c753ac513bcf"
+  },
+  "frontend/src/app/AnnunciatorBar.tsx": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "b0adf9fbe714243c213aa60f23db8a24",
+    "semantic_hash": "b0adf9fbe714243c213aa60f23db8a24"
+  },
+  "frontend/src/app/AppShell.tsx": {
+    "mtime": 1785874485.0924082,
+    "ast_hash": "946d976bd9b7022d25d4b955f0b132c4",
+    "semantic_hash": "946d976bd9b7022d25d4b955f0b132c4"
+  },
+  "frontend/src/app/AuthGuard.tsx": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "033decb6e1fedad34c036695c24bde16",
+    "semantic_hash": "033decb6e1fedad34c036695c24bde16"
+  },
+  "frontend/src/app/HomePage.tsx": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "6a9a613ec419fcaafb4e1d6cb7453ebd",
+    "semantic_hash": "6a9a613ec419fcaafb4e1d6cb7453ebd"
+  },
+  "frontend/src/app/router.tsx": {
+    "mtime": 1785874485.0924082,
+    "ast_hash": "e4dd5fefc49873b04d73d6949afcab23",
+    "semantic_hash": "e4dd5fefc49873b04d73d6949afcab23"
+  },
+  "frontend/src/components/ui/button.tsx": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "0e88d8bb69fcfe532a9be07e70bae442",
+    "semantic_hash": "0e88d8bb69fcfe532a9be07e70bae442"
+  },
+  "frontend/src/components/ui/card.tsx": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "66283f6fe8da5288ada5ec3d80a2fa5f",
+    "semantic_hash": "66283f6fe8da5288ada5ec3d80a2fa5f"
+  },
+  "frontend/src/components/ui/input.tsx": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "8cc6fcb981e800cb8ccbe00d799e6bae",
+    "semantic_hash": "8cc6fcb981e800cb8ccbe00d799e6bae"
+  },
+  "frontend/src/components/ui/label.tsx": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "4110421dc864fb27c668b170fe7a16e3",
+    "semantic_hash": "4110421dc864fb27c668b170fe7a16e3"
+  },
+  "frontend/src/components/ui/select.tsx": {
+    "mtime": 1785850330.4958994,
+    "ast_hash": "ee8e9cc626f32fc7b98b839079880496",
+    "semantic_hash": "ee8e9cc626f32fc7b98b839079880496"
+  },
+  "frontend/src/features/auth/LoginPage.tsx": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "44a11aac28c05c683fb0e1c9be20612d",
+    "semantic_hash": "44a11aac28c05c683fb0e1c9be20612d"
+  },
+  "frontend/src/features/auth/useAuth.tsx": {
+    "mtime": 1785850330.4958994,
+    "ast_hash": "4a06c0bb7abfca91ab2d38f1869d33b9",
+    "semantic_hash": "4a06c0bb7abfca91ab2d38f1869d33b9"
+  },
+  "frontend/src/features/connections/ConnectionForm.tsx": {
+    "mtime": 1785850330.5238986,
+    "ast_hash": "8851a1562c2f14837262ccae45eec709",
+    "semantic_hash": "8851a1562c2f14837262ccae45eec709"
+  },
+  "frontend/src/features/connections/ConnectionsPage.tsx": {
+    "mtime": 1785850330.5358982,
+    "ast_hash": "d6208474253f3a8b076d3cba45d873c5",
+    "semantic_hash": "d6208474253f3a8b076d3cba45d873c5"
+  },
+  "frontend/src/features/connections/useConnections.ts": {
+    "mtime": 1785850330.5358982,
+    "ast_hash": "a7593d03656b97c5ba45a6611ce44f7e",
+    "semantic_hash": "a7593d03656b97c5ba45a6611ce44f7e"
+  },
+  "frontend/src/features/connections/useLastConnectionState.ts": {
+    "mtime": 1785850330.5358982,
+    "ast_hash": "1d4e9037f59cc34a03a8e875105de5a4",
+    "semantic_hash": "1d4e9037f59cc34a03a8e875105de5a4"
+  },
+  "frontend/src/features/flows/FlowEditorPage.tsx": {
+    "mtime": 1785974809.7732704,
+    "ast_hash": "fb65da780a51a1a4a94ea4f62881b831",
+    "semantic_hash": "fb65da780a51a1a4a94ea4f62881b831"
+  },
+  "frontend/src/features/flows/FlowPalette.tsx": {
+    "mtime": 1785974809.7732704,
+    "ast_hash": "056a86ec06c1c8ec5d19064508bcbd62",
+    "semantic_hash": "056a86ec06c1c8ec5d19064508bcbd62"
+  },
+  "frontend/src/features/flows/FlowsPage.tsx": {
+    "mtime": 1785874485.0924082,
+    "ast_hash": "c30ad2f028d4bf61f3118baf38aef903",
+    "semantic_hash": "c30ad2f028d4bf61f3118baf38aef903"
+  },
+  "frontend/src/features/flows/config/CamposTfs.tsx": {
+    "mtime": 1785874485.0924082,
+    "ast_hash": "ce6bab6ca07560c9f379f4251137f696",
+    "semantic_hash": "ce6bab6ca07560c9f379f4251137f696"
+  },
+  "frontend/src/features/flows/config/ModalConfigBloco.tsx": {
+    "mtime": 1785974809.7732704,
+    "ast_hash": "b9c20dec717508a2f396020072eb6231",
+    "semantic_hash": "b9c20dec717508a2f396020072eb6231"
+  },
+  "frontend/src/features/flows/config/campos.check.ts": {
+    "mtime": 1785874485.0924082,
+    "ast_hash": "9b101a44a1fb21c211c787f96c8242b3",
+    "semantic_hash": "9b101a44a1fb21c211c787f96c8242b3"
+  },
+  "frontend/src/features/flows/config/campos.ts": {
+    "mtime": 1785874485.0924082,
+    "ast_hash": "f945576196f9a27d0857f944d047f5a6",
+    "semantic_hash": "f945576196f9a27d0857f944d047f5a6"
+  },
+  "frontend/src/features/flows/graph.check.ts": {
+    "mtime": 1785974809.7732704,
+    "ast_hash": "2a9d2a152177bddf40c6b2d27d30fef9",
+    "semantic_hash": "2a9d2a152177bddf40c6b2d27d30fef9"
+  },
+  "frontend/src/features/flows/graph.ts": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "f2d9596bcd5c08f876cbf36b27c1de38",
+    "semantic_hash": "f2d9596bcd5c08f876cbf36b27c1de38"
+  },
+  "frontend/src/features/flows/nodes/BlocoChapa.tsx": {
+    "mtime": 1785874485.0924082,
+    "ast_hash": "dd66b9f94b6f6846f25178c7f44aa29b",
+    "semantic_hash": "dd66b9f94b6f6846f25178c7f44aa29b"
+  },
+  "frontend/src/features/flows/nodes/contexto.ts": {
+    "mtime": 1785874485.0924082,
+    "ast_hash": "466a5b39b9afed63526f70e49e035b26",
+    "semantic_hash": "466a5b39b9afed63526f70e49e035b26"
+  },
+  "frontend/src/features/flows/nodes/index.tsx": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "7c5f924781066d2a306a5bc3f5898eb2",
+    "semantic_hash": "7c5f924781066d2a306a5bc3f5898eb2"
+  },
+  "frontend/src/features/flows/useFlowStatus.check.ts": {
+    "mtime": 1785874485.0924082,
+    "ast_hash": "b92b7e9904bf4a49a2bb76c944cdefea",
+    "semantic_hash": "b92b7e9904bf4a49a2bb76c944cdefea"
+  },
+  "frontend/src/features/flows/useFlowStatus.ts": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "5d3d0383d20ae2f0a60c2cfdc0089f99",
+    "semantic_hash": "5d3d0383d20ae2f0a60c2cfdc0089f99"
+  },
+  "frontend/src/features/flows/useFlows.ts": {
+    "mtime": 1785874485.0924082,
+    "ast_hash": "d2e1954eee7062be40c4d50d46e42a67",
+    "semantic_hash": "d2e1954eee7062be40c4d50d46e42a67"
+  },
+  "frontend/src/features/flows/useLastFlowState.check.ts": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "fe17926cc511ac89050c778efc31ed58",
+    "semantic_hash": "fe17926cc511ac89050c778efc31ed58"
+  },
+  "frontend/src/features/flows/useLastFlowState.ts": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "91e8aa5963f54a963777257d55b90a8a",
+    "semantic_hash": "91e8aa5963f54a963777257d55b90a8a"
+  },
+  "frontend/src/features/tags/TagForm.tsx": {
+    "mtime": 1785850330.543898,
+    "ast_hash": "8c034e8cf5ead736f49c971d9202d5d2",
+    "semantic_hash": "8c034e8cf5ead736f49c971d9202d5d2"
+  },
+  "frontend/src/features/tags/TagsPage.tsx": {
+    "mtime": 1785850330.6198957,
+    "ast_hash": "784a786ce132ce3556951a3fef41b816",
+    "semantic_hash": "784a786ce132ce3556951a3fef41b816"
+  },
+  "frontend/src/features/tags/useTags.ts": {
+    "mtime": 1785850330.6198957,
+    "ast_hash": "748a0960f21ceeaeee06600f4d3c62d3",
+    "semantic_hash": "748a0960f21ceeaeee06600f4d3c62d3"
+  },
+  "frontend/src/features/trend/TrendChart.tsx": {
+    "mtime": 1785850330.6198957,
+    "ast_hash": "424f5fb4196bd853e0736a0ae3843bf2",
+    "semantic_hash": "424f5fb4196bd853e0736a0ae3843bf2"
+  },
+  "frontend/src/features/trend/TrendPage.tsx": {
+    "mtime": 1785850330.6598945,
+    "ast_hash": "b0e11b5b7e4438219e73be7e8bea8ed0",
+    "semantic_hash": "b0e11b5b7e4438219e73be7e8bea8ed0"
+  },
+  "frontend/src/features/trend/trendTheme.ts": {
+    "mtime": 1785850330.6598945,
+    "ast_hash": "7c547df072a012dbacc467d96e1283c8",
+    "semantic_hash": "7c547df072a012dbacc467d96e1283c8"
+  },
+  "frontend/src/features/trend/useHistory.check.ts": {
+    "mtime": 1785850330.6638944,
+    "ast_hash": "e73ffaf3da08a96bda94d677632f3d5f",
+    "semantic_hash": "e73ffaf3da08a96bda94d677632f3d5f"
+  },
+  "frontend/src/features/trend/useHistory.ts": {
+    "mtime": 1785850330.6638944,
+    "ast_hash": "c3ffda3e0d72939ba5094fdfe5aae4b6",
+    "semantic_hash": "c3ffda3e0d72939ba5094fdfe5aae4b6"
+  },
+  "frontend/src/lib/api-types.ts": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "5a0527f36a3a615f724deff9933bcc94",
+    "semantic_hash": "5a0527f36a3a615f724deff9933bcc94"
+  },
+  "frontend/src/lib/api.ts": {
+    "mtime": 1785874485.0924082,
+    "ast_hash": "890643b94ca28c1c2afd2f3b2898710b",
+    "semantic_hash": "890643b94ca28c1c2afd2f3b2898710b"
+  },
+  "frontend/src/lib/cn.ts": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "a201fb9f1c5fefe41b771aa8d7f99957",
+    "semantic_hash": "a201fb9f1c5fefe41b771aa8d7f99957"
+  },
+  "frontend/src/main.tsx": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "6c86b4cfc1a2729fed7df8bb4a0d021b",
+    "semantic_hash": "6c86b4cfc1a2729fed7df8bb4a0d021b"
+  },
+  "frontend/tsconfig.json": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "58e11e614122775fdb46572fd5159f7b",
+    "semantic_hash": "58e11e614122775fdb46572fd5159f7b"
+  },
+  "frontend/vite.config.ts": {
+    "mtime": 1785874485.0924082,
+    "ast_hash": "fe09367d38dc0d8fcbf5a31f139582a7",
+    "semantic_hash": "fe09367d38dc0d8fcbf5a31f139582a7"
+  },
+  "packages/ottima-core/alembic/env.py": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "09b8783138730c2df9a1c76139ccba91",
+    "semantic_hash": "09b8783138730c2df9a1c76139ccba91"
+  },
+  "packages/ottima-core/alembic/versions/0001_relational.py": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "92b062451b7295e6ee94e5ba455630d0",
+    "semantic_hash": "92b062451b7295e6ee94e5ba455630d0"
+  },
+  "packages/ottima-core/alembic/versions/0002_timescale.py": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "529a07da6df14b77b62dd4c2be922cc1",
+    "semantic_hash": "529a07da6df14b77b62dd4c2be922cc1"
+  },
+  "packages/ottima-core/pyproject.toml": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "6a766b02516b2ce852be29ec8a82565e",
+    "semantic_hash": "6a766b02516b2ce852be29ec8a82565e"
+  },
+  "packages/ottima-core/src/ottima_core/__init__.py": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "07772b7f51b56de751985d12811565aa",
+    "semantic_hash": "07772b7f51b56de751985d12811565aa"
+  },
+  "packages/ottima-core/src/ottima_core/bus.py": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "635df372c2f1128cbb456cff4b8c2daa",
+    "semantic_hash": "635df372c2f1128cbb456cff4b8c2daa"
+  },
+  "packages/ottima-core/src/ottima_core/certs.py": {
+    "mtime": 1785850330.7198927,
+    "ast_hash": "67bcd3129e7c2cc1aea9e481c57a87ef",
+    "semantic_hash": "67bcd3129e7c2cc1aea9e481c57a87ef"
+  },
+  "packages/ottima-core/src/ottima_core/config.py": {
+    "mtime": 1785850330.7198927,
+    "ast_hash": "93e427551a3be2d23dfbae241f2c4b05",
+    "semantic_hash": "93e427551a3be2d23dfbae241f2c4b05"
+  },
+  "packages/ottima-core/src/ottima_core/db.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "70324e5d8184eec6b3ae83235e43414f",
+    "semantic_hash": "70324e5d8184eec6b3ae83235e43414f"
+  },
+  "packages/ottima-core/src/ottima_core/logging.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "863623dcd67b660ab390dc8b2c6ddbb6",
+    "semantic_hash": "863623dcd67b660ab390dc8b2c6ddbb6"
+  },
+  "packages/ottima-core/src/ottima_core/models/__init__.py": {
+    "mtime": 1785850330.7598915,
+    "ast_hash": "2c8fdc9c55e771b717b6f93026fba612",
+    "semantic_hash": "2c8fdc9c55e771b717b6f93026fba612"
+  },
+  "packages/ottima-core/src/ottima_core/models/base.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "59b905d72d89fce3935a74c4c58cf3d3",
+    "semantic_hash": "59b905d72d89fce3935a74c4c58cf3d3"
+  },
+  "packages/ottima-core/src/ottima_core/models/connection.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "b07b11fac84685c89466e3a7214c9105",
+    "semantic_hash": "b07b11fac84685c89466e3a7214c9105"
+  },
+  "packages/ottima-core/src/ottima_core/models/flow.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "56bdd4846bd7e4f4f4a4738bbd263f93",
+    "semantic_hash": "56bdd4846bd7e4f4f4a4738bbd263f93"
+  },
+  "packages/ottima-core/src/ottima_core/models/project.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "f54eb48b3f469a90df0638614b36471f",
+    "semantic_hash": "f54eb48b3f469a90df0638614b36471f"
+  },
+  "packages/ottima-core/src/ottima_core/models/tag.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "84e15d82118ed55ebf1c45e023afad89",
+    "semantic_hash": "84e15d82118ed55ebf1c45e023afad89"
+  },
+  "packages/ottima-core/src/ottima_core/models/timeseries.py": {
+    "mtime": 1785850330.7598915,
+    "ast_hash": "7674ea2ab106a5153c924c075280349b",
+    "semantic_hash": "7674ea2ab106a5153c924c075280349b"
+  },
+  "packages/ottima-core/src/ottima_core/models/user.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "c29c4741e71858d0f4dc75aca3d81ad4",
+    "semantic_hash": "c29c4741e71858d0f4dc75aca3d81ad4"
+  },
+  "packages/ottima-core/src/ottima_core/schemas/__init__.py": {
+    "mtime": 1785850330.851889,
+    "ast_hash": "d5fbc6034a81d8a7d52d80680f6152e0",
+    "semantic_hash": "d5fbc6034a81d8a7d52d80680f6152e0"
+  },
+  "packages/ottima-core/src/ottima_core/schemas/auth.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "7d85cedb4c4c2b53cc8dcd5b22067f61",
+    "semantic_hash": "7d85cedb4c4c2b53cc8dcd5b22067f61"
+  },
+  "packages/ottima-core/src/ottima_core/schemas/certificates.py": {
+    "mtime": 1785850330.8958874,
+    "ast_hash": "215aef068b19cb8b55238b05f5afa519",
+    "semantic_hash": "215aef068b19cb8b55238b05f5afa519"
+  },
+  "packages/ottima-core/src/ottima_core/schemas/connections.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "65aea07bd25f896017678761807aaa97",
+    "semantic_hash": "65aea07bd25f896017678761807aaa97"
+  },
+  "packages/ottima-core/src/ottima_core/schemas/events.py": {
+    "mtime": 1785850330.9158869,
+    "ast_hash": "cb265258f7e3df4d7f2e367ce94bc5a6",
+    "semantic_hash": "cb265258f7e3df4d7f2e367ce94bc5a6"
+  },
+  "packages/ottima-core/src/ottima_core/schemas/flows.py": {
+    "mtime": 1785874485.096408,
+    "ast_hash": "5c6be10b308f82c7b050be8ee1e46a0e",
+    "semantic_hash": "5c6be10b308f82c7b050be8ee1e46a0e"
+  },
+  "packages/ottima-core/src/ottima_core/schemas/history.py": {
+    "mtime": 1785850330.9318864,
+    "ast_hash": "9804fc61ecddb5bb505a8dcdb0060566",
+    "semantic_hash": "9804fc61ecddb5bb505a8dcdb0060566"
+  },
+  "packages/ottima-core/src/ottima_core/schemas/projects.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "77a7ce7ebaf2e945bed9850936c327ec",
+    "semantic_hash": "77a7ce7ebaf2e945bed9850936c327ec"
+  },
+  "packages/ottima-core/src/ottima_core/schemas/tags.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "1dfa82b270b095c9949b21963943b9e2",
+    "semantic_hash": "1dfa82b270b095c9949b21963943b9e2"
+  },
+  "packages/ottima-core/src/ottima_core/schemas/users.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "f56dc3074bbccb449ef35fae62522be7",
+    "semantic_hash": "f56dc3074bbccb449ef35fae62522be7"
+  },
+  "packages/ottima-core/src/ottima_core/security.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "1ffbfa78f6fe677aed834d581537ec96",
+    "semantic_hash": "1ffbfa78f6fe677aed834d581537ec96"
+  },
+  "packages/ottima-core/tests/test_bus.py": {
+    "mtime": 1785874485.096408,
+    "ast_hash": "fa0edccd8a030dbdfe52efd3b20e8e15",
+    "semantic_hash": "fa0edccd8a030dbdfe52efd3b20e8e15"
+  },
+  "packages/ottima-core/tests/test_bus_events.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "3af14133ce9fa1976e13c0568b7f1fbe",
+    "semantic_hash": "3af14133ce9fa1976e13c0568b7f1fbe"
+  },
+  "packages/ottima-core/tests/test_certs.py": {
+    "mtime": 1785850330.943886,
+    "ast_hash": "3449dfb2d0270140cf3da09d685e3586",
+    "semantic_hash": "3449dfb2d0270140cf3da09d685e3586"
+  },
+  "packages/ottima-core/tests/test_config.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "60ccc5f1622cf24eae20bdcae2bb1645",
+    "semantic_hash": "60ccc5f1622cf24eae20bdcae2bb1645"
+  },
+  "packages/ottima-core/tests/test_flowgraph.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "9aab08b86e45fa987946f0c76474e669",
+    "semantic_hash": "9aab08b86e45fa987946f0c76474e669"
+  },
+  "packages/ottima-core/tests/test_imports.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "1b21c61b2fdd88f342aaf2c120959cc8",
+    "semantic_hash": "1b21c61b2fdd88f342aaf2c120959cc8"
+  },
+  "packages/ottima-core/tests/test_migrations.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "eaefd92b68f1b64445477f7f8599566a",
+    "semantic_hash": "eaefd92b68f1b64445477f7f8599566a"
+  },
+  "packages/ottima-core/tests/test_models.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "810f96d8814fe3cc50d2e16e30ceff40",
+    "semantic_hash": "810f96d8814fe3cc50d2e16e30ceff40"
+  },
+  "packages/ottima-core/tests/test_security.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "3c8cc2a4a536fe39947e7cf94c2609af",
+    "semantic_hash": "3c8cc2a4a536fe39947e7cf94c2609af"
+  },
+  "packages/ottima-core/tests/test_timescale.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "2958b95f6890c02777d0c0abf0d50569",
+    "semantic_hash": "2958b95f6890c02777d0c0abf0d50569"
+  },
+  "pyproject.toml": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "82c691614a06503c06c515e64b6a45e6",
+    "semantic_hash": "82c691614a06503c06c515e64b6a45e6"
+  },
+  "services/api/pyproject.toml": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "112cf5e8105beda09d245bed6cafbf3f",
+    "semantic_hash": "112cf5e8105beda09d245bed6cafbf3f"
+  },
+  "services/api/src/ottima_api/__init__.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "64ab1988796e1e2abdbb0897db993ab5",
+    "semantic_hash": "64ab1988796e1e2abdbb0897db993ab5"
+  },
+  "services/api/src/ottima_api/app.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "42181d4613ac62dd75b6387e38661c96",
+    "semantic_hash": "42181d4613ac62dd75b6387e38661c96"
+  },
+  "services/api/src/ottima_api/deps.py": {
+    "mtime": 1785850331.0358832,
+    "ast_hash": "067a815e23c2d35772c5bb04acb59eb8",
+    "semantic_hash": "067a815e23c2d35772c5bb04acb59eb8"
+  },
+  "services/api/src/ottima_api/main.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "3089064380c329cdcce2d28b5570ff75",
+    "semantic_hash": "3089064380c329cdcce2d28b5570ff75"
+  },
+  "services/api/src/ottima_api/routers/__init__.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "19c8f233c3ace51a160d41d5661dcf76",
+    "semantic_hash": "19c8f233c3ace51a160d41d5661dcf76"
+  },
+  "services/api/src/ottima_api/routers/auth.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "d1984fdab24215340769438cdbd40026",
+    "semantic_hash": "d1984fdab24215340769438cdbd40026"
+  },
+  "services/api/src/ottima_api/routers/certificates.py": {
+    "mtime": 1785850331.0358832,
+    "ast_hash": "ea992ad04a58f807eb534e12495ee0d1",
+    "semantic_hash": "ea992ad04a58f807eb534e12495ee0d1"
+  },
+  "services/api/src/ottima_api/routers/connections.py": {
+    "mtime": 1785850331.0558827,
+    "ast_hash": "7c3b8897b1d62fd7bed18aa5dccdf5e0",
+    "semantic_hash": "7c3b8897b1d62fd7bed18aa5dccdf5e0"
+  },
+  "services/api/src/ottima_api/routers/events.py": {
+    "mtime": 1785850331.0558827,
+    "ast_hash": "754e789e612c3236db6869adc8d24a5b",
+    "semantic_hash": "754e789e612c3236db6869adc8d24a5b"
+  },
+  "services/api/src/ottima_api/routers/flows.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "0bd34173471243cf427e6d4ac52b5fd5",
+    "semantic_hash": "0bd34173471243cf427e6d4ac52b5fd5"
+  },
+  "services/api/src/ottima_api/routers/health.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "a072ba7d8b16b944b305f3a577239e93",
+    "semantic_hash": "a072ba7d8b16b944b305f3a577239e93"
+  },
+  "services/api/src/ottima_api/routers/history.py": {
+    "mtime": 1785850331.1278806,
+    "ast_hash": "c439de9911f7f43f1e364becbe0d9594",
+    "semantic_hash": "c439de9911f7f43f1e364becbe0d9594"
+  },
+  "services/api/src/ottima_api/routers/projects.py": {
+    "mtime": 1785874485.1444066,
+    "ast_hash": "3100bd0ba5e1c7adbaddd6446294b649",
+    "semantic_hash": "3100bd0ba5e1c7adbaddd6446294b649"
+  },
+  "services/api/src/ottima_api/routers/tags.py": {
+    "mtime": 1785850331.1278806,
+    "ast_hash": "504a01a3b4810192a89674b346469d5e",
+    "semantic_hash": "504a01a3b4810192a89674b346469d5e"
+  },
+  "services/api/src/ottima_api/routers/users.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "ca06321b78d896c5543d55bab854a40d",
+    "semantic_hash": "ca06321b78d896c5543d55bab854a40d"
+  },
+  "services/api/src/ottima_api/seed.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "e16b2a3e1d7c4050feb1b4ec428ec342",
+    "semantic_hash": "e16b2a3e1d7c4050feb1b4ec428ec342"
+  },
+  "services/api/src/ottima_api/ws.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "3d570333b03c45de866b1a0ed1b87ad2",
+    "semantic_hash": "3d570333b03c45de866b1a0ed1b87ad2"
+  },
+  "services/api/tests/conftest.py": {
+    "mtime": 1785850331.1558797,
+    "ast_hash": "9f4a5d18cd128f960dc396d793ae6060",
+    "semantic_hash": "9f4a5d18cd128f960dc396d793ae6060"
+  },
+  "services/api/tests/test_audit_events.py": {
+    "mtime": 1785850331.175879,
+    "ast_hash": "2ab92acff330a01f93e0538c00f5e08d",
+    "semantic_hash": "2ab92acff330a01f93e0538c00f5e08d"
+  },
+  "services/api/tests/test_auth.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "1efd724d152efa8d2694a7efbe41b630",
+    "semantic_hash": "1efd724d152efa8d2694a7efbe41b630"
+  },
+  "services/api/tests/test_certificates.py": {
+    "mtime": 1785850331.179879,
+    "ast_hash": "356d54ee66f60b48ea1099ec4956a938",
+    "semantic_hash": "356d54ee66f60b48ea1099ec4956a938"
+  },
+  "services/api/tests/test_connections.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "78dde99d47c67881390e7554fcf7fcea",
+    "semantic_hash": "78dde99d47c67881390e7554fcf7fcea"
+  },
+  "services/api/tests/test_events.py": {
+    "mtime": 1785850331.179879,
+    "ast_hash": "a2f68835cb3a31b3a046d87771ffc1e9",
+    "semantic_hash": "a2f68835cb3a31b3a046d87771ffc1e9"
+  },
+  "services/api/tests/test_flow_commands.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "9b790867146ebd98dd18b51aae1a0f1b",
+    "semantic_hash": "9b790867146ebd98dd18b51aae1a0f1b"
+  },
+  "services/api/tests/test_flows.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "e8fc475149f7f797ac8950fba3a2c6b0",
+    "semantic_hash": "e8fc475149f7f797ac8950fba3a2c6b0"
+  },
+  "services/api/tests/test_health.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "257634b20cec0cd56d357454ef9dcbb4",
+    "semantic_hash": "257634b20cec0cd56d357454ef9dcbb4"
+  },
+  "services/api/tests/test_history.py": {
+    "mtime": 1785850331.2398772,
+    "ast_hash": "4e1a725a32837a32fbea4a62be33fce4",
+    "semantic_hash": "4e1a725a32837a32fbea4a62be33fce4"
+  },
+  "services/api/tests/test_projects.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "1a70f108cb70feb32074c59022bd1dc4",
+    "semantic_hash": "1a70f108cb70feb32074c59022bd1dc4"
+  },
+  "services/api/tests/test_tags.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "c7c6f4ffbb0daa1ba46a4510bd0dc96f",
+    "semantic_hash": "c7c6f4ffbb0daa1ba46a4510bd0dc96f"
+  },
+  "services/api/tests/test_users.py": {
+    "mtime": 1785803706.5994165,
+    "ast_hash": "276e9fef78e0832addf02a8de1b2138b",
+    "semantic_hash": "276e9fef78e0832addf02a8de1b2138b"
+  },
+  "services/api/tests/test_ws.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "4db47c06ebff86a05716f1c8aa54343f",
+    "semantic_hash": "4db47c06ebff86a05716f1c8aa54343f"
+  },
+  "services/flow-runtime/pyproject.toml": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "f26568e0724472ca5c5cc10acc2a64da",
+    "semantic_hash": "f26568e0724472ca5c5cc10acc2a64da"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/__init__.py": {
+    "mtime": 1785803706.6034162,
+    "ast_hash": "9b441b7ea93ede2c55b7f0d69eca8df6",
+    "semantic_hash": "9b441b7ea93ede2c55b7f0d69eca8df6"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/blocks/__init__.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "d4e4c7a3909ea0ce91193eb90122513a",
+    "semantic_hash": "d4e4c7a3909ea0ce91193eb90122513a"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/blocks/base.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "ae8e0286ead0d752147e5dbc36b66bb3",
+    "semantic_hash": "ae8e0286ead0d752147e5dbc36b66bb3"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/blocks/opc_read.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "d2c008570d90066122950da678d841ba",
+    "semantic_hash": "d2c008570d90066122950da678d841ba"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/blocks/opc_write.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "c168fdc0c2144ab4e8df28cb72eb55bd",
+    "semantic_hash": "c168fdc0c2144ab4e8df28cb72eb55bd"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/blocks/script.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "00010eb0dfcca566db1f5450b0f486f6",
+    "semantic_hash": "00010eb0dfcca566db1f5450b0f486f6"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/blocks/tfs.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "a3a278956193352bef44a97f2564bfae",
+    "semantic_hash": "a3a278956193352bef44a97f2564bfae"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/events.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "16822c7d5cc7387380225583ddb2e466",
+    "semantic_hash": "16822c7d5cc7387380225583ddb2e466"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/main.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "88430aafdcadfd6fb06fa22a67fc2c13",
+    "semantic_hash": "88430aafdcadfd6fb06fa22a67fc2c13"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/scheduler.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "a997a0bc086c989047b7d309bae6909b",
+    "semantic_hash": "a997a0bc086c989047b7d309bae6909b"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/script_pool.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "58ba13aed88b7250ef3e2d40a9af3fc4",
+    "semantic_hash": "58ba13aed88b7250ef3e2d40a9af3fc4"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/snapshot.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "24d41f05390b2935a4db3b9f4fbce4d8",
+    "semantic_hash": "24d41f05390b2935a4db3b9f4fbce4d8"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/state.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "8ffee934509a95d536a44916f92af26b",
+    "semantic_hash": "8ffee934509a95d536a44916f92af26b"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/supervisor.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "cd38a212e9a2b3c44d88bd2044b600b4",
+    "semantic_hash": "cd38a212e9a2b3c44d88bd2044b600b4"
+  },
+  "services/flow-runtime/tests/conftest.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "067e15ac6bab5c3d5ba9ee042839d927",
+    "semantic_hash": "067e15ac6bab5c3d5ba9ee042839d927"
+  },
+  "services/flow-runtime/tests/test_blocks.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "04eb800ae2cb7f33c11a2213f42e6282",
+    "semantic_hash": "04eb800ae2cb7f33c11a2213f42e6282"
+  },
+  "services/flow-runtime/tests/test_events.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "8b30a4271fc761c37303876952ded38d",
+    "semantic_hash": "8b30a4271fc761c37303876952ded38d"
+  },
+  "services/flow-runtime/tests/test_health.py": {
+    "mtime": 1785874485.1484065,
+    "ast_hash": "a7ea3f04def9a47e58eb87abe39cacfe",
+    "semantic_hash": "a7ea3f04def9a47e58eb87abe39cacfe"
+  },
+  "services/flow-runtime/tests/test_hotswap.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "98542d6a518b9e815db7d1c0f88beb8f",
+    "semantic_hash": "98542d6a518b9e815db7d1c0f88beb8f"
+  },
+  "services/flow-runtime/tests/test_scheduler.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "db9a23f0a686835b577dda18d9a6908b",
+    "semantic_hash": "db9a23f0a686835b577dda18d9a6908b"
+  },
+  "services/flow-runtime/tests/test_script.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "c122cf7d180f10bbb3fc57dcdb41cdbb",
+    "semantic_hash": "c122cf7d180f10bbb3fc57dcdb41cdbb"
+  },
+  "services/flow-runtime/tests/test_snapshot.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "c95b956757527c598b700c656f12aada",
+    "semantic_hash": "c95b956757527c598b700c656f12aada"
+  },
+  "services/flow-runtime/tests/test_supervisor.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "47f4fca53dedd2694933a4744e23741a",
+    "semantic_hash": "47f4fca53dedd2694933a4744e23741a"
+  },
+  "services/flow-runtime/tests/test_tfs.py": {
+    "mtime": 1785874485.1524065,
+    "ast_hash": "2b8e078f216342d118170f8162c3ede0",
+    "semantic_hash": "2b8e078f216342d118170f8162c3ede0"
+  },
+  "services/opc-worker/pyproject.toml": {
+    "mtime": 1785850331.2398772,
+    "ast_hash": "180754795e2de9e9ad1b9035c4d63135",
+    "semantic_hash": "180754795e2de9e9ad1b9035c4d63135"
+  },
+  "services/opc-worker/src/ottima_opc_worker/__init__.py": {
+    "mtime": 1785803706.6034162,
+    "ast_hash": "6a755108eba8288c2aabad65b7c80442",
+    "semantic_hash": "6a755108eba8288c2aabad65b7c80442"
+  },
+  "services/opc-worker/src/ottima_opc_worker/connection.py": {
+    "mtime": 1785850331.2398772,
+    "ast_hash": "a6d6d2f371df478eae5608e9ec21b0e2",
+    "semantic_hash": "a6d6d2f371df478eae5608e9ec21b0e2"
+  },
+  "services/opc-worker/src/ottima_opc_worker/heartbeat.py": {
+    "mtime": 1785850331.2678764,
+    "ast_hash": "be3776025fe6c1557f945a45d0edbe0a",
+    "semantic_hash": "be3776025fe6c1557f945a45d0edbe0a"
+  },
+  "services/opc-worker/src/ottima_opc_worker/main.py": {
+    "mtime": 1785850331.2678764,
+    "ast_hash": "da5845f8fd3a9ff81ff15df6331fbc2f",
+    "semantic_hash": "da5845f8fd3a9ff81ff15df6331fbc2f"
+  },
+  "services/opc-worker/src/ottima_opc_worker/security.py": {
+    "mtime": 1785850331.2998753,
+    "ast_hash": "665bf03803404dae3f3e6ff16d54feed",
+    "semantic_hash": "665bf03803404dae3f3e6ff16d54feed"
+  },
+  "services/opc-worker/src/ottima_opc_worker/state.py": {
+    "mtime": 1785850331.2998753,
+    "ast_hash": "b8c8488837aa150e5ef4134767a6d33d",
+    "semantic_hash": "b8c8488837aa150e5ef4134767a6d33d"
+  },
+  "services/opc-worker/src/ottima_opc_worker/subscriptions.py": {
+    "mtime": 1785850331.3198748,
+    "ast_hash": "6c3839bf1952103f2e1cc34bcc0f0bd6",
+    "semantic_hash": "6c3839bf1952103f2e1cc34bcc0f0bd6"
+  },
+  "services/opc-worker/src/ottima_opc_worker/supervisor.py": {
+    "mtime": 1785850331.379873,
+    "ast_hash": "9a1597f2ecad477764cc3887b91a1c33",
+    "semantic_hash": "9a1597f2ecad477764cc3887b91a1c33"
+  },
+  "services/opc-worker/src/ottima_opc_worker/watchdog.py": {
+    "mtime": 1785850331.4158719,
+    "ast_hash": "76d51743deeec2d24cba94d506a4e743",
+    "semantic_hash": "76d51743deeec2d24cba94d506a4e743"
+  },
+  "services/opc-worker/src/ottima_opc_worker/writes.py": {
+    "mtime": 1785850331.4158719,
+    "ast_hash": "a0e8bae7e19afe40603af6276e18845a",
+    "semantic_hash": "a0e8bae7e19afe40603af6276e18845a"
+  },
+  "services/opc-worker/tests/conftest.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "52d9c5f12dfa4a205e58a3ab34fa2ada",
+    "semantic_hash": "52d9c5f12dfa4a205e58a3ab34fa2ada"
+  },
+  "services/opc-worker/tests/test_connection.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "c8a68bfbfcf5e2940db248df6973afeb",
+    "semantic_hash": "c8a68bfbfcf5e2940db248df6973afeb"
+  },
+  "services/opc-worker/tests/test_failure.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "938f76a8af7cdb27efe50a3c77c30fc4",
+    "semantic_hash": "938f76a8af7cdb27efe50a3c77c30fc4"
+  },
+  "services/opc-worker/tests/test_health.py": {
+    "mtime": 1785850331.4998693,
+    "ast_hash": "9c854775f1335fdd72ed9688f95f929e",
+    "semantic_hash": "9c854775f1335fdd72ed9688f95f929e"
+  },
+  "services/opc-worker/tests/test_heartbeat.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "2444c5376b04fddc6dbcc624369ba261",
+    "semantic_hash": "2444c5376b04fddc6dbcc624369ba261"
+  },
+  "services/opc-worker/tests/test_security.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "87ec67123026d2c103c81c761e953b07",
+    "semantic_hash": "87ec67123026d2c103c81c761e953b07"
+  },
+  "services/opc-worker/tests/test_subscriptions.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "db809736c72181a3177bd16549ff6b8d",
+    "semantic_hash": "db809736c72181a3177bd16549ff6b8d"
+  },
+  "services/opc-worker/tests/test_supervisor.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "da3b446f10517e58e288797390194142",
+    "semantic_hash": "da3b446f10517e58e288797390194142"
+  },
+  "services/opc-worker/tests/test_watchdog.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "39229865dc26314d0e7b5d14ea741491",
+    "semantic_hash": "39229865dc26314d0e7b5d14ea741491"
+  },
+  "services/opc-worker/tests/test_writes.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "6ea28e27f70bb2dea5b9e1871171e975",
+    "semantic_hash": "6ea28e27f70bb2dea5b9e1871171e975"
+  },
+  "services/recorder/pyproject.toml": {
+    "mtime": 1785803706.6034162,
+    "ast_hash": "c9c1835109317352fde03ba1cc561134",
+    "semantic_hash": "c9c1835109317352fde03ba1cc561134"
+  },
+  "services/recorder/src/ottima_recorder/__init__.py": {
+    "mtime": 1785803706.6034162,
+    "ast_hash": "42ac80f2aeb4c4878681ab2904292949",
+    "semantic_hash": "42ac80f2aeb4c4878681ab2904292949"
+  },
+  "services/recorder/src/ottima_recorder/main.py": {
+    "mtime": 1785850331.6358652,
+    "ast_hash": "cc69b79fca0965ecd72129d401ead6f3",
+    "semantic_hash": "cc69b79fca0965ecd72129d401ead6f3"
+  },
+  "services/recorder/src/ottima_recorder/pipeline.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "a68a98e3ebcb657d94a7ed28b3167aa1",
+    "semantic_hash": "a68a98e3ebcb657d94a7ed28b3167aa1"
+  },
+  "services/recorder/tests/test_backpressure.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "04f7bc3ece3a69c4277810218c74a761",
+    "semantic_hash": "04f7bc3ece3a69c4277810218c74a761"
+  },
+  "services/recorder/tests/test_health.py": {
+    "mtime": 1785803706.6034162,
+    "ast_hash": "670d52a7e6e49db96ad6b74f3723190c",
+    "semantic_hash": "670d52a7e6e49db96ad6b74f3723190c"
+  },
+  "services/recorder/tests/test_pipeline.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "5988d2c3135e24af313e317b8b1174a5",
+    "semantic_hash": "5988d2c3135e24af313e317b8b1174a5"
+  },
+  "tests/e2e/conftest.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "c496a6d3ed630c37f7cffce551cd84b9",
+    "semantic_hash": "c496a6d3ed630c37f7cffce551cd84b9"
+  },
+  "tests/e2e/f3_support.py": {
+    "mtime": 1785874485.1524065,
+    "ast_hash": "a248d47464c38f301093b3937f5d7a8f",
+    "semantic_hash": "a248d47464c38f301093b3937f5d7a8f"
+  },
+  "tests/e2e/test_api_e2e.py": {
+    "mtime": 1785803706.6034162,
+    "ast_hash": "e74b17f406425c21d060a04435581dca",
+    "semantic_hash": "e74b17f406425c21d060a04435581dca"
+  },
+  "tests/e2e/test_f2_acquisition.py": {
+    "mtime": 1785850331.7638614,
+    "ast_hash": "b1b31be8e2961ecde0cbf2082dd84941",
+    "semantic_hash": "b1b31be8e2961ecde0cbf2082dd84941"
+  },
+  "tests/e2e/test_f2_failure.py": {
+    "mtime": 1785850331.7638614,
+    "ast_hash": "6d6df951e9ca50dcec7ed0e5a594f1e5",
+    "semantic_hash": "6d6df951e9ca50dcec7ed0e5a594f1e5"
+  },
+  "tests/e2e/test_f2_security.py": {
+    "mtime": 1785850331.7638614,
+    "ast_hash": "a0e29f83a175143e066cedea5c904262",
+    "semantic_hash": "a0e29f83a175143e066cedea5c904262"
+  },
+  "tests/e2e/test_f3_engine.py": {
+    "mtime": 1785874485.1524065,
+    "ast_hash": "629b0b01ca796ab94d1ffa94e6182a47",
+    "semantic_hash": "629b0b01ca796ab94d1ffa94e6182a47"
+  },
+  "tests/e2e/test_f3_lifecycle.py": {
+    "mtime": 1785874485.1524065,
+    "ast_hash": "efee2dd41251dcd6aed99d8abbab5464",
+    "semantic_hash": "efee2dd41251dcd6aed99d8abbab5464"
+  },
+  "tests/opcsim/pyproject.toml": {
+    "mtime": 1785850331.7638614,
+    "ast_hash": "8bce35f8d76aecfa826b7628b82c4b0c",
+    "semantic_hash": "8bce35f8d76aecfa826b7628b82c4b0c"
+  },
+  "tests/opcsim/src/opcsim/__init__.py": {
+    "mtime": 1785850331.7678614,
+    "ast_hash": "8ddd59af264d92f975c2348825cd97b3",
+    "semantic_hash": "8ddd59af264d92f975c2348825cd97b3"
+  },
+  "tests/opcsim/src/opcsim/__main__.py": {
+    "mtime": 1785850331.7678614,
+    "ast_hash": "53d5f154c202100c44cd98b2ac2c924d",
+    "semantic_hash": "53d5f154c202100c44cd98b2ac2c924d"
+  },
+  "tests/opcsim/src/opcsim/server.py": {
+    "mtime": 1785850331.8318594,
+    "ast_hash": "0e5699157d4b5f9c280ca9035f9dc5b7",
+    "semantic_hash": "0e5699157d4b5f9c280ca9035f9dc5b7"
+  },
+  "tests/opcsim/tests/test_server.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "d3e4c6e88ec43c3ff804335dcf63ed98",
+    "semantic_hash": "d3e4c6e88ec43c3ff804335dcf63ed98"
+  },
+  "CLAUDE.md": {
+    "mtime": 1785974809.7332714,
+    "ast_hash": "55eec1c73e05aa0d03a1e1a412739ec1",
+    "semantic_hash": "55eec1c73e05aa0d03a1e1a412739ec1"
+  },
+  "DESIGN.md": {
+    "mtime": 1785775688.2543318,
+    "ast_hash": "1e1722b878ed251912af077b0e65ca05",
+    "semantic_hash": "1e1722b878ed251912af077b0e65ca05"
+  },
+  "PRODUCT.md": {
+    "mtime": 1785775713.2176402,
+    "ast_hash": "8e7b3753b482816f4044aa2b4748660c",
+    "semantic_hash": "8e7b3753b482816f4044aa2b4748660c"
+  },
+  "deploy/docker-compose.e2e.yml": {
+    "mtime": 1785850330.3759031,
+    "ast_hash": "6786c42273cf42db555c92f346b52383",
+    "semantic_hash": "6786c42273cf42db555c92f346b52383"
+  },
+  "deploy/docker-compose.yml": {
+    "mtime": 1785874485.0884082,
+    "ast_hash": "9df48d468ee8b546e658e82c81ddaa58",
+    "semantic_hash": "9df48d468ee8b546e658e82c81ddaa58"
+  },
+  "docs/GLOSSARY.md": {
+    "mtime": 1785836557.0,
+    "ast_hash": "3a638991ed9806d8feae4ad308eb8986",
+    "semantic_hash": "3a638991ed9806d8feae4ad308eb8986"
+  },
+  "docs/PRD.md": {
+    "mtime": 1785850249.6063461,
+    "ast_hash": "f3ff4f57a6ef8a6a04b4a3ef0719b36c",
+    "semantic_hash": "f3ff4f57a6ef8a6a04b4a3ef0719b36c"
+  },
+  "docs/README.md": {
+    "mtime": 1785773488.0,
+    "ast_hash": "eae9b9d15793088241a27685e4535a5d",
+    "semantic_hash": "eae9b9d15793088241a27685e4535a5d"
+  },
+  "docs/adr/ADR-001-fastapi-all-in.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "623ea6d93c6c20c738a3d207f2420b1e",
+    "semantic_hash": "623ea6d93c6c20c738a3d207f2420b1e"
+  },
+  "docs/adr/ADR-002-barramento-redis-pubsub.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "c869b26c848fc7583f35f22560e5065e",
+    "semantic_hash": "c869b26c848fc7583f35f22560e5065e"
+  },
+  "docs/adr/ADR-003-timescaledb-unico-retencao-1mes.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "8e9b82e03b6526e6a56e25546fdbb575",
+    "semantic_hash": "8e9b82e03b6526e6a56e25546fdbb575"
+  },
+  "docs/adr/ADR-004-loops-vivos-asyncio-sem-celery.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "aa2f39fef31e578bc2ae91fbee6d1ee7",
+    "semantic_hash": "aa2f39fef31e578bc2ae91fbee6d1ee7"
+  },
+  "docs/adr/ADR-005-canvas-react-flow-execucao-backend.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "ea243871772e0a6ae75160214101bef9",
+    "semantic_hash": "ea243871772e0a6ae75160214101bef9"
+  },
+  "docs/adr/ADR-006-separacao-opc-worker-flow-runtime.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "4bfc2c242b67fa48e6b0055f4e4f8e00",
+    "semantic_hash": "4bfc2c242b67fa48e6b0055f4e4f8e00"
+  },
+  "docs/adr/ADR-007-scan-cycle-ts-por-flow.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "267cb9e439a77990d0d89e0cde76f611",
+    "semantic_hash": "267cb9e439a77990d0d89e0cde76f611"
+  },
+  "docs/adr/ADR-008-mpc-config-formulario-abas.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "34028243a1f2582e08fdf41f69186498",
+    "semantic_hash": "34028243a1f2582e08fdf41f69186498"
+  },
+  "docs/adr/ADR-009-watchdog-bit-alternante.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "10959ca0c185a385463dff84a2465ddf",
+    "semantic_hash": "10959ca0c185a385463dff84a2465ddf"
+  },
+  "docs/adr/ADR-010-modos-local-remoto-man-auto-bumpless.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "f6915e5008754258f4c44c736adf6eb1",
+    "semantic_hash": "f6915e5008754258f4c44c736adf6eb1"
+  },
+  "docs/adr/ADR-011-hot-swap-sem-versionamento.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "4afca868f90bc3d207b263bb162598be",
+    "semantic_hash": "4afca868f90bc3d207b263bb162598be"
+  },
+  "docs/adr/ADR-012-projeto-export-import-json.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "138ddb970539ee952a9df44037ec5e22",
+    "semantic_hash": "138ddb970539ee952a9df44037ec5e22"
+  },
+  "docs/adr/ADR-013-modelo-sopdt-tss-integrador.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "efeef8ae350859feee02ceac2c1cf4e2",
+    "semantic_hash": "efeef8ae350859feee02ceac2c1cf4e2"
+  },
+  "docs/adr/ADR-014-orcamento-solver-multiplicador.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "66285cdf991b0d597c90393c55ba8466",
+    "semantic_hash": "66285cdf991b0d597c90393c55ba8466"
+  },
+  "docs/adr/ADR-015-papeis-admin-operador.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "2f2249edb035f4606b7adf15f649fe29",
+    "semantic_hash": "2f2249edb035f4606b7adf15f649fe29"
+  },
+  "docs/adr/ADR-016-tela-operacao-faceplate-tendencia-predicao.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "ca4c4df9d3fb2c8d963065e64f103394",
+    "semantic_hash": "ca4c4df9d3fb2c8d963065e64f103394"
+  },
+  "docs/adr/ADR-017-projeto-ativo-unico-boot-parado.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "358d599944c619abf729ffb3c053388e",
+    "semantic_hash": "358d599944c619abf729ffb3c053388e"
+  },
+  "docs/adr/ADR-018-contrato-bloco-python-script.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "da8e61f0d6f6937cd52c7acb08f01bac",
+    "semantic_hash": "da8e61f0d6f6937cd52c7acb08f01bac"
+  },
+  "docs/adr/ADR-019-cv-sp-restricoes-por-faixa-precedencia.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "90e24c81f3ea9c27f23e7ac6ee250e73",
+    "semantic_hash": "90e24c81f3ea9c27f23e7ac6ee250e73"
+  },
+  "docs/adr/ADR-020-log-eventos-sem-ack.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "27bb1ef52d325a2f75611041e4f6b716",
+    "semantic_hash": "27bb1ef52d325a2f75611041e4f6b716"
+  },
+  "docs/adr/ADR-021-seguranca-opcua-v1.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "7ad9db1ac7b6490891053151a556eb67",
+    "semantic_hash": "7ad9db1ac7b6490891053151a556eb67"
+  },
+  "docs/adr/ADR-022-bloco-tfs-simulacao.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "caae1ecbde857eb44fec45355a1809c7",
+    "semantic_hash": "caae1ecbde857eb44fec45355a1809c7"
+  },
+  "docs/adr/ADR-023-escopo-plataforma-v1.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "26b7af99cc5e43f8a15e63a1ed5b2dea",
+    "semantic_hash": "26b7af99cc5e43f8a15e63a1ed5b2dea"
+  },
+  "docs/adr/ADR-024-ordem-execucao-explicita.md": {
+    "mtime": 1785848124.0,
+    "ast_hash": "f6bbf7a9d289c4b8909b603a40edb5fb",
+    "semantic_hash": "f6bbf7a9d289c4b8909b603a40edb5fb"
+  },
+  "docs/archive/CLAUDE.md": {
+    "mtime": 1785803706.5914166,
+    "ast_hash": "efaa52c23a4f15fae40a21db19458248",
+    "semantic_hash": "efaa52c23a4f15fae40a21db19458248"
+  },
+  "docs/archive/GLOSSARY.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "0bc5b899cf1f467f411ec764a656c793",
+    "semantic_hash": "0bc5b899cf1f467f411ec764a656c793"
+  },
+  "docs/archive/PRD.md": {
+    "mtime": 1785773480.0,
+    "ast_hash": "c5d0e348b21803c91935c814b7a6b61e",
+    "semantic_hash": "c5d0e348b21803c91935c814b7a6b61e"
+  },
+  "docs/archive/adr/ADR-001-fastapi-all-in.md": {
+    "mtime": 1785770305.0,
+    "ast_hash": "623ea6d93c6c20c738a3d207f2420b1e",
+    "semantic_hash": "623ea6d93c6c20c738a3d207f2420b1e"
+  },
+  "docs/archive/adr/ADR-002-barramento-redis-pubsub.md": {
+    "mtime": 1785770305.0,
+    "ast_hash": "c869b26c848fc7583f35f22560e5065e",
+    "semantic_hash": "c869b26c848fc7583f35f22560e5065e"
+  },
+  "docs/archive/adr/ADR-003-timescaledb-unico-retencao-1mes.md": {
+    "mtime": 1785770305.0,
+    "ast_hash": "8e9b82e03b6526e6a56e25546fdbb575",
+    "semantic_hash": "8e9b82e03b6526e6a56e25546fdbb575"
+  },
+  "docs/archive/adr/ADR-004-loops-vivos-asyncio-sem-celery.md": {
+    "mtime": 1785770305.0,
+    "ast_hash": "aa2f39fef31e578bc2ae91fbee6d1ee7",
+    "semantic_hash": "aa2f39fef31e578bc2ae91fbee6d1ee7"
+  },
+  "docs/archive/adr/ADR-005-canvas-react-flow-execucao-backend.md": {
+    "mtime": 1785770305.0,
+    "ast_hash": "ea243871772e0a6ae75160214101bef9",
+    "semantic_hash": "ea243871772e0a6ae75160214101bef9"
+  },
+  "docs/archive/adr/ADR-006-separacao-opc-worker-flow-runtime.md": {
+    "mtime": 1785770305.0,
+    "ast_hash": "4bfc2c242b67fa48e6b0055f4e4f8e00",
+    "semantic_hash": "4bfc2c242b67fa48e6b0055f4e4f8e00"
+  },
+  "docs/archive/adr/ADR-007-scan-cycle-ts-por-flow.md": {
+    "mtime": 1785771388.0,
+    "ast_hash": "67c4f5f94c099b354cc80a687295002d",
+    "semantic_hash": "67c4f5f94c099b354cc80a687295002d"
+  },
+  "docs/archive/adr/ADR-008-mpc-config-formulario-abas.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "34028243a1f2582e08fdf41f69186498",
+    "semantic_hash": "34028243a1f2582e08fdf41f69186498"
+  },
+  "docs/archive/adr/ADR-009-watchdog-bit-alternante.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "10959ca0c185a385463dff84a2465ddf",
+    "semantic_hash": "10959ca0c185a385463dff84a2465ddf"
+  },
+  "docs/archive/adr/ADR-010-modos-local-remoto-man-auto-bumpless.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "f6915e5008754258f4c44c736adf6eb1",
+    "semantic_hash": "f6915e5008754258f4c44c736adf6eb1"
+  },
+  "docs/archive/adr/ADR-011-hot-swap-sem-versionamento.md": {
+    "mtime": 1785771388.0,
+    "ast_hash": "4afca868f90bc3d207b263bb162598be",
+    "semantic_hash": "4afca868f90bc3d207b263bb162598be"
+  },
+  "docs/archive/adr/ADR-012-projeto-export-import-json.md": {
+    "mtime": 1785771388.0,
+    "ast_hash": "138ddb970539ee952a9df44037ec5e22",
+    "semantic_hash": "138ddb970539ee952a9df44037ec5e22"
+  },
+  "docs/archive/adr/ADR-013-modelo-sopdt-tss-integrador.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "efeef8ae350859feee02ceac2c1cf4e2",
+    "semantic_hash": "efeef8ae350859feee02ceac2c1cf4e2"
+  },
+  "docs/archive/adr/ADR-014-orcamento-solver-multiplicador.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "66285cdf991b0d597c90393c55ba8466",
+    "semantic_hash": "66285cdf991b0d597c90393c55ba8466"
+  },
+  "docs/archive/adr/ADR-015-papeis-admin-operador.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "2f2249edb035f4606b7adf15f649fe29",
+    "semantic_hash": "2f2249edb035f4606b7adf15f649fe29"
+  },
+  "docs/archive/adr/ADR-016-tela-operacao-faceplate-tendencia-predicao.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "ca4c4df9d3fb2c8d963065e64f103394",
+    "semantic_hash": "ca4c4df9d3fb2c8d963065e64f103394"
+  },
+  "docs/archive/adr/ADR-017-projeto-ativo-unico-boot-parado.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "358d599944c619abf729ffb3c053388e",
+    "semantic_hash": "358d599944c619abf729ffb3c053388e"
+  },
+  "docs/archive/adr/ADR-018-contrato-bloco-python-script.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "da8e61f0d6f6937cd52c7acb08f01bac",
+    "semantic_hash": "da8e61f0d6f6937cd52c7acb08f01bac"
+  },
+  "docs/archive/adr/ADR-019-cv-sp-restricoes-por-faixa-precedencia.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "90e24c81f3ea9c27f23e7ac6ee250e73",
+    "semantic_hash": "90e24c81f3ea9c27f23e7ac6ee250e73"
+  },
+  "docs/archive/adr/ADR-020-log-eventos-sem-ack.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "27bb1ef52d325a2f75611041e4f6b716",
+    "semantic_hash": "27bb1ef52d325a2f75611041e4f6b716"
+  },
+  "docs/archive/adr/ADR-021-seguranca-opcua-v1.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "7ad9db1ac7b6490891053151a556eb67",
+    "semantic_hash": "7ad9db1ac7b6490891053151a556eb67"
+  },
+  "docs/archive/adr/ADR-022-bloco-tfs-simulacao.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "caae1ecbde857eb44fec45355a1809c7",
+    "semantic_hash": "caae1ecbde857eb44fec45355a1809c7"
+  },
+  "docs/archive/adr/ADR-023-escopo-plataforma-v1.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "26b7af99cc5e43f8a15e63a1ed5b2dea",
+    "semantic_hash": "26b7af99cc5e43f8a15e63a1ed5b2dea"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-001-fastapi-all-in.md": {
+    "mtime": 1785770305.0,
+    "ast_hash": "623ea6d93c6c20c738a3d207f2420b1e",
+    "semantic_hash": "623ea6d93c6c20c738a3d207f2420b1e"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-002-barramento-redis-pubsub.md": {
+    "mtime": 1785770305.0,
+    "ast_hash": "c869b26c848fc7583f35f22560e5065e",
+    "semantic_hash": "c869b26c848fc7583f35f22560e5065e"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-003-timescaledb-unico-retencao-1mes.md": {
+    "mtime": 1785770305.0,
+    "ast_hash": "8e9b82e03b6526e6a56e25546fdbb575",
+    "semantic_hash": "8e9b82e03b6526e6a56e25546fdbb575"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-004-loops-vivos-asyncio-sem-celery.md": {
+    "mtime": 1785770305.0,
+    "ast_hash": "aa2f39fef31e578bc2ae91fbee6d1ee7",
+    "semantic_hash": "aa2f39fef31e578bc2ae91fbee6d1ee7"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-005-canvas-react-flow-execucao-backend.md": {
+    "mtime": 1785770305.0,
+    "ast_hash": "ea243871772e0a6ae75160214101bef9",
+    "semantic_hash": "ea243871772e0a6ae75160214101bef9"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-006-separacao-opc-worker-flow-runtime.md": {
+    "mtime": 1785770305.0,
+    "ast_hash": "4bfc2c242b67fa48e6b0055f4e4f8e00",
+    "semantic_hash": "4bfc2c242b67fa48e6b0055f4e4f8e00"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-007-scan-cycle-ts-por-flow.md": {
+    "mtime": 1785836557.0,
+    "ast_hash": "267cb9e439a77990d0d89e0cde76f611",
+    "semantic_hash": "267cb9e439a77990d0d89e0cde76f611"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-008-mpc-config-formulario-abas.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "34028243a1f2582e08fdf41f69186498",
+    "semantic_hash": "34028243a1f2582e08fdf41f69186498"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-009-watchdog-bit-alternante.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "10959ca0c185a385463dff84a2465ddf",
+    "semantic_hash": "10959ca0c185a385463dff84a2465ddf"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-010-modos-local-remoto-man-auto-bumpless.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "f6915e5008754258f4c44c736adf6eb1",
+    "semantic_hash": "f6915e5008754258f4c44c736adf6eb1"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-011-hot-swap-sem-versionamento.md": {
+    "mtime": 1785771388.0,
+    "ast_hash": "4afca868f90bc3d207b263bb162598be",
+    "semantic_hash": "4afca868f90bc3d207b263bb162598be"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-012-projeto-export-import-json.md": {
+    "mtime": 1785771388.0,
+    "ast_hash": "138ddb970539ee952a9df44037ec5e22",
+    "semantic_hash": "138ddb970539ee952a9df44037ec5e22"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-013-modelo-sopdt-tss-integrador.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "efeef8ae350859feee02ceac2c1cf4e2",
+    "semantic_hash": "efeef8ae350859feee02ceac2c1cf4e2"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-014-orcamento-solver-multiplicador.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "66285cdf991b0d597c90393c55ba8466",
+    "semantic_hash": "66285cdf991b0d597c90393c55ba8466"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-015-papeis-admin-operador.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "2f2249edb035f4606b7adf15f649fe29",
+    "semantic_hash": "2f2249edb035f4606b7adf15f649fe29"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-016-tela-operacao-faceplate-tendencia-predicao.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "ca4c4df9d3fb2c8d963065e64f103394",
+    "semantic_hash": "ca4c4df9d3fb2c8d963065e64f103394"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-017-projeto-ativo-unico-boot-parado.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "358d599944c619abf729ffb3c053388e",
+    "semantic_hash": "358d599944c619abf729ffb3c053388e"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-018-contrato-bloco-python-script.md": {
+    "mtime": 1785772525.0,
+    "ast_hash": "da8e61f0d6f6937cd52c7acb08f01bac",
+    "semantic_hash": "da8e61f0d6f6937cd52c7acb08f01bac"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-019-cv-sp-restricoes-por-faixa-precedencia.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "90e24c81f3ea9c27f23e7ac6ee250e73",
+    "semantic_hash": "90e24c81f3ea9c27f23e7ac6ee250e73"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-020-log-eventos-sem-ack.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "27bb1ef52d325a2f75611041e4f6b716",
+    "semantic_hash": "27bb1ef52d325a2f75611041e4f6b716"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-021-seguranca-opcua-v1.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "7ad9db1ac7b6490891053151a556eb67",
+    "semantic_hash": "7ad9db1ac7b6490891053151a556eb67"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-022-bloco-tfs-simulacao.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "caae1ecbde857eb44fec45355a1809c7",
+    "semantic_hash": "caae1ecbde857eb44fec45355a1809c7"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-023-escopo-plataforma-v1.md": {
+    "mtime": 1785773363.0,
+    "ast_hash": "26b7af99cc5e43f8a15e63a1ed5b2dea",
+    "semantic_hash": "26b7af99cc5e43f8a15e63a1ed5b2dea"
+  },
+  "docs/ottimasystem-docsv1.1/adr/ADR-024-ordem-execucao-explicita.md": {
+    "mtime": 1785836531.0,
+    "ast_hash": "f6bbf7a9d289c4b8909b603a40edb5fb",
+    "semantic_hash": "f6bbf7a9d289c4b8909b603a40edb5fb"
+  },
+  "docs/plans/F2-aquisicao.md": {
+    "mtime": 1785807816.7278166,
+    "ast_hash": "315c515be310281d5fcba27b76801dc2",
+    "semantic_hash": "315c515be310281d5fcba27b76801dc2"
+  },
+  "docs/plans/F3-motor-canvas.md": {
+    "mtime": 1785850704.800948,
+    "ast_hash": "ba848286d5be7b28dc0e4ef180ef9d0e",
+    "semantic_hash": "ba848286d5be7b28dc0e4ef180ef9d0e"
+  },
+  "docs/specs/F1-fundacao.md": {
+    "mtime": 1785778614.0795577,
+    "ast_hash": "43e07ebc0b1a5f036fb01c25b6ab456d",
+    "semantic_hash": "43e07ebc0b1a5f036fb01c25b6ab456d"
+  },
+  "docs/specs/F1-testes-e2e.md": {
+    "mtime": 1785779540.3180013,
+    "ast_hash": "2cd38729a143635fe1d958388b94ca60",
+    "semantic_hash": "2cd38729a143635fe1d958388b94ca60"
+  },
+  "docs/specs/F2-aquisicao.md": {
+    "mtime": 1785807253.9948504,
+    "ast_hash": "7ef99d9668e3c6d2c4b3315b40b15216",
+    "semantic_hash": "7ef99d9668e3c6d2c4b3315b40b15216"
+  },
+  "docs/specs/F3-motor-canvas.md": {
+    "mtime": 1785879161.0594568,
+    "ast_hash": "a9d2ea0fd9333ef4094255683d6b5697",
+    "semantic_hash": "a9d2ea0fd9333ef4094255683d6b5697"
+  },
+  "docs/superpowers/plans/2026-08-03-F1-fundacao.md": {
+    "mtime": 1785780161.8489811,
+    "ast_hash": "d760fe1e8ca508bd7007e7b1a6e15aff",
+    "semantic_hash": "d760fe1e8ca508bd7007e7b1a6e15aff"
+  },
+  "frontend/index.html": {
+    "mtime": 1785803706.5954165,
+    "ast_hash": "5b391685187f7b2b74cab1984b86adeb",
+    "semantic_hash": "5b391685187f7b2b74cab1984b86adeb"
+  },
+  "tests/README.md": {
+    "mtime": 1785803706.6034162,
+    "ast_hash": "b4f0023db3ee5b95bf40faeed6dd9939",
+    "semantic_hash": "b4f0023db3ee5b95bf40faeed6dd9939"
+  },
+  "docs/specs/F4-mpc.md": {
+    "mtime": 1785880436.6037858,
+    "ast_hash": "e98fd7830dadc639ede36a0a903da656",
+    "semantic_hash": "e98fd7830dadc639ede36a0a903da656"
+  },
+  ".clinerules/caveman.md": {
+    "mtime": 1785881235.8822293,
+    "ast_hash": "b1cdbe1b6654ab792a3744966034dcf7",
+    "semantic_hash": ""
+  },
+  ".github/copilot-instructions.md": {
+    "mtime": 1785881235.8822293,
+    "ast_hash": "b1cdbe1b6654ab792a3744966034dcf7",
+    "semantic_hash": ""
+  },
+  ".opencode/AGENTS.md": {
+    "mtime": 1785881235.8822293,
+    "ast_hash": "b1cdbe1b6654ab792a3744966034dcf7",
+    "semantic_hash": ""
+  },
+  ".windsurf/rules/caveman.md": {
+    "mtime": 1785881235.8822293,
+    "ast_hash": "b439cfa81819754ec6be648d7e2073ca",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1785881235.8822293,
+    "ast_hash": "b1cdbe1b6654ab792a3744966034dcf7",
+    "semantic_hash": ""
+  },
+  "docs/plans/F4a-mpc-config-montagem.md": {
+    "mtime": 1785881341.123386,
+    "ast_hash": "512def39a607057643350dce7744a11e",
+    "semantic_hash": "512def39a607057643350dce7744a11e"
+  },
+  "docs/plans/F4b-mpc-runtime-modos.md": {
+    "mtime": 1785881527.4783413,
+    "ast_hash": "089e9434722b2aa79f04880929ff8267",
+    "semantic_hash": "089e9434722b2aa79f04880929ff8267"
+  },
+  "docs/plans/tests-e2e-f4.md": {
+    "mtime": 1785974809.7732704,
+    "ast_hash": "3d0c1a9f3530f45d65223968a4a19035",
+    "semantic_hash": "3d0c1a9f3530f45d65223968a4a19035"
+  },
+  "frontend/scripts/generate-contracts.mjs": {
+    "mtime": 1785974809.7732704,
+    "ast_hash": "78e3beb9d4ec515d4eeb8ad7b47977c0",
+    "semantic_hash": "78e3beb9d4ec515d4eeb8ad7b47977c0"
+  },
+  "frontend/src/features/flows/mpc/CamposPid.tsx": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "cb4b4099b3b396b1557137a8b71fe63c",
+    "semantic_hash": "cb4b4099b3b396b1557137a8b71fe63c"
+  },
+  "frontend/src/features/flows/mpc/MpcModal.tsx": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "4e370bd9327bfe43f2d5e75bb007f1e7",
+    "semantic_hash": "4e370bd9327bfe43f2d5e75bb007f1e7"
+  },
+  "frontend/src/features/flows/mpc/TabGeneral.tsx": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "5776e9b70308b551f2daa9eb0bfad469",
+    "semantic_hash": "5776e9b70308b551f2daa9eb0bfad469"
+  },
+  "frontend/src/features/flows/mpc/TabHorizons.tsx": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "bf4a38b9f21029b1595abc3f8d01150a",
+    "semantic_hash": "bf4a38b9f21029b1595abc3f8d01150a"
+  },
+  "frontend/src/features/flows/mpc/TabLimits.tsx": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "4ce3f9b03f8718abacb945ae543fcca6",
+    "semantic_hash": "4ce3f9b03f8718abacb945ae543fcca6"
+  },
+  "frontend/src/features/flows/mpc/TabModels.tsx": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "2e17009895652778252ea7d1ffacaa8a",
+    "semantic_hash": "2e17009895652778252ea7d1ffacaa8a"
+  },
+  "frontend/src/features/flows/mpc/TabSummary.tsx": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "cb7f384d564a62ea12e1b275597a0c51",
+    "semantic_hash": "cb7f384d564a62ea12e1b275597a0c51"
+  },
+  "frontend/src/features/flows/mpc/TabVariables.tsx": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "33f557ce423e5bfc870c538a3819e485",
+    "semantic_hash": "33f557ce423e5bfc870c538a3819e485"
+  },
+  "frontend/src/features/flows/mpc/TabWeights.tsx": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "69e98468683087ed69b29c6871e65fd1",
+    "semantic_hash": "69e98468683087ed69b29c6871e65fd1"
+  },
+  "frontend/src/features/flows/mpc/graphMpc.ts": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "b34a691af8229b7516537ab7e5b98ae2",
+    "semantic_hash": "b34a691af8229b7516537ab7e5b98ae2"
+  },
+  "frontend/src/features/flows/mpc/mpcLogic.check.ts": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "ac207367fd92a7994880518831abe15d",
+    "semantic_hash": "ac207367fd92a7994880518831abe15d"
+  },
+  "frontend/src/features/flows/mpc/mpcLogic.ts": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "7416f401617698f3058b65be8aea0de9",
+    "semantic_hash": "7416f401617698f3058b65be8aea0de9"
+  },
+  "frontend/src/lib/contracts.gen.ts": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "56dc877751f5299be79224b3f2be9734",
+    "semantic_hash": "56dc877751f5299be79224b3f2be9734"
+  },
+  "packages/ottima-core/src/ottima_core/contracts_export.py": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "2314b83da524f4a20a36f1f518039df7",
+    "semantic_hash": "2314b83da524f4a20a36f1f518039df7"
+  },
+  "packages/ottima-core/src/ottima_core/flowgraph/__init__.py": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "fefed057082d4f14cd50ecf0d3981a0c",
+    "semantic_hash": "fefed057082d4f14cd50ecf0d3981a0c"
+  },
+  "packages/ottima-core/src/ottima_core/flowgraph/mpc_config.py": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "73e27f5bbfd44d13b7fd521f85e52c0f",
+    "semantic_hash": "73e27f5bbfd44d13b7fd521f85e52c0f"
+  },
+  "packages/ottima-core/src/ottima_core/flowgraph/parse.py": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "bbcc89dad4f79ec7179b0bfd4908178c",
+    "semantic_hash": "bbcc89dad4f79ec7179b0bfd4908178c"
+  },
+  "packages/ottima-core/src/ottima_core/flowgraph/validate.py": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "b186e08e576775ad2d68b3920466f7ed",
+    "semantic_hash": "b186e08e576775ad2d68b3920466f7ed"
+  },
+  "packages/ottima-core/src/ottima_core/pubsub.py": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "c1f8a1bae0aaf09423389bf4147e1f15",
+    "semantic_hash": "c1f8a1bae0aaf09423389bf4147e1f15"
+  },
+  "packages/ottima-core/src/ottima_core/tags.py": {
+    "mtime": 1785974809.7772703,
+    "ast_hash": "e51f8edd4d0c26abe0380e1b44b059e2",
+    "semantic_hash": "e51f8edd4d0c26abe0380e1b44b059e2"
+  },
+  "packages/ottima-core/tests/test_contracts_export.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "b33a44e32f83dd5ebaa8666c4833c047",
+    "semantic_hash": "b33a44e32f83dd5ebaa8666c4833c047"
+  },
+  "packages/ottima-core/tests/test_flowgraph_mpc.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "354bcce0e8899868eb389f8c02203200",
+    "semantic_hash": "354bcce0e8899868eb389f8c02203200"
+  },
+  "packages/ottima-core/tests/test_mpc_config.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "5b398c2031a794895ac5767defce4768",
+    "semantic_hash": "5b398c2031a794895ac5767defce4768"
+  },
+  "packages/ottima-core/tests/test_pubsub.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "b5ef26f5a64022c008bb043b854ed6f3",
+    "semantic_hash": "b5ef26f5a64022c008bb043b854ed6f3"
+  },
+  "packages/ottima-core/tests/test_tags.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "ddb0045750f84830e9a9fdf2f6778001",
+    "semantic_hash": "ddb0045750f84830e9a9fdf2f6778001"
+  },
+  "services/api/src/ottima_api/routers/operate.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "64d754e230a185b41e8bc32c3d8840f1",
+    "semantic_hash": "64d754e230a185b41e8bc32c3d8840f1"
+  },
+  "services/api/tests/test_flows_mpc.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "0c21557f15a611c81560f5d36889938b",
+    "semantic_hash": "0c21557f15a611c81560f5d36889938b"
+  },
+  "services/api/tests/test_operate.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "c06633ec175e35b93011548d0386e9ae",
+    "semantic_hash": "c06633ec175e35b93011548d0386e9ae"
+  },
+  "services/api/tests/test_ws_mpc.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "0cba679761b71fc2e52e79323166bbdb",
+    "semantic_hash": "0cba679761b71fc2e52e79323166bbdb"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/blocks/mpc.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "0c9241b69a4c2b4288ecf14f6f9f0f12",
+    "semantic_hash": "0c9241b69a4c2b4288ecf14f6f9f0f12"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/definition.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "e45ec136bccadad0250d33bb5aef89c3",
+    "semantic_hash": "e45ec136bccadad0250d33bb5aef89c3"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/mpc/__init__.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "b267ede3eaa4ade5e7188f4bb030cdf9",
+    "semantic_hash": "b267ede3eaa4ade5e7188f4bb030cdf9"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/mpc/builder.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "19732c668dc9afceafae0d08f6b45aa1",
+    "semantic_hash": "19732c668dc9afceafae0d08f6b45aa1"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/mpc/bumpless.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "6fee076963d993dbaaf038af5e629b4d",
+    "semantic_hash": "6fee076963d993dbaaf038af5e629b4d"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/mpc/discretize.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "4f1e42bcef33dddbdc453846e6d12fab",
+    "semantic_hash": "4f1e42bcef33dddbdc453846e6d12fab"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/mpc/host.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "76874a9f2eebe7bb42b6de33d610554e",
+    "semantic_hash": "76874a9f2eebe7bb42b6de33d610554e"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/mpc/worker.py": {
+    "mtime": 1785974809.7812703,
+    "ast_hash": "bd58efa370f430e6b6d70fee3422d0a2",
+    "semantic_hash": "bd58efa370f430e6b6d70fee3422d0a2"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/mpc_arming.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "76d56d359b9f08247b3dad8549aba8cb",
+    "semantic_hash": "76d56d359b9f08247b3dad8549aba8cb"
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/supervisor_mpc.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "5ba79d982bc87cf57414e8b6e9f5a803",
+    "semantic_hash": "5ba79d982bc87cf57414e8b6e9f5a803"
+  },
+  "services/flow-runtime/tests/runtime_test_helpers.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "46daa20cc317876710977f212f6bab1f",
+    "semantic_hash": "46daa20cc317876710977f212f6bab1f"
+  },
+  "services/flow-runtime/tests/test_definition.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "42f7a0926d1f1583d50a53a64523e770",
+    "semantic_hash": "42f7a0926d1f1583d50a53a64523e770"
+  },
+  "services/flow-runtime/tests/test_health_mpc.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "15cc7f0495ca37cac0ed157ff9b751b0",
+    "semantic_hash": "15cc7f0495ca37cac0ed157ff9b751b0"
+  },
+  "services/flow-runtime/tests/test_mpc_arming.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "c7c6b204ae4473157a9abf20d388998d",
+    "semantic_hash": "c7c6b204ae4473157a9abf20d388998d"
+  },
+  "services/flow-runtime/tests/test_mpc_block.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "2c9236c712fa7cc0e2f07aa3d90e2e03",
+    "semantic_hash": "2c9236c712fa7cc0e2f07aa3d90e2e03"
+  },
+  "services/flow-runtime/tests/test_mpc_builder.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "9e1b73e33647db41b5caa98d78577d39",
+    "semantic_hash": "9e1b73e33647db41b5caa98d78577d39"
+  },
+  "services/flow-runtime/tests/test_mpc_bumpless.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "356a16be21226e475668a3c6a49c891b",
+    "semantic_hash": "356a16be21226e475668a3c6a49c891b"
+  },
+  "services/flow-runtime/tests/test_mpc_discretize.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "f2d877aeaddde9f3ce4edce779b04777",
+    "semantic_hash": "f2d877aeaddde9f3ce4edce779b04777"
+  },
+  "services/flow-runtime/tests/test_mpc_host.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "8ebe1814add8f8ce666b84038bddf225",
+    "semantic_hash": "8ebe1814add8f8ce666b84038bddf225"
+  },
+  "services/flow-runtime/tests/test_mpc_load.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "4b3b4f1c6d28ed58efe142b48522728c",
+    "semantic_hash": "4b3b4f1c6d28ed58efe142b48522728c"
+  },
+  "services/flow-runtime/tests/test_mpc_worker.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "ffcdd7e12ba1195d7565b896747bba3e",
+    "semantic_hash": "ffcdd7e12ba1195d7565b896747bba3e"
+  },
+  "services/flow-runtime/tests/test_supervisor_mpc.py": {
+    "mtime": 1785974809.78527,
+    "ast_hash": "5eee6d91246b7f11e0b8ab58bc4371c8",
+    "semantic_hash": "5eee6d91246b7f11e0b8ab58bc4371c8"
+  },
+  "services/opc-worker/tests/worker_test_helpers.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "b88aafc46831f30762ccf9f41beb5976",
+    "semantic_hash": "b88aafc46831f30762ccf9f41beb5976"
+  },
+  "tests/e2e/test_f4_failure.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "ba37f505b4146f2e15a1fb8de9599119",
+    "semantic_hash": "ba37f505b4146f2e15a1fb8de9599119"
+  },
+  "tests/e2e/test_f4_mpc.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "2ec1dfb2d44bc093b370331655076f17",
+    "semantic_hash": "2ec1dfb2d44bc093b370331655076f17"
+  },
+  "tests/e2e/test_f4_ws.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "e90f1830825bd21c2e395a1e5d049eac",
+    "semantic_hash": "e90f1830825bd21c2e395a1e5d049eac"
+  },
+  "tests/testkit/__init__.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "f914b92d5a9d28edc012507773e97c08",
+    "semantic_hash": "f914b92d5a9d28edc012507773e97c08"
+  },
+  "tests/testkit/await_until.py": {
+    "mtime": 1785974809.78927,
+    "ast_hash": "877cf65e9857eefaff3ac79776dcdaef",
+    "semantic_hash": "877cf65e9857eefaff3ac79776dcdaef"
+  },
+  "Resume this session with.txt": {
+    "mtime": 1786003869.7955914,
+    "ast_hash": "e60429572be4b0752abce14498e51840",
+    "semantic_hash": ""
+  },
+  "docs/specs/F5-operacao.md": {
+    "mtime": 1786022102.882516,
+    "ast_hash": "ba10650adb5cc991d120ce7489a327ec",
+    "semantic_hash": ""
+  },
+  "docs/plans/F5a-operacao-dados.md": {
+    "mtime": 1786023592.8142502,
+    "ast_hash": "c2584faabdcdf21f69268a009dab6eaa",
+    "semantic_hash": ""
+  },
+  "docs/plans/F5b-tela-operacao.md": {
+    "mtime": 1786023802.7685711,
+    "ast_hash": "bff645974c829c3b507683cf0972877c",
+    "semantic_hash": ""
+  },
+  "docs/plans/tests-e2e-f5.md": {
+    "mtime": 1786024325.458417,
+    "ast_hash": "7a63dc53712416da24e9df8a0903aa82",
+    "semantic_hash": ""
+  }
+}
