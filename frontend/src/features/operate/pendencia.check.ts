@@ -95,3 +95,21 @@ test("piso de 5s aplicado quando 3xTs_mpc < 5s", () => {
   expect(reduzirPendencia(pendente, { tipo: "tique", agora: AGORA + 4999 })).toEqual(pendente);
   expect(reduzirPendencia(pendente, { tipo: "tique", agora: AGORA + 5000 })).toBeNull();
 });
+
+test("comandar de novo sobre uma pendência já aberta substitui pelo novo alvo/valor/janela", () => {
+  const primeira = reduzirPendencia(null, {
+    tipo: "comandar",
+    alvo: "vars.MV1.v",
+    valor: 42,
+    tsMpcSegundos: 2,
+    agora: AGORA,
+  });
+  const segunda = reduzirPendencia(primeira, {
+    tipo: "comandar",
+    alvo: "vars.MV1.v",
+    valor: 50,
+    tsMpcSegundos: 3,
+    agora: AGORA + 500,
+  });
+  expect(segunda).toEqual({ alvo: "vars.MV1.v", valorComandado: 50, expiraEm: AGORA + 500 + 9000 });
+});

@@ -15,6 +15,10 @@ import type { MpcState } from "../../lib/contracts.gen";
  * (confirmação ou `mpc_arm_failed`) sempre chegar antes do timeout do cliente.
  */
 
+/** `valorComandado` é primitivo por contrato (`number | string | boolean` — posição de
+ *  comutador ou valor de SP/MV; nunca objeto/array). A assinatura pública é a fixada pelo
+ *  plano (`unknown`, tarefa 4.2) — não estreitar o tipo aqui divergiria dela; a comparação
+ *  por igualdade estrita em `estadoPublicado` depende dessa premissa permanecer verdadeira. */
 export type Pendencia = { alvo: string; valorComandado: unknown; expiraEm: number };
 
 type AcaoPendencia =
@@ -26,7 +30,10 @@ const PISO_JANELA_SEGUNDOS = 5;
 
 /** `alvo` é um caminho com pontos dentro do `MpcState` publicado (ex.: "modes.local_remote",
  *  "vars.MV1.v", "vars.CV1.sp") — o mesmo alvo endereça tanto comutadores de posição quanto
- *  variáveis, sem o redutor conhecer a forma de cada faceplate (4.3/4.4 escolhem o caminho). */
+ *  variáveis, sem o redutor conhecer a forma de cada faceplate (4.3/4.4 escolhem o caminho).
+ *  Caminho que não existe no estado (alvo inválido ou variável ainda não publicada) resolve
+ *  para `undefined`, que nunca é `=== valorComandado` — a pendência só expira pela janela,
+ *  nunca trava (mesmo fail-safe de um estado que não confirma). */
 function lerCaminho(objeto: unknown, caminho: string): unknown {
   return caminho.split(".").reduce<unknown>((atual, chave) => {
     if (atual === null || typeof atual !== "object") return undefined;
@@ -42,6 +49,7 @@ export function reduzirPendencia(atual: Pendencia | null, acao: AcaoPendencia): 
     }
     case "estadoPublicado": {
       if (atual === null) return null;
+      // Igualdade estrita: correta enquanto `valorComandado` for primitivo (contrato acima).
       const confirmado = lerCaminho(acao.state, atual.alvo) === atual.valorComandado;
       return confirmado ? null : atual;
     }
