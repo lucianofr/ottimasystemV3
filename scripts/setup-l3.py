@@ -139,8 +139,7 @@ def _criar_tag(admin: Client, conn_id: int, nome: str, node_id: str, direcao: st
                         )
                         if r_new.status_code != 201:
                             print(
-                                f"[!] Falha ao recriar tag: "
-                                f"HTTP {r_new.status_code}",
+                                f"[!] Falha ao recriar tag: HTTP {r_new.status_code}",
                                 file=sys.stderr,
                             )
                             sys.exit(1)
@@ -319,8 +318,7 @@ def main() -> None:
         r = admin.put(f"/api/flows/{flow_id}", json={"graph_json": grafo})
         if r.status_code != 200:
             print(
-                "[!] Falha ao atualizar grafo: "
-                f"HTTP {r.status_code} {r.text}",
+                f"[!] Falha ao atualizar grafo: HTTP {r.status_code} {r.text}",
                 file=sys.stderr,
             )
             sys.exit(1)
