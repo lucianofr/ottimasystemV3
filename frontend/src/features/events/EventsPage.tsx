@@ -14,6 +14,7 @@ import {
   calcularEventosVisiveis,
   chaveEvento,
   origensConhecidas,
+  paraIsoUtc,
   type FiltrosEventos,
   type MpcNodeOut,
 } from "./eventos";
@@ -88,8 +89,10 @@ export function EventsPage() {
       const params = new URLSearchParams();
       if (filtros.severity !== null) params.set("severity", filtros.severity);
       if (filtros.origin !== null) params.set("origin", filtros.origin);
-      if (filtros.start !== null) params.set("start", filtros.start);
-      if (filtros.end !== null) params.set("end", filtros.end);
+      const inicioIso = paraIsoUtc(filtros.start);
+      const fimIso = paraIsoUtc(filtros.end);
+      if (inicioIso !== null) params.set("start", inicioIso);
+      if (fimIso !== null) params.set("end", fimIso);
       params.set("limit", String(LIMITE_HISTORICO));
       return api<EventOut[]>(`/api/events?${params.toString()}`);
     },

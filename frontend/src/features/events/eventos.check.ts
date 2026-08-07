@@ -6,6 +6,7 @@ import {
   casaFiltros,
   chaveEvento,
   origensConhecidas,
+  paraIsoUtc,
   temPeriodo,
   type FiltrosEventos,
   type MpcNodeOut,
@@ -171,4 +172,26 @@ test("origensConhecidas: origem desconhecida do resultado carregado entra com r�
 test("origensConhecidas: ordenação alfabética por rótulo (pt-BR)", () => {
   const opcoes = origensConhecidas([flow(2, "Zebra"), flow(1, "Alfa")], [], [], []);
   expect(opcoes.map((o) => o.rotulo)).toEqual(["Alfa", "Zebra"]);
+});
+
+// -------------------------------------------------------------------------------- paraIsoUtc
+
+test("paraIsoUtc: null permanece null (campo vazio do filtro)", () => {
+  expect(paraIsoUtc(null)).toBeNull();
+});
+
+test("paraIsoUtc: converte datetime-local (hora do NAVEGADOR, sem offset) para ISO UTC preservando o mesmo instante", () => {
+  const valorLocal = "2026-03-15T10:30";
+  const iso = paraIsoUtc(valorLocal);
+  expect(iso).not.toBeNull();
+  // fix round 1: sem essa conversão, `iso` seria o próprio `valorLocal` (ou `valorLocal +
+  // "Z"`) — o backend (`_as_utc`) trataria a hora LOCAL do operador como se já fosse UTC,
+  // deslocando a janela em silêncio. Comparado de volta via `Date`, que interpreta ISO com
+  // offset corretamente: os componentes locais batem com o que o operador digitou.
+  const resultado = new Date(iso as string);
+  expect(resultado.getFullYear()).toBe(2026);
+  expect(resultado.getMonth()).toBe(2);
+  expect(resultado.getDate()).toBe(15);
+  expect(resultado.getHours()).toBe(10);
+  expect(resultado.getMinutes()).toBe(30);
 });

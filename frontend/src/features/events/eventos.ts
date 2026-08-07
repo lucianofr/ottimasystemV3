@@ -5,9 +5,12 @@ import type { components } from "../../lib/api-types";
  *  compor o rótulo de origem; sem tipo próprio em `lib/api.ts` porque só esta página consome. */
 export type MpcNodeOut = components["schemas"]["MpcNodeOut"];
 
-/** Filtros combináveis da página (spec F5 §7.5): `start`/`end` chegam crus do
- *  `<input type="datetime-local">` (sem timezone — mesma convenção "sem offset vale UTC" do
- *  backend, `routers/events.py:_as_utc`). Vazio = sem filtro naquele campo. */
+/** Filtros combináveis da página (spec F5 §7.5): `start`/`end` guardam o valor CRU do
+ *  `<input type="datetime-local">` (`"AAAA-MM-DDTHH:mm"`, hora LOCAL do navegador, sem
+ *  offset) — servem só pra `temPeriodo`/composição de UI. Antes de sair pra
+ *  `GET /api/events`, cada borda passa por `paraIsoUtc` (fix round 1): o backend
+ *  (`routers/events.py::_as_utc`) trata ISO sem offset como UTC literal, então mandar o
+ *  valor cru deslocaria a janela pela diferença de fuso do operador, em silêncio. */
 export interface FiltrosEventos {
   severity: EventOut["severity"] | null;
   origin: string | null;
@@ -31,6 +34,14 @@ export function casaFiltros(
  *  A-13): não precisa das duas, uma só já é "não é mais ao vivo". */
 export function temPeriodo(filtros: Pick<FiltrosEventos, "start" | "end">): boolean {
   return filtros.start !== null || filtros.end !== null;
+}
+
+/** Converte a hora LOCAL do navegador (`<input type="datetime-local">`, sem offset) para
+ *  ISO UTC antes de ir pra REST (spec F1 §325 — conversão de fuso só na UI; fix round 1
+ *  desta tarefa). `new Date(valorLocal)` já interpreta esse formato como hora local do
+ *  motor JS — a conversão é só reserializar em `toISOString()`, que sempre sai em UTC. */
+export function paraIsoUtc(valorLocal: string | null): string | null {
+  return valorLocal === null ? null : new Date(valorLocal).toISOString();
 }
 
 /** `EventOut` não tem id (schemas/events.py) — chave de dedupe entre o resultado REST e o
