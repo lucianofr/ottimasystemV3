@@ -31,16 +31,18 @@ function kindDoEvento(evento: EventMessage): string | null {
   return typeof valor === "string" ? valor : null;
 }
 
-/** Os `kind`s tratados por esta função nunca publicam severity "info" (tabelas de kinds
- *  F2/F3/F4 §5.3 e F5 §7.2-1, `bus.py`): a condição herda a severidade tal como veio do
- *  barramento — fonte única, sem tradução duplicada no cliente. */
+/** Os `kind`s tratados por esta função nunca deveriam publicar severity "info" (tabelas
+ *  de kinds F2/F3/F4 §5.3 e F5 §7.2-1, `bus.py`) — mas a condição não pode ficar
+ *  silenciosa por um contrato de severity violado a montante nem mascarar o dado com um
+ *  `as`: normaliza para "warning" quando não é "alarm" (nunca oculta um alarme real; na
+ *  pior hipótese subestima a severidade, nunca a esconde). Fix round 1, achado 1. */
 function condicaoDe(familia: CondicaoAtiva["familia"], kind: string, evento: EventMessage): CondicaoAtiva {
   return {
     familia,
     kind,
     origin: evento.origin,
     desde: evento.ts,
-    severity: evento.severity as "warning" | "alarm",
+    severity: evento.severity === "alarm" ? "alarm" : "warning",
     message: evento.message,
   };
 }
@@ -170,6 +172,15 @@ function condicoesContador(
   // se aplica aqui. `status.solver` é o espelho equivalente já publicado: só sai de
   // `"overrun"` no MESMO `_apply_result` que rearma o dedupe (`blocks/mpc.py:313`), o mesmo
   // instante que "overruns inalterado" descreveria — sem precisar do contador.
+  //
+  // Borda conhecida (fix round 1, achado 2): `_build_state` (`blocks/mpc.py`) sobrepõe
+  // `solver` para "idle"/"building" fora de AUTO, INDEPENDENTE do `_overrun_reported`
+  // interno — então `solver !== "overrun"` pode virar verdadeiro por um motivo diferente
+  // do rearme (ex.: operador troca para MAN com o overrun ainda não rearmado por dentro).
+  // Autocorretivo: voltar a AUTO com o problema persistente publica `solver = "overrun"`
+  // de novo e a condição reativa. Aceitável para a tela (nunca fica presa fora do ar), mas
+  // quem consumir isto nas tarefas 2.2/2.3 deve saber que a cessação aqui não é 100%
+  // exclusiva do rearme — pode coincidir com uma troca de modo.
   for (const [origin, evento] of maisRecentePorOrigem(eventos, { mpc_overrun: true })) {
     const chave = chaveMpc(origin);
     const estado = chave === null ? undefined : mpcStates.get(chave);

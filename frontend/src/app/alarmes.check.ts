@@ -268,6 +268,24 @@ test("evento sem `kind` no payload é ignorado, não gera condição nem quebra 
   expect(resolverAlarmes([malformado], SEM_FLOW_STATUS, SEM_MPC_STATES, AGORA)).toEqual([]);
 });
 
+test("severity inesperada ('info') num kind de alarme normaliza para 'warning', nunca fica silenciosa nem quebra (fix round 1, achado 1)", () => {
+  const evt = evento("comm_failure", "conn:99", {
+    ts: "2026-01-01T00:00:01.000Z",
+    severity: "info",
+  });
+
+  expect(resolverAlarmes([evt], SEM_FLOW_STATUS, SEM_MPC_STATES, AGORA)).toEqual([
+    {
+      familia: "par",
+      kind: "comm_failure",
+      origin: "conn:99",
+      desde: "2026-01-01T00:00:01.000Z",
+      severity: "warning",
+      message: "mensagem de comm_failure",
+    },
+  ]);
+});
+
 test("agrega condições de famílias e origens diferentes sem se misturarem", () => {
   const eventos = [
     evento("mpc_arm_failed", "flow:1/block:mpc", {
