@@ -232,7 +232,7 @@ O PRD tem regra explícita de correção (`PRD.md` §nota inicial); specs anteri
 
 | # | Débito (relatório gate F4 §8.2) | Veredito F5 | Onde |
 |---|---|---|---|
-| F-1 | Boot de worker síncrono sob o lock do supervisor (deploy **e** reload; stop esperava build em voo com o lock) | **Fecha na F5** (boot assíncrono em todos os caminhos + lock reescopado ao mapa) | §6 · plano F5a |
+| F-1 | Boot de worker síncrono sob o lock do supervisor (deploy **e** reload; stop esperava build em voo com o lock) | **Fecha na F5** nos três caminhos de comando (`_deploy`, `_stop`, `reconcile_mpc_hosts`); ver o débito residual abaixo | §6 · plano F5a |
 | F-3 | Regras client-side espelhadas à mão | **Fecha na F5** (golden amplo, drift bidirecional) | §7.6 · plano F5b |
 | — | `_empty_result` duplicado (assinaturas divergentes) | **Fecha na F5** (Etapa 0; assinatura kw-only do host) | §4.3-3 |
 | — | 422 de enum como lista FastAPI | **Fecha na F5** (handler global) | §4.3-1 |
@@ -242,6 +242,7 @@ O PRD tem regra explícita de correção (`PRD.md` §nota inicial); specs anteri
 | — | `mpc_state_dimension` conservador | Fica (letra da spec F4 §2.2-7) | §1.2 |
 | — | Protocolo `Commandable`/`Healthy` | Fica (revisitar no 2º bloco comandável) | §1.2 |
 | — | EU nas portas de Script/TFS | Diferido F6 (schema novo) | §1.2 |
+| — | `shutdown_mpc` síncrono sob o lock em `_force_stop` (`on_project_activated`), `_pass`/`_reconcile_flow` e `_handback_failed_mpc` | Fica (herdado da F4, **não** é regressão da F5): se o host estiver em build, esses caminhos ainda seguram o lock por até `_BOOT_TIMEOUT_S = 30 s`. O reescopo de §6-3 vale para os três caminhos de comando (deploy/stop/reload), não para estes | §6.3 · achado da revisão de fechamento da F5 |
 
 ---
 
