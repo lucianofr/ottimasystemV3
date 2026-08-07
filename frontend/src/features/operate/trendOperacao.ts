@@ -1,5 +1,5 @@
 import type { MpcHistoryResponse } from "../../lib/api";
-import type { MpcVarState } from "../../lib/contracts.gen";
+import type { MpcPrediction, MpcVarState } from "../../lib/contracts.gen";
 
 /**
  * Trend central com predição (spec F5 §7.4-6; plano F5b Etapa 5). Lógica pura: montagem de
@@ -93,4 +93,62 @@ export function mesclarSeriesVivas(
       auto: t.map((ts) => pontos.get(ts)!.auto),
     };
   });
+}
+
+// ----------------------------------------------------------------------------------------
+// 5.2 — Overlay de predição (spec F5 §3, §7.4-6 item 3)
+// ----------------------------------------------------------------------------------------
+
+/** Degrau fantasma das penas de MV (§3.3): `stepped align: -1` — o valor de `mv[j]` pertence
+ *  ao intervalo que TERMINA no seu ponto (ZOH à esquerda). Única fonte do `align` consumido
+ *  por `TrendOperacao.tsx`: `align: +1` deslocaria o plano inteiro em 1×Ts_mpc e é proibido —
+ *  como nenhum outro lugar do código escreve o número, ele nunca pode nascer errado. */
+export const OPCOES_DEGRAU_MV = { align: -1 as const };
+
+export interface OverlayPrevisao {
+  /** `t_abs[k] = prediction.ts + t[k]` (§3.5) — nunca `MpcState.ts` (F5R-01). Vazio fora de
+   *  AUTO (`prediction.t == []`, §3.4): o overlay some sem mexer no histórico. */
+  readonly tAbs: readonly number[];
+  /** Início do overlay ("agora") para a linha-cursor; `null` quando não há predição. */
+  readonly agora: number | null;
+  /** `cv[i][k]` previsto no instante `tAbs[k]`; linhas = CVs do config, depois Restrições. */
+  readonly cv: readonly (readonly number[])[];
+  /** `mv[i] = [u_prev, u_0, …, u_{Np-1}]` alinhado a `tAbs` — renderizar com `OPCOES_DEGRAU_MV`. */
+  readonly mv: readonly (readonly number[])[];
+}
+
+/**
+ * Monta o overlay a partir do último `MpcPrediction` publicado. Âncora `prediction.ts`
+ * (nunca `MpcState.ts` do quadro — regra global 2): o resultado publicado num quadro foi
+ * calculado na fronteira anterior (F5R-01), então usar o `ts` do quadro adiantaria o plano
+ * inteiro em 1×Ts_mpc.
+ */
+export function montarOverlayPrevisao(prediction: MpcPrediction): OverlayPrevisao {
+  if (prediction.t.length === 0) return { tAbs: [], agora: null, cv: [], mv: [] };
+  const ancoraSegundos = Date.parse(prediction.ts) / 1000;
+  const tAbs = prediction.t.map((deslocamentoS) => ancoraSegundos + deslocamentoS);
+  return { tAbs, agora: tAbs[0], cv: prediction.cv, mv: prediction.mv };
+}
+
+export interface DivisaoSp {
+  /** SP nos trechos com `auto=true` — SP comandado, cor cheia (Azul Industrial). */
+  readonly comandado: readonly (number | null)[];
+  /** SP nos trechos com `auto=false` — SP rastreado (PV-tracking), dessaturado. */
+  readonly rastreado: readonly (number | null)[];
+}
+
+/**
+ * Divide a pena de SP em duas séries paralelas por `auto` (§2.2-1, F5R-21): SP em
+ * PV-tracking não é SP comandado, então o trecho `auto=false` não pode sair na mesma cor do
+ * trecho comandado. As duas séries alinham ao mesmo eixo x do histórico (nulo onde a outra
+ * série tem valor), então a pena aparente é contínua mas troca de estilo exatamente na borda.
+ */
+export function dividirSpPorAuto(
+  sp: readonly (number | null)[],
+  auto: readonly boolean[],
+): DivisaoSp {
+  return {
+    comandado: sp.map((valor, i) => (auto[i] ? valor : null)),
+    rastreado: sp.map((valor, i) => (auto[i] ? null : valor)),
+  };
 }

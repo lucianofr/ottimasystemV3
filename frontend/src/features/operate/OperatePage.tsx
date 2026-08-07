@@ -5,6 +5,7 @@ import { Card } from "../../components/ui/card";
 import type { MpcState } from "../../lib/contracts.gen";
 import { FaceplatePrincipal } from "./FaceplatePrincipal";
 import FaceplateVariavel, { type FaceplateVariavelProps } from "./FaceplateVariavel";
+import { TrendOperacao } from "./TrendOperacao";
 import { useMpcs, type MpcNodeOut } from "./useMpcs";
 
 /**
@@ -13,9 +14,8 @@ import { useMpcs, type MpcNodeOut } from "./useMpcs";
  * `useAssinatura`) e trata os estados de carregando/erro/ausente da descoberta
  * (`GET /api/operate/mpcs`, revalidada ao montar/focar pelo default do react-query). A
  * plaqueta `nome · flow` mora dentro do faceplate principal (tarefa 4.3); a fileira de
- * faceplates de variável (tarefa 4.4) monta na ordem MV → CV → Restrição → DV (§7.4-5).
- *
- * Trend com predição (5.x) chega na próxima tarefa.
+ * faceplates de variável (tarefa 4.4) monta na ordem MV → CV → Restrição → DV (§7.4-5);
+ * o trend central com predição (Etapa 5) monta abaixo da fileira de faceplates.
  */
 
 /** Monta a lista de props de `FaceplateVariavel` na ordem fixada pelo spec (MV → CV →
@@ -138,6 +138,9 @@ function OperacaoDoMpc({ flowId, blockId }: { flowId: number; blockId: string })
         {gradeDeVariaveis(mpc, mpcState, flowId, blockId).map(({ key, ...props }) => (
           <FaceplateVariavel key={key} {...props} />
         ))}
+      </div>
+      <div className="mt-4">
+        <TrendOperacao flowId={flowId} blockId={blockId} mpc={mpc} mpcState={mpcState} />
       </div>
     </div>
   );
