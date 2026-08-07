@@ -59,7 +59,9 @@ def test_horizontes_bate_com_o_caso_canonico_do_brief():
 def test_validacao_tem_um_caso_aprovado_e_varios_reprovados():
     vereditos = build_golden()["validacao"]
     assert any(caso["esperado"] == {"erros": 0, "avisos": 0} for caso in vereditos)
-    reprovados = [caso for caso in vereditos if caso["esperado"]["erros"] or caso["esperado"]["avisos"]]
+    reprovados = [
+        caso for caso in vereditos if caso["esperado"]["erros"] or caso["esperado"]["avisos"]
+    ]
     assert len(reprovados) >= 15  # um por regra de caps/matrix/numbers/horizons + dimensao
 
 
