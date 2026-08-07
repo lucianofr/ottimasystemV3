@@ -1,3 +1,4 @@
+import { useQueries } from "@tanstack/react-query";
 import {
   createContext,
   useContext,
@@ -8,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { getToken, type EventOut } from "../lib/api";
+import { api, getToken, type EventOut, type FlowDetail } from "../lib/api";
 import type { MpcState } from "../lib/contracts.gen";
 import {
   atrasoReconexao,
@@ -23,8 +24,14 @@ import {
   type PortsPorBloco,
 } from "../features/flows/useFlowStatus";
 import { useActiveProject, useConnections } from "../features/connections/useConnections";
+import { deGraphJson } from "../features/flows/graph";
 import { useFlows } from "../features/flows/useFlows";
-import { criarCacheBootstrapAlarmes } from "./bootstrapAlarmes";
+import {
+  criarCacheBootstrapAlarmes,
+  TETO_FLOWS,
+  type EscopoBootstrap,
+  type OrigemBlocoScript,
+} from "./bootstrapAlarmes";
 
 /**
  * Canal ao vivo da sessão (spec F5 §7.1-1/2/3; decisão A-6; F5R-22): **um** WebSocket por
@@ -415,6 +422,15 @@ export function aplicarInteresse(
   ciclo?.notificarInteresse({ [acao]: delta });
 }
 
+/** Blocos Script de um flow (emenda ao bootstrap, fix round 2, achado 2): `deGraphJson`
+ *  já é a leitura tolerante e testada do `graph_json` (`graph.ts`) — nó ilegível vira
+ *  descarte lá, nunca quebra aqui. Reaproveitada para não duplicar o parse. */
+function blocosScriptDoFlow(flow: FlowDetail): OrigemBlocoScript[] {
+  return deGraphJson(flow.graph_json)
+    .nodes.filter((no) => no.type === "script")
+    .map((no) => ({ flowId: flow.id, blockId: no.id }));
+}
+
 /** Montado no `AppShell`: um socket por aba, vivo enquanto a sessão durar. `events` sempre
  *  assinado (o banner é do shell). Dois contexts, não um: `estado` muda a cada mensagem do
  *  socket, e um componente que só chama `useAssinatura` (registra e esquece) não precisa
@@ -427,6 +443,27 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
   const projectId = projetoAtivo.data?.id ?? null;
   const flows = useFlows(projectId);
   const conexoes = useConnections(projectId);
+  /** Flows cujo `graph_json` é buscado para achar blocos Script (emenda ao bootstrap,
+   *  fix round 2, achado 2) — mesmo teto de flows do grupo 1 (`TETO_FLOWS`), corte
+   *  determinístico (`flows.data` já chega ordenado por nome, `routers/flows.py`).
+   *  `queryKey` igual à de `useFlow` (`useFlows.ts`) de propósito: compartilha cache com
+   *  o editor se o operador abrir o mesmo flow depois. Uma falha isolada (rede, 404) não
+   *  trava as outras nem o bootstrap — `pronto` só espera cada consulta assentar
+   *  (sucesso OU erro), nunca as bloqueia entre si (mesmo espírito do
+   *  `Promise.allSettled` de `bootstrapAlarmes`). */
+  const idsParaBlocosScript = (flows.data ?? []).slice(0, TETO_FLOWS).map((flow) => flow.id);
+  const detalhesFlow = useQueries({
+    queries: idsParaBlocosScript.map((id) => ({
+      queryKey: ["flows", "detalhe", id],
+      queryFn: () => api<FlowDetail>(`/api/flows/${String(id)}`),
+    })),
+    combine: (resultados) => ({
+      pronto: resultados.every((resultado) => resultado.isSuccess || resultado.isError),
+      scriptBlocks: resultados.flatMap((resultado) =>
+        resultado.data ? blocosScriptDoFlow(resultado.data) : [],
+      ),
+    }),
+  });
   const [cacheBootstrap] = useState(() => criarCacheBootstrapAlarmes());
   const bootstrapFeitoRef = useRef(false);
 
@@ -439,19 +476,21 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
     };
   }, [registro]);
 
-  /** Bootstrap de alarmes (tarefa 2.2, spec F5 §7.2-3): roda uma vez, quando o projeto
-   *  ativo e (se houver um) seus flows/conexões terminam de carregar — nunca de novo por
+  /** Bootstrap de alarmes (tarefa 2.2, spec F5 §7.2-3, emenda do fix round 2 — blocos
+   *  Script): roda uma vez, quando o projeto ativo e (se houver um) seus flows/conexões
+   *  e os `graph_json` para achar blocos Script terminam de carregar — nunca de novo por
    *  causa de um refetch em segundo plano da lista. Sem projeto ativo, o escopo por
    *  origem fica vazio e só o grupo 2 (severidade/janela, global) traz algo. Depois
    *  disto, só WS: os eventos ao vivo já chegam via `reduzir` acima. */
   useEffect(() => {
     if (bootstrapFeitoRef.current) return;
     if (projetoAtivo.isPending) return;
-    if (projectId !== null && (flows.isPending || conexoes.isPending)) return;
+    if (projectId !== null && (flows.isPending || conexoes.isPending || !detalhesFlow.pronto)) return;
     bootstrapFeitoRef.current = true;
-    const escopo = {
+    const escopo: EscopoBootstrap = {
       flowIds: (flows.data ?? []).map((flow) => flow.id),
       connectionIds: (conexoes.data ?? []).map((conexao) => conexao.id),
+      scriptBlocks: detalhesFlow.scriptBlocks,
     };
     cacheBootstrap
       .obter(escopo, new Date())
@@ -474,6 +513,8 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
     flows.data,
     conexoes.isPending,
     conexoes.data,
+    detalhesFlow.pronto,
+    detalhesFlow.scriptBlocks,
     cacheBootstrap,
   ]);
 

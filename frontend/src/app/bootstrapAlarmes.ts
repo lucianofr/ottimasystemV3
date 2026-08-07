@@ -10,11 +10,17 @@ import type { EventMessage } from "./CanalAoVivo";
  * 1 mês (nenhuma das famílias "par"/"estado"/"contador" tem TTL). Dois grupos, cada um
  * cobrindo metade das 4 famílias:
  *
- * - grupo 1 (família "par"): uma consulta por origem — `origin=flow:<id>` e
- *   `origin=conn:<id>` — teto de 10 flows + 5 conexões (RNF-01 dimensiona ~10 flows;
- *   RF-201 dimensiona 5 conexões), `limit=20` (padrão `useLastFlowState.ts:112-133`: o
- *   suficiente para achar o último evento do par sem que um flow ruidoso empurre o de
- *   outro para fora da janela);
+ * - grupo 1 (família "par"): uma consulta por origem — `origin=flow:<id>`,
+ *   `origin=conn:<id>` e (EMENDA aprovada à spec §7.2-3, fix round 2 — bloco Script
+ *   latcha `script_timeout`/`script_error` até `script_recovered`, mas publica com
+ *   `origin=flow:<id>/block:<id>`, `blocks/script.py:62`; igualdade exata no servidor,
+ *   `routers/events.py:44`, não casa com `origin=flow:<id>` sozinho — sem isto, um
+ *   script_error latchado há mais de 2h fica invisível no reload) `origin=flow:<id>/
+ *   block:<id>` por bloco Script — teto de 10 flows + 5 conexões + 20 blocos Script
+ *   (RNF-01 dimensiona ~10 flows; RF-201 dimensiona 5 conexões; 20 blocos é o corte
+ *   desta emenda, documentado junto de `TETO_BLOCOS_SCRIPT`), `limit=20` (padrão
+ *   `useLastFlowState.ts:112-133`: o suficiente para achar o último evento do par sem
+ *   que uma origem ruidosa empurre a de outra para fora da janela);
  * - grupo 2 (famílias "estado"/"contador"/"ttl"): duas consultas globais por
  *   severidade — a API não aceita lista (`schemas/events.py`) — na janela das
  *   últimas 2 h.
@@ -23,16 +29,33 @@ import type { EventMessage } from "./CanalAoVivo";
  * socket, `CanalAoVivo.tsx`) cobre o resto da sessão.
  */
 
-const TETO_FLOWS = 10;
+/** Exportado: `CanalAoVivo.tsx` reaproveita o mesmo teto para decidir de quantos flows
+ *  buscar o `graph_json` (descoberta dos blocos Script da emenda abaixo) — os blocos
+ *  Script pesquisados são sempre os dos mesmos flows já em escopo no grupo 1. */
+export const TETO_FLOWS = 10;
 const TETO_CONEXOES = 5;
+/** Corte desta emenda (fix round 2, achado 2 aprovado pelo dono do plano): teto total de
+ *  origens de bloco Script consultadas, no espírito dos tetos de flows/conexões acima —
+ *  corte determinístico (`Array.prototype.slice`, ordem de chegada do escopo). */
+const TETO_BLOCOS_SCRIPT = 20;
 const LIMITE_PAR = 20;
 const LIMITE_JANELA = 500;
 const JANELA_MS = 2 * 60 * 60 * 1000;
 const CACHE_MS = 60_000;
 
+/** Origem de um bloco Script (`flow:<flowId>/block:<blockId>`, `blocks/script.py:62`). */
+export interface OrigemBlocoScript {
+  flowId: number;
+  blockId: string;
+}
+
 export interface EscopoBootstrap {
   flowIds: readonly number[];
   connectionIds: readonly number[];
+  /** Emenda aprovada à spec F5 §7.2-3 (fix round 2, achado 2): blocos Script do projeto
+   *  ativo, para o grupo 1 também cobrir `script_timeout`/`script_error` ⇒
+   *  `script_recovered` (família "par", `alarmes.ts`). */
+  scriptBlocks: readonly OrigemBlocoScript[];
 }
 
 /** Só o fetch é injetável — `agora` já entra como parâmetro explícito (mesmo padrão de
@@ -73,7 +96,7 @@ function logarFalha(caminho: string, motivo: unknown): void {
 /** Fetch dos dois grupos, sem cache — `criarCacheBootstrapAlarmes` embrulha isto com o
  *  TTL de 60 s. Exportada à parte para o teste isolar o comportamento de rede do de
  *  cache. `Promise.allSettled`, não `Promise.all`: uma origem que falha não pode
- *  derrubar as até 16 outras — a condição ativa que ela carregava ficaria invisível
+ *  derrubar as até 36 outras — a condição ativa que ela carregava ficaria invisível
  *  até o próximo bootstrap ou evento ao vivo (regra A-4). Esta função nunca rejeita. */
 export async function bootstrapAlarmes(
   escopo: EscopoBootstrap,
@@ -82,12 +105,17 @@ export async function bootstrapAlarmes(
 ): Promise<EventMessage[]> {
   const flowIds = escopo.flowIds.slice(0, TETO_FLOWS);
   const connectionIds = escopo.connectionIds.slice(0, TETO_CONEXOES);
+  const scriptBlocks = escopo.scriptBlocks.slice(0, TETO_BLOCOS_SCRIPT);
   const inicioJanela = new Date(agora.getTime() - JANELA_MS).toISOString();
   const janela = new URLSearchParams({ start: inicioJanela, limit: String(LIMITE_JANELA) });
 
   const caminhos = [
     ...flowIds.map((id) => `/api/events?origin=flow:${String(id)}&limit=${String(LIMITE_PAR)}`),
     ...connectionIds.map((id) => `/api/events?origin=conn:${String(id)}&limit=${String(LIMITE_PAR)}`),
+    ...scriptBlocks.map(
+      ({ flowId, blockId }) =>
+        `/api/events?origin=flow:${String(flowId)}/block:${blockId}&limit=${String(LIMITE_PAR)}`,
+    ),
     `/api/events?severity=warning&${janela.toString()}`,
     `/api/events?severity=alarm&${janela.toString()}`,
   ];
@@ -121,7 +149,7 @@ interface EntradaCache {
 
 /** Uma instância por `CanalAoVivoProvider` (mesmo padrão de `criarRegistroInteresses`):
  *  cache de 60 s por escopo, para um remount do provider (StrictMode em dev, ou uma
- *  navegação que desmonta e remonta o shell) não refazer as até 17 chamadas do
+ *  navegação que desmonta e remonta o shell) não refazer as até 37 chamadas do
  *  bootstrap. Guarda a Promise, não o resultado: duas chamadas concorrentes no mesmo
  *  escopo, antes da primeira resolver, também dividem a mesma requisição. */
 export function criarCacheBootstrapAlarmes(): CacheBootstrapAlarmes {
@@ -131,6 +159,9 @@ export function criarCacheBootstrapAlarmes(): CacheBootstrapAlarmes {
       const chave = JSON.stringify([
         [...escopo.flowIds].sort((a, b) => a - b),
         [...escopo.connectionIds].sort((a, b) => a - b),
+        [...escopo.scriptBlocks]
+          .map(({ flowId, blockId }) => `${String(flowId)}:${blockId}`)
+          .sort(),
       ]);
       const agoraMs = agora.getTime();
       if (entrada !== null && entrada.chave === chave && agoraMs < entrada.expiraEm) {
