@@ -43,9 +43,9 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+export async function apiResposta(path: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
-  if (init?.body) headers.set("Content-Type", "application/json");
+  if (init?.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(path, { ...init, headers });
@@ -60,6 +60,11 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     const detail = typeof body?.detail === "string" ? body.detail : "Erro inesperado";
     throw new ApiError(res.status, detail);
   }
+  return res;
+}
+
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await apiResposta(path, init);
   // 204 (DELETE) e 202 sem corpo (deploy/parar, spec F3 §5.1) não trazem JSON para parsear.
   const corpo = await res.text();
   if (!corpo) return undefined as T;
