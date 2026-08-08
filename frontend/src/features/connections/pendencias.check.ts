@@ -167,6 +167,28 @@ test("ordem de saída é estável: senha, depois certificado_servidor, depois ce
   ).toEqual(["senha", "certificado_servidor", "certificado_aplicacao"]);
 });
 
+test("EFEITO_PENDENCIA bate, por igualdade exata, com o texto verbatim do plano F6b tarefa 1.4 (docs/plans/F6b-superficies.md:88)", () => {
+  // Verbatim do plano: "a conexão falhará em `cert_missing` até confiar no certificado do
+  // servidor" / "…até gerar o certificado de aplicação da instalação" / "a conexão falhará
+  // na autenticação até a senha ser reinformada" — capitalização inicial e ponto final são
+  // normalização de sentença de UI, não paráfrase; o conteúdo é idêntico palavra por palavra.
+  expect(EFEITO_PENDENCIA.senha).toBe(
+    "A conexão falhará na autenticação até a senha ser reinformada.",
+  );
+  expect(EFEITO_PENDENCIA.certificado_servidor).toBe(
+    "A conexão falhará em `cert_missing` até confiar no certificado do servidor.",
+  );
+  expect(EFEITO_PENDENCIA.certificado_aplicacao).toBe(
+    "A conexão falhará em `cert_missing` até gerar o certificado de aplicação da instalação.",
+  );
+});
+
+test("ROTULO_PENDENCIA bate, por igualdade exata, com os rótulos curtos definidos em pendencias.ts (não fixados verbatim pelo plano, mas travados aqui como contrato do módulo)", () => {
+  expect(ROTULO_PENDENCIA.senha).toBe("Senha");
+  expect(ROTULO_PENDENCIA.certificado_servidor).toBe("Certificado do servidor");
+  expect(ROTULO_PENDENCIA.certificado_aplicacao).toBe("Certificado de aplicação");
+});
+
 test("ROTULO_PENDENCIA e EFEITO_PENDENCIA cobrem as 3 pendências, pt-BR, sem a palavra 'bundle' e sem emoji", () => {
   const pendencias: Pendencia[] = ["senha", "certificado_servidor", "certificado_aplicacao"];
   const emoji = /\p{Extended_Pictographic}/u;

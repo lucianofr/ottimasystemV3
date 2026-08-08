@@ -57,11 +57,10 @@ export const ROTULO_PENDENCIA: Record<Pendencia, string> = {
   certificado_aplicacao: "Certificado de aplicação",
 };
 
-/** Texto do `title` por pendência (spec §6.3-3): o efeito exato, não um rótulo
- *  genérico. Códigos entre crases são os de `FailureReason`
- *  (`services/opc-worker/src/ottima_opc_worker/security.py`). */
+/** Texto do `title` por pendência (spec §6.3-3; plano F6b tarefa 1.4, verbatim): o
+ *  efeito exato, não um rótulo genérico. */
 export const EFEITO_PENDENCIA: Record<Pendencia, string> = {
-  senha: "A conexão falhará em `connect_failed` até a senha ser informada novamente.",
+  senha: "A conexão falhará na autenticação até a senha ser reinformada.",
   certificado_servidor:
     "A conexão falhará em `cert_missing` até confiar no certificado do servidor.",
   certificado_aplicacao:
