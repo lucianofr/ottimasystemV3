@@ -1,6 +1,9 @@
 """CRUD de projetos (RF-101, ADR-017): leitura para operador, escrita e ativação para admin."""
 
-from fastapi import APIRouter, Depends, HTTPException
+import re
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Response
 from redis.asyncio import Redis
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -8,12 +11,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_api.deps import get_db, get_redis, require_admin, require_operator
 from ottima_api.messages import MSG_PROJETO_NAO_ENCONTRADO, MSG_PROJETO_NOME_EM_USO
-from ottima_core.bus import KIND_PROJECT_ACTIVATED, publish_event
-from ottima_core.models import Project, User
+from ottima_api.validacao import formatar_problemas
+from ottima_core.bus import KIND_PROJECT_ACTIVATED, KIND_PROJECT_EXPORTED, publish_event
+from ottima_core.models import Flow, OpcConnection, Project, Tag, User
+from ottima_core.portability import ReferenciaTagInvalida, montar_bundle
 from ottima_core.schemas.projects import ProjectCreate, ProjectOut, ProjectUpdate
 
 # Sem dependência no router: os papéis variam por rota (ADR-015)
 router = APIRouter()
+
+_SLUG_SEP = re.compile(r"[^a-z0-9]+")
+
+
+def _slug(name: str) -> str:
+    """Reduz o nome do projeto a `[a-z0-9-]` para o filename do export (spec §3.1-2):
+    minúsculas, sequências fora de a-z0-9 colapsadas num único hífen, hífens das pontas
+    removidos. Nome que reduz a vazio cai em `projeto`."""
+    slug = _SLUG_SEP.sub("-", name.lower()).strip("-")
+    return slug or "projeto"
 
 
 async def _carregar(db: AsyncSession, project_id: int) -> Project:
@@ -111,3 +126,66 @@ async def activate_project(
         payload={"project_id": project.id, "name": project.name},
     )
     return project
+
+
+@router.get("/{project_id}/export")
+async def export_project(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+    redis_client: Redis = Depends(get_redis),
+) -> Response:
+    """Arquivo de projeto (bundle) para portabilidade entre instalações (spec §3.1).
+
+    `require_admin`: mesmo sem segredos, o bundle revela a topologia OPC completa da
+    planta (RF-102, PRD §2). Exporta **qualquer** projeto por id, não só o ativo.
+    """
+    project = await _carregar(db, project_id)
+    connections = list(
+        await db.scalars(select(OpcConnection).where(OpcConnection.project_id == project_id))
+    )
+    # Tags pelas conexões do projeto, nunca por uma consulta independente: `ref_por_id`
+    # (ottima_core.portability.bundle) indexa por `connection.id` e propaga `KeyError` se
+    # alguma tag carregada apontar para uma conexão fora deste conjunto (revisão da 1.3) —
+    # o join garante que toda tag aqui pertence a uma das `connections` acima.
+    tags = list(
+        await db.scalars(
+            select(Tag)
+            .join(OpcConnection, Tag.connection_id == OpcConnection.id)
+            .where(OpcConnection.project_id == project_id)
+        )
+    )
+    flows = list(await db.scalars(select(Flow).where(Flow.project_id == project_id)))
+    try:
+        bundle = montar_bundle(
+            project=project,
+            connections=connections,
+            tags=tags,
+            flows=flows,
+            exported_at=datetime.now(UTC),
+        )
+    except ReferenciaTagInvalida as exc:
+        # Referência que não resolve aborta com 422, nunca exporta bundle quebrado (§2.2-5).
+        raise HTTPException(
+            status_code=422,
+            detail=formatar_problemas(exc.problemas, cabecalho="Export recusado"),
+        ) from None
+
+    # Depois de montar o bundle: evento sobre export que falhou (422 acima) poluiria a
+    # auditoria com uma ação que não aconteceu. A própria justificativa do RBAC é a
+    # sensibilidade da topologia — export sem evento seria exfiltração silenciosa (SEC-05).
+    await publish_event(
+        redis_client,
+        severity="info",
+        origin=f"user:{user.id}",
+        message=f"Projeto '{project.name}' exportado",
+        kind=KIND_PROJECT_EXPORTED,
+        payload={"project_id": project.id, "name": project.name},
+    )
+    return Response(
+        content=bundle.model_dump_json(),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{_slug(project.name)}.ottima.json"'
+        },
+    )
