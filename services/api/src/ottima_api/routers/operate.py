@@ -97,11 +97,12 @@ class ConstraintOut(BaseModel):
 
 
 class DvOut(BaseModel):
-    """Projeção de uma DV do bloco (spec §4.1-1)."""
+    """Projeção de uma DV do bloco (spec §4.1-1) — `range` opcional (§4.2, RF-702)."""
 
     id: str
     name: str
     eu: str
+    range: Range | None = None
 
 
 class MpcVariablesOut(BaseModel):
@@ -287,7 +288,8 @@ def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
                             for co in config.variables.constraints
                         ],
                         dvs=[
-                            DvOut(id=dv.id, name=dv.name, eu=dv.eu) for dv in config.variables.dvs
+                            DvOut(id=dv.id, name=dv.name, eu=dv.eu, range=dv.range)
+                            for dv in config.variables.dvs
                         ],
                     ),
                 )
