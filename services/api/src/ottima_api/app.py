@@ -2,7 +2,6 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
 
 import redis.asyncio as redis
 from fastapi import FastAPI, Request
@@ -10,50 +9,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from ottima_api import API_VERSION
+from ottima_api.validacao import traduzir_erro_de_validacao
 from ottima_api.ws import FlowStatusHub
 from ottima_api.ws import router as ws_router
 from ottima_core.config import Settings, get_settings, validate_secrets
 from ottima_core.db import create_engine, create_session_factory
 from ottima_core.logging import setup_logging
-
-# Motivo pt-BR por `type` de erro do Pydantic v2 (spec F5 §4.3-1, decisão A-9, dívida F4).
-# Cobre os tipos que aparecem nos schemas do serviço (Literal, Field(min_length=...),
-# Field(ge=/le=...), campo obrigatório, `model_validator` com `ValueError` pt-BR já pronto)
-# e `json_invalid`, do corpo malformado antes mesmo de chegar ao schema.
-_MOTIVO_POR_TIPO = {
-    "missing": lambda erro: "campo obrigatório",
-    "string_too_short": lambda erro: f"mínimo de {erro['ctx']['min_length']} caractere(s)",
-    "string_too_long": lambda erro: f"máximo de {erro['ctx']['max_length']} caractere(s)",
-    "greater_than_equal": lambda erro: f"deve ser maior ou igual a {erro['ctx']['ge']}",
-    "less_than_equal": lambda erro: f"deve ser menor ou igual a {erro['ctx']['le']}",
-    "greater_than": lambda erro: f"deve ser maior que {erro['ctx']['gt']}",
-    "less_than": lambda erro: f"deve ser menor que {erro['ctx']['lt']}",
-    "int_parsing": lambda erro: "deve ser um número inteiro",
-    "int_type": lambda erro: "deve ser um número inteiro",
-    "float_parsing": lambda erro: "deve ser um número",
-    "float_type": lambda erro: "deve ser um número",
-    "bool_parsing": lambda erro: "deve ser verdadeiro ou falso",
-    "bool_type": lambda erro: "deve ser verdadeiro ou falso",
-    "string_type": lambda erro: "deve ser um texto",
-    "json_invalid": lambda erro: "corpo JSON inválido",
-}
-
-
-def _traduzir_erro_de_validacao(erro: dict[str, Any]) -> str:
-    """`{loc, msg, type, ctx}` do Pydantic vira `"<campo>: <motivo pt-BR>"` (formato exato
-    da spec F5 §4.3-1). `value_error` (de `model_validator`) já é pt-BR: só remove o prefixo
-    "Value error, " que o Pydantic adiciona. `literal_error` (Literal/enum) traduz a lista de
-    opções. Tipo desconhecido cai na mensagem original do Pydantic (defensivo; nenhum schema
-    do serviço produz outro tipo hoje)."""
-    campo = ".".join(str(parte) for parte in erro["loc"])
-    if erro["type"] == "value_error":
-        motivo = str(erro["ctx"]["error"])
-    elif erro["type"] == "literal_error":
-        opcoes = erro["ctx"]["expected"].replace("'", "").replace(" or ", ", ")
-        motivo = f"valor inválido; esperado um de: {opcoes}"
-    else:
-        motivo = _MOTIVO_POR_TIPO.get(erro["type"], lambda e: e["msg"])(erro)
-    return f"{campo}: {motivo}"
 
 
 async def _validation_exception_handler(
@@ -64,7 +25,7 @@ async def _validation_exception_handler(
     `detail` que não seja string)."""
     return JSONResponse(
         status_code=422,
-        content={"detail": _traduzir_erro_de_validacao(exc.errors()[0])},
+        content={"detail": traduzir_erro_de_validacao(exc.errors()[0])},
     )
 
 
