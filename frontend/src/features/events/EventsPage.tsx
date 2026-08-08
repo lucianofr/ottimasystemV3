@@ -11,13 +11,13 @@ import { api, type EventOut } from "../../lib/api";
 import { useConnections } from "../connections/useConnections";
 import { useActiveProject } from "../projects/useProjects";
 import { useFlows } from "../flows/useFlows";
+import { useMpcs } from "../operate/useMpcs";
 import {
   calcularEventosVisiveis,
   chaveEvento,
   origensConhecidas,
   paraIsoUtc,
   type FiltrosEventos,
-  type MpcNodeOut,
 } from "./eventos";
 
 /** Teto da consulta histórica (spec §7.5, `routers/events.py:DEFAULT_LIMIT=100`,
@@ -67,10 +67,7 @@ export function EventsPage() {
   const projectId = projeto.data?.id ?? null;
   const flows = useFlows(projectId);
   const conexoes = useConnections(projectId);
-  const mpcs = useQuery({
-    queryKey: ["operate", "mpcs"],
-    queryFn: () => api<MpcNodeOut[]>("/api/operate/mpcs"),
-  });
+  const mpcs = useMpcs();
 
   const [severidade, setSeveridade] = useState("");
   const [origem, setOrigem] = useState("");
