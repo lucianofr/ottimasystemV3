@@ -156,6 +156,17 @@ export function ImportarProjeto({ onFechar }: Props) {
 
   return (
     <Card data-testid="import-painel" className="space-y-4 p-6">
+      {/* Sempre no DOM (independente do passo) para o roteiro E2E alcançar por seletor
+          e disparar via `uploadFile` sem depender de estar no passo "escolher". */}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="application/json,.json"
+        data-testid="import-arquivo-input"
+        className="sr-only"
+        onChange={(e) => void onArquivoEscolhido(e)}
+      />
+
       {passo === "escolher" && (
         <div className="space-y-3">
           <p className="plaqueta text-xs text-fg-muted">Passo 1 de 3 — Escolher arquivo</p>
@@ -181,14 +192,6 @@ export function ImportarProjeto({ onFechar }: Props) {
               Cancelar
             </Button>
           </div>
-          <input
-            ref={inputRef}
-            type="file"
-            accept="application/json,.json"
-            data-testid="import-arquivo-input"
-            className="sr-only"
-            onChange={(e) => void onArquivoEscolhido(e)}
-          />
         </div>
       )}
 
