@@ -120,6 +120,8 @@ E2E_ADMIN_USERNAME=$(grep -m1 '^OTTIMA_ADMIN_USERNAME=' deploy/.env|cut -d= -f2-
 # Telas da F5b (operador; admin herda): /operacao (seletor; 1 MPC redireciona direto),
 # /operacao/:flowId/:blockId (faceplate principal + faceplates de variável + trend com
 # predição) e /eventos. Nav do shell em dois grupos: Operação · Eventos | engenharia.
+# Grupo engenharia com 5 itens (F6b acrescentou a rota `/engenharia/projetos`, com
+# "Projetos" no início do grupo): Projetos, Conexões, Tags, Flows, Trend.
 # data-testid: operate-*, faceplate-*, eventos-*, home-* (o roteiro L3 depende deles).
 # Ambiente do L3: `uv run python scripts/setup-l3.py` (idempotente) cria projeto ativo,
 # conexão opcsim-l3, flow MPC↔TFS deployado e o usuário operador_e2e.
