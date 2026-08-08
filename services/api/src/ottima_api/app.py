@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    setup_logging(settings.log_level)
+    setup_logging(settings.log_level, "api")
     validate_secrets(settings)  # falha o boot se a chave de assinatura JWT não for própria
     app = FastAPI(
         title="OttimaSystem API",

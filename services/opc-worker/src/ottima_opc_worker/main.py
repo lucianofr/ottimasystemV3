@@ -61,7 +61,7 @@ async def _heartbeat_loop(client, session_factory, app: FastAPI) -> None:
 async def lifespan(app: FastAPI):
     """Sobe Redis, banco, supervisor e heartbeat; encerra na ordem inversa."""
     settings = get_settings()
-    setup_logging(settings.log_level)
+    setup_logging(settings.log_level, SERVICE_NAME)
     # decode_responses=True é contrato do barramento na F2: consumidor recebe str
     client = redis.from_url(settings.redis_url, decode_responses=True)
     engine = create_engine(settings.database_url)

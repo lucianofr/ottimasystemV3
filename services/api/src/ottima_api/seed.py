@@ -41,7 +41,7 @@ async def seed_admin(session: AsyncSession, settings: Settings) -> bool:
 
 async def run() -> None:
     settings = get_settings()
-    setup_logging(settings.log_level)
+    setup_logging(settings.log_level, "api-seed")
     engine = create_engine(settings.database_url)
     factory = create_session_factory(engine)
     async with factory() as session:
