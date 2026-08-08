@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_api.deps import get_db, get_redis, require_admin, require_operator
+from ottima_api.messages import MSG_PROJETO_NAO_ENCONTRADO, MSG_PROJETO_NOME_EM_USO
 from ottima_core.bus import KIND_PROJECT_ACTIVATED, publish_event
 from ottima_core.models import Project, User
 from ottima_core.schemas.projects import ProjectCreate, ProjectOut, ProjectUpdate
@@ -18,7 +19,7 @@ router = APIRouter()
 async def _carregar(db: AsyncSession, project_id: int) -> Project:
     project = await db.get(Project, project_id)
     if project is None:
-        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+        raise HTTPException(status_code=404, detail=MSG_PROJETO_NAO_ENCONTRADO)
     return project
 
 
@@ -36,7 +37,7 @@ async def create_project(body: ProjectCreate, db: AsyncSession = Depends(get_db)
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Nome de projeto já em uso") from None
+        raise HTTPException(status_code=409, detail=MSG_PROJETO_NOME_EM_USO) from None
     await db.refresh(project)
     return project
 
@@ -59,7 +60,7 @@ async def update_project(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Nome de projeto já em uso") from None
+        raise HTTPException(status_code=409, detail=MSG_PROJETO_NOME_EM_USO) from None
     await db.refresh(project)
     return project
 
