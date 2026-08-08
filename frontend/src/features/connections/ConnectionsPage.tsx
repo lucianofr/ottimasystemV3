@@ -6,7 +6,9 @@ import { Card } from "../../components/ui/card";
 import { ApiError, type ConnectionOut } from "../../lib/api";
 import { useCanMutate } from "../auth/useAuth";
 import { ChapaCertificadoApp } from "../certificates/ChapaCertificadoApp";
+import { useAppCertificate } from "../certificates/useAppCertificate";
 import { ConnectionForm } from "./ConnectionForm";
+import { EFEITO_PENDENCIA, pendenciasDaConexao, ROTULO_PENDENCIA } from "./pendencias";
 import { useConnections, useDeleteConnection } from "./useConnections";
 import { useActiveProject } from "../projects/useProjects";
 import { useLastConnectionState, type UltimoEstado } from "./useLastConnectionState";
@@ -46,6 +48,7 @@ const COLUNAS = [
   "Autenticação",
   "Watchdog",
   "Senha",
+  "Pendências",
   "Último estado",
 ] as const;
 
@@ -65,6 +68,54 @@ function CelulaWatchdog({ conexao }: { conexao: ConnectionOut }) {
       <span className="process-value">{conexao.watchdog_period_ms}</span>{" "}
       <span className="text-xs text-fg-muted">ms</span>
     </span>
+  );
+}
+
+/**
+ * Pendência de segredo derivável (spec §6.3, decisão A-4, UX-01, plano F6b tarefa 4.1): ícone +
+ * rótulo em Texto Secundário (`text-fg-muted`), NUNCA em cor de severidade. Pendência é estado
+ * de configuração, não advertência de processo — a Regra da Cor Anormal fica reservada à
+ * coluna "Último estado" (`conn-last-state`), o canal correto para a falha real. Os predicados
+ * vêm só de `pendenciasDaConexao` (tarefa 1.4); esta célula não reimplementa nenhum.
+ */
+function CelulaPendencias({
+  conexao,
+  appCertExiste,
+}: {
+  conexao: ConnectionOut;
+  appCertExiste: boolean | null;
+}) {
+  const pendencias = pendenciasDaConexao(conexao, appCertExiste);
+  if (pendencias.length === 0) {
+    return (
+      <span data-testid="conn-pendencias" className="text-fg-muted">
+        Nenhuma pendência
+      </span>
+    );
+  }
+  return (
+    <ul data-testid="conn-pendencias" className="space-y-0.5">
+      {pendencias.map((pendencia) => (
+        <li
+          key={pendencia}
+          data-testid={`conn-pendencia-${pendencia.replace(/_/g, "-")}`}
+          title={EFEITO_PENDENCIA[pendencia]}
+          className="flex items-center gap-1.5 text-fg-muted"
+        >
+          <svg
+            aria-hidden="true"
+            width="8"
+            height="8"
+            viewBox="0 0 10 10"
+            fill="currentColor"
+            className="shrink-0"
+          >
+            <circle cx="5" cy="5" r="4" />
+          </svg>
+          {ROTULO_PENDENCIA[pendencia]}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -223,6 +274,11 @@ export function ConnectionsPage() {
   }
 
   const podeMutar = useCanMutate();
+  // GET /api/certificates/app é require_admin (certificates.py:25) — decisão de RBAC do
+  // preâmbulo do plano F6b, não reaberta aqui. Para o operador `appCertExiste` fica `null`
+  // ("não avaliável"), e o terceiro predicado simplesmente não aparece na célula.
+  const certificadoApp = useAppCertificate(podeMutar);
+  const appCertExiste = podeMutar ? (certificadoApp.data?.exists ?? null) : null;
   const linhas = conexoes.data ?? [];
   const totalColunas = COLUNAS.length + (podeMutar ? 2 : 0);
 
@@ -320,6 +376,9 @@ export function ConnectionsPage() {
                 </td>
                 <td className="px-3 py-2">
                   {conexao.has_password ? "definida" : <span className="text-fg-muted">—</span>}
+                </td>
+                <td className="px-3 py-2">
+                  <CelulaPendencias conexao={conexao} appCertExiste={appCertExiste} />
                 </td>
                 <td className="px-3 py-2">
                   <CelulaUltimoEstado estado={estados.get(conexao.id)} />
