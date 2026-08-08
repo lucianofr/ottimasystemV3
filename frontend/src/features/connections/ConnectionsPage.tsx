@@ -5,6 +5,7 @@ import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { ApiError, type ConnectionOut } from "../../lib/api";
 import { useCanMutate } from "../auth/useAuth";
+import { ChapaCertificadoApp } from "../certificates/ChapaCertificadoApp";
 import { ConnectionForm } from "./ConnectionForm";
 import { useConnections, useDeleteConnection } from "./useConnections";
 import { useActiveProject } from "../projects/useProjects";
@@ -131,6 +132,8 @@ export function ConnectionsPage() {
 
   return (
     <section className="space-y-4">
+      <ChapaCertificadoApp conexoes={linhas} />
+
       <div className="flex items-center justify-between">
         <h1 className="plaqueta text-sm">Conexões</h1>
         {podeMutar && (
