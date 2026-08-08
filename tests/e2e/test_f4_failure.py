@@ -156,6 +156,7 @@ def _grafo_overrun(admin: httpx.Client, ambiente: AmbienteMpc, *, mpc_id: str = 
 # --------------------------------------------------------------------------------------
 
 
+@pytest.mark.rnf09
 def test_e2e_f4_06_overrun_mantem_mv_e_alarme(
     admin: httpx.Client,
     ambiente_mpc: AmbienteMpc,
