@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { Link } from "react-router";
 
 import { Button } from "../../components/ui/button";
@@ -10,6 +10,12 @@ import { ConnectionForm } from "./ConnectionForm";
 import { useConnections, useDeleteConnection } from "./useConnections";
 import { useActiveProject } from "../projects/useProjects";
 import { useLastConnectionState, type UltimoEstado } from "./useLastConnectionState";
+import {
+  certificadoExcedeLimite,
+  MAX_SERVER_CERT_BYTES,
+  useClearServerCertificate,
+  useTrustServerCertificate,
+} from "./useServerCertificate";
 
 const POLICY: Record<ConnectionOut["security_policy"], string> = {
   none: "Sem segurança",
@@ -91,6 +97,96 @@ function CelulaUltimoEstado({ estado }: { estado: UltimoEstado | undefined }) {
   );
 }
 
+/**
+ * "Confiar certificado" / "Deixar de confiar" por linha (spec §6.2-2, RF-202, ADR-021,
+ * tarefa 3.2). O `<input type="file">` fica sempre no DOM assim que a linha renderiza — nunca
+ * atrás de um menu — porque o roteiro E2E (B-F6-04) sobe o arquivo direto nele. O fingerprint
+ * só existe no cliente depois de um trust bem-sucedido nesta sessão: a API devolve o
+ * `fingerprint_sha256` só de quem acabou de gravar, não há rota para reler o de um certificado
+ * já persistido (`ConnectionOut` só traz `server_cert_file`, o nome do arquivo).
+ */
+function CelulaCertificadoServidor({
+  conexao,
+  onErro,
+}: {
+  conexao: ConnectionOut;
+  onErro: (mensagem: string | null) => void;
+}) {
+  const confiar = useTrustServerCertificate();
+  const descartar = useClearServerCertificate();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [fingerprint, setFingerprint] = useState<string | null>(null);
+
+  async function selecionarArquivo(evento: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const arquivo = evento.target.files?.[0];
+    evento.target.value = ""; // permite reenviar o mesmo arquivo depois de um erro
+    if (!arquivo) return;
+    onErro(null);
+    if (certificadoExcedeLimite(arquivo.size)) {
+      const teto = String(MAX_SERVER_CERT_BYTES / 1024);
+      onErro(`Certificado maior que ${teto} KiB — o servidor recusaria; escolha um arquivo menor.`);
+      return;
+    }
+    try {
+      const resultado = await confiar.mutateAsync({ id: conexao.id, arquivo });
+      setFingerprint(resultado.fingerprint_sha256);
+    } catch (err) {
+      onErro(err instanceof ApiError ? err.message : "Erro de comunicação com o servidor");
+    }
+  }
+
+  async function descartarCertificado(): Promise<void> {
+    onErro(null);
+    try {
+      await descartar.mutateAsync(conexao.id);
+      setFingerprint(null);
+    } catch (err) {
+      onErro(err instanceof ApiError ? err.message : "Erro de comunicação com o servidor");
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <input
+        ref={inputRef}
+        type="file"
+        data-testid="cert-servidor-upload-input"
+        className="hidden"
+        onChange={(evento) => void selecionarArquivo(evento)}
+      />
+      {conexao.server_cert_file ? (
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="cert-servidor-descartar"
+          disabled={descartar.isPending}
+          onClick={() => void descartarCertificado()}
+        >
+          Deixar de confiar
+        </Button>
+      ) : (
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="cert-servidor-confiar"
+          disabled={confiar.isPending}
+          onClick={() => inputRef.current?.click()}
+        >
+          Confiar certificado
+        </Button>
+      )}
+      {fingerprint && (
+        <span
+          data-testid="cert-servidor-fingerprint"
+          className="process-value text-xs text-fg-muted"
+        >
+          {fingerprint}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function ConnectionsPage() {
   const projeto = useActiveProject();
   const projectId = projeto.data?.id ?? null;
@@ -128,7 +224,7 @@ export function ConnectionsPage() {
 
   const podeMutar = useCanMutate();
   const linhas = conexoes.data ?? [];
-  const totalColunas = COLUNAS.length + (podeMutar ? 1 : 0);
+  const totalColunas = COLUNAS.length + (podeMutar ? 2 : 0);
 
   return (
     <section className="space-y-4">
@@ -168,6 +264,11 @@ export function ConnectionsPage() {
                   {coluna}
                 </th>
               ))}
+              {podeMutar && (
+                <th className="plaqueta px-3 py-2 text-left text-xs text-fg-muted">
+                  Certificado do servidor
+                </th>
+              )}
               {podeMutar && (
                 <th className="px-3 py-2">
                   <span className="sr-only">Ações</span>
@@ -223,6 +324,11 @@ export function ConnectionsPage() {
                 <td className="px-3 py-2">
                   <CelulaUltimoEstado estado={estados.get(conexao.id)} />
                 </td>
+                {podeMutar && (
+                  <td className="px-3 py-2">
+                    <CelulaCertificadoServidor conexao={conexao} onErro={setErro} />
+                  </td>
+                )}
                 {podeMutar && (
                   <td className="px-3 py-2">
                     {aConfirmar === conexao.id ? (
