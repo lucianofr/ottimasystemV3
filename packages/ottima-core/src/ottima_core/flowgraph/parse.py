@@ -9,7 +9,7 @@ para a divisão de responsabilidade completa do pacote.
 import math
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 NodeType = Literal["opc_read", "opc_write", "script", "tfs", "mpc"]
 NODE_TYPES: tuple[str, ...] = ("opc_read", "opc_write", "script", "tfs", "mpc")
@@ -19,8 +19,8 @@ MAX_SCRIPT_PORTS = 8  # spec §3.3
 _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
     "opc_read": ("tag_id",),
     "opc_write": ("tag_id",),
-    "script": ("n_inputs", "n_outputs", "code"),
-    "tfs": ("matrix",),
+    "script": ("n_inputs", "n_outputs", "code", "output_eu"),
+    "tfs": ("matrix", "output_eu"),
     "mpc": ("name", "multiplier", "variables", "models"),
 }
 _PARAM_KEYS: dict[str, tuple[str, ...]] = {
@@ -57,6 +57,20 @@ class ScriptConfig(BaseModel):
     n_inputs: int = Field(ge=0, le=MAX_SCRIPT_PORTS)
     n_outputs: int = Field(ge=0, le=MAX_SCRIPT_PORTS)
     code: str
+    output_eu: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _valida_output_eu(self) -> "ScriptConfig":
+        """Chave de `output_eu` só existe se houver a porta correspondente (spec §4.1) —
+        depende de `n_outputs`, por isso model_validator e não field_validator."""
+        validas = {f"OUT{i}" for i in range(1, self.n_outputs + 1)}
+        invalidas = sorted(set(self.output_eu) - validas)
+        if invalidas:
+            raise ValueError(
+                f"'output_eu' referencia porta(s) inexistente(s) para n_outputs="
+                f"{self.n_outputs}: {', '.join(invalidas)}"
+            )
+        return self
 
 
 class SopdtParams(BaseModel):
@@ -89,6 +103,18 @@ class TfsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     matrix: list[list[TfsElement]]
+    output_eu: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("output_eu")
+    @classmethod
+    def _valida_output_eu(cls, value: dict[str, str]) -> dict[str, str]:
+        """Portas fixas do bloco `tfs` (spec §3.4): y1/y2, sem depender de outro campo."""
+        invalidas = sorted(set(value) - {"y1", "y2"})
+        if invalidas:
+            raise ValueError(
+                f"'output_eu' referencia porta(s) inexistente(s): {', '.join(invalidas)}"
+            )
+        return value
 
 
 class MpcRawConfig(BaseModel):
@@ -298,6 +324,21 @@ def _parse_mpc_config(data: dict) -> MpcRawConfig:
     return MpcRawConfig(**payload)
 
 
+def _parse_output_eu(where: str, data: dict, errors: list[str]) -> dict[str, str] | None:
+    """`output_eu` é opcional por porta (spec §4.1): ausente vira `{}` (compat. retroativa);
+    presente precisa ser um objeto porta -> unidade de engenharia em texto."""
+    if "output_eu" not in data:
+        return {}
+    output_eu = data["output_eu"]
+    if not isinstance(output_eu, dict) or any(not isinstance(v, str) for v in output_eu.values()):
+        errors.append(
+            f"{where}: 'output_eu' deve ser um objeto que mapeia porta para unidade de "
+            "engenharia (texto)"
+        )
+        return None
+    return output_eu
+
+
 def _parse_script_config(where: str, data: dict, errors: list[str]) -> ScriptConfig | None:
     counts: dict[str, int] = {}
     for field in ("n_inputs", "n_outputs"):
@@ -314,9 +355,20 @@ def _parse_script_config(where: str, data: dict, errors: list[str]) -> ScriptCon
     if not isinstance(code, str):
         errors.append(f"{where}: 'code' é obrigatório e deve ser uma string")
         return None
-    if len(counts) != 2:
+
+    output_eu = _parse_output_eu(where, data, errors)
+    if len(counts) != 2 or output_eu is None:
         return None
-    return ScriptConfig(n_inputs=counts["n_inputs"], n_outputs=counts["n_outputs"], code=code)
+    try:
+        return ScriptConfig(
+            n_inputs=counts["n_inputs"],
+            n_outputs=counts["n_outputs"],
+            code=code,
+            output_eu=output_eu,
+        )
+    except ValidationError as erro:
+        errors.append(f"{where}: {erro.errors()[0]['ctx']['error']}")
+        return None
 
 
 def _parse_tfs_config(where: str, data: dict, errors: list[str]) -> TfsConfig | None:
@@ -344,7 +396,15 @@ def _parse_tfs_config(where: str, data: dict, errors: list[str]) -> TfsConfig | 
         rows.append(parsed)
     if not complete:
         return None
-    return TfsConfig(matrix=rows)
+
+    output_eu = _parse_output_eu(where, data, errors)
+    if output_eu is None:
+        return None
+    try:
+        return TfsConfig(matrix=rows, output_eu=output_eu)
+    except ValidationError as erro:
+        errors.append(f"{where}: {erro.errors()[0]['ctx']['error']}")
+        return None
 
 
 def _parse_tfs_element(where: str, raw: object, errors: list[str]) -> TfsElement | None:
