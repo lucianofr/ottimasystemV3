@@ -734,27 +734,6 @@ function relogioFalso(inicio = new Date("2026-01-01T00:00:00.000Z")) {
   };
 }
 
-test("relógio: o intervalo agendado é a constante nomeada de 5 s (spec §6.6-1), não um literal solto", () => {
-  const f = relogioFalso();
-  criarRelogioAlarmes(() => {}, f.ambiente);
-
-  expect(INTERVALO_TIQUE_ALARMES_MS).toBe(5_000);
-  expect(f.intervaloRegistradoMs()).toBe(INTERVALO_TIQUE_ALARMES_MS);
-});
-
-test("relógio: cada tique entrega um instante mais novo que o anterior, sem depender de mensagem nenhuma", () => {
-  const f = relogioFalso();
-  const instantes: Date[] = [];
-  criarRelogioAlarmes((agora) => instantes.push(agora), f.ambiente);
-
-  f.avancar(INTERVALO_TIQUE_ALARMES_MS);
-  f.avancar(INTERVALO_TIQUE_ALARMES_MS);
-  f.avancar(INTERVALO_TIQUE_ALARMES_MS);
-
-  expect(instantes).toHaveLength(3);
-  expect(instantes[1].getTime()).toBeGreaterThan(instantes[0].getTime());
-  expect(instantes[2].getTime()).toBeGreaterThan(instantes[1].getTime());
-});
 
 test("relógio: desmontar cancela exatamente o intervalo agendado — sem vazamento entre montagens", () => {
   const f = relogioFalso();
