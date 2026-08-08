@@ -51,7 +51,12 @@ export type MapaTags = ReadonlyMap<number, TipoDadoTag>;
 type DadosBase = { exec_order: number; label: string };
 
 export type DadosTag = DadosBase & { tag_id: number | null };
-export type DadosScript = DadosBase & { n_inputs: number; n_outputs: number; code: string };
+export type DadosScript = DadosBase & {
+  n_inputs: number;
+  n_outputs: number;
+  code: string;
+  output_eu: Record<string, string>;
+};
 
 export type ParamsSopdt = { K: number; tau1: number; tau2: number; theta: number };
 export type ParamsIopdt = { Ki: number; theta: number };
@@ -65,7 +70,7 @@ export type ElementoTfs =
 export type LinhaTfs = [ElementoTfs, ElementoTfs];
 export type MatrizTfs = [LinhaTfs, LinhaTfs];
 
-export type DadosTfs = DadosBase & { matrix: MatrizTfs };
+export type DadosTfs = DadosBase & { matrix: MatrizTfs; output_eu: Record<string, string> };
 
 export type LimitesMpc = { min: number; max: number };
 export type FaixaMpc = { low: number; high: number };
@@ -384,6 +389,17 @@ export function podarArestasDoBloco(edges: readonly BlocoEdge[], no: BlocoNode):
   });
 }
 
+/** Poda as EUs de portas que a nova contagem de saídas do Script não tem mais (spec §4.1-6):
+ *  reduzir n_outputs sem descartar a chave sobrando seria 422 no save (`parse.py`
+ *  `ScriptConfig._valida_output_eu` rejeita 'output_eu' referenciando porta inexistente). */
+export function podarOutputEuScript(
+  output_eu: Record<string, string>,
+  n_outputs: number,
+): Record<string, string> {
+  const validas = new Set(portasScript("OUT", n_outputs));
+  return Object.fromEntries(Object.entries(output_eu).filter(([porta]) => validas.has(porta)));
+}
+
 /** Compactação automática ao excluir (ADR-024): o conjunto volta a ser contíguo 1..N. */
 export function compactarExecOrder(nodes: readonly BlocoNode[]): BlocoNode[] {
   return renumerar(nodes, ordemVigente(nodes));
@@ -479,10 +495,15 @@ export function criarBloco(
         id,
         type: "script",
         position,
-        data: { exec_order, label: "", n_inputs: 1, n_outputs: 1, code: "OUT1 = IN1\n" },
+        data: { exec_order, label: "", n_inputs: 1, n_outputs: 1, code: "OUT1 = IN1\n", output_eu: {} },
       };
     case "tfs":
-      return { id, type: "tfs", position, data: { exec_order, label: "", matrix: matrizPadrao() } };
+      return {
+        id,
+        type: "tfs",
+        position,
+        data: { exec_order, label: "", matrix: matrizPadrao(), output_eu: {} },
+      };
     case "mpc":
       return {
         id,
@@ -566,6 +587,18 @@ export function texto(valor: unknown, padrao: string): string {
   return typeof valor === "string" ? valor : padrao;
 }
 
+/** `output_eu` é opcional por porta (spec §4.1-5/6): ausente ou valor não-string vira `{}`,
+ *  igual ao servidor (`parse.py::_parse_output_eu`) — compatibilidade retroativa obrigatória. */
+function lerOutputEu(bruto: unknown): Record<string, string> {
+  const cru = objeto(bruto);
+  if (cru === null) return {};
+  const saida: Record<string, string> = {};
+  for (const [porta, valor] of Object.entries(cru)) {
+    if (typeof valor === "string") saida[porta] = valor;
+  }
+  return saida;
+}
+
 function lerElemento(bruto: unknown): ElementoTfs {
   const cru = objeto(bruto);
   if (cru === null) return elementoPadrao();
@@ -631,6 +664,7 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           n_inputs: inteiro(dados.n_inputs, 0, 0, MAX_PORTAS_SCRIPT),
           n_outputs: inteiro(dados.n_outputs, 0, 0, MAX_PORTAS_SCRIPT),
           code: texto(dados.code, ""),
+          output_eu: lerOutputEu(dados.output_eu),
         },
       };
     case "tfs":
@@ -638,7 +672,7 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
         id,
         type: tipo,
         position,
-        data: { exec_order, label, matrix: lerMatriz(dados.matrix) },
+        data: { exec_order, label, matrix: lerMatriz(dados.matrix), output_eu: lerOutputEu(dados.output_eu) },
       };
     case "mpc":
       return {

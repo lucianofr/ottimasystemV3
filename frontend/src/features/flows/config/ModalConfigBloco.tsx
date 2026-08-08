@@ -8,6 +8,8 @@ import type { TagOut } from "../../../lib/api";
 import { ROTULO_TIPO } from "../../tags/useTags";
 import {
   MAX_PORTAS_SCRIPT,
+  podarOutputEuScript,
+  portasScript,
   ROTULO_BLOCO,
   type BlocoNode,
   type DadosTfs,
@@ -63,7 +65,27 @@ function indentarComTab(evento: KeyboardEvent<HTMLTextAreaElement>): void {
   campo.setRangeText("    ", campo.selectionStart, campo.selectionEnd, "end");
 }
 
-function CamposScript({ dados }: { dados: NoScript["data"] }) {
+/** Lê o EU de cada porta do FormData; texto livre e opcional — porta ausente ou em branco
+ *  não entra no objeto (spec §4.1-6: porta sem unidade fica sem chave, como `Tag.eu`). */
+function outputEuDoFormulario(campos: FormData, portas: readonly string[]): Record<string, string> {
+  const saida: Record<string, string> = {};
+  for (const porta of portas) {
+    const bruto = campos.get(`output_eu_${porta}`);
+    if (typeof bruto === "string" && bruto.trim() !== "") saida[porta] = bruto.trim();
+  }
+  return saida;
+}
+
+function CamposScript({
+  dados,
+  nOutputs,
+  aoMudarNOutputs,
+}: {
+  dados: NoScript["data"];
+  nOutputs: number;
+  aoMudarNOutputs: (n_outputs: number) => void;
+}) {
+  const portasEu = portasScript("OUT", nOutputs);
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
@@ -79,7 +101,13 @@ function CamposScript({ dados }: { dados: NoScript["data"] }) {
         </div>
         <div className="space-y-1">
           <Label htmlFor="n_outputs">Saídas (OUT1..OUTn)</Label>
-          <Select id="n_outputs" name="n_outputs" data-testid="config-n-outputs" defaultValue={dados.n_outputs}>
+          <Select
+            id="n_outputs"
+            name="n_outputs"
+            data-testid="config-n-outputs"
+            value={nOutputs}
+            onChange={(evento) => aoMudarNOutputs(Number(evento.target.value))}
+          >
             {OPCOES_PORTAS.map((quantidade) => (
               <option key={quantidade} value={quantidade}>
                 {quantidade}
@@ -88,6 +116,24 @@ function CamposScript({ dados }: { dados: NoScript["data"] }) {
           </Select>
         </div>
       </div>
+
+      {portasEu.length > 0 && (
+        <div className="grid grid-cols-2 gap-3">
+          {portasEu.map((porta) => (
+            <div key={porta} className="space-y-1">
+              <Label htmlFor={`output_eu_${porta}`}>{porta} · EU</Label>
+              <Input
+                id={`output_eu_${porta}`}
+                name={`output_eu_${porta}`}
+                data-testid={`config-output-eu-${porta}`}
+                defaultValue={dados.output_eu[porta] ?? ""}
+                placeholder="ex.: t/h"
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="space-y-1">
         <Label htmlFor="code">Código</Label>
         <textarea
@@ -126,9 +172,10 @@ interface Props {
 /**
  * Modal de config por duplo-clique (RF-301), um formulário por tipo de bloco.
  *
- * Os campos são não-controlados e lidos no envio; só `enabled`/`kind` da matriz do TFS vivem
- * em estado, porque decidem quais parâmetros existem. Para o operador o `fieldset` inteiro
- * entra desabilitado (contrato de RBAC, PRD §2).
+ * Os campos são não-controlados e lidos no envio; `enabled`/`kind` da matriz do TFS e o
+ * `n_outputs` do Script vivem em estado — o primeiro par decide quais parâmetros existem,
+ * o segundo decide quantos campos de EU por porta aparecem (spec §4.1-4). Para o operador o
+ * `fieldset` inteiro entra desabilitado (contrato de RBAC, PRD §2).
  */
 export function ModalConfigBloco({
   no,
@@ -140,6 +187,7 @@ export function ModalConfigBloco({
 }: Props) {
   const dialogo = useRef<HTMLDialogElement>(null);
   const [matrizTfs, setMatrizTfs] = useState<DadosTfs | null>(no.type === "tfs" ? no.data : null);
+  const [nOutputsScript, setNOutputsScript] = useState(no.type === "script" ? no.data.n_outputs : 0);
 
   // `main.tsx` monta sob <StrictMode>: em dev o efeito roda duas vezes e `showModal()` num
   // <dialog> já aberto levanta InvalidStateError, que sem error boundary derruba a árvore.
@@ -162,7 +210,8 @@ export function ModalConfigBloco({
         onAplicar({ ...no, data: { ...no.data, label, tag_id } }, execOrder);
         break;
       }
-      case "script":
+      case "script": {
+        const n_outputs = inteiroDoCampo(campos.get("n_outputs"), 0, 0, MAX_PORTAS_SCRIPT);
         onAplicar(
           {
             ...no,
@@ -170,13 +219,18 @@ export function ModalConfigBloco({
               ...no.data,
               label,
               n_inputs: inteiroDoCampo(campos.get("n_inputs"), 0, 0, MAX_PORTAS_SCRIPT),
-              n_outputs: inteiroDoCampo(campos.get("n_outputs"), 0, 0, MAX_PORTAS_SCRIPT),
+              n_outputs,
               code: String(campos.get("code") ?? ""),
+              output_eu: podarOutputEuScript(
+                outputEuDoFormulario(campos, portasScript("OUT", MAX_PORTAS_SCRIPT)),
+                n_outputs,
+              ),
             },
           },
           execOrder,
         );
         break;
+      }
       case "tfs":
         onAplicar(
           {
@@ -185,6 +239,7 @@ export function ModalConfigBloco({
               ...no.data,
               label,
               matrix: matrizDoFormulario((matrizTfs ?? no.data).matrix, campos),
+              output_eu: outputEuDoFormulario(campos, ["y1", "y2"]),
             },
           },
           execOrder,
@@ -249,7 +304,9 @@ export function ModalConfigBloco({
 
           {no.type === "opc_read" && <CamposTag dados={no.data} direcao="r" tags={tags} />}
           {no.type === "opc_write" && <CamposTag dados={no.data} direcao="w" tags={tags} />}
-          {no.type === "script" && <CamposScript dados={no.data} />}
+          {no.type === "script" && (
+            <CamposScript dados={no.data} nOutputs={nOutputsScript} aoMudarNOutputs={setNOutputsScript} />
+          )}
           {no.type === "tfs" && matrizTfs !== null && (
             <CamposTfs dados={matrizTfs} aoMudar={setMatrizTfs} />
           )}

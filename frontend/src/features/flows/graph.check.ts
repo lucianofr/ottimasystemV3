@@ -8,9 +8,11 @@ import {
   definirExecOrder,
   handlesEntrada,
   handlesSaida,
+  matrizPadrao,
   motivoRecusa,
   paraGraphJson,
   podarArestasDoBloco,
+  podarOutputEuScript,
   proximaPosicaoNaGrade,
   proximoExecOrder,
   tipoPorta,
@@ -47,7 +49,7 @@ function script(id: string, ordem: number, entradas = 1, saidas = 1): BlocoNode 
     id,
     type: "script",
     position: POS,
-    data: { exec_order: ordem, label: "", n_inputs: entradas, n_outputs: saidas, code: "" },
+    data: { exec_order: ordem, label: "", n_inputs: entradas, n_outputs: saidas, code: "", output_eu: {} },
   };
 }
 
@@ -377,8 +379,8 @@ test("data sai com exatamente as chaves do contrato, uma lista por tipo", () => 
   expect(chaves).toEqual([
     ["exec_order", "label", "tag_id"],
     ["exec_order", "label", "tag_id"],
-    ["code", "exec_order", "label", "n_inputs", "n_outputs"],
-    ["exec_order", "label", "matrix"],
+    ["code", "exec_order", "label", "n_inputs", "n_outputs", "output_eu"],
+    ["exec_order", "label", "matrix", "output_eu"],
     ["exec_order", "label", "models", "multiplier", "name", "variables"],
   ]);
 });
@@ -425,6 +427,45 @@ test("ida e volta pelo graph_json preserva o grafo", () => {
   const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson(nodes, edges))));
   expect(volta.nodes).toEqual(nodes);
   expect(volta.edges).toEqual(edges);
+});
+
+test("ida e volta pelo graph_json preserva output_eu do Script e do TFS (spec §4.1)", () => {
+  const nodes: BlocoNode[] = [
+    {
+      id: "s",
+      type: "script",
+      position: POS,
+      data: { exec_order: 1, label: "", n_inputs: 1, n_outputs: 2, code: "", output_eu: { OUT1: "t/h" } },
+    },
+    {
+      id: "t",
+      type: "tfs",
+      position: { x: 300, y: 20 },
+      data: { exec_order: 2, label: "", matrix: matrizPadrao(), output_eu: { y1: "C" } },
+    },
+  ];
+  const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson(nodes, []))));
+  expect(volta.nodes).toEqual(nodes);
+});
+
+test("nó Script/TFS salvo antes da F6, sem output_eu, carrega com {} (compatibilidade retroativa)", () => {
+  const grafo = deGraphJson({
+    nodes: [
+      {
+        id: "s",
+        type: "script",
+        position: POS,
+        data: { exec_order: 1, label: "", n_inputs: 1, n_outputs: 1, code: "" },
+      },
+      { id: "t", type: "tfs", position: POS, data: { exec_order: 2, label: "", matrix: matrizPadrao() } },
+    ],
+    edges: [],
+  });
+  const s = grafo.nodes.find((no) => no.id === "s");
+  const t = grafo.nodes.find((no) => no.id === "t");
+  if (s?.type !== "script" || t?.type !== "tfs") throw new Error("tipos preservados");
+  expect(s.data.output_eu).toEqual({});
+  expect(t.data.output_eu).toEqual({});
 });
 
 test("ida e volta pelo graph_json preserva o nó mpc com config completo (mvs com pid, cvs, constraints, dvs, models)", () => {
@@ -507,4 +548,23 @@ test("reconfigurar sem mexer nas portas não derruba nada", () => {
   expect(podarArestasDoBloco(edges, tfs("t", 1))).toEqual(edges);
   expect(podarArestasDoBloco(edges, escrita("w", 2, 42))).toEqual(edges);
   expect(podarArestasDoBloco(edges, leitura("r", 3, 41))).toEqual(edges);
+});
+
+// --------------------------------------------------------------------------------------
+// Poda de output_eu ao reduzir n_outputs (spec §4.1-6)
+// --------------------------------------------------------------------------------------
+
+test("reduzir n_outputs de 3 para 2 descarta a EU de OUT3 (servidor recusaria com 422)", () => {
+  expect(podarOutputEuScript({ OUT1: "t/h", OUT2: "bar", OUT3: "C" }, 2)).toEqual({
+    OUT1: "t/h",
+    OUT2: "bar",
+  });
+});
+
+test("aumentar n_outputs preserva as EUs existentes sem inventar a da porta nova", () => {
+  expect(podarOutputEuScript({ OUT1: "t/h" }, 3)).toEqual({ OUT1: "t/h" });
+});
+
+test("zerar n_outputs descarta toda EU do Script", () => {
+  expect(podarOutputEuScript({ OUT1: "t/h", OUT2: "bar" }, 0)).toEqual({});
 });
