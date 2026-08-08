@@ -41,6 +41,8 @@ Convenções herdadas: itens **[NOVA — implementação]** são decisões de im
 | **Shed automático por overrun/falha de solver** — RF-624 manda manter MV + alarme; devolver é decisão do operador | fora da v1 | decisão A-12 |
 | DV com trajetória futura (na F4, DV futura = último valor medido, constante no horizonte) | fora da v1 | §3.2 |
 
+> Nota (spec F6 §7): a linha "Suíte completa de malha fechada RNF-09 (a F4 entrega os cenários-núcleo §9.2) | F6" (§1.2) é cumprida por `docs/specs/F6-portabilidade-hardening.md` §7.
+
 ---
 
 ## 2. Bloco MPC — config e validação

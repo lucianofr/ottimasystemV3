@@ -47,6 +47,10 @@ Convenções herdadas: itens **[NOVA — implementação]** são decisões de im
 | Persistir predição/custo/status do MPC | nunca | ADR-016 |
 | Teto de blocos MPC por flow (o volume §2.2-5 assume 1 por flow como caso de projeto) | registrado como limite de dimensionamento; teto formal se aparecer o caso real | F5R-25 |
 
+> Nota (spec F6 §4.1): a linha "EU nas portas de Script/TFS (exige campo novo de schema) | F6" (§1.2) é cumprida por `docs/specs/F6-portabilidade-hardening.md` §4.1.
+
+> Nota (spec F6 §7): a parte "suíte completa RNF-09" da linha "Export/import, UI de certificados, suíte completa RNF-09 | F6" (§1.2) é cumprida por `docs/specs/F6-portabilidade-hardening.md` §7.
+
 ### 1.3 Emendas a documentos anteriores (consolidação; F5R-26)
 
 O PRD tem regra explícita de correção (`PRD.md` §nota inicial); specs anteriores recebem **nota de remissão** a esta spec no trecho alterado. Aplicação: **Etapa 0 do plano F5a**, antes de qualquer código.
@@ -243,6 +247,8 @@ O PRD tem regra explícita de correção (`PRD.md` §nota inicial); specs anteri
 | — | Protocolo `Commandable`/`Healthy` | Fica (revisitar no 2º bloco comandável) | §1.2 |
 | — | EU nas portas de Script/TFS | Diferido F6 (schema novo) | §1.2 |
 | — | `shutdown_mpc` síncrono sob o lock em `_force_stop` (`on_project_activated`), `_pass`/`_reconcile_flow` e `_handback_failed_mpc` | Fica (herdado da F4, **não** é regressão da F5): se o host estiver em build, esses caminhos ainda seguram o lock por até `_BOOT_TIMEOUT_S = 30 s`. O reescopo de §6-3 vale para os três caminhos de comando (deploy/stop/reload), não para estes | §6.3 · achado da revisão de fechamento da F5 |
+
+> Nota (spec F6 §5.2): a linha `shutdown_mpc` síncrono sob o lock (§8) fecha em `docs/specs/F6-portabilidade-hardening.md` §5.2 — com correção de registro: são três contextos reais, e o quarto chamador que o ledger da F5 não registrou é `_deploy` sobre `old_runtime` (`supervisor.py:338`).
 
 ---
 
