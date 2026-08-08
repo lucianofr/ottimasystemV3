@@ -5,7 +5,10 @@ tradução num router, e um router importando de `app.py` fecharia ciclo (`app.p
 importa `ottima_api.ws` no topo).
 """
 
+from collections.abc import Sequence
 from typing import Any
+
+from pydantic import ValidationError
 
 # Motivo pt-BR por `type` de erro do Pydantic v2 (spec F5 §4.3-1, decisão A-9, dívida F4).
 # Cobre os tipos que aparecem nos schemas do serviço (Literal, Field(min_length=...),
@@ -45,3 +48,24 @@ def traduzir_erro_de_validacao(erro: dict[str, Any]) -> str:
     else:
         motivo = _MOTIVO_POR_TIPO.get(erro["type"], lambda e: e["msg"])(erro)
     return f"{campo}: {motivo}"
+
+
+def problemas_de_validacao(exc: ValidationError, *, prefixo: str = "") -> list[str]:
+    """Todos os erros de `exc.errors()` traduzidos e formatados como `"<caminho>:
+    <motivo pt-BR>"` (reusa `traduzir_erro_de_validacao`, não reimplementa a tradução).
+    `prefixo` antepõe o caminho quando o erro vem de um schema validado isoladamente
+    dentro de uma estrutura maior (ex.: `"connections[2]."` no import de bundle, tarefa
+    2.3) — a função só concatena, quem chama decide o separador."""
+    return [f"{prefixo}{traduzir_erro_de_validacao(erro)}" for erro in exc.errors()]
+
+
+def formatar_problemas(problemas: Sequence[str], *, cabecalho: str) -> str:
+    """Agrega uma lista de problemas na string única do 422 (spec §3.2-5, decisão A-5):
+    `"<cabecalho> (N problemas) | p1 | p2 | … | e mais N"`. Separador ` | ` (nunca `;`,
+    que aparece dentro de `node_id` OPC-UA como `ns=2;s=TT101`, UX-06); teto de 10
+    problemas exibidos, com o total real sempre no cabeçalho. `cabecalho` não é fixado
+    aqui porque `"Import recusado"` é normativo (§3.2-5) e `"Export recusado"` não."""
+    exibidos = problemas[:10]
+    excedente = len(problemas) - len(exibidos)
+    sufixo = f" | e mais {excedente}" if excedente > 0 else ""
+    return f"{cabecalho} ({len(problemas)} problemas) | {' | '.join(exibidos)}{sufixo}"
