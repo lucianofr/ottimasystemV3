@@ -1,4 +1,5 @@
 import { useRef, useState, type ChangeEvent } from "react";
+import { Link } from "react-router";
 
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
@@ -344,16 +345,16 @@ export function ImportarProjeto({ onFechar }: Props) {
                   >
                     <IconePendencia />
                     <span className="plaqueta">{ROTULO_PENDENCIA[pendencia]}</span>
-                    <span className="process-value">{conexoes.join(", ")}</span>
+                    <span>{conexoes.join(", ")}</span>
                   </li>
                 );
               });
             })()}
           </ul>
           <div className="flex items-center justify-between">
-            <a href="/engenharia/conexoes" data-testid="import-resumo-link" className="text-xs text-accent">
+          <Link to="/engenharia/conexoes" data-testid="import-resumo-link" className="text-xs text-accent">
               Ir para Conexões
-            </a>
+          </Link>
             <Button type="button" size="sm" data-testid="import-fechar" onClick={fechar}>
               Fechar
             </Button>
