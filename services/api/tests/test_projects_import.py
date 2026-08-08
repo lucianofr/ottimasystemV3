@@ -247,7 +247,33 @@ async def test_schema_version_diferente_422_sem_tocar_banco(client, admin_header
     antes = await _contagens(db_session)
     r = await client.post(IMPORT, json={"bundle": _bundle(schema_version=2)}, headers=admin_headers)
     assert r.status_code == 422, r.text
-    assert r.json()["detail"].startswith("Import recusado")
+    # Mensagem própria da camada 1 (§3.2-2) — não a tradução genérica de `literal_error` que a
+    # camada 2 (`ProjectBundle.model_validate`) produziria para o mesmo campo ("schema_version:
+    # valor inválido; esperado um de: 1"). Provar o texto exato garante que quem recusou foi a
+    # camada 1 (recusa imediata, sem tentativa de migração), não a camada 2 — remover a camada 1
+    # inteira produziria um 422 parecido, mas com este texto diferente.
+    assert (
+        r.json()["detail"]
+        == "Import recusado (1 problemas) | schema_version 2 não suportado; esperado 1"
+    )
+    assert await _contagens(db_session) == antes
+
+
+async def test_schema_version_diferente_422_nao_valida_resto_do_bundle(
+    client, admin_headers, db_session
+):
+    """ "Sem tentativa de migração" (§3.2-2) tem de ser observável: um bundle com
+    `schema_version: 2` e o resto do conteúdo também inválido (`auth_mode` fora do enum) recusa
+    só pela versão — a camada 2 nunca roda, então o problema do `auth_mode` não aparece na lista
+    agregada. Se a camada 1 fosse removida (ou rodasse depois da 2), este teste veria 2+
+    problemas e/ou o texto de `auth_mode` no detail."""
+    antes = await _contagens(db_session)
+    bundle = _bundle(schema_version=2, connections=[_conexao_bundle("gw1", auth_mode="invalido")])
+    r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail == "Import recusado (1 problemas) | schema_version 2 não suportado; esperado 1"
+    assert "auth_mode" not in detail
     assert await _contagens(db_session) == antes
 
 
