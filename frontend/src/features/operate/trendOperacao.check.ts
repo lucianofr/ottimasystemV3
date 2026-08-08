@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import type { MpcHistoryResponse } from "../../lib/api";
 import type { MpcPrediction } from "../../lib/contracts.gen";
@@ -7,6 +9,7 @@ import {
   JANELA_PADRAO_ID,
   OPCOES_DEGRAU_MV,
   TETO_PENAS_OPERACAO,
+  TOKENS_PENA_OPERACAO,
   dividirSpPorAuto,
   mesclarSeriesVivas,
   montarOverlayPrevisao,
@@ -185,4 +188,39 @@ test("defaults: MVs e DVs nascem desligadas (opt-in pela legenda), mesmo com o t
 
 test("teto de penas de operação é 8 (distinto do teto de 6 do trend de engenharia)", () => {
   expect(TETO_PENAS_OPERACAO).toBe(8);
+});
+
+// -------------------------------------------------------------------- paleta de 8 penas (§6.6-5)
+
+/** Lê o valor cru do token direto de `tokens.css` — a paleta tem fonte única (DESIGN.md
+ *  §Do's); duplicar os literais OKLCH aqui criaria um segundo lugar para divergir. */
+const TOKENS_CSS = readFileSync(
+  fileURLToPath(new URL("../../styles/tokens.css", import.meta.url)),
+  "utf-8",
+);
+
+function valorToken(nome: string): string {
+  const casado = TOKENS_CSS.match(new RegExp(`${nome}:\\s*([^;]+);`));
+  if (casado === null) throw new Error(`token ${nome} não encontrado em tokens.css`);
+  return casado[1].trim();
+}
+
+test("paleta do trend de operação tem 8 tokens, um por posição do teto (§6.6-5)", () => {
+  expect(TOKENS_PENA_OPERACAO).toHaveLength(TETO_PENAS_OPERACAO);
+});
+
+test("as 8 cores de pena são distintas entre si — comparação por conjunto, não caso a caso (§6.6-5)", () => {
+  const coresPenas = TOKENS_PENA_OPERACAO.map(valorToken);
+  expect(new Set(coresPenas).size).toBe(TETO_PENAS_OPERACAO);
+});
+
+test("nenhuma cor de pena colide com cor reservada de severidade nem com o Azul Único (§6.6-5, DESIGN §Colors)", () => {
+  const coresPenas = new Set(TOKENS_PENA_OPERACAO.map(valorToken));
+  const coresReservadas = ["--color-alarm", "--color-warn", "--color-running", "--color-accent"].map(
+    valorToken,
+  );
+
+  for (const reservada of coresReservadas) {
+    expect(coresPenas.has(reservada)).toBe(false);
+  }
 });

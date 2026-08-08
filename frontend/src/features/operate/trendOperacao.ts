@@ -210,3 +210,24 @@ export function selecionarPenasDefault(
     ...dvs.map((dv) => ({ id: dv.id, categoria: "dv" as const, ligada: false, excedente: false })),
   ];
 }
+
+// ----------------------------------------------------------------------------------------
+// 5.4 — Paleta de série (débito de frontend da F5, spec §6.6-5)
+// ----------------------------------------------------------------------------------------
+
+/** Tokens de cor de pena do trend de operação, um por posição 1..8 — tamanho igual a
+ *  `TETO_PENAS_OPERACAO`, então a 8ª pena nunca envolve (wrap) numa cor já usada por outra.
+ *  Paleta PRÓPRIA, distinta da paleta de 6 do trend de engenharia (`features/trend/trendTheme.ts`,
+ *  `LIMITE_PENAS`) — outro caso de uso, teto distinto (brief 5.3, plano F6b). Só os nomes dos
+ *  tokens aqui: os valores OKLCH têm fonte única em `tokens.css` (DESIGN.md §Do's) — este
+ *  módulo não lê DOM (regra global 2), quem desenha resolve o valor em runtime. */
+export const TOKENS_PENA_OPERACAO: readonly string[] = [
+  "--color-pen-1",
+  "--color-pen-2",
+  "--color-pen-3",
+  "--color-pen-4",
+  "--color-pen-5",
+  "--color-pen-6",
+  "--color-pen-7",
+  "--color-pen-8",
+] as const;
