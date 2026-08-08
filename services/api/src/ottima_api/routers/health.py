@@ -13,8 +13,10 @@ import asyncio
 import json
 import urllib.error
 import urllib.request
+from typing import Literal
 
 from fastapi import APIRouter, Depends, FastAPI, Request
+from pydantic import BaseModel
 from sqlalchemy import text
 
 from ottima_api import API_VERSION
@@ -55,18 +57,30 @@ async def heartbeat_loop(client, session_factory, app: FastAPI) -> None:
         await asyncio.sleep(HEARTBEAT_INTERVAL_S)
 
 
-@router.get("/health")
-async def health(request: Request) -> dict:
+class HealthOut(BaseModel):
+    """Forma de `/health` (spec §3.3): as 5 chaves sempre presentes, tipadas para o OpenAPI
+    carregar `redis_ok`/`db_ok` — antes a rota devolvia `dict` cru e o gerador de contratos
+    (`frontend/openapi.json`/`api-types.ts`, tarefa 6.1) não tinha como nomear os campos."""
+
+    status: Literal["ok", "degraded"]
+    service: str
+    version: str
+    redis_ok: bool
+    db_ok: bool
+
+
+@router.get("/health", response_model=HealthOut)
+async def health(request: Request) -> HealthOut:
     """Sempre 200: a degradação vai no corpo (spec §3.3-3)."""
     redis_ok = getattr(request.app.state, "redis_ok", False)
     db_ok = getattr(request.app.state, "db_ok", False)
-    return {
-        "status": "ok" if redis_ok and db_ok else "degraded",
-        "service": "api",
-        "version": API_VERSION,
-        "redis_ok": redis_ok,
-        "db_ok": db_ok,
-    }
+    return HealthOut(
+        status="ok" if redis_ok and db_ok else "degraded",
+        service="api",
+        version=API_VERSION,
+        redis_ok=redis_ok,
+        db_ok=db_ok,
+    )
 
 
 def _fetch_worker_health(url: str) -> dict:

@@ -252,7 +252,21 @@ async def _ler_corpo_import(request: Request) -> bytes:
     return b"".join(partes)
 
 
-@router.post("/import", response_model=ProjectImportOut, status_code=201)
+@router.post(
+    "/import",
+    response_model=ProjectImportOut,
+    status_code=201,
+    # O corpo é lido em stream via `_ler_corpo_import` (teto de 4 MiB antes de materializar,
+    # API-06) — sem parâmetro `body: ProjectImportIn`, o FastAPI não teria como documentar o
+    # requestBody sozinho. `openapi_extra` publica o schema (derivado do próprio modelo, não
+    # reescrito à mão) sem amarrar a leitura em stream (tarefa 6.1, fix round 1).
+    openapi_extra={
+        "requestBody": {
+            "content": {"application/json": {"schema": ProjectImportIn.model_json_schema()}},
+            "required": True,
+        },
+    },
+)
 async def import_project(
     request: Request,
     db: AsyncSession = Depends(get_db),
