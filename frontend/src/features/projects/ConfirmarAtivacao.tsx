@@ -1,9 +1,21 @@
 import { useState } from "react";
 
 import { Button } from "../../components/ui/button";
-import { ApiError, type ProjectOut } from "../../lib/api";
+import { ApiError, type FlowOut, type ProjectOut } from "../../lib/api";
 import { useFlows } from "../flows/useFlows";
 import { useActivateProject, useActiveProject } from "./useProjects";
+
+/**
+ * Só flows com `desired_state === "running"` de fato param ao ativar outro projeto: o
+ * supervisor do flow-runtime (`on_project_activated`) itera `self._runtimes`, o registro em
+ * memória dos flows efetivamente rodando (`flow-runtime/supervisor.py:502-507`,
+ * `routers/projects.py:126-128`) — flows já parados não têm o que parar. Pura: filtra pelo
+ * mesmo campo já exposto em `FlowOut` (coluna "Desejado" da `FlowsPage`), zero requisição
+ * extra. Testada com `textoBotaoAtivar` em `ConfirmarAtivacao.check.ts`.
+ */
+export function contarFlowsRodando(flows: readonly Pick<FlowOut, "desired_state">[]): number {
+  return flows.filter((flow) => flow.desired_state === "running").length;
+}
 
 /**
  * Texto do botão de confirmação (spec §6.1-4, UX-07): o verbo carrega a contagem de flows
@@ -33,8 +45,9 @@ interface Props {
  * malha com estado publicado pelo runtime; aqui a confirmação é do banco e é síncrona — o
  * sucesso da mutação já é o desfecho, sem eco a esperar.
  *
- * A contagem de flows vem de `useFlows(projetoAtualId)` — o mesmo hook e a mesma `queryKey`
- * já usados por `FlowsPage`/`HomePage`/`EventsPage`/`CanalAoVivo`; nenhum endpoint novo.
+ * A contagem vem de `useFlows(projetoAtualId)` filtrado por `contarFlowsRodando` — o mesmo
+ * hook/`queryKey` já usados por `FlowsPage`/`HomePage`/`EventsPage`/`CanalAoVivo`, sem
+ * endpoint novo; só os flows com `desired_state === "running"` de fato param ao ativar.
  */
 export function ConfirmarAtivacao({ alvo, onCancelar }: Props) {
   const [erro, setErro] = useState<string | null>(null);
@@ -44,7 +57,7 @@ export function ConfirmarAtivacao({ alvo, onCancelar }: Props) {
   const ativar = useActivateProject();
 
   const contandoFlows = projetoAtualId !== null && flows.isPending;
-  const contagem = flows.data?.length ?? 0;
+  const contagem = contarFlowsRodando(flows.data ?? []);
 
   async function confirmar(): Promise<void> {
     setErro(null);
@@ -74,7 +87,7 @@ export function ConfirmarAtivacao({ alvo, onCancelar }: Props) {
       <div className="flex flex-wrap items-center justify-end gap-2">
         <span data-testid="proj-ativar-aviso" className="text-xs text-fg-muted">
           {atual.data
-            ? `Isso vai parar os flows do projeto atual, "${atual.data.name}".`
+            ? `Isso vai parar os flows em execução do projeto atual, "${atual.data.name}".`
             : "Nenhum projeto está ativo no momento."}
         </span>
         <Button
