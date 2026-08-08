@@ -329,13 +329,24 @@ class Supervisor:
             # Redeploy sobre um runtime anterior (parado ou em falha, nunca "running" — o
             # early-return acima cobre isso): a `StagedDefinition` nova é zerada (`reuse={}`),
             # então qualquer `MpcHost`/watchdog do runtime velho ficaria órfão sem isto.
-            # `shutdown_mpc` (idempotente) também devolve `mode_cmd=auto` se o bloco velho
-            # ainda estiver armado REMOTO — achado 1 da revisão F4: sem isto, um redeploy
-            # logo após uma falha interna (watermark ainda não passou) matava o worker
-            # antigo mas nunca escrevia a devolução, travando o PID em `target` pra sempre
-            # (comm_failure não conta: `fail()` já reseta o bloco pra LOCAL antes de chegar
-            # aqui, então o guard por `local_remote` é no-op nesse caso).
-            await self._mpc.shutdown_mpc(old_runtime, flow_id=flow_id)
+            # `revert_armed_mpc` (idempotente) devolve `mode_cmd=auto` se o bloco velho ainda
+            # estiver armado REMOTO — achado 1 da revisão F4: sem isto, um redeploy logo após
+            # uma falha interna (watermark ainda não passou) matava o worker antigo mas nunca
+            # escrevia a devolução, travando o PID em `target` pra sempre (comm_failure não
+            # conta: `fail()` já reseta o bloco pra LOCAL antes de chegar aqui, então o guard
+            # por `local_remote` é no-op nesse caso).
+            #
+            # F6R-06 (spec F6 §5.2, débito F5 §8, tarefa 5.2): o `shutdown_mpc` síncrono
+            # antigo mantinha `Supervisor._lock` preso pelo boot/kill/join real do worker
+            # velho — mesma sequência de três passos que `_stop` já usa. A task destacada de
+            # `stop_host_background` é registrada no `_FlowRuntime` NOVO (já publicado no
+            # mapa em `:317`), não no `old_runtime`: ele sai do mapa aqui mesmo, e uma task
+            # pendurada nele ficaria órfã — `_teardown` (que aguarda `runtime.mpc_stop_tasks`
+            # de propósito) voltaria a poder abandonar um kill em voo, reabrindo o defeito
+            # que a spec F5 §6.5 fechou.
+            await self._mpc.revert_armed_mpc(old_runtime, flow_id=flow_id)
+            for block_id, host in self._mpc.detach_hosts(old_runtime).items():
+                self._mpc.stop_host_background(runtime, host, flow_id=flow_id, block_id=block_id)
 
     async def _stop(self, command: FlowCommand) -> None:
         flow_id = command.flow_id
@@ -540,12 +551,21 @@ class Supervisor:
         REMOTO (comando explícito, `_stop`/`_force_stop`/`_teardown`, hot-swap,
         `on_comm_failure`) já cancela o watchdog ANTES de deixar de rodar — sobreviver até
         aqui com watchdog em pé só acontece nesta falha interna, não anunciada.
-        `shutdown_mpc` é idempotente (guarda por `local_remote`, `MpcHost.stop()`
-        idempotente): repetir a cada passada até o flow sumir do mapa (redeploy) nunca
-        escreve `mode_cmd` de novo."""
+        `revert_armed_mpc`/`MpcHost.stop()` são idempotentes: repetir a cada passada até o
+        flow sumir do mapa (redeploy) nunca escreve `mode_cmd` de novo nem tenta reparar um
+        host que já saiu de `runtime.hosts`.
+
+        F6R-06 (spec F6 §5.2, débito F5 §8, tarefa 5.2): mesma sequência de três passos que
+        `_stop` já usa no lugar do `shutdown_mpc` síncrono — esperar o boot/kill/join real
+        do worker aqui prendia `self._lock` (a mesma tomada de `_pass`) pelo mesmo tempo
+        que um comando concorrente de QUALQUER outro flow levaria para ser processado."""
         for flow_id, runtime in list(self._runtimes.items()):
             if runtime.task.state == "failed" and runtime.mpc_watchdogs:
-                await self._mpc.shutdown_mpc(runtime, flow_id=flow_id)
+                await self._mpc.revert_armed_mpc(runtime, flow_id=flow_id)
+                for block_id, host in self._mpc.detach_hosts(runtime).items():
+                    self._mpc.stop_host_background(
+                        runtime, host, flow_id=flow_id, block_id=block_id
+                    )
 
     async def _reconcile_flow(self, session: AsyncSession, flow_id: int) -> None:
         runtime = self._runtimes.get(flow_id)
@@ -589,12 +609,19 @@ class Supervisor:
         return row[0], bool(row[1])
 
     async def _force_stop(self, flow_id: int, *, reason: str) -> None:
-        """Parada sem comando de usuário atrás: o `reason` carrega a causa, o `user` não existe."""
+        """Parada sem comando de usuário atrás: o `reason` carrega a causa, o `user` não
+        existe. F6R-06 (spec F6 §5.2, débito F5 §8, tarefa 5.2): mesma sequência de três
+        passos que `_stop` já usa no lugar do `shutdown_mpc` síncrono —
+        `on_project_activated`/`_reconcile_flow` chamam este método SOB `self._lock`;
+        esperar o kill/join real do worker ali prendia o lock pelo mesmo tempo do
+        boot/kill (até `_BOOT_TIMEOUT_S`, `mpc/host.py::stop`)."""
         runtime = self._runtimes.get(flow_id)
         if runtime is None or runtime.task.state != "running":
             return
         try:
-            await self._mpc.shutdown_mpc(runtime, flow_id=flow_id)
+            await self._mpc.revert_armed_mpc(runtime, flow_id=flow_id)
+            for block_id, host in self._mpc.detach_hosts(runtime).items():
+                self._mpc.stop_host_background(runtime, host, flow_id=flow_id, block_id=block_id)
             await runtime.task.stop(user=SYSTEM_ACTOR, reason=reason)
         except Exception:
             logger.exception("Falha ao parar o flow %s (motivo=%s)", flow_id, reason)

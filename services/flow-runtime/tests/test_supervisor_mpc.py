@@ -20,8 +20,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 import pytest
+from redis.asyncio import Redis
 from runtime_test_helpers import (
     AWAIT_TIMEOUT_S,
     MPC_SLOW_BUILD_DELAY_S,
@@ -31,6 +33,7 @@ from runtime_test_helpers import (
     Collector,
     Harness,
     await_until,
+    counter_graph,
     create_connection,
     create_flow,
     create_project,
@@ -52,16 +55,19 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ottima_core.bus import (
     CHANNEL_EVENTS,
     CHANNEL_OPC_WRITES,
+    KIND_COMM_FAILURE,
     KIND_MPC_ARM_FAILED,
     KIND_MPC_MODE_CHANGED,
     KIND_MPC_MV_WRITTEN,
     KIND_MPC_SHED,
     KIND_MPC_SP_WRITTEN,
+    KIND_PROJECT_ACTIVATED,
     FlowStatus,
     MpcState,
     OpcWrite,
     channel_flow_status,
     channel_mpc_state,
+    publish_event,
 )
 
 Factory = Callable[..., Awaitable[Harness]]
@@ -1129,3 +1135,217 @@ async def test_excecao_em_spawn_worker_e_logada_com_contexto_e_nao_fica_muda(
     runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
     block = runtime.blocks["m1"][1]
     assert block.host.ready is False
+
+
+# --------------------------------------------------------------------------------------
+# 21-23: tarefa 5.2 (plano F6a; spec F6 §5.2, débito F5 §8, F6R-06) — `shutdown_mpc` fora
+#     do lock global nos três caminhos que ainda chamavam a versão síncrona sob
+#     `Supervisor._lock`: redeploy (`_deploy` sobre o `old_runtime`), `_handback_failed_mpc`
+#     (watermark) e `_force_stop` (`on_project_activated`/`_reconcile_flow`). Mesma
+#     sequência de três passos que `_stop` já usa: `revert_armed_mpc` + `detach_hosts`
+#     (síncronos, sob o lock) + `stop_host_background` (destacado, fora do lock).
+#
+#     `MpcHost.stop()` é travado atrás de um `asyncio.Event` que o teste controla
+#     (`_gate_mpc_host_stop`) — clock controlado, nenhum `sleep` real de `_BOOT_TIMEOUT_S`:
+#     enquanto o portão fica fechado, um `host.stop()` de verdade nunca retornaria; se o
+#     chamador ainda esperasse por ele SOB o lock (o defeito de antes desta tarefa),
+#     qualquer comando de OUTRO flow que competisse pelo MESMO `Supervisor._lock` travaria
+#     junto — é essa travada que cada teste prova que NÃO acontece mais.
+# --------------------------------------------------------------------------------------
+
+
+def _gate_mpc_host_stop(monkeypatch: pytest.MonkeyPatch) -> tuple[asyncio.Event, list[Any]]:
+    """Trava `MpcHost.stop()` atrás de um `asyncio.Event` controlado pelo teste — prova
+    determinística (sem relógio real) de que o desmonte roda fora do lock: quem chama
+    `stop_host_background` cria a task e nunca a `await`a (docstring do próprio método,
+    `supervisor_mpc.py`), então o chamador — sob `Supervisor._lock` — retorna mesmo com o
+    portão fechado. Devolve o portão e a lista (na ordem de chamada) dos `MpcHost` cujo
+    `stop()` real já disparou."""
+    import ottima_flow_runtime.mpc.host as host_module
+
+    gate = asyncio.Event()
+    stopped: list[Any] = []
+    real_stop = host_module.MpcHost.stop
+
+    async def _stop_gated(self: Any) -> None:
+        stopped.append(self)
+        await gate.wait()
+        await real_stop(self)
+
+    monkeypatch.setattr(host_module.MpcHost, "stop", _stop_gated)
+    return gate, stopped
+
+
+async def _comm_failure(redis_client: Redis, conn_id: int) -> None:
+    """Evento tal como o opc-worker o emite (spec F2 §3.7) — mesmo corpo do helper local de
+    `test_supervisor.py`. MPC (ADR-009) NÃO mata host nenhum nesta reação (`on_comm_failure`
+    só cancela watchdog e falha a task) — é o único jeito de chegar num redeploy
+    (`old_runtime.task.state != "running"`) com `old_runtime.hosts` ainda povoado, o
+    gatilho real do caminho 1 (comentário de `supervisor.py:328-346`)."""
+    await publish_event(
+        redis_client,
+        severity="alarm",
+        origin=f"conn:{conn_id}",
+        message=f"Conexão {conn_id} em falha",
+        kind=KIND_COMM_FAILURE,
+        payload={"conn_id": conn_id, "reason": "session_lost", "detail": "sessão perdida"},
+    )
+
+
+async def test_redeploy_shutdown_do_host_antigo_roda_fora_do_lock_dono_e_o_runtime_novo(
+    harness_factory: Factory,
+    collect: Collect,
+    session_factory: Sessions,
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """spec F6 §5.2, caminho 1 (`_deploy` sobre o `old_runtime` do redeploy,
+    `supervisor.py:338`, sob a tomada de `:259`). Posse da task destacada (§5.2-3): o
+    `_FlowRuntime` NOVO, já publicado no mapa (`:317`) ANTES da limpeza do velho — uma task
+    pendurada no `old_runtime` ficaria órfã quando ele sai do mapa, reabrindo o defeito que
+    a spec F5 §6.5 fechou."""
+    scenario = await _scenario(session_factory)
+    flow_e_id = await create_flow(
+        session_factory, scenario["project_id"], graph=counter_graph("s_e"), name="Flow E"
+    )
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+
+    await harness.command("deploy", scenario["flow_id"])
+    await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
+    old_runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    host_antigo = old_runtime.hosts["m1"]
+    # Host pronto (não em boot) ANTES do portão: o kill real só entra em jogo depois do
+    # `gate.set()`, e não deve competir pelo boot em voo (mpc/host.py::stop, `_background`).
+    await await_until(lambda: host_antigo.ready, timeout_s=DEPLOY_TIMEOUT_S)
+
+    await _comm_failure(redis_client, scenario["connection_id"])
+    await harness.await_state(scenario["flow_id"], "failed", timeout_s=AWAIT_TIMEOUT_S)
+    assert "m1" in old_runtime.hosts  # comm_failure não mata host (ADR-009) — precondição
+
+    gate, stopped = _gate_mpc_host_stop(monkeypatch)
+
+    await harness.command("deploy", scenario["flow_id"])  # redeploy: limpa o host velho
+    await harness.command("deploy", flow_e_id)  # mesma fila, logo depois
+
+    # RED (antes desta tarefa): o redeploy esperava `host.stop()` SOB o lock — com o
+    # portão fechado, o `deploy` de E nunca seria processado e este `await_state` estouraria.
+    await harness.await_state(flow_e_id, "running", timeout_s=AWAIT_TIMEOUT_S)
+    assert harness.flow_state(scenario["flow_id"]) == "running"
+
+    new_runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    assert new_runtime is not old_runtime
+    assert old_runtime.hosts == {}  # F6R-06: passo 2 esvazia o mapa ANTES do kill terminar
+    assert stopped == [host_antigo]
+    assert old_runtime.mpc_stop_tasks == set()  # nenhuma task órfã no runtime velho
+    assert len(new_runtime.mpc_stop_tasks) == 1  # dono é o runtime NOVO (§5.2-3)
+
+    gate.set()
+    await await_until(lambda: not new_runtime.mpc_stop_tasks, timeout_s=AWAIT_TIMEOUT_S)
+
+
+async def test_handback_de_mpc_armado_apos_falha_interna_roda_fora_do_lock(
+    harness_factory: Factory,
+    collect: Collect,
+    session_factory: Sessions,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """spec F6 §5.2, caminho 2 (`_handback_failed_mpc`, `supervisor.py:548`, sob a tomada de
+    `_pass`/`:517`). Cenário do teste 17 (achado 1 da revisão F4 — `FlowTask` cai em
+    `failed` por exceção NÃO tratada num bloco QUALQUER, com o MPC ainda armado REMOTO):
+    aqui o host já está pronto e armado (watchdog vivo) — o kill em si é o que trava atrás
+    do portão, provando que `_pass()` não segura `Supervisor._lock` esperando por ele."""
+    scenario = await _scenario(session_factory)
+    events = await collect(CHANNEL_EVENTS)
+    flow_e_id = await create_flow(
+        session_factory, scenario["project_id"], graph=counter_graph("s_e"), name="Flow E"
+    )
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+    await _deploy_and_warm(harness, collect, scenario)
+
+    await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
+    await await_until(lambda: len(events.events(KIND_MPC_MODE_CHANGED)) == 1)
+
+    runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    assert "m1" in runtime.mpc_watchdogs  # armado, watchdog vivo — precondição do handback
+    host_antes = runtime.hosts["m1"]
+
+    read_block = runtime.blocks["r1"][1]
+
+    async def boom(inputs: object) -> None:
+        raise RuntimeError("bloco-duplo explodiu de proposito")
+
+    read_block.step = boom
+    await harness.await_state(scenario["flow_id"], "failed", timeout_s=AWAIT_TIMEOUT_S)
+    assert "m1" in runtime.mpc_watchdogs  # ainda não passou o watermark
+
+    gate, stopped = _gate_mpc_host_stop(monkeypatch)
+    reconcile_task = asyncio.create_task(harness.supervisor.reconcile())
+
+    # RED (antes desta tarefa): `_handback_failed_mpc` esperava `host.stop()` SOB o lock —
+    # com o portão fechado, `reconcile()` nunca soltaria `Supervisor._lock` e o `deploy` de
+    # E, mesma fila, nunca seria processado; este `await_state` estouraria.
+    await harness.command("deploy", flow_e_id)
+    await harness.await_state(flow_e_id, "running", timeout_s=AWAIT_TIMEOUT_S)
+
+    await asyncio.wait_for(reconcile_task, timeout=AWAIT_TIMEOUT_S)
+
+    assert "m1" not in runtime.mpc_watchdogs  # PID devolvido (mesmo teste 17)
+    assert runtime.hosts == {}  # F6R-06: passo 2 esvazia o mapa ANTES do kill terminar
+    assert stopped == [host_antes]
+    assert len(runtime.mpc_stop_tasks) == 1
+
+    gate.set()
+    await await_until(lambda: not runtime.mpc_stop_tasks, timeout_s=AWAIT_TIMEOUT_S)
+
+
+async def test_force_stop_libera_o_lock_antes_do_kill_do_host_mpc(
+    harness_factory: Factory,
+    collect: Collect,
+    session_factory: Sessions,
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """spec F6 §5.2, caminho 3 (`_force_stop`, `supervisor.py:597`, sob a tomada de
+    `on_project_activated`/`:494`). `on_project_activated` chega por um consumidor
+    DIFERENTE (`events`) do `deploy` de E (`flow.commands`) — os dois competem pelo MESMO
+    `Supervisor._lock`; provar que o `deploy` de E não espera é provar que o lock liberou-se
+    sem esperar o kill."""
+    scenario = await _scenario(session_factory)
+    flow_e_id = await create_flow(
+        session_factory, scenario["project_id"], graph=counter_graph("s_e"), name="Flow E"
+    )
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+
+    await harness.command("deploy", scenario["flow_id"])
+    await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
+    runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    host_antes = runtime.hosts["m1"]
+    # Host pronto (não em boot) ANTES do portão: o kill real só entra em jogo depois do
+    # `gate.set()`, e não deve competir pelo boot em voo (mpc/host.py::stop, `_background`).
+    await await_until(lambda: host_antes.ready, timeout_s=DEPLOY_TIMEOUT_S)
+
+    gate, stopped = _gate_mpc_host_stop(monkeypatch)
+
+    await publish_event(
+        redis_client,
+        severity="info",
+        origin="user:1",
+        message="Projeto ativado",
+        kind=KIND_PROJECT_ACTIVATED,
+        payload={"project_id": 42, "name": "Outro"},
+    )
+    # RED (antes desta tarefa): `_force_stop` esperava `host.stop()` SOB o lock — com o
+    # portão fechado, o flow nunca chegaria a "stopped" e este `await_state` estouraria.
+    await harness.await_state(scenario["flow_id"], "stopped", timeout_s=AWAIT_TIMEOUT_S)
+
+    assert runtime.hosts == {}  # F6R-06: passo 2 esvazia o mapa ANTES do kill terminar
+    assert stopped == [host_antes]
+    assert len(runtime.mpc_stop_tasks) == 1
+
+    # Prova adicional: comando de OUTRO flow, mesma fila `flow.commands`, não espera o kill
+    # (que segue travado no portão fechado).
+    await harness.command("deploy", flow_e_id)
+    await harness.await_state(flow_e_id, "running", timeout_s=AWAIT_TIMEOUT_S)
+
+    gate.set()
+    await await_until(lambda: not runtime.mpc_stop_tasks, timeout_s=AWAIT_TIMEOUT_S)
