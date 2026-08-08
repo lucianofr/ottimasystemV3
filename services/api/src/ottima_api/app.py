@@ -1,5 +1,6 @@
 """App factory da API: rotas sob /api, logging JSON e ciclo de vida do engine."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -9,6 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from ottima_api import API_VERSION
+from ottima_api.routers.health import heartbeat_loop
 from ottima_api.validacao import traduzir_erro_de_validacao
 from ottima_api.ws import FlowStatusHub
 from ottima_api.ws import router as ws_router
@@ -31,7 +33,9 @@ async def _validation_exception_handler(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Cria engine, session factory, Redis e o hub do /ws na subida; descarta na descida."""
+    """Cria engine, session factory, Redis, o hub do /ws e o heartbeat de health na subida;
+    descarta na descida. O heartbeat grava app.state.redis_ok/db_ok (spec F6 §3.3, RNF-07);
+    o handler de /health só lê esse estado, nunca faz I/O."""
     settings: Settings = app.state.settings
     engine = create_engine(settings.database_url)
     app.state.engine = engine
@@ -41,7 +45,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Uma assinatura de flow.status.* para todos os sockets do /ws (spec F3 §5.3)
     app.state.flow_status_hub = FlowStatusHub(app.state.redis)
     await app.state.flow_status_hub.start()
+    heartbeat_task = asyncio.create_task(
+        heartbeat_loop(app.state.redis, app.state.session_factory, app)
+    )
     yield
+    heartbeat_task.cancel()
+    try:
+        await heartbeat_task
+    except asyncio.CancelledError:
+        pass
     await app.state.flow_status_hub.stop()  # antes do aclose: o hub usa este cliente
     await app.state.redis.aclose()
     await engine.dispose()

@@ -1,4 +1,8 @@
-"""Health check público (sem token) e agregador de workers (spec F5 §4.2, decisão A-8)."""
+"""Health check público (sem token) e agregador de workers (spec F5 §4.2, decisão A-8).
+
+`/health` reflete Redis/Postgres por heartbeat de fundo (spec F6 §3.3, RNF-07). O cliente
+de teste (`ASGITransport`) nunca dispara o `lifespan`, então os testes abaixo populam
+`app.state` diretamente para simular o heartbeat já ter rodado."""
 
 import json
 import urllib.error
@@ -6,13 +10,118 @@ import urllib.error
 from ottima_api.routers import health as health_module
 
 
-async def test_health_publico(client):
+async def test_health_forma_completa_com_defaults_antes_do_heartbeat(client):
+    """App cru (sem lifespan): degraded, os dois flags em False, forma completa com as 5
+    chaves."""
     r = await client.get("/api/health")
     assert r.status_code == 200
     body = r.json()
+    assert body == {
+        "status": "degraded",
+        "service": "api",
+        "version": "0.1.0",
+        "redis_ok": False,
+        "db_ok": False,
+    }
+
+
+async def test_health_ok_quando_os_dois_flags_verdadeiros(client, app):
+    app.state.redis_ok = True
+    app.state.db_ok = True
+
+    r = await client.get("/api/health")
+
+    assert r.status_code == 200
+    body = r.json()
     assert body["status"] == "ok"
-    assert body["service"] == "api"
-    assert body["version"] == "0.1.0"
+    assert body["redis_ok"] is True
+    assert body["db_ok"] is True
+
+
+async def test_health_degraded_quando_um_flag_falso(client, app):
+    app.state.redis_ok = True
+    app.state.db_ok = False
+
+    r = await client.get("/api/health")
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "degraded"
+
+
+class _ClienteQueLevantaSeChamado:
+    """Qualquer atributo acessado indica que o handler tentou I/O — o que `/health` não
+    pode fazer (spec F6 §3.3-2: handler sem I/O, só lê o estado gravado pelo heartbeat)."""
+
+    def __getattr__(self, _name: str):
+        def _boom(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("handler de /health não pode tocar no cliente Redis")
+
+        return _boom
+
+
+async def test_health_handler_nao_faz_io(client, app):
+    """app.state já populado pelo heartbeat (simulado aqui); substituir o cliente Redis por
+    um que levanta em qualquer chamada prova que o handler nunca o usa."""
+    app.state.redis_ok = True
+    app.state.db_ok = True
+    app.state.redis = _ClienteQueLevantaSeChamado()
+
+    r = await client.get("/api/health")
+
+    assert r.status_code == 200
+    assert r.json() == {
+        "status": "ok",
+        "service": "api",
+        "version": "0.1.0",
+        "redis_ok": True,
+        "db_ok": True,
+    }
+
+
+class _RedisFalso:
+    def __init__(self, *, falha: bool) -> None:
+        self._falha = falha
+
+    async def ping(self) -> bool:
+        if self._falha:
+            raise ConnectionError("sem redis")
+        return True
+
+
+class _SessionFactoryFalsa:
+    """Dublê de `async_sessionmaker`: o `SELECT 1` é executado ou explode, como no real."""
+
+    def __init__(self, *, falha: bool) -> None:
+        self._falha = falha
+
+    def __call__(self) -> "_SessionFactoryFalsa":
+        return self
+
+    async def __aenter__(self) -> "_SessionFactoryFalsa":
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> bool:
+        return False
+
+    async def execute(self, _statement: object) -> None:
+        if self._falha:
+            raise ConnectionError("sem banco")
+
+
+async def test_check_redis_marca_app_state(app):
+    await health_module.check_redis(_RedisFalso(falha=False), app)
+    assert app.state.redis_ok is True
+
+    await health_module.check_redis(_RedisFalso(falha=True), app)
+    assert app.state.redis_ok is False
+
+
+async def test_check_database_marca_app_state(app):
+    await health_module.check_database(_SessionFactoryFalsa(falha=False), app)
+    assert app.state.db_ok is True
+
+    await health_module.check_database(_SessionFactoryFalsa(falha=True), app)
+    assert app.state.db_ok is False
 
 
 class _RespostaFalsa:
