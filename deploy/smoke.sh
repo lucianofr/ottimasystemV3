@@ -36,7 +36,15 @@ done
 "${COMPOSE[@]}" ps
 
 echo "E2E-01a: /api/health via nginx (same-origin)..."
-curl -fsS "${BASE}/api/health" | grep -q '"status"'
+# status precisa valer "ok" (não só existir) e redis_ok/db_ok precisam estar presentes --
+# um stack degradado (Redis ou Postgres fora do alcance) tem de reprovar aqui, não só no F3-L1a.
+curl -fsS "${BASE}/api/health" | python3 -c '
+import json, sys
+corpo = json.load(sys.stdin)
+assert corpo["status"] == "ok", corpo
+assert "redis_ok" in corpo, corpo
+assert "db_ok" in corpo, corpo
+'
 
 echo "E2E-01b: healths internos dos workers..."
 for svc in "opc-worker:8001" "flow-runtime:8002" "recorder:8003"; do
