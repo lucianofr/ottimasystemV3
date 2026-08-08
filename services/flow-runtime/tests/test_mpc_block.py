@@ -415,6 +415,7 @@ async def test_overrun_mantem_mv_soma_contador_e_dedupe_do_evento() -> None:
     primeira = await block.step(entradas(20.0))
     assert primeira["mv_pid"] == PortSample(10.0, True)  # MV mantida
     assert block.health()["overruns"] == 1
+    assert events.of_kind(KIND_MPC_OVERRUN)[-1]["payload"] == {"overruns": 1}
 
     host.pending = overrun
     await block.step(entradas(20.0))
@@ -428,6 +429,48 @@ async def test_overrun_mantem_mv_soma_contador_e_dedupe_do_evento() -> None:
     await block.step(entradas(20.0))
     assert block.health()["overruns"] == 3
     assert len(events.of_kind(KIND_MPC_OVERRUN)) == 2
+    assert events.of_kind(KIND_MPC_OVERRUN)[-1]["payload"] == {"overruns": 3}, (
+        "cada período novo publica o contador CORRENTE, não reinicia do zero — é o que "
+        "distingue duas publicações consecutivas com o MESMO valor (overrun parou) de "
+        "duas com valor crescente (overrun contínuo)"
+    )
+
+
+async def test_reset_zera_overruns_e_proximo_evento_reflete_o_contador_resomado() -> None:
+    """`reset()` (hot-swap/stop) zera `self._overruns` (blocks/mpc.py:234) — o evento do
+    próximo overrun tem que carregar o contador RESOMADO desde zero, não o acumulado
+    anterior ao reset. Sem isso, a cessação de alarme do frontend (duas publicações
+    consecutivas com valor igual) confundiria um hot-swap com um overrun contínuo."""
+    block, host, _, _, _, events = _block()
+    await _entra_remoto_auto(block)
+
+    overrun = SolveResult(
+        u_plan={},
+        prediction_t=[],
+        prediction_cv=[],
+        prediction_mv=[],
+        cost=0.0,
+        status="overrun",
+        wall_ms=210.0,
+        detail="orçamento de 70% do Ts_mpc excedido",
+    )
+
+    host.pending = overrun
+    await block.step(entradas(20.0))
+    assert block.health()["overruns"] == 1
+    assert events.of_kind(KIND_MPC_OVERRUN)[-1]["payload"] == {"overruns": 1}
+
+    block.reset()
+    assert block.health()["overruns"] == 0
+
+    await _entra_remoto_auto(block)
+    host.pending = overrun
+    await block.step(entradas(20.0))
+    assert block.health()["overruns"] == 1
+    assert events.of_kind(KIND_MPC_OVERRUN)[-1]["payload"] == {"overruns": 1}, (
+        "após reset(), o contador resoma do zero — o evento novo carrega o valor zerado, "
+        "não o valor acumulado antes do reset"
+    )
 
 
 async def test_worker_indisponivel_na_fronteira_conta_overrun_sem_emitir_evento() -> None:
