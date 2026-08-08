@@ -3,8 +3,10 @@ import { useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { ApiError, type ProjectOut } from "../../lib/api";
+import { baixarArquivo } from "../../lib/arquivos";
 import { useCanMutate } from "../auth/useAuth";
 import { ConfirmarAtivacao } from "./ConfirmarAtivacao";
+import { nomeArquivoExportado } from "./nomeArquivoExportado";
 import { ProjectForm } from "./ProjectForm";
 import { useDeleteProject, useProjects } from "./useProjects";
 
@@ -41,6 +43,7 @@ export function ProjectsPage() {
   const [emEdicao, setEmEdicao] = useState<ProjectOut | null>(null);
   const [aConfirmar, setAConfirmar] = useState<number | null>(null);
   const [ativarAlvo, setAtivarAlvo] = useState<ProjectOut | null>(null);
+  const [exportando, setExportando] = useState<number | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
   function abrirCriacao(): void {
@@ -68,6 +71,24 @@ export function ProjectsPage() {
       // Excluir o projeto ativo é recusado pelo servidor com 409 (spec §6.1-3, projects.py:67-74);
       // a tela exibe a recusa verbatim, sem duplicar a regra no cliente.
       setErro(err instanceof ApiError ? err.message : "Erro de comunicação com o servidor");
+    }
+  }
+
+  async function exportarProjeto(projeto: ProjectOut): Promise<void> {
+    setErro(null);
+    setExportando(projeto.id);
+    try {
+      await baixarArquivo(
+        `/api/projects/${String(projeto.id)}/export`,
+        nomeArquivoExportado(projeto.name),
+      );
+    } catch (err) {
+      // Mesmo padrão de confirmarExclusao/ConfirmarAtivacao: 404 (projeto sumiu) ou 422
+      // (referência de tag irresolvível) chegam com `detail` pt-BR do servidor e são
+      // exibidos verbatim, nunca substituídos por mensagem genérica (spec §6.1-5).
+      setErro(err instanceof ApiError ? err.message : "Erro de comunicação com o servidor");
+    } finally {
+      setExportando(null);
     }
   }
 
@@ -196,6 +217,15 @@ export function ProjectsPage() {
                           onClick={() => abrirEdicao(projeto)}
                         >
                           Editar
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          data-testid="proj-exportar"
+                          disabled={exportando === projeto.id}
+                          onClick={() => void exportarProjeto(projeto)}
+                        >
+                          Exportar
                         </Button>
                         {!projeto.is_active && (
                           <Button
