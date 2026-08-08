@@ -1,21 +1,45 @@
 """CRUD de projetos (RF-101, ADR-017): leitura para operador, escrita e ativação para admin."""
 
+import json
 import re
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import ValidationError
 from redis.asyncio import Redis
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ottima_api.deps import get_db, get_redis, require_admin, require_operator
+from ottima_api.deps import get_app_settings, get_db, get_redis, require_admin, require_operator
 from ottima_api.messages import MSG_PROJETO_NAO_ENCONTRADO, MSG_PROJETO_NOME_EM_USO
-from ottima_api.validacao import formatar_problemas
-from ottima_core.bus import KIND_PROJECT_ACTIVATED, KIND_PROJECT_EXPORTED, publish_event
+from ottima_api.validacao import formatar_problemas, problemas_de_validacao
+from ottima_core.bus import (
+    KIND_PROJECT_ACTIVATED,
+    KIND_PROJECT_EXPORTED,
+    KIND_PROJECT_IMPORTED,
+    publish_event,
+)
+from ottima_core.certs import read_app_certificate
+from ottima_core.config import Settings
+from ottima_core.flowgraph import GraphParseError, TagRef, parse_graph, validate_graph
 from ottima_core.models import Flow, OpcConnection, Project, Tag, User
-from ottima_core.portability import ReferenciaTagInvalida, montar_bundle
-from ottima_core.schemas.projects import ProjectCreate, ProjectOut, ProjectUpdate
+from ottima_core.portability import (
+    SCHEMA_VERSION,
+    ProjectBundle,
+    ReferenciaTagInvalida,
+    grafo_para_banco,
+    montar_bundle,
+    problemas_de_coerencia_interna,
+)
+from ottima_core.portability.pendencias import pendencias_da_conexao
+from ottima_core.schemas.projects import (
+    ProjectCreate,
+    ProjectImportIn,
+    ProjectImportOut,
+    ProjectOut,
+    ProjectUpdate,
+)
 
 # Sem dependência no router: os papéis variam por rota (ADR-015)
 router = APIRouter()
@@ -188,4 +212,226 @@ async def export_project(
         headers={
             "Content-Disposition": f'attachment; filename="{_slug(project.name)}.ottima.json"'
         },
+    )
+
+
+MAX_IMPORT_BUNDLE_BYTES = 4 * 1024 * 1024  # 4 MiB (spec §3.2-1)
+_MAX_DIGITOS_TETO_IMPORT = len(str(MAX_IMPORT_BUNDLE_BYTES))
+_MSG_IMPORT_GRANDE = "Corpo do import excede o limite de 4 MiB."
+_MSG_JSON_INVALIDO = "Corpo não é JSON válido"
+
+
+def _excede_o_declarado_import(declarado: str | None) -> bool:
+    """Mesmo raciocínio de `connections._excede_o_declarado`, com o teto de 4 MiB do import
+    (spec §3.2-1): `isdecimal()` filtra o alfabeto do header antes de qualquer `int()`, e a
+    contagem de dígitos resolve sozinha o caso "grande demais" sem estourar
+    `sys.get_int_max_str_digits()`."""
+    if declarado is None or not declarado.isdecimal():
+        return False
+    significativos = declarado.lstrip("0")
+    if len(significativos) > _MAX_DIGITOS_TETO_IMPORT:
+        return True
+    return int(significativos or "0") > MAX_IMPORT_BUNDLE_BYTES
+
+
+async def _ler_corpo_import(request: Request) -> bytes:
+    """Corpo bruto do arquivo de projeto (bundle), com teto de 4 MiB — molde exato de
+    `connections._ler_certificado`: um parâmetro `body:` tipado só materializa o payload
+    inteiro no momento em que dá para medi-lo (API-06), então a leitura é em fluxo e aborta
+    no primeiro chunk que cruza o teto, nunca depois de bufferizar tudo (spec §3.2-1).
+    """
+    if _excede_o_declarado_import(request.headers.get("content-length")):
+        raise HTTPException(status_code=413, detail=_MSG_IMPORT_GRANDE)
+    partes: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_IMPORT_BUNDLE_BYTES:
+            raise HTTPException(status_code=413, detail=_MSG_IMPORT_GRANDE)
+        partes.append(chunk)
+    return b"".join(partes)
+
+
+@router.post("/import", response_model=ProjectImportOut, status_code=201)
+async def import_project(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+    redis_client: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_app_settings),
+) -> ProjectImportOut:
+    """Import de projeto (spec §3.2, RF-103): quatro camadas de validação, a maioria em
+    memória e antes de qualquer insert. As duas exceções — nome de projeto duplicado (só o
+    banco responde) e a camada 4 (que precisa dos ids gerados pelo insert de conexões/tags
+    para traduzir o grafo) — inserem via `flush()` e desfazem com `rollback()` se falharem;
+    o `commit()` só acontece depois que as quatro camadas passam.
+    """
+    corpo = await _ler_corpo_import(request)
+
+    try:
+        bruto = json.loads(corpo)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=422, detail=_MSG_JSON_INVALIDO) from None
+
+    try:
+        body = ProjectImportIn.model_validate(bruto)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=formatar_problemas(problemas_de_validacao(exc), cabecalho="Import recusado"),
+        ) from None
+
+    # Camada 1 (§3.2-2): schema_version diferente de 1 é 422 imediato, nunca migração.
+    versao = body.bundle.get("schema_version")
+    if versao != SCHEMA_VERSION:
+        raise HTTPException(
+            status_code=422,
+            detail=formatar_problemas(
+                [f"schema_version {versao!r} não suportado; esperado {SCHEMA_VERSION}"],
+                cabecalho="Import recusado",
+            ),
+        )
+
+    # Camada 2 (§3.2-4): forma do bundle — todos os modelos são `extra="forbid"`.
+    try:
+        bundle = ProjectBundle.model_validate(body.bundle)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=formatar_problemas(problemas_de_validacao(exc), cabecalho="Import recusado"),
+        ) from None
+
+    # Camada 3 (§3.2-4): referências internas, em memória, antes de qualquer insert.
+    problemas = problemas_de_coerencia_interna(bundle)
+    if problemas:
+        raise HTTPException(
+            status_code=422, detail=formatar_problemas(problemas, cabecalho="Import recusado")
+        )
+
+    nome_final = body.name if body.name is not None else bundle.project.name
+
+    project = Project(name=nome_final, description=bundle.project.description, is_active=False)
+    db.add(project)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=MSG_PROJETO_NOME_EM_USO) from None
+
+    conexoes_por_nome: dict[str, OpcConnection] = {}
+    for bc in bundle.connections:
+        conn = OpcConnection(
+            project_id=project.id,
+            name=bc.name,
+            endpoint=bc.endpoint,
+            security_policy=bc.security_policy,
+            security_mode=bc.security_mode,
+            auth_mode=bc.auth_mode,
+            auth_username=bc.auth_username,
+            watchdog_read_node_id=bc.watchdog_read_node_id,
+            watchdog_write_node_id=bc.watchdog_write_node_id,
+            watchdog_period_ms=bc.watchdog_period_ms,
+        )
+        db.add(conn)
+        conexoes_por_nome[bc.name] = conn
+    await db.flush()  # ids das conexões, para o `connection_id` das tags abaixo
+
+    tags_por_ref: dict[tuple[str, str], Tag] = {}
+    for bt in bundle.tags:
+        tag = Tag(
+            connection_id=conexoes_por_nome[bt.connection].id,
+            name=bt.name,
+            node_id=bt.node_id,
+            direction=bt.direction,
+            data_type=bt.data_type,
+            eu=bt.eu,
+            description=bt.description,
+        )
+        db.add(tag)
+        tags_por_ref[(bt.connection, bt.name)] = tag
+    await db.flush()  # ids das tags — só agora o mapa (connection, tag) -> id existe (§2.2-5)
+
+    id_por_ref = {ref: tag.id for ref, tag in tags_por_ref.items()}
+    tags_para_validacao = {
+        tag.id: TagRef(
+            id=tag.id, conn_id=tag.connection_id, direction=tag.direction, data_type=tag.data_type
+        )
+        for tag in tags_por_ref.values()
+    }
+
+    # Camada 4 (§3.2-4): `parse_graph` + `validate_graph` por flow, com o mapa de tags
+    # materializado pelo `flush()` acima. `grafo_para_banco` nunca levanta aqui: toda
+    # `tag_ref` já foi conferida contra o próprio bundle na camada 3.
+    problemas_grafo: list[str] = []
+    flows_novos: list[Flow] = []
+    for bf in bundle.flows:
+        graph_banco = grafo_para_banco(bf.graph, id_por_ref)
+        try:
+            grafo_tipado = parse_graph(graph_banco)
+        except GraphParseError as exc:
+            problemas_grafo.extend(f"fluxo '{bf.name}': {p}" for p in exc.errors)
+            continue
+        resultado = validate_graph(grafo_tipado, tags_para_validacao, float(bf.ts_seconds))
+        if resultado.errors:
+            problemas_grafo.extend(f"fluxo '{bf.name}': {p}" for p in resultado.errors)
+            continue
+        flow = Flow(
+            project_id=project.id,
+            name=bf.name,
+            ts_seconds=bf.ts_seconds,
+            desired_state=bf.desired_state,
+            graph_json=graph_banco,
+        )
+        db.add(flow)
+        flows_novos.append(flow)
+
+    if problemas_grafo:
+        await db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail=formatar_problemas(problemas_grafo, cabecalho="Import recusado"),
+        )
+
+    await db.commit()
+    await db.refresh(project)
+
+    try:
+        app_cert_exists = read_app_certificate(settings.certs_dir).exists
+    except ValueError:
+        # Certificado presente mas ilegível: para a pendência dá no mesmo que não existir —
+        # o operador ainda precisa agir antes de confiar na conexão (não é o 500 de infra de
+        # `GET /api/certificates/app`, que é sobre o certificado em si, não sobre o import).
+        app_cert_exists = False
+
+    pending_secrets = [
+        pendencias_da_conexao(
+            connection_name=bc.name,
+            auth_mode=bc.auth_mode,
+            has_password=False,  # senha nunca atravessa a fronteira (spec §2.3)
+            security_policy=bc.security_policy,
+            server_cert_file=None,  # idem — certificado do servidor nunca atravessa
+            app_cert_exists=app_cert_exists,
+        )
+        for bc in bundle.connections
+    ]
+
+    # Depois do commit: evento sobre import que falhou (422/409 acima) poluiria a auditoria
+    # com uma ação que não aconteceu (mesmo padrão de `export_project`).
+    await publish_event(
+        redis_client,
+        severity="info",
+        origin=f"user:{user.id}",
+        message=f"Projeto '{project.name}' importado",
+        kind=KIND_PROJECT_IMPORTED,
+        payload={
+            "project_id": project.id,
+            "name": project.name,
+            "connections": len(bundle.connections),
+            "tags": len(bundle.tags),
+            "flows": len(flows_novos),
+        },
+    )
+
+    return ProjectImportOut(
+        project=ProjectOut.model_validate(project), pending_secrets=pending_secrets
     )

@@ -170,8 +170,9 @@ KIND_MPC_INPUT_INVALID = "mpc_input_invalid"
 # Vocabulário `kind` novo da F5 (spec F5 §7.2-2, F5R-02b).
 KIND_SCRIPT_RECOVERED = "script_recovered"  # severity "info"
 
-# Vocabulário `kind` novo da F6 (spec F6 §3.1-4).
+# Vocabulário `kind` novo da F6 (spec F6 §3.1-4/§3.2-9).
 KIND_PROJECT_EXPORTED = "project_exported"  # severity "info"
+KIND_PROJECT_IMPORTED = "project_imported"  # severity "info"
 
 
 async def publish_event(
