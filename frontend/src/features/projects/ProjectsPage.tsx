@@ -4,6 +4,7 @@ import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { ApiError, type ProjectOut } from "../../lib/api";
 import { useCanMutate } from "../auth/useAuth";
+import { ConfirmarAtivacao } from "./ConfirmarAtivacao";
 import { ProjectForm } from "./ProjectForm";
 import { useDeleteProject, useProjects } from "./useProjects";
 
@@ -39,11 +40,13 @@ export function ProjectsPage() {
   const [formAberto, setFormAberto] = useState(false);
   const [emEdicao, setEmEdicao] = useState<ProjectOut | null>(null);
   const [aConfirmar, setAConfirmar] = useState<number | null>(null);
+  const [ativarAlvo, setAtivarAlvo] = useState<ProjectOut | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
   function abrirCriacao(): void {
     setEmEdicao(null);
     setAConfirmar(null);
+    setAtivarAlvo(null);
     setErro(null);
     setFormAberto(true);
   }
@@ -51,6 +54,7 @@ export function ProjectsPage() {
   function abrirEdicao(projeto: ProjectOut): void {
     setEmEdicao(projeto);
     setAConfirmar(null);
+    setAtivarAlvo(null);
     setErro(null);
     setFormAberto(true);
   }
@@ -84,7 +88,11 @@ export function ProjectsPage() {
       </div>
 
       {podeMutar && formAberto && (
-        <ProjectForm projeto={emEdicao} onClose={() => setFormAberto(false)} />
+        <ProjectForm
+          key={emEdicao?.id ?? "nova"}
+          projeto={emEdicao}
+          onClose={() => setFormAberto(false)}
+        />
       )}
 
       {erro && (
@@ -177,6 +185,8 @@ export function ProjectsPage() {
                           Cancelar
                         </Button>
                       </div>
+                    ) : ativarAlvo?.id === projeto.id ? (
+                      <ConfirmarAtivacao alvo={projeto} onCancelar={() => setAtivarAlvo(null)} />
                     ) : (
                       <div className="flex items-center justify-end gap-2">
                         <Button
@@ -187,12 +197,26 @@ export function ProjectsPage() {
                         >
                           Editar
                         </Button>
+                        {!projeto.is_active && (
+                          <Button
+                            size="sm"
+                            data-testid="proj-ativar"
+                            onClick={() => {
+                              setErro(null);
+                              setAConfirmar(null);
+                              setAtivarAlvo(projeto);
+                            }}
+                          >
+                            Ativar
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"
                           data-testid="proj-delete"
                           onClick={() => {
                             setErro(null);
+                            setAtivarAlvo(null);
                             setAConfirmar(projeto.id);
                           }}
                         >
