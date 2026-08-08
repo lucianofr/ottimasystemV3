@@ -35,6 +35,12 @@ def test_schema_version_e_1():
     assert SCHEMA_VERSION == 1
 
 
+def test_bundle_project_rejeita_campo_fora_da_fronteira():
+    with pytest.raises(ValidationError) as exc_info:
+        BundleProject(name="Planta C-101", description="Coluna debutanizadora", id=1)
+    assert any(e["type"] == "extra_forbidden" for e in exc_info.value.errors())
+
+
 @pytest.mark.parametrize("campo_extra", ["auth_password", "server_cert_file", "id", "project_id"])
 def test_bundle_connection_rejeita_campo_fora_da_fronteira(campo_extra):
     with pytest.raises(ValidationError) as exc_info:
@@ -106,10 +112,28 @@ def test_bundle_flow_ts_seconds_fora_do_conjunto_reprova():
         )
 
 
+def test_bundle_flow_rejeita_campo_fora_da_fronteira():
+    with pytest.raises(ValidationError) as exc_info:
+        BundleFlow(
+            name="Coluna C-101",
+            ts_seconds=1.0,
+            desired_state="stopped",
+            graph={"nodes": [], "edges": []},
+            id=1,
+        )
+    assert any(e["type"] == "extra_forbidden" for e in exc_info.value.errors())
+
+
 def test_bundle_tag_ref_e_objeto_com_connection_e_tag():
     ref = BundleTagRef(connection="gateway-1", tag="TT-101")
     assert ref.connection == "gateway-1"
     assert ref.tag == "TT-101"
+
+
+def test_bundle_tag_ref_rejeita_campo_fora_da_fronteira():
+    with pytest.raises(ValidationError) as exc_info:
+        BundleTagRef(connection="gateway-1", tag="TT-101", connection_id=1)
+    assert any(e["type"] == "extra_forbidden" for e in exc_info.value.errors())
 
 
 def test_project_bundle_monta_o_contrato_verbatim_da_spec():
