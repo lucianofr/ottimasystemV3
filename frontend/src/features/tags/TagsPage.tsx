@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
@@ -52,7 +53,11 @@ export function TagsPage() {
       <section className="space-y-4">
         <h1 className="plaqueta text-sm">Tags</h1>
         <p data-testid="tag-no-project" className="text-sm text-fg-muted">
-          Nenhum projeto ativo: ative um projeto para gerenciar tags.
+          Nenhum projeto ativo:{" "}
+          <Link to="/engenharia/projetos" className="text-accent hover:underline">
+            ative um projeto
+          </Link>{" "}
+          para gerenciar tags.
         </p>
       </section>
     );

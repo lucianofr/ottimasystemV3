@@ -291,7 +291,11 @@ export function FlowsPage() {
             {projeto.isSuccess && projectId === null && (
               <tr>
                 <td colSpan={totalColunas} className="px-3 py-4 text-fg-muted">
-                  Nenhum projeto ativo: ative um projeto para cadastrar flows.
+                  Nenhum projeto ativo:{" "}
+                  <Link to="/engenharia/projetos" className="text-accent hover:underline">
+                    ative um projeto
+                  </Link>{" "}
+                  para cadastrar flows.
                 </td>
               </tr>
             )}
