@@ -6,6 +6,7 @@ import { ApiError, type ProjectOut } from "../../lib/api";
 import { baixarArquivo } from "../../lib/arquivos";
 import { useCanMutate } from "../auth/useAuth";
 import { ConfirmarAtivacao } from "./ConfirmarAtivacao";
+import { ImportarProjeto } from "./ImportarProjeto";
 import { nomeArquivoExportado } from "./nomeArquivoExportado";
 import { ProjectForm } from "./ProjectForm";
 import { useDeleteProject, useProjects } from "./useProjects";
@@ -44,12 +45,14 @@ export function ProjectsPage() {
   const [aConfirmar, setAConfirmar] = useState<number | null>(null);
   const [ativarAlvo, setAtivarAlvo] = useState<ProjectOut | null>(null);
   const [exportando, setExportando] = useState<number | null>(null);
+  const [importAberto, setImportAberto] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
   function abrirCriacao(): void {
     setEmEdicao(null);
     setAConfirmar(null);
     setAtivarAlvo(null);
+    setImportAberto(false);
     setErro(null);
     setFormAberto(true);
   }
@@ -58,8 +61,20 @@ export function ProjectsPage() {
     setEmEdicao(projeto);
     setAConfirmar(null);
     setAtivarAlvo(null);
+    setImportAberto(false);
     setErro(null);
     setFormAberto(true);
+  }
+
+  /** Ação de maior consequência de segurança da tela (F6R-03, spec §6.1-6): abre o import
+   *  em três passos (`ImportarProjeto.tsx`), fechando qualquer outro painel aberto. */
+  function abrirImportacao(): void {
+    setFormAberto(false);
+    setEmEdicao(null);
+    setAConfirmar(null);
+    setAtivarAlvo(null);
+    setErro(null);
+    setImportAberto(true);
   }
 
   async function confirmarExclusao(id: number): Promise<void> {
@@ -102,9 +117,14 @@ export function ProjectsPage() {
       <div className="flex items-center justify-between">
         <h1 className="plaqueta text-sm">Projetos</h1>
         {podeMutar && (
-          <Button data-testid="proj-new" onClick={abrirCriacao}>
-            Novo projeto
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" data-testid="import-arquivo" onClick={abrirImportacao}>
+              Importar
+            </Button>
+            <Button data-testid="proj-new" onClick={abrirCriacao}>
+              Novo projeto
+            </Button>
+          </div>
         )}
       </div>
 
@@ -115,6 +135,8 @@ export function ProjectsPage() {
           onClose={() => setFormAberto(false)}
         />
       )}
+
+      {podeMutar && importAberto && <ImportarProjeto onFechar={() => setImportAberto(false)} />}
 
       {erro && (
         <p role="alert" data-testid="proj-error" className="text-sm text-alarm">
@@ -155,16 +177,30 @@ export function ProjectsPage() {
               </tr>
             )}
             {vazio && (
-              // Dia 1 de instalação: estado próprio com os dois caminhos possíveis (spec
-              // §6.1-7, UX-09). "Criar" é o botão acima; "importar" chega na tarefa 2.4 —
-              // aqui só o texto que a anuncia, sem lógica nenhuma de importação.
+              // Dia 1 de instalação: estado próprio com os dois caminhos possíveis lado a
+              // lado, ambos com botão (spec §6.1-7, UX-09) — nenhum dos dois é só texto.
               <tr>
                 <td colSpan={totalColunas} className="px-3 py-6 text-center">
                   <p className="text-fg-muted">Nenhum projeto cadastrado</p>
                   {podeMutar && (
-                    <p className="mt-2 text-xs text-fg-muted">
-                      Crie um novo projeto ou importe um arquivo de projeto existente.
-                    </p>
+                    <>
+                      <p className="mt-2 text-xs text-fg-muted">
+                        Crie um novo projeto ou importe um arquivo de projeto existente.
+                      </p>
+                      <div className="mt-3 flex items-center justify-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          data-testid="import-arquivo-vazio"
+                          onClick={abrirImportacao}
+                        >
+                          Importar arquivo de projeto
+                        </Button>
+                        <Button size="sm" data-testid="proj-new-vazio" onClick={abrirCriacao}>
+                          Criar projeto
+                        </Button>
+                      </div>
+                    </>
                   )}
                 </td>
               </tr>
