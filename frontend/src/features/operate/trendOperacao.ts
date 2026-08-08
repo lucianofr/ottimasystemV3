@@ -231,3 +231,21 @@ export const TOKENS_PENA_OPERACAO: readonly string[] = [
   "--color-pen-7",
   "--color-pen-8",
 ] as const;
+
+/** Cor de cada variável por posição — ordem MV→CV→Restrição→DV fixa de `mpc.variables`
+ *  (mesma ordem de `FaceplateVariavel`/`gradeDeVariaveis`), independente de qual pena está
+ *  ligada: ligar/desligar pela legenda nunca reatribui a cor de uma variável já visível.
+ *  Extraída de `TrendOperacao.tsx` (era `atribuirCoresPenas(mpc, tema)`, acoplada a
+ *  `MpcNodeOut`/`TemaTrend`) — é lógica pura (regra global 3), então mora aqui: quem chama
+ *  já traz a lista de ids pronta e a paleta JÁ RESOLVIDA (valores reais, não nomes de token
+ *  — este módulo não lê DOM, regra global 2; `TrendOperacao.tsx` resolve `TOKENS_PENA_OPERACAO`
+ *  via `getComputedStyle` e passa o resultado aqui). Sem wrap até o teto: `cores.length` é o
+ *  tamanho da paleta (8 para operação) — só ids além do teto reciclam por módulo, mesmo
+ *  comportamento de antes (variáveis que nunca cabem na legenda ainda ganham uma cor "de
+ *  casa" para quando ligadas, mesmo que nunca apareçam ao mesmo tempo que as 8 primeiras). */
+export function atribuirCoresPenas(
+  ids: readonly string[],
+  cores: readonly string[],
+): ReadonlyMap<string, string> {
+  return new Map(ids.map((id, i) => [id, cores[i % cores.length]]));
+}

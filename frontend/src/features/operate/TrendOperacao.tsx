@@ -13,6 +13,8 @@ import {
   JANELA_PADRAO_ID,
   OPCOES_DEGRAU_MV,
   TETO_PENAS_OPERACAO,
+  TOKENS_PENA_OPERACAO,
+  atribuirCoresPenas,
   dividirSpPorAuto,
   mesclarSeriesVivas,
   montarOverlayPrevisao,
@@ -121,18 +123,14 @@ function pluginLinhaAgora(agoraRef: { current: number | null }, tema: TemaTrend)
   };
 }
 
-/** Cor de cada variável — id fixo na ordem MV→CV→Restrição→DV de `mpc.variables` (mesma
- *  ordem de `FaceplateVariavel`/`gradeDeVariaveis`), independente de qual pena está ligada:
- *  ligar/desligar pela legenda nunca reatribui a cor de uma variável já visível. Compartilhada
- *  entre o gráfico (`montarColunas`) e a legenda, para o traço e o marcador nunca divergirem. */
-function atribuirCoresPenas(mpc: MpcNodeOut, tema: TemaTrend): ReadonlyMap<string, string> {
-  const ids = [
-    ...mpc.variables.cvs.map((v) => v.id),
-    ...mpc.variables.constraints.map((v) => v.id),
-    ...mpc.variables.mvs.map((v) => v.id),
-    ...mpc.variables.dvs.map((v) => v.id),
-  ];
-  return new Map(ids.map((id, i) => [id, tema.penas[i % tema.penas.length]]));
+/** Paleta resolvida do trend de operação — mesmo padrão de `lerTemaTrend` (`getComputedStyle`
+ *  sobre `document.documentElement`), mas com a paleta PRÓPRIA de 8 posições
+ *  (`TOKENS_PENA_OPERACAO`, `trendOperacao.ts`), não a de 6 do trend de engenharia
+ *  (`tema.penas`, `trendTheme.ts`) — §6.6-5: a 7ª/8ª pena colidiam reaproveitando a paleta
+ *  de 6, que não bate com o teto de 8 (`TETO_PENAS_OPERACAO`) deste gráfico. */
+function lerCoresPenaOperacao(): readonly string[] {
+  const estilo = getComputedStyle(document.documentElement);
+  return TOKENS_PENA_OPERACAO.map((token) => estilo.getPropertyValue(token).trim());
 }
 
 // ----------------------------------------------------------------------------------------
@@ -153,6 +151,7 @@ function montarColunas(
   overlay: OverlayPrevisao,
   tema: TemaTrend,
   cores: ReadonlyMap<string, string>,
+  corPadrao: string,
   ligadas: ReadonlySet<string>,
 ): ColunasOperacao {
   const porId = new Map(seriesHistoricas.map((serie) => [serie.id, serie]));
@@ -184,7 +183,7 @@ function montarColunas(
   mpc.variables.cvs.forEach((cv, indiceLinha) => {
     if (!ligadas.has(cv.id)) return;
     const historica = porId.get(cv.id) ?? SERIE_VAZIA(cv.id);
-    const cor = cores.get(cv.id) ?? tema.penas[0];
+    const cor = cores.get(cv.id) ?? corPadrao;
     pushSerie(historica.t, historica.v, {
       label: `${cv.name} PV`,
       stroke: cor,
@@ -220,7 +219,7 @@ function montarColunas(
     const indiceLinha = mpc.variables.cvs.length + indiceRestricao;
     if (!ligadas.has(restricao.id)) return;
     const historica = porId.get(restricao.id) ?? SERIE_VAZIA(restricao.id);
-    const cor = cores.get(restricao.id) ?? tema.penas[0];
+    const cor = cores.get(restricao.id) ?? corPadrao;
     pushSerie(historica.t, historica.v, {
       label: `${restricao.name} PV`,
       stroke: cor,
@@ -253,7 +252,7 @@ function montarColunas(
   mpc.variables.mvs.forEach((mv, indiceMv) => {
     if (!ligadas.has(mv.id)) return;
     const historica = porId.get(mv.id) ?? SERIE_VAZIA(mv.id);
-    const cor = cores.get(mv.id) ?? tema.penas[0];
+    const cor = cores.get(mv.id) ?? corPadrao;
     pushSerie(historica.t, historica.v, {
       label: `${mv.name} PV`,
       stroke: cor,
@@ -278,7 +277,7 @@ function montarColunas(
   mpc.variables.dvs.forEach((dv) => {
     if (!ligadas.has(dv.id)) return;
     const historica = porId.get(dv.id) ?? SERIE_VAZIA(dv.id);
-    const cor = cores.get(dv.id) ?? tema.penas[0];
+    const cor = cores.get(dv.id) ?? corPadrao;
     pushSerie(historica.t, historica.v, {
       label: `${dv.name} PV`,
       stroke: cor,
@@ -387,7 +386,14 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   );
 
   const tema = useMemo(() => lerTemaTrend(), []);
-  const cores = useMemo(() => atribuirCoresPenas(mpc, tema), [mpc, tema]);
+  // Paleta PRÓPRIA do trend de operação (§6.6-5) — não `tema.penas` (6, do trend de
+  // engenharia): o resto do tema (grade, eixos, mono, accent, poço) segue vindo de
+  // `lerTemaTrend()`, só a cor de pena tem fonte própria de 8 posições.
+  const coresPena = useMemo(() => lerCoresPenaOperacao(), []);
+  const cores = useMemo(
+    () => atribuirCoresPenas(idsHistorico, coresPena),
+    [idsHistorico, coresPena],
+  );
 
   // Defaults (decisão A-11, F5R-16): calculados uma vez por MPC aberto — recalcular a cada
   // refetch de `useMpcs()` religaria penas que o operador tinha desligado deliberadamente.
@@ -444,8 +450,10 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
 
   const colunas = useMemo(
     () =>
-      seriesMescladas ? montarColunas(mpc, seriesMescladas, overlay, tema, cores, ligadas) : null,
-    [mpc, seriesMescladas, overlay, tema, cores, ligadas],
+      seriesMescladas
+        ? montarColunas(mpc, seriesMescladas, overlay, tema, cores, coresPena[0], ligadas)
+        : null,
+    [mpc, seriesMescladas, overlay, tema, cores, coresPena, ligadas],
   );
 
   const container = useRef<HTMLDivElement>(null);

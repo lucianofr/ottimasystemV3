@@ -10,6 +10,7 @@ import {
   OPCOES_DEGRAU_MV,
   TETO_PENAS_OPERACAO,
   TOKENS_PENA_OPERACAO,
+  atribuirCoresPenas,
   dividirSpPorAuto,
   mesclarSeriesVivas,
   montarOverlayPrevisao,
@@ -223,4 +224,22 @@ test("nenhuma cor de pena colide com cor reservada de severidade nem com o Azul 
   for (const reservada of coresReservadas) {
     expect(coresPenas.has(reservada)).toBe(false);
   }
+});
+
+test("atribuirCoresPenas — a mesma função que TrendOperacao.tsx usa para colorir cada pena — devolve 8 cores distintas para 8 ids, sem wrap antes do teto (§6.6-5)", () => {
+  const ids = ["cv_1", "cv_2", "co_1", "co_2", "co_3", "mv_1", "mv_2", "dv_1"]; // 8 ids
+  const coresResolvidas = TOKENS_PENA_OPERACAO.map(valorToken); // valores reais de tokens.css
+  const mapa = atribuirCoresPenas(ids, coresResolvidas);
+
+  expect(mapa.size).toBe(8);
+  // Comparação por conjunto, não caso a caso: 8 ids distintos ⇒ 8 cores distintas.
+  expect(new Set(mapa.values()).size).toBe(8);
+});
+
+test("atribuirCoresPenas: id além do teto de 8 recicla por módulo — mesmo comportamento de antes (§6.6-5)", () => {
+  const ids = Array.from({ length: 9 }, (_, i) => `v${String(i)}`); // 9º id, 1 além do teto
+  const coresResolvidas = TOKENS_PENA_OPERACAO.map(valorToken);
+  const mapa = atribuirCoresPenas(ids, coresResolvidas);
+
+  expect(mapa.get("v8")).toBe(mapa.get("v0"));
 });
