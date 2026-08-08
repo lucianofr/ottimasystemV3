@@ -8,7 +8,7 @@ import { Label } from "../../components/ui/label";
 import { Select } from "../../components/ui/select";
 import { ApiError, type FlowOut } from "../../lib/api";
 import { useCanMutate } from "../auth/useAuth";
-import { useActiveProject } from "../connections/useConnections";
+import { useActiveProject } from "../projects/useProjects";
 import {
   formatarTs,
   ROTULO_DESEJADO,

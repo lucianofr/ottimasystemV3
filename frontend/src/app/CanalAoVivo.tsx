@@ -23,7 +23,8 @@ import {
   type FlowStatus,
   type PortsPorBloco,
 } from "../features/flows/useFlowStatus";
-import { useActiveProject, useConnections } from "../features/connections/useConnections";
+import { useConnections } from "../features/connections/useConnections";
+import { useActiveProject } from "../features/projects/useProjects";
 import { deGraphJson } from "../features/flows/graph";
 import { useFlows } from "../features/flows/useFlows";
 import {

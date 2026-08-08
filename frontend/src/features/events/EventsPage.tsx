@@ -8,7 +8,8 @@ import { Label } from "../../components/ui/label";
 import { Select } from "../../components/ui/select";
 import { cn } from "../../lib/cn";
 import { api, type EventOut } from "../../lib/api";
-import { useActiveProject, useConnections } from "../connections/useConnections";
+import { useConnections } from "../connections/useConnections";
+import { useActiveProject } from "../projects/useProjects";
 import { useFlows } from "../flows/useFlows";
 import {
   calcularEventosVisiveis,

@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 
 import { Card } from "../components/ui/card";
-import { useActiveProject } from "../features/connections/useConnections";
+import { useActiveProject } from "../features/projects/useProjects";
 import { useFlows } from "../features/flows/useFlows";
 import { useLastFlowState, type UltimoEstadoFlow } from "../features/flows/useLastFlowState";
 import { useMpcs, type MpcNodeOut } from "../features/operate/useMpcs";

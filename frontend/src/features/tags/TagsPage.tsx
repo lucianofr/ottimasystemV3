@@ -6,7 +6,8 @@ import { Label } from "../../components/ui/label";
 import { Select } from "../../components/ui/select";
 import { ApiError, type TagOut } from "../../lib/api";
 import { useCanMutate } from "../auth/useAuth";
-import { useActiveProject, useConnections } from "../connections/useConnections";
+import { useConnections } from "../connections/useConnections";
+import { useActiveProject } from "../projects/useProjects";
 import { TagForm } from "./TagForm";
 import {
   ROTULO_DIRECAO,

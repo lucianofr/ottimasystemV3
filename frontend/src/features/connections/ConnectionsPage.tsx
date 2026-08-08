@@ -5,7 +5,8 @@ import { Card } from "../../components/ui/card";
 import { ApiError, type ConnectionOut } from "../../lib/api";
 import { useCanMutate } from "../auth/useAuth";
 import { ConnectionForm } from "./ConnectionForm";
-import { useActiveProject, useConnections, useDeleteConnection } from "./useConnections";
+import { useConnections, useDeleteConnection } from "./useConnections";
+import { useActiveProject } from "../projects/useProjects";
 import { useLastConnectionState, type UltimoEstado } from "./useLastConnectionState";
 
 const POLICY: Record<ConnectionOut["security_policy"], string> = {
