@@ -194,7 +194,9 @@ test("teto de penas de operação é 8 (distinto do teto de 6 do trend de engenh
 // -------------------------------------------------------------------- paleta de 8 penas (§6.6-5)
 
 /** Lê o valor cru do token direto de `tokens.css` — a paleta tem fonte única (DESIGN.md
- *  §Do's); duplicar os literais OKLCH aqui criaria um segundo lugar para divergir. */
+ *  §Do's); duplicar os literais OKLCH aqui criaria um segundo lugar para divergir.
+ *  `node:fs` aqui é seguro porque `tsconfig.build.json` exclui `*.check.ts` do build de
+ *  produção (a imagem roda `npm ci` sem `@types/node`). */
 const TOKENS_CSS = readFileSync(
   fileURLToPath(new URL("../../styles/tokens.css", import.meta.url)),
   "utf-8",
