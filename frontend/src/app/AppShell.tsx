@@ -6,7 +6,7 @@ import { AnnunciatorBar } from "./AnnunciatorBar";
 import { CanalAoVivoProvider } from "./CanalAoVivo";
 
 /* Navegação em dois grupos (decisão A-10, spec F5 §7.3-1): Operação·Eventos são de
-   operador (admin herda); Conexões·Tags·Flows·Trend seguem visíveis para leitura —
+   operador (admin herda); Projetos·Conexões·Tags·Flows·Trend seguem visíveis para leitura —
    a ocultação de mutações é a tarefa 6.5. */
 const NAV_OPERACAO = [
   { rotulo: "Operação", para: "/operacao", testid: "nav-operacao" },
@@ -14,6 +14,7 @@ const NAV_OPERACAO = [
 ] as const;
 
 const NAV_ENGENHARIA = [
+  { rotulo: "Projetos", para: "/engenharia/projetos", testid: "nav-projetos" },
   { rotulo: "Conexões", para: "/engenharia/conexoes", testid: "nav-conexoes" },
   { rotulo: "Tags", para: "/engenharia/tags", testid: "nav-tags" },
   { rotulo: "Flows", para: "/engenharia/flows", testid: "nav-flows" },

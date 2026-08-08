@@ -9,6 +9,7 @@ import { FlowEditorPage } from "../features/flows/FlowEditorPage";
 import { FlowsPage } from "../features/flows/FlowsPage";
 import { OperatePage } from "../features/operate/OperatePage";
 import { OperateSelectorPage } from "../features/operate/OperateSelectorPage";
+import { ProjectsPage } from "../features/projects/ProjectsPage";
 import { TagsPage } from "../features/tags/TagsPage";
 import { TrendPage } from "../features/trend/TrendPage";
 import { AppShell } from "./AppShell";
@@ -30,6 +31,7 @@ export function App() {
                 <Route path="/operacao" element={<OperateSelectorPage />} />
                 <Route path="/operacao/:flowId/:blockId" element={<OperatePage />} />
                 <Route path="/eventos" element={<EventsPage />} />
+                <Route path="/engenharia/projetos" element={<ProjectsPage />} />
                 <Route path="/engenharia/conexoes" element={<ConnectionsPage />} />
                 <Route path="/engenharia/tags" element={<TagsPage />} />
                 <Route path="/engenharia/flows" element={<FlowsPage />} />
