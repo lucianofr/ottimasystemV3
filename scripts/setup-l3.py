@@ -45,6 +45,17 @@ CONNECTION_NAME = "opcsim-l3"
 OPERATOR_USERNAME = "operador_e2e"
 OPERATOR_PASSWORD = "OperadorE2E#2026"
 
+# Material de portabilidade da F6 (tarefa 4.1): projeto extra, sempre inativo — o
+# projeto ativo ao final continua sendo PROJECT_NAME (roteiro E2E §1 item 7).
+PORTABILIDADE_PROJECT_NAME = "L3 F6 portabilidade"
+CONN_CERTIFICADO_NAME = "opcsim-l3-certificado"
+CONN_SEGURA_NAME = "opcsim-l3-segura"
+CONN_SEGURA_USERNAME = "e2e-conexao-segura"
+CONN_HOMONIMA_A_NAME = "opcsim-l3-homonima-a"
+CONN_HOMONIMA_B_NAME = "opcsim-l3-homonima-b"
+TAG_HOMONIMA_NOME = "shared-level"
+FLOW_ARQUIVO_NAME = "L3-flow-arquivo"
+
 # OPC-UA node IDs corretos (de tests/opcsim/src/opcsim/server.py)
 # Nós graváveis:
 NODE_W_FLOAT = "ns=2;s=sim.w.float"
@@ -149,6 +160,37 @@ def _criar_tag(admin: Client, conn_id: int, nome: str, node_id: str, direcao: st
                     return tag_id
 
     raise RuntimeError(f"Falha ao criar/recuperar tag {nome}: HTTP {r.status_code} {r.text}")
+
+
+def _obter_ou_criar_conexao(
+    admin: Client, project_id: int, nome: str, payload: dict
+) -> tuple[int, bool]:
+    """Busca conexão por nome no projeto; cria se ausente (idempotente).
+
+    Devolve `(id, criada_agora)`: o chamador usa o segundo valor para decidir se um
+    ajuste pós-criação (ex.: `PATCH` para o estado de pendência) precisa rodar — nas
+    próximas execuções a conexão já existe no estado final e o ajuste é pulado.
+    """
+    r = admin.get(f"/api/connections?project_id={project_id}")
+    if r.status_code != 200:
+        print(f"[!] Falha ao listar conexões: HTTP {r.status_code}", file=sys.stderr)
+        sys.exit(1)
+    for c in r.json():
+        if c["name"] == nome:
+            print(f"[+] Conexão encontrada: '{nome}' (id={c['id']})", file=sys.stderr)
+            return int(c["id"]), False
+
+    print(f"[*] Criando conexão '{nome}'...", file=sys.stderr)
+    r = admin.post("/api/connections", json=payload)
+    if r.status_code != 201:
+        print(
+            f"[!] Falha ao criar conexão '{nome}': HTTP {r.status_code} {r.text}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    conn_id = int(r.json()["id"])
+    print(f"[+] Conexão criada: '{nome}' (id={conn_id})", file=sys.stderr)
+    return conn_id, True
 
 
 # ============================================================================
@@ -396,7 +438,201 @@ def main() -> None:
             print(f"[+] Operador existente: {OPERATOR_USERNAME}", file=sys.stderr)
 
         # ====================================================================
-        # 7. Resumo
+        # 7. Projeto extra F6 portabilidade (export/import, pendências, tag homônima)
+        # ====================================================================
+        print(f"[*] Procurando projeto '{PORTABILIDADE_PROJECT_NAME}'...", file=sys.stderr)
+        r = admin.get("/api/projects")
+        if r.status_code != 200:
+            print(f"[!] Falha ao listar projetos: HTTP {r.status_code}", file=sys.stderr)
+            sys.exit(1)
+        portabilidade_id = None
+        for p in r.json():
+            if p["name"] == PORTABILIDADE_PROJECT_NAME:
+                portabilidade_id = int(p["id"])
+                print(
+                    f"[+] Projeto portabilidade encontrado: id={portabilidade_id}",
+                    file=sys.stderr,
+                )
+                break
+
+        if portabilidade_id is None:
+            print(f"[*] Criando projeto '{PORTABILIDADE_PROJECT_NAME}'...", file=sys.stderr)
+            r = admin.post("/api/projects", json={"name": PORTABILIDADE_PROJECT_NAME})
+            if r.status_code != 201:
+                print(
+                    f"[!] Falha ao criar projeto portabilidade: HTTP {r.status_code} {r.text}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            portabilidade_id = int(r.json()["id"])
+            print(f"[+] Projeto portabilidade criado: id={portabilidade_id}", file=sys.stderr)
+        # Nunca ativado (ADR-017): PROJECT_NAME continua o projeto ativo ao final. Este
+        # projeto só existe para os cenários de export/import/pendências/tag homônima.
+
+        # (a) auth_mode=certificate, security_policy=none — pendência só de certificado
+        # de aplicação (B-F6-07 passo 2).
+        conn_certificado_id, _ = _obter_ou_criar_conexao(
+            admin,
+            portabilidade_id,
+            CONN_CERTIFICADO_NAME,
+            {
+                "project_id": portabilidade_id,
+                "name": CONN_CERTIFICADO_NAME,
+                "endpoint": OPCSIM_URL,
+                "security_policy": "none",
+                "security_mode": "none",
+                "auth_mode": "certificate",
+            },
+        )
+
+        # (b) segura sem senha reinformada — nasce anonymous para satisfazer a coerência
+        # de ConnectionCreate (exige auth_password quando auth_mode=user_password) e é
+        # ajustada por PATCH logo abaixo, que não tem essa exigência (spec §3.2-8): o
+        # resultado final é has_password=False com as três pendências simultâneas
+        # (B-F6-07 passo 3).
+        conn_segura_id, conn_segura_criada = _obter_ou_criar_conexao(
+            admin,
+            portabilidade_id,
+            CONN_SEGURA_NAME,
+            {
+                "project_id": portabilidade_id,
+                "name": CONN_SEGURA_NAME,
+                "endpoint": OPCSIM_URL,
+                "security_policy": "basic256sha256",
+                "security_mode": "sign_and_encrypt",
+                "auth_mode": "anonymous",
+                "auth_username": CONN_SEGURA_USERNAME,
+            },
+        )
+        if conn_segura_criada:
+            print(
+                "[*] Ajustando conexão segura para user_password sem senha...",
+                file=sys.stderr,
+            )
+            r = admin.patch(
+                f"/api/connections/{conn_segura_id}", json={"auth_mode": "user_password"}
+            )
+            if r.status_code != 200:
+                print(
+                    f"[!] Falha ao ajustar conexão segura: HTTP {r.status_code} {r.text}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            print(
+                "[+] Conexão segura ajustada: user_password sem auth_password",
+                file=sys.stderr,
+            )
+
+        # (c) duas conexões com tag homônima — mesmo nome de tag em conexões diferentes,
+        # material do tag_ref como objeto (B-F6-05).
+        conn_homonima_a_id, _ = _obter_ou_criar_conexao(
+            admin,
+            portabilidade_id,
+            CONN_HOMONIMA_A_NAME,
+            {
+                "project_id": portabilidade_id,
+                "name": CONN_HOMONIMA_A_NAME,
+                "endpoint": OPCSIM_URL,
+                "security_policy": "none",
+                "security_mode": "none",
+                "auth_mode": "anonymous",
+            },
+        )
+        conn_homonima_b_id, _ = _obter_ou_criar_conexao(
+            admin,
+            portabilidade_id,
+            CONN_HOMONIMA_B_NAME,
+            {
+                "project_id": portabilidade_id,
+                "name": CONN_HOMONIMA_B_NAME,
+                "endpoint": OPCSIM_URL,
+                "security_policy": "none",
+                "security_mode": "none",
+                "auth_mode": "anonymous",
+            },
+        )
+        tag_homonima_a = _criar_tag(
+            admin, conn_homonima_a_id, TAG_HOMONIMA_NOME, NODE_MIRROR_FLOAT, "r"
+        )
+        tag_homonima_b = _criar_tag(
+            admin, conn_homonima_b_id, TAG_HOMONIMA_NOME, NODE_MIRROR_FLOAT, "r"
+        )
+        print(
+            f"[+] Tags homônimas '{TAG_HOMONIMA_NOME}': "
+            f"conn_a={conn_homonima_a_id}/tag={tag_homonima_a}, "
+            f"conn_b={conn_homonima_b_id}/tag={tag_homonima_b}",
+            file=sys.stderr,
+        )
+
+        # (d) flow L3-flow-arquivo: opc_read numa das tags homônimas + Script com código
+        # conhecido (OUT1 = 0.0); nasce e fica parado (ADR-017), nunca deployado — o
+        # projeto é inativo e nada nele deve escrever em planta.
+        print(f"[*] Procurando flow '{FLOW_ARQUIVO_NAME}'...", file=sys.stderr)
+        r = admin.get(f"/api/flows?project_id={portabilidade_id}")
+        if r.status_code != 200:
+            print(f"[!] Falha ao listar flows: HTTP {r.status_code}", file=sys.stderr)
+            sys.exit(1)
+        flow_arquivo_id = None
+        for f in r.json():
+            if f["project_id"] == portabilidade_id:
+                flow_arquivo_id = int(f["id"])
+                print(f"[+] Flow encontrado: id={flow_arquivo_id}", file=sys.stderr)
+                break
+
+        if flow_arquivo_id is None:
+            print(f"[*] Criando flow '{FLOW_ARQUIVO_NAME}'...", file=sys.stderr)
+            r = admin.post(
+                "/api/flows",
+                json={
+                    "project_id": portabilidade_id,
+                    "name": FLOW_ARQUIVO_NAME,
+                    "ts_seconds": TS_FLOW_MPC,
+                },
+            )
+            if r.status_code != 201:
+                print(f"[!] Falha ao criar flow: HTTP {r.status_code} {r.text}", file=sys.stderr)
+                sys.exit(1)
+            flow_arquivo_id = int(r.json()["id"])
+            print(f"[+] Flow criado: id={flow_arquivo_id}", file=sys.stderr)
+
+        # SEMPRE atualizar grafo (idempotente: PUT com mesmo grafo é seguro)
+        print("[*] Atualizando grafo do flow-arquivo...", file=sys.stderr)
+        grafo_arquivo = {
+            "nodes": [
+                {
+                    "id": "leitura_homonima",
+                    "type": "opc_read",
+                    "position": {"x": 0.0, "y": 0.0},
+                    "data": {"exec_order": 1, "tag_id": tag_homonima_a},
+                },
+                {
+                    "id": "script_conhecido",
+                    "type": "script",
+                    "position": {"x": 0.0, "y": 0.0},
+                    "data": {
+                        "exec_order": 2,
+                        "n_inputs": 0,
+                        "n_outputs": 1,
+                        "code": "OUT1 = 0.0\n",
+                    },
+                },
+            ],
+            "edges": [],
+        }
+        r = admin.put(f"/api/flows/{flow_arquivo_id}", json={"graph_json": grafo_arquivo})
+        if r.status_code != 200:
+            print(
+                f"[!] Falha ao atualizar grafo do flow-arquivo: HTTP {r.status_code} {r.text}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print(
+            "[+] Grafo do flow-arquivo atualizado (permanece parado, nunca deployado)",
+            file=sys.stderr,
+        )
+
+        # ====================================================================
+        # 8. Resumo
         # ====================================================================
         print("\n" + "=" * 70, file=sys.stderr)
         print("SETUP L3 CONCLUÍDO COM SUCESSO", file=sys.stderr)
@@ -414,6 +650,18 @@ def main() -> None:
             "block_id": mpc_block_id,
             "operacao_url": operacao_url,
             "operator_username": OPERATOR_USERNAME,
+            "portabilidade_project_id": portabilidade_id,
+            "portabilidade_connections": {
+                "certificado": conn_certificado_id,
+                "segura": conn_segura_id,
+                "homonima_a": conn_homonima_a_id,
+                "homonima_b": conn_homonima_b_id,
+            },
+            "portabilidade_tags_homonimas": {
+                "homonima_a": tag_homonima_a,
+                "homonima_b": tag_homonima_b,
+            },
+            "portabilidade_flow_arquivo_id": flow_arquivo_id,
         }
 
         print("\nResumo do ambiente L3:", file=sys.stderr)
@@ -423,6 +671,14 @@ def main() -> None:
         print(f"  block_id (MPC):  {mpc_block_id}", file=sys.stderr)
         print(f"  Operacao URL:    {operacao_url}", file=sys.stderr)
         print(f"  Operador:        {OPERATOR_USERNAME}", file=sys.stderr)
+        print(f"  portabilidade_project_id:  {portabilidade_id}", file=sys.stderr)
+        print(
+            f"  portabilidade_connections: certificado={conn_certificado_id}, "
+            f"segura={conn_segura_id}, homonima_a={conn_homonima_a_id}, "
+            f"homonima_b={conn_homonima_b_id}",
+            file=sys.stderr,
+        )
+        print(f"  portabilidade_flow_arquivo_id: {flow_arquivo_id}", file=sys.stderr)
         print("=" * 70, file=sys.stderr)
 
         # Output em JSON para parsing automatizado
