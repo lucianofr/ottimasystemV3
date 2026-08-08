@@ -1,6 +1,6 @@
-import type { FlowOut } from "../../lib/api";
-import type { FlowStatus as FlowStatusGerado, PortValue } from "../../lib/contracts.gen";
+import type { PortValue } from "../../lib/contracts.gen";
 import { useAssinatura, useCanalAoVivo, type EstadoDoCanal } from "../../app/CanalAoVivo";
+import { type EstadoFlow, type FlowStatus, type PortsPorBloco } from "./canalPrimitivos";
 
 /**
  * Canvas ao vivo (RF-305, spec F3 §5.3/§6.2, F5 §7.1-2/4): um editor por flow aberto,
@@ -9,23 +9,17 @@ import { useAssinatura, useCanalAoVivo, type EstadoDoCanal } from "../../app/Can
  * para o flow da URL, com a mesma assinatura pública de antes do provider.
  *
  * `/ws` não aparece no OpenAPI (WebSocket não existe em OpenAPI 3.0); `FlowStatus`/`PortValue`
- * vêm de `contracts.gen.ts` (fonte: `ottima_core.bus`, débito 2+4 do plano F4a). `EstadoFlow`
- * deriva do enum gerado para `desired_state`: `running` e `stopped` são os mesmos literais do
- * banco, e `failed` é o único estado que só existe no barramento (spec §4.2).
+ * vêm de `contracts.gen.ts` (fonte: `ottima_core.bus`, débito 2+4 do plano F4a) e, junto com
+ * `EstadoFlow`/`PortsPorBloco`, são reexportados aqui a partir de `canalPrimitivos.ts` (débito
+ * 2 de frontend da F5, spec F6 §6.6-2 — primitivos do protocolo que o provider também usa,
+ * sem import circular entre os dois). `EstadoFlow` deriva do enum gerado para
+ * `desired_state`: `running` e `stopped` são os mesmos literais do banco, e `failed` é o
+ * único estado que só existe no barramento (spec §4.2).
  */
 
-export type EstadoFlow = FlowOut["desired_state"] | "failed";
+export type { EstadoFlow, FlowStatus, PortsPorBloco };
 
 export type { PortValue };
-
-/** `{block_id: {porta: PortValue}}` — a tabela inteira de portas de uma varredura. */
-export type PortsPorBloco = Readonly<Record<string, Readonly<Record<string, PortValue>>>>;
-
-/** `ports` sai como visão somente-leitura (`PortsPorBloco`); o campo gerado é mutável — o
- *  contrato do wire é o mesmo, isto é só disciplina de imutabilidade do frontend. */
-export interface FlowStatus extends Omit<FlowStatusGerado, "ports"> {
-  ports: PortsPorBloco;
-}
 
 /**
  * `sessao_invalida` é desfecho, não espera: o servidor fecha com 1008 quando o token não
@@ -47,82 +41,7 @@ export const ROTULO_ESTADO: Record<EstadoFlow, string> = {
   failed: "Falha",
 };
 
-/** Fechamento por sessão inválida (§5.3); qualquer outro código é queda de rede. */
-export const CODIGO_SESSAO_INVALIDA = 1008;
-
-const ATRASO_BASE_MS = 1000;
-const ATRASO_TETO_MS = 15000;
-
 const SEM_PORTS: PortsPorBloco = {};
-
-// --------------------------------------------------------------------------------------
-// Protocolo (§5.3) — puro, reusado pelo provider da sessão (`CanalAoVivo.tsx`, §7.1)
-// --------------------------------------------------------------------------------------
-
-/**
- * Path literal `/ws`, **sem** barra final: o `location /ws` do nginx casa por prefixo e não
- * reescreve o path, então `/ws/` chega ao Starlette como rota inexistente e vira 403 — que
- * é indistinguível de token recusado a olho nu.
- */
-export function urlDoWs(origem: Location, token: string): string {
-  const protocolo = origem.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocolo}//${origem.host}/ws?token=${encodeURIComponent(token)}`;
-}
-
-/** Backoff crescente e limitado: só para queda de rede, nunca para 1008. */
-export function atrasoReconexao(tentativa: number): number {
-  return Math.min(ATRASO_BASE_MS * 2 ** tentativa, ATRASO_TETO_MS);
-}
-
-export function deveReconectar(codigo: number): boolean {
-  return codigo !== CODIGO_SESSAO_INVALIDA;
-}
-
-/**
- * Publicação de transição de estado vem com `ports` vazio (§4.2): o estado mudou e os
- * valores não fazem parte daquela mensagem. Apagar o canvas a cada deploy/parada seria
- * confundir "sem `ports`" com "sem valores".
- */
-export function mesclarPorts(anterior: PortsPorBloco, recebido: PortsPorBloco): PortsPorBloco {
-  return Object.keys(recebido).length === 0 ? anterior : recebido;
-}
-
-/** Exportado para reuso em `CanalAoVivo.tsx` (§7.1): o mesmo formato `{block_id: {porta:
- *  PortValue}}` chega por `flow.status.*`, roteado pelo provider da sessão. */
-export function objeto(valor: unknown): Record<string, unknown> | null {
-  return typeof valor === "object" && valor !== null && !Array.isArray(valor)
-    ? (valor as Record<string, unknown>)
-    : null;
-}
-
-export function ehEstado(valor: unknown): valor is EstadoFlow {
-  return valor === "running" || valor === "stopped" || valor === "failed";
-}
-
-export function lerPortValue(bruto: unknown): PortValue | null {
-  const item = objeto(bruto);
-  if (item === null || typeof item.ok !== "boolean") return null;
-  const v = item.v;
-  if (v !== null && typeof v !== "number" && typeof v !== "boolean") return null;
-  return { v, ok: item.ok };
-}
-
-export function lerPorts(bruto: unknown): PortsPorBloco {
-  const mapa = objeto(bruto);
-  if (mapa === null) return SEM_PORTS;
-  const portsPorBloco: Record<string, Record<string, PortValue>> = {};
-  for (const [blockId, portas] of Object.entries(mapa)) {
-    const doBloco = objeto(portas);
-    if (doBloco === null) continue;
-    const valores: Record<string, PortValue> = {};
-    for (const [porta, valorBruto] of Object.entries(doBloco)) {
-      const valor = lerPortValue(valorBruto);
-      if (valor !== null) valores[porta] = valor;
-    }
-    portsPorBloco[blockId] = valores;
-  }
-  return portsPorBloco;
-}
 
 // --------------------------------------------------------------------------------------
 // Formatação de valor (Regra do Número Tabular / Regra do Canal Redundante)
@@ -138,24 +57,6 @@ export function formatarValorPorta(valor: PortValue): string {
   if (valor.v === null) return "sem valor";
   if (typeof valor.v === "boolean") return valor.v ? "verdadeiro" : "falso";
   return formatarNumero(valor.v);
-}
-
-// --------------------------------------------------------------------------------------
-// Ambiente do socket (§7.1): quem abre e mantém o socket é o provider (`CanalAoVivo.tsx`);
-// o formato mora aqui porque `urlDoWs`/`atrasoReconexao`/`deveReconectar` também moram.
-// --------------------------------------------------------------------------------------
-
-/**
- * Socket, relógio e sessão como dependências. Em produção são os do browser; no check de
- * desmonte (`canalAoVivo.check.ts`) são dublês, que é como se prova que nada sobrou aberto
- * ou agendado.
- */
-export interface AmbienteAoVivo {
-  criarSocket: (url: string) => WebSocket;
-  token: () => string | null;
-  origem: () => Location;
-  agendar: (acao: () => void, atrasoMs: number) => number;
-  cancelar: (id: number) => void;
 }
 
 // --------------------------------------------------------------------------------------

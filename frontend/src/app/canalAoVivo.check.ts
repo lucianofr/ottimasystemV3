@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { CODIGO_SESSAO_INVALIDA, type AmbienteAoVivo } from "../features/flows/useFlowStatus";
+import { CODIGO_SESSAO_INVALIDA, type AmbienteAoVivo } from "../features/flows/canalPrimitivos";
 import {
   abrirCanalSessao,
   analisarMensagemCanal,
