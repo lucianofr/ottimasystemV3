@@ -1,4 +1,10 @@
-import type { MpcState } from "../../lib/contracts.gen";
+/**
+ * `state` do ramo `estadoPublicado` é `unknown`, não `MpcState` (débito §6.6-3 fechado):
+ * `lerCaminho` só lê por caminho de pontos, então o redutor nunca precisa de um `MpcState`
+ * estruturalmente completo — exigir esse tipo obrigava os chamadores que só têm um recorte
+ * (ex. `FaceplateVariavel`, que republica um único `vars.<id>`) a forjar um objeto inteiro e
+ * fazer double-cast só para satisfazer o compilador. Ver `FaceplateVariavel.tsx`.
+ */
 
 /**
  * `reduzirPendencia` — tarefa 4.2 do plano F5b (spec F5 §7.4-4; F5R-18; Regra do Estado
@@ -23,7 +29,7 @@ export type Pendencia = { alvo: string; valorComandado: unknown; expiraEm: numbe
 
 type AcaoPendencia =
   | { tipo: "comandar"; alvo: string; valor: unknown; tsMpcSegundos: number; agora: number }
-  | { tipo: "estadoPublicado"; state: MpcState; agora: number }
+  | { tipo: "estadoPublicado"; state: unknown; agora: number }
   | { tipo: "tique"; agora: number };
 
 const PISO_JANELA_SEGUNDOS = 5;

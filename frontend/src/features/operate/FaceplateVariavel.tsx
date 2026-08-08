@@ -5,7 +5,6 @@ import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { api, ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
-import type { MpcState } from "../../lib/contracts.gen";
 import { clampNaFaixa, type Faixa } from "./clamp";
 import { reduzirPendencia, type Pendencia } from "./pendencia";
 
@@ -153,10 +152,11 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
 
   // "estadoPublicado": cada `valor` novo (mpc.state.vars[id] republicado) tenta materializar a
   // pendência. `lerCaminho` (pendencia.ts) só lê `vars.<id>.<campo>` do objeto abaixo — o resto
-  // do shape de `MpcState` nunca é acessado, então o cast não finge um estado completo real.
+  // do shape de `MpcState` nunca é acessado. `state` do redutor é `unknown` (§6.6-3), então
+  // este recorte parcial não precisa mais fingir ser um `MpcState` completo.
   useEffect(() => {
     if (valor === undefined) return;
-    const estadoMinimo = { vars: { [definicao.id]: valor } } as unknown as MpcState;
+    const estadoMinimo = { vars: { [definicao.id]: valor } };
     setPendencia((atual) =>
       reduzirPendencia(atual, { tipo: "estadoPublicado", state: estadoMinimo, agora: Date.now() }),
     );

@@ -113,3 +113,23 @@ test("comandar de novo sobre uma pendência já aberta substitui pelo novo alvo/
   });
   expect(segunda).toEqual({ alvo: "vars.MV1.v", valorComandado: 50, expiraEm: AGORA + 500 + 9000 });
 });
+
+test("estadoPublicado aceita um recorte parcial sem cast (§6.6-3: state é unknown, não MpcState)", () => {
+  const pendente = reduzirPendencia(null, {
+    tipo: "comandar",
+    alvo: "vars.MV1.v",
+    valor: 42,
+    tsMpcSegundos: 2,
+    agora: AGORA,
+  });
+  // Sem double-cast para MpcState: só o recorte que FaceplateVariavel de fato tem (um único
+  // `vars.<id>`), sem `ts`/`modes`/`status`/`cost`/`prediction` — exatamente o formato que
+  // exigia o cast antes do débito §6.6-3 fechar.
+  const recortePublicado = { vars: { MV1: { v: 42, sp: null } } };
+  const resultado = reduzirPendencia(pendente, {
+    tipo: "estadoPublicado",
+    state: recortePublicado,
+    agora: AGORA + 100,
+  });
+  expect(resultado).toBeNull();
+});
