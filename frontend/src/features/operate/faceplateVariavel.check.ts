@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 import { faixaDaEscala, type FaceplateVariavelProps, type VariavelTipo } from "./FaceplateVariavel";
+import { gradeDeVariaveis } from "./gradeVariaveis";
+import type { MpcNodeOut } from "./useMpcs";
 
 /**
  * `faixaDaEscala` — tarefa 5.4 do plano F6b-superficies (spec F6 §4.2/§6.5; RF-702; decisão
@@ -86,4 +88,42 @@ test("Restrição sem range devolve null (comportamento preexistente)", () => {
 
 test("Restrição com range degenerado (low === high) também devolve null (mesma guarda da DV)", () => {
   expect(faixaDaEscala(props("constraint", { range: { low: 5, high: 5 } }))).toBeNull();
+});
+
+/**
+ * Regressão do gate L3 (cenário B-F6-10 passo 5): `faixaDaEscala` já sabia ler `range` da DV,
+ * mas `gradeDeVariaveis` fixava `range: null` ao montar os props — a faixa publicada por
+ * `GET /api/operate/mpcs` (F6a tarefa 4.2) morria antes de chegar à função, e a DV nunca
+ * ganhava barra na tela por mais correta que estivesse a config. O teste puro acima não pega
+ * isso: ele alimenta os props direto. A asserção aqui é sobre a travessia projeção → props.
+ */
+function mpcComDv(range: { low: number; high: number } | null): MpcNodeOut {
+  return {
+    flow_id: 1,
+    flow_name: "f",
+    flow_ts_seconds: 0.5,
+    block_id: "mpc1",
+    name: "MPC",
+    multiplier: 2,
+    variables: {
+      mvs: [],
+      cvs: [],
+      constraints: [],
+      dvs: [{ id: "dv_1", name: "DV constante", eu: "m3/h", range }],
+    },
+  } as MpcNodeOut;
+}
+
+test("gradeDeVariaveis repassa o range publicado da DV até o faceplate", () => {
+  const grade = gradeDeVariaveis(mpcComDv({ low: 0, high: 100 }), undefined, 1, "mpc1");
+  const dv = grade.find((item) => item.tipo === "dv");
+  expect(dv?.definicao.range).toEqual({ low: 0, high: 100 });
+  expect(faixaDaEscala(dv as FaceplateVariavelProps)).toEqual({ min: 0, max: 100 });
+});
+
+test("gradeDeVariaveis mantém a DV sem faixa quando o servidor não publica range", () => {
+  const grade = gradeDeVariaveis(mpcComDv(null), undefined, 1, "mpc1");
+  const dv = grade.find((item) => item.tipo === "dv");
+  expect(dv?.definicao.range).toBeNull();
+  expect(faixaDaEscala(dv as FaceplateVariavelProps)).toBeNull();
 });
