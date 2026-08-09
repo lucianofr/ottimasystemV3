@@ -195,7 +195,10 @@ async def test_porta_errada_falha_uma_vez_e_retries_nao_reemitem(
     snapshot = ConnectionSnapshot(name=config.name)
     async with collect_events(redis_client) as events:
         async with running(make_runtime(config, redis_client, snapshot)) as runtime:
-            await await_until(lambda: runtime.state is ConnectionState.FAILED)
+            # A asserção é sobre o EVENTO, então a espera também tem de ser: `fail()` marca o
+            # estado e só depois publica, e a publicação ainda atravessa o Redis até o
+            # assinante de teste. Esperar pelo estado e ler a lista na sequência é corrida.
+            await await_until(lambda: len(of_kind(events, KIND_COMM_FAILURE)) == 1)
             falhas = of_kind(events, KIND_COMM_FAILURE)
             assert len(falhas) == 1
             assert falhas[0]["severity"] == "alarm"
@@ -218,6 +221,7 @@ async def test_queda_do_servidor_gera_session_lost(sim: OpcSimServer, redis_clie
             await await_until(lambda: runtime.state is ConnectionState.UP)
             await sim.stop()
             await await_until(lambda: runtime.state is ConnectionState.FAILED)
+            await await_until(lambda: len(of_kind(events, KIND_COMM_FAILURE)) == 1)
             falhas = of_kind(events, KIND_COMM_FAILURE)
             assert len(falhas) == 1
             assert falhas[0]["payload"]["reason"] == "session_lost"
