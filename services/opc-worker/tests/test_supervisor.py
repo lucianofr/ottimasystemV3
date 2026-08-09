@@ -23,6 +23,7 @@ from worker_test_helpers import await_until, collecting
 from opcsim import NODE_SINE, NODE_STATIC, OpcSimServer
 from ottima_core.bus import (
     CHANNEL_EVENTS,
+    KIND_COMM_RESTORED,
     KIND_CONNECTION_CREATED,
     KIND_OPC_WRITE,
     channel_opc_values,
@@ -499,6 +500,42 @@ async def test_campo_da_conexao_recria_a_sessao(
         assert novo.snapshot.session_up_since != subiu_em
         assert state.connections[conn_id] is novo.snapshot
         assert antigo.state is not ConnectionState.UP or antigo.client is None
+
+
+async def test_falha_pendente_atravessa_a_troca_de_sessao(
+    session_factory: async_sessionmaker[AsyncSession], redis_client: Redis, sim: OpcSimServer
+) -> None:
+    """`comm_failure` publicado sobrevive ao remonte: quem edita a conexão para resolver a
+    causa (confiar no certificado, reinformar a senha) precisa receber o `comm_restored`
+    quando a sessão nova sobe. Sem herdar a aresta, o runtime novo nasce limpo, o
+    `mark_restored` de `_open_session` volta cedo e o alarme antigo fica na tela para
+    sempre — achado do gate L3 (cenário B-F6-04 passo 3)."""
+    project_id = await create_project(session_factory)
+    conn_id = await create_connection(session_factory, project_id, sim.endpoint)
+    state = WorkerState()
+    supervisor = make_supervisor(session_factory, redis_client, state)
+
+    async with started(supervisor):
+        await wait_up(supervisor, conn_id)
+        antigo = supervisor.runtimes[conn_id]
+
+        async with collecting(redis_client, CHANNEL_EVENTS) as eventos:
+            await antigo.fail("cert_missing", "falha forjada pelo teste")
+            assert antigo.failure_pending is True
+
+            await update_connection(session_factory, conn_id, watchdog_period_ms=2000)
+            await await_until(lambda: supervisor.runtimes.get(conn_id) is not antigo)
+            novo = supervisor.runtimes[conn_id]
+            assert novo is not antigo
+            await wait_up(supervisor, conn_id)
+
+            # A asserção que importa: o evento sai. `failure_pending` sozinho passaria
+            await await_until(
+                lambda: any(
+                    (e.get("payload") or {}).get("kind") == KIND_COMM_RESTORED for e in eventos
+                )
+            )
+        assert novo.failure_pending is False
 
 
 async def test_projeto_desativado_derruba_tudo(
