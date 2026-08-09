@@ -121,7 +121,7 @@ export type VariavelRestricao = {
   priority: number;
 };
 
-export type VariavelDv = { id: string; name: string; eu: string };
+export type VariavelDv = { id: string; name: string; eu: string; range: FaixaMpc | null };
 
 /** Espelho de `MpcVariables` (spec F4 §2.1): entradas do nó = cvs+constraints+dvs, saída =
  *  mvs, sempre nesta ordem (decisão A-10, `validate.py::_input_handles`/`_output_handles`). */
@@ -398,6 +398,33 @@ export function podarOutputEuScript(
 ): Record<string, string> {
   const validas = new Set(portasScript("OUT", n_outputs));
   return Object.fromEntries(Object.entries(output_eu).filter(([porta]) => validas.has(porta)));
+}
+
+/**
+ * EU herdada por uma porta de ENTRADA (spec §4.1-5): a porta em si não declara EU — segue a
+ * aresta que chega em `handle` do nó `no`, acha a porta de SAÍDA de origem, e devolve a EU
+ * que essa porta declara em `output_eu_por_no` (mapa nó → `output_eu` do bloco, só populado
+ * para Script/TFS). `null` quando não há aresta chegando, ou a origem não declara EU para
+ * aquela porta (chave ausente ou `''`, mesmo default de `Tag.eu`).
+ *
+ * Resolve só UM nível — decisão desta tarefa. Recursar mais um hop (a origem ela mesma
+ * herdando de mais um nó atrás) não tem leitura correta aqui: Script não tem mapeamento
+ * porta-de-entrada → porta-de-saída (o código é livre, qualquer IN pode alimentar qualquer
+ * OUT) e TFS soma até duas entradas por saída (`matrix[j][k]`) — "herdar de qual das duas,
+ * com qual EU?" não tem resposta única. Um nível é também a mesma cautela de §4.1-6 (Script
+ * não propaga EU da entrada para a própria saída automaticamente): inventar EU atravessando
+ * um nó inteiro é pior que deixar a porta sem unidade.
+ */
+export function euDaPortaDeEntrada(
+  edges: readonly BlocoEdge[],
+  output_eu_por_no: ReadonlyMap<string, Record<string, string>>,
+  no: string,
+  handle: string,
+): string | null {
+  const aresta = edges.find((a) => a.target === no && a.targetHandle === handle);
+  if (aresta === undefined) return null;
+  const eu = output_eu_por_no.get(aresta.source)?.[aresta.sourceHandle];
+  return eu !== undefined && eu !== "" ? eu : null;
 }
 
 /** Compactação automática ao excluir (ADR-024): o conjunto volta a ser contíguo 1..N. */

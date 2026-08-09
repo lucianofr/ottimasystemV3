@@ -341,6 +341,11 @@ function ListaRestricao({
   );
 }
 
+/** DVs têm faixa OPCIONAL (spec §4.2-5, RFC-16, ao contrário de MV/CV/Restrição, que sempre
+ *  têm uma): os dois campos ficam ao lado de Nome/EU, mesmo padrão `CampoNumero` que a
+ *  Restrição já usa para `range_low`/`range_high` (`ListaRestricao` acima). Sem faixa, uma
+ *  nota discreta avisa que o faceplate (§6.5) ficará sem barra — RF-702 pede limites, e
+ *  omissão silenciosa é exatamente o defeito que RFC-16 fecha. */
 function ListaDv({
   dvs,
   aoMudar,
@@ -356,7 +361,7 @@ function ListaDv({
           type="button"
           size="sm"
           data-testid="mpc-add-dv"
-          onClick={() => aoMudar([...dvs, { id: gerarIdVariavel("dv"), name: "", eu: "" }])}
+          onClick={() => aoMudar([...dvs, { id: gerarIdVariavel("dv"), name: "", eu: "", range: null }])}
         >
           Adicionar DV
         </Button>
@@ -369,6 +374,15 @@ function ListaDv({
           aoRemover={() => aoMudar(dvs.filter((item) => item.id !== dv.id))}
         >
           <CampoNomeEu id={dv.id} nome={dv.name} eu={dv.eu} />
+          <div className="grid grid-cols-2 gap-3">
+            <CampoNumero id={dv.id} campo="range_low" rotulo="Faixa mín." valor={dv.range?.low ?? 0} />
+            <CampoNumero id={dv.id} campo="range_high" rotulo="Faixa máx." valor={dv.range?.high ?? 0} />
+          </div>
+          {dv.range === null && (
+            <p className="text-[10px] text-fg-muted">
+              Sem faixa: o faceplate desta DV ficará sem barra (RF-702).
+            </p>
+          )}
         </LinhaVariavel>
       ))}
     </div>

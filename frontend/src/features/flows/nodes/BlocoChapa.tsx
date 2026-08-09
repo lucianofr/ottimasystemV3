@@ -15,6 +15,9 @@ import { useValoresDoBloco, type PortasDoBloco } from "./contexto";
 export interface Porta {
   id: string;
   rotulo: string;
+  /** EU desta porta específica (Script/TFS declaram por porta, spec §4.1/§6.4). Ausente cai
+   *  no `eu` do bloco (OPC-Read/Write: uma tag → uma EU para todas as portas). */
+  eu?: string;
 }
 
 interface Props {
@@ -82,7 +85,7 @@ function LinhaPorta({
         id={porta.id}
       />
       <span className="plaqueta text-[10px] leading-none text-fg-muted">{porta.rotulo}</span>
-      {valores !== null && <ValorPorta valor={valores[porta.id]} eu={eu} />}
+      {valores !== null && <ValorPorta valor={valores[porta.id]} eu={porta.eu ?? eu} />}
     </div>
   );
 }

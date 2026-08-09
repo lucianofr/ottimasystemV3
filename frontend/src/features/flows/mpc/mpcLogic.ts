@@ -1,6 +1,7 @@
 import type { TagOut } from "../../../lib/api";
 import { numeroDoCampo } from "../config/campos";
 import type {
+  FaixaMpc,
   ParModeloMpc,
   TipoLinhaMpc,
   VariaveisMpc,
@@ -51,12 +52,29 @@ function texto(dados: FormData, campo: string, padrao: string): string {
   return typeof bruto === "string" ? bruto.trim() : padrao;
 }
 
+/** `range` da DV é opcional (spec §4.2-5, RFC-16), ao contrário do de Restrição: os dois
+ *  campos vazios ⇒ `null` (sem faixa, `ListaDv` mostra a nota); qualquer um preenchido monta
+ *  a faixa completa, o campo que ficou vazio cai no valor anterior da própria DV (ou 0 numa
+ *  DV nova) — mesmo padrão de fallback silencioso que todo campo numérico não-controlado já
+ *  usa neste modal (`numeroDoCampo`), copiado da Restrição (`range_low`/`range_high`, spec
+ *  §4.1-4: "copie o padrão, não invente outro"). O servidor (`Range`, `extra="forbid"`)
+ *  continua a barreira final: esta função nunca emite uma faixa parcial. */
 export function variavelDvDoFormulario(atual: VariavelDv, dados: FormData): VariavelDv {
   const c = (campo: string): string => nomeCampoVar(atual.id, campo);
+  const n = (campo: string, padrao: number): number => numeroDoCampo(dados.get(c(campo)), padrao);
+  const vazio = (campo: string): boolean => {
+    const bruto = dados.get(c(campo));
+    return typeof bruto !== "string" || bruto.trim() === "";
+  };
+  const semFaixa = vazio("range_low") && vazio("range_high");
+  const range: FaixaMpc | null = semFaixa
+    ? null
+    : { low: n("range_low", atual.range?.low ?? 0), high: n("range_high", atual.range?.high ?? 0) };
   return {
     id: atual.id,
     name: texto(dados, c("name"), atual.name),
     eu: texto(dados, c("eu"), atual.eu),
+    range,
   };
 }
 
