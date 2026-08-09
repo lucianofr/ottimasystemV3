@@ -6,6 +6,7 @@ Dois cenários novos (E2E-F6-05, E2E-F6-06) que exercitam o MPC fechado pela TFS
 """
 
 import time
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -30,6 +31,12 @@ from .conftest import (
 )
 
 pytestmark = pytest.mark.e2e
+
+# `du_max` que o hot-swap de E2E-F6-06 passa a impor a MV. Serve de duas formas: e a
+# mudanca de configuracao que o cenario aplica, e e o teto normativo do salto aceitavel
+# na CV (ADR-011, "bumpless" — o swap nao pode produzir movimento maior do que o proprio
+# controlador poderia comandar num passo).
+DU_MAX_NOVO = 3.0
 
 
 # --------------------------------------------------------------------------------------
@@ -189,7 +196,7 @@ def test_e2e_f6_06_hot_swap_mpc_malha_tfs(
 
         # Alterar apenas MPC: du_max de uma MV
         mpc_data = grafo_atual["nodes"][3]["data"]  # node mpc1
-        mpc_data["variables"]["mvs"][0]["du_max"] = 3.0
+        mpc_data["variables"]["mvs"][0]["du_max"] = DU_MAX_NOVO
 
         # Aplicar hot-swap
         r = admin.put(f"/api/flows/{flow_id}", json={"graph_json": grafo_atual})
@@ -210,23 +217,61 @@ def test_e2e_f6_06_hot_swap_mpc_malha_tfs(
             descricao="série PÓS hot-swap",
         )
 
-        # Critério normativo (ADR-011): Não há descontinuidade grande
-        # Prova que planta sobrevive: CV não salta para valor inicial
-        cv_antes_ultimo = serie_antes[-1]["vars"]["cv_1"]["v"]
-        cv_depois_primeiro = serie_depois[0]["vars"]["cv_1"]["v"]
-        salto = abs(cv_depois_primeiro - cv_antes_ultimo)
+        # Critério normativo (ADR-011, "bumpless"): o hot-swap não pode fazer a CV se mover
+        # MAIS RÁPIDO do que a própria malha já vinha se movendo. Compara-se TAXA
+        # (unidade por segundo), não degrau absoluto: a fronteira do swap abrange mais
+        # tempo que um intervalo de amostragem (há espera entre as séries), então comparar
+        # degraus puniria uma malha em rampa que apenas continuou rampando.
+        # Os dois termos são MEDIDOS — nenhuma constante escolhida.
+        # `du_max` não serve de teto aqui: ele limita o movimento da MV por passo, e a CV
+        # responde pela dinâmica da planta ao longo de vários passos.
+        def _taxas(serie: list[dict[str, Any]]) -> list[float]:
+            taxas = []
+            for anterior, atual in zip(serie, serie[1:], strict=False):
+                dt = (
+                    datetime.fromisoformat(atual["ts"]) - datetime.fromisoformat(anterior["ts"])
+                ).total_seconds()
+                if dt > 0:
+                    dv = atual["vars"]["cv_1"]["v"] - anterior["vars"]["cv_1"]["v"]
+                    taxas.append(abs(dv) / dt)
+            return taxas
 
-        assert salto < 10.0, (
-            f"ADR-011: Planta deve sobreviver sem queda abrupta. "
-            f"Último antes: {cv_antes_ultimo:.1f}, Primeiro depois: {cv_depois_primeiro:.1f}, "
-            f"Salto: {salto:.1f}"
+        taxas_antes = _taxas(serie_antes)
+        assert taxas_antes, "série pré-swap curta demais para medir taxa natural"
+        taxa_natural_maxima = max(taxas_antes)
+
+        dt_fronteira = (
+            datetime.fromisoformat(serie_depois[0]["ts"])
+            - datetime.fromisoformat(serie_antes[-1]["ts"])
+        ).total_seconds()
+        assert dt_fronteira > 0, "carimbos de tempo não avançaram na fronteira do swap"
+        valores_cv_antes = [a["vars"]["cv_1"]["v"] for a in serie_antes]
+        valores_cv_depois = [a["vars"]["cv_1"]["v"] for a in serie_depois]
+        taxa_fronteira = abs(valores_cv_depois[0] - valores_cv_antes[-1]) / dt_fronteira
+
+        assert taxa_fronteira <= taxa_natural_maxima, (
+            f"ADR-011 (bumpless): na fronteira do hot-swap a CV se moveu a "
+            f"{taxa_fronteira:.3f}/s, acima da maior taxa natural da malha antes do swap "
+            f"({taxa_natural_maxima:.3f}/s) — o swap não foi bumpless. "
+            f"Série antes: {[round(v, 2) for v in valores_cv_antes]}; "
+            f"primeira depois: {valores_cv_depois[0]:.3f}; dt={dt_fronteira:.3f}s"
         )
 
-        # Critério validação: Sistema continua respondendo (não travou)
-        # Prova: host foi reconstruído e estado foi publicado
-        mpc_estado_novo = serie_depois[-1]
-        assert mpc_estado_novo.get("status") is not None, (
-            "MPC deve estar publicando estado após hot-swap"
+        # A planta continua evoluindo (malha fechada por TFS): a CV não congelou. Sem
+        # isto, uma malha parada passaria no critério acima por vacuidade.
+        assert len(set(valores_cv_depois)) > 1, (
+            f"CV congelou após o hot-swap — a malha TFS parou de evoluir: {valores_cv_depois}"
+        )
+
+        # A config NOVA chegou ao host reconstruído: sem esta prova o cenário mostraria
+        # apenas que o flow sobreviveu, não que houve hot-swap (ADR-011).
+        r = admin.get(f"/api/flows/{flow_id}")
+        assert r.status_code == 200
+        no_mpc = next(
+            n for n in r.json()["graph_json"]["nodes"] if n["id"] == "mpc1"
+        )
+        assert no_mpc["data"]["variables"]["mvs"][0]["du_max"] == DU_MAX_NOVO, (
+            "a configuração nova não foi persistida — não houve hot-swap"
         )
     finally:
         ws.close()
