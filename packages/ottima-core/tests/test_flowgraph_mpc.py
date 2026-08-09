@@ -77,8 +77,10 @@ def co(
     return node
 
 
-def dv(suffix: str) -> dict:
-    return {"id": f"dv_{suffix}", "name": f"DV {suffix}", "eu": "m3/h"}
+def dv(suffix: str, **overrides) -> dict:
+    node = {"id": f"dv_{suffix}", "name": f"DV {suffix}", "eu": "m3/h"}
+    node.update(overrides)
+    return node
 
 
 def selfreg_params(**overrides: float) -> dict:
@@ -530,6 +532,54 @@ def test_range_low_maior_ou_igual_a_high_e_erro():
     graph = mpc_graph(node)
     tags = mpc_tags(node)
     assert has(errors_of(graph, tags), "co_a", "range.low < range.high")
+
+
+def test_dv_range_valido_aprova():
+    node = mpc_node(dvs=[dv("a", range={"low": 20.0, "high": 80.0})])
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert not has(errors_of(graph, tags), "dv_a", "range.low < range.high")
+
+
+def test_dv_range_low_maior_que_high_e_erro():
+    node = mpc_node(dvs=[dv("a", range={"low": 100.0, "high": 0.0})])
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert has(errors_of(graph, tags), "dv_a", "range.low < range.high")
+
+
+def test_dv_range_low_igual_a_high_e_erro():
+    """Mesmo comportamento de `test_range_low_maior_ou_igual_a_high_e_erro`: `_less_than`
+    reprova low == high, e a DV replica a regra da Restrição sem "melhorá-la"."""
+    node = mpc_node(dvs=[dv("a", range={"low": 50.0, "high": 50.0})])
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert has(errors_of(graph, tags), "dv_a", "range.low < range.high")
+
+
+def test_dv_sem_range_aprova():
+    node = mpc_node(dvs=[dv("a")])
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    assert result_of(graph, tags).errors == []
+
+
+def test_dv_range_valido_nao_afeta_validacao_de_mv_cv_restricao():
+    """Não-regressão: MV/CV/Restrição continuam reprovando pelos próprios critérios depois
+    que o loop de DVs entra em `_check_mpc_numbers` — sem efeito colateral cruzado."""
+    node = mpc_node(
+        mvs=[mv("a", limits={"min": 50.0, "max": 50.0})],
+        cvs=[cv("a", sp_limits={"min": 100.0, "max": 100.0})],
+        constraints=[co("a", range={"low": 50.0, "high": 50.0})],
+        dvs=[dv("a", range={"low": 20.0, "high": 80.0})],
+    )
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    errors = errors_of(graph, tags)
+    assert has(errors, "mv_a", "limits.min < limits.max")
+    assert has(errors, "cv_a", "sp_limits.min < sp_limits.max")
+    assert has(errors, "co_a", "range.low < range.high")
+    assert not has(errors, "dv_a", "range.low < range.high")
 
 
 def test_du_max_zero_e_erro():

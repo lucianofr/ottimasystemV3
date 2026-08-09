@@ -273,9 +273,13 @@ class Supervisor:
             if runtime is None:
                 await self._spawn(config)
             elif runtime.config.session_key != config.session_key:
-                # Campo da conexão mudou: a sessão asyncua não é reconfigurável.
+                # Campo da conexão mudou: a sessão asyncua não é reconfigurável. A falha
+                # pendente atravessa a troca — quem resolve a causa editando a conexão
+                # (confiar no certificado, reinformar a senha) precisa ver o `comm_restored`
+                # quando a sessão nova sobe, senão a tela fica presa no alarme antigo.
+                pendente = runtime.failure_pending
                 await self._teardown(conn_id)
-                await self._spawn(config)
+                await self._spawn(config, failure_pending=pendente)
             elif runtime.config.tags_key != config.tags_key:
                 # Só o conjunto de tags mudou: troca a subscription sem derrubar a sessão.
                 await runtime.apply_tags(config.tags)
@@ -292,7 +296,7 @@ class Supervisor:
         )
         return configs[:MAX_CONNECTIONS]
 
-    async def _spawn(self, config: ConnectionConfig) -> None:
+    async def _spawn(self, config: ConnectionConfig, *, failure_pending: bool = False) -> None:
         snapshot = ConnectionSnapshot(name=config.name)
         runtime = ConnectionRuntime(
             config,
@@ -300,6 +304,7 @@ class Supervisor:
             snapshot,
             certs_dir=self._certs_dir,
             fernet_key=self._fernet_key,
+            failure_pending=failure_pending,
         )
         self._runtimes[config.id] = runtime
         self._state.connections[config.id] = snapshot

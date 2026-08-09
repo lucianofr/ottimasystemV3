@@ -156,6 +156,7 @@ def _grafo_overrun(admin: httpx.Client, ambiente: AmbienteMpc, *, mpc_id: str = 
 # --------------------------------------------------------------------------------------
 
 
+@pytest.mark.rnf09
 def test_e2e_f4_06_overrun_mantem_mv_e_alarme(
     admin: httpx.Client,
     ambiente_mpc: AmbienteMpc,
@@ -223,7 +224,10 @@ def test_e2e_f4_06_overrun_mantem_mv_e_alarme(
         )
 
     assert evento["severity"] == "warning"
-    assert evento["payload"] == {"kind": KIND_MPC_OVERRUN}
+    assert set(evento["payload"]) == {"kind", "overruns"}
+    assert evento["payload"]["kind"] == KIND_MPC_OVERRUN
+    assert isinstance(evento["payload"]["overruns"], int)
+    assert evento["payload"]["overruns"] >= 1
 
     # MV congelada: `initial_value=0.0` o tempo todo — mesmo nas amostras rotuladas "ok"
     # pelo defeito acima, a MV nunca se move (a prova física independe do rótulo).

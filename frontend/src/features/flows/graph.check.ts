@@ -6,16 +6,20 @@ import {
   criarBloco,
   deGraphJson,
   definirExecOrder,
+  euDaPortaDeEntrada,
   handlesEntrada,
   handlesSaida,
+  matrizPadrao,
   motivoRecusa,
   paraGraphJson,
   podarArestasDoBloco,
+  podarOutputEuScript,
   proximaPosicaoNaGrade,
   proximoExecOrder,
   tipoPorta,
   type BlocoEdge,
   type BlocoNode,
+  type FaixaMpc,
   type MapaTags,
 } from "./graph";
 
@@ -47,7 +51,7 @@ function script(id: string, ordem: number, entradas = 1, saidas = 1): BlocoNode 
     id,
     type: "script",
     position: POS,
-    data: { exec_order: ordem, label: "", n_inputs: entradas, n_outputs: saidas, code: "" },
+    data: { exec_order: ordem, label: "", n_inputs: entradas, n_outputs: saidas, code: "", output_eu: {} },
   };
 }
 
@@ -108,8 +112,8 @@ function variavelRestricao(id: string, name: string, eu: string) {
   };
 }
 
-function variavelDv(id: string, name: string, eu: string) {
-  return { id, name, eu };
+function variavelDv(id: string, name: string, eu: string, range: FaixaMpc | null = null) {
+  return { id, name, eu, range };
 }
 
 function aresta(
@@ -377,8 +381,8 @@ test("data sai com exatamente as chaves do contrato, uma lista por tipo", () => 
   expect(chaves).toEqual([
     ["exec_order", "label", "tag_id"],
     ["exec_order", "label", "tag_id"],
-    ["code", "exec_order", "label", "n_inputs", "n_outputs"],
-    ["exec_order", "label", "matrix"],
+    ["code", "exec_order", "label", "n_inputs", "n_outputs", "output_eu"],
+    ["exec_order", "label", "matrix", "output_eu"],
     ["exec_order", "label", "models", "multiplier", "name", "variables"],
   ]);
 });
@@ -425,6 +429,45 @@ test("ida e volta pelo graph_json preserva o grafo", () => {
   const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson(nodes, edges))));
   expect(volta.nodes).toEqual(nodes);
   expect(volta.edges).toEqual(edges);
+});
+
+test("ida e volta pelo graph_json preserva output_eu do Script e do TFS (spec §4.1)", () => {
+  const nodes: BlocoNode[] = [
+    {
+      id: "s",
+      type: "script",
+      position: POS,
+      data: { exec_order: 1, label: "", n_inputs: 1, n_outputs: 2, code: "", output_eu: { OUT1: "t/h" } },
+    },
+    {
+      id: "t",
+      type: "tfs",
+      position: { x: 300, y: 20 },
+      data: { exec_order: 2, label: "", matrix: matrizPadrao(), output_eu: { y1: "C" } },
+    },
+  ];
+  const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson(nodes, []))));
+  expect(volta.nodes).toEqual(nodes);
+});
+
+test("nó Script/TFS salvo antes da F6, sem output_eu, carrega com {} (compatibilidade retroativa)", () => {
+  const grafo = deGraphJson({
+    nodes: [
+      {
+        id: "s",
+        type: "script",
+        position: POS,
+        data: { exec_order: 1, label: "", n_inputs: 1, n_outputs: 1, code: "" },
+      },
+      { id: "t", type: "tfs", position: POS, data: { exec_order: 2, label: "", matrix: matrizPadrao() } },
+    ],
+    edges: [],
+  });
+  const s = grafo.nodes.find((no) => no.id === "s");
+  const t = grafo.nodes.find((no) => no.id === "t");
+  if (s?.type !== "script" || t?.type !== "tfs") throw new Error("tipos preservados");
+  expect(s.data.output_eu).toEqual({});
+  expect(t.data.output_eu).toEqual({});
 });
 
 test("ida e volta pelo graph_json preserva o nó mpc com config completo (mvs com pid, cvs, constraints, dvs, models)", () => {
@@ -507,4 +550,121 @@ test("reconfigurar sem mexer nas portas não derruba nada", () => {
   expect(podarArestasDoBloco(edges, tfs("t", 1))).toEqual(edges);
   expect(podarArestasDoBloco(edges, escrita("w", 2, 42))).toEqual(edges);
   expect(podarArestasDoBloco(edges, leitura("r", 3, 41))).toEqual(edges);
+});
+
+// --------------------------------------------------------------------------------------
+// Poda de output_eu ao reduzir n_outputs (spec §4.1-6)
+// --------------------------------------------------------------------------------------
+
+test("reduzir n_outputs de 3 para 2 descarta a EU de OUT3 (servidor recusaria com 422)", () => {
+  expect(podarOutputEuScript({ OUT1: "t/h", OUT2: "bar", OUT3: "C" }, 2)).toEqual({
+    OUT1: "t/h",
+    OUT2: "bar",
+  });
+});
+
+test("aumentar n_outputs preserva as EUs existentes sem inventar a da porta nova", () => {
+  expect(podarOutputEuScript({ OUT1: "t/h" }, 3)).toEqual({ OUT1: "t/h" });
+});
+
+test("zerar n_outputs descarta toda EU do Script", () => {
+  expect(podarOutputEuScript({ OUT1: "t/h", OUT2: "bar" }, 0)).toEqual({});
+});
+
+// --------------------------------------------------------------------------------------
+// EU herdada por porta de entrada (spec §4.1-5, tarefa 5.2)
+// --------------------------------------------------------------------------------------
+
+test("entrada ligada à saída com EU declarada herda a EU da origem", () => {
+  const edges = [aresta("e1", "a", "OUT1", "b", "IN1")];
+  const output_eu_por_no = new Map([["a", { OUT1: "t/h" }]]);
+  expect(euDaPortaDeEntrada(edges, output_eu_por_no, "b", "IN1")).toBe("t/h");
+});
+
+test("entrada solta (sem aresta chegando) não herda nada", () => {
+  expect(euDaPortaDeEntrada([], new Map(), "b", "IN1")).toBeNull();
+});
+
+test("origem sem EU declarada para a porta (chave ausente ou vazia) devolve null", () => {
+  const edges = [aresta("e1", "a", "OUT1", "b", "IN1"), aresta("e2", "c", "OUT2", "d", "IN1")];
+  const output_eu_por_no = new Map<string, Record<string, string>>([
+    ["a", {}], // Script sem nenhuma EU declarada
+    ["c", { OUT2: "" }], // porta com EU explicitamente vazia (mesmo default de Tag.eu)
+  ]);
+  expect(euDaPortaDeEntrada(edges, output_eu_por_no, "b", "IN1")).toBeNull();
+  expect(euDaPortaDeEntrada(edges, output_eu_por_no, "d", "IN1")).toBeNull();
+});
+
+test("resolve só um nível: EU atravessando um Script intermediário sem EU própria não propaga (spec §4.1-6)", () => {
+  // a(OUT1 = "t/h") -> b(IN1 herda "t/h", mas o OUT1 de b não declara nada) -> c(IN1)
+  const edges = [aresta("e1", "a", "OUT1", "b", "IN1"), aresta("e2", "b", "OUT1", "c", "IN1")];
+  const output_eu_por_no = new Map<string, Record<string, string>>([
+    ["a", { OUT1: "t/h" }],
+    ["b", {}], // b não repete a EU herdada na própria saída — §4.1-6, sem propagação automática
+  ]);
+  expect(euDaPortaDeEntrada(edges, output_eu_por_no, "b", "IN1")).toBe("t/h");
+  expect(euDaPortaDeEntrada(edges, output_eu_por_no, "c", "IN1")).toBeNull();
+});
+
+test("resolve pela combinação exata nó+handle: outra entrada do mesmo nó, ou o mesmo handle de outro nó, não interferem", () => {
+  const edges = [aresta("e1", "a", "OUT1", "b", "IN1"), aresta("e2", "a", "OUT2", "b", "IN2")];
+  const output_eu_por_no = new Map([["a", { OUT1: "t/h", OUT2: "bar" }]]);
+  expect(euDaPortaDeEntrada(edges, output_eu_por_no, "b", "IN1")).toBe("t/h");
+  expect(euDaPortaDeEntrada(edges, output_eu_por_no, "b", "IN2")).toBe("bar");
+  expect(euDaPortaDeEntrada(edges, output_eu_por_no, "z", "IN1")).toBeNull();
+});
+
+// --------------------------------------------------------------------------------------
+// range opcional da DV (spec §4.2, tarefa 5.3) — VariavelDv.range: FaixaMpc | null
+// --------------------------------------------------------------------------------------
+
+test("ida e volta pelo graph_json preserva o range da DV quando declarado", () => {
+  const no = mpc("m", 1, {
+    variables: {
+      mvs: [],
+      cvs: [],
+      constraints: [],
+      dvs: [variavelDv("dv_1", "Vazão de carga", "m3/h", { low: 0, high: 10 })],
+    },
+  });
+  const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson([no], []))));
+  expect(volta.nodes).toEqual([no]);
+});
+
+test("DV sem range fica com null explícito na ida e volta (padrão de DV nova)", () => {
+  const no = mpc("m", 1, {
+    variables: { mvs: [], cvs: [], constraints: [], dvs: [variavelDv("dv_1", "Vazão de carga", "m3/h")] },
+  });
+  const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson([no], []))));
+  if (volta.nodes[0]?.type !== "mpc") throw new Error("tipo preservado");
+  expect(volta.nodes[0].data.variables.dvs).toEqual([{ id: "dv_1", name: "Vazão de carga", eu: "m3/h", range: null }]);
+});
+
+test("DV salva antes da F6, sem a chave range, carrega com null (compatibilidade retroativa)", () => {
+  const grafo = deGraphJson({
+    nodes: [
+      {
+        id: "m",
+        type: "mpc",
+        position: POS,
+        data: {
+          exec_order: 1,
+          label: "",
+          name: "",
+          multiplier: 1,
+          variables: {
+            mvs: [],
+            cvs: [],
+            constraints: [],
+            dvs: [{ id: "dv_1", name: "Vazão de carga", eu: "m3/h" }],
+          },
+          models: {},
+        },
+      },
+    ],
+    edges: [],
+  });
+  const no = grafo.nodes.find((n) => n.id === "m");
+  if (no?.type !== "mpc") throw new Error("tipo preservado");
+  expect(no.data.variables.dvs).toEqual([{ id: "dv_1", name: "Vazão de carga", eu: "m3/h", range: null }]);
 });

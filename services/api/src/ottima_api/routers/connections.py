@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from ottima_api.deps import get_app_settings, get_db, get_redis, require_admin, require_operator
+from ottima_api.messages import MSG_PROJETO_NAO_ENCONTRADO
 from ottima_core.bus import (
     KIND_CONNECTION_CREATED,
     KIND_CONNECTION_DELETED,
@@ -145,7 +146,7 @@ async def create_connection(
     redis_client: Redis = Depends(get_redis),
 ) -> ConnectionOut:
     if await db.get(Project, body.project_id) is None:
-        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+        raise HTTPException(status_code=404, detail=MSG_PROJETO_NAO_ENCONTRADO)
     n = await db.scalar(
         select(func.count())
         .select_from(OpcConnection)

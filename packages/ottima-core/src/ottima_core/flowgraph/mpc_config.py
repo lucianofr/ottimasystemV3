@@ -133,6 +133,7 @@ class DvVar(BaseModel):
     id: str
     name: str
     eu: str
+    range: Range | None = None
 
     @field_validator("id")
     @classmethod

@@ -114,9 +114,15 @@ export function MpcModal({
   function aplicar(evento: FormEvent<HTMLFormElement>): void {
     evento.preventDefault();
     const campos = new FormData(evento.currentTarget);
-    const label = String(campos.get("label") ?? "").trim();
+    // Campo AUSENTE do FormData ≠ campo vazio: `mpc_name` mora na aba Geral, que é desmontada
+    // ao trocar de aba (nota abaixo), então Aplicar a partir de Variáveis/Modelos/… mandava
+    // `name: ""` e apagava o nome do MPC no grafo. `exec_order` já tratava isso pelo padrão do
+    // `inteiroDoCampo`; texto passa a seguir a mesma regra — só o campo montado pode limpar.
+    const texto = (campo: string, atual: string): string =>
+      campos.has(campo) ? String(campos.get(campo) ?? "").trim() : atual;
+    const label = texto("label", no.data.label);
     const execOrder = inteiroDoCampo(campos.get("exec_order"), no.data.exec_order, 1, totalBlocos);
-    const name = String(campos.get("mpc_name") ?? "").trim();
+    const name = texto("mpc_name", no.data.name);
     const novasVariaveis = variaveisDoFormulario(variaveis, campos);
     const novosModelos = modelosDoFormulario(novasVariaveis, modelos, campos);
 

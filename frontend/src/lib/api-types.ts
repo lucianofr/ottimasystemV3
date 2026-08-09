@@ -11,8 +11,32 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Health */
+        /**
+         * Health
+         * @description Sempre 200: a degradação vai no corpo (spec §3.3-3).
+         */
         get: operations["health_api_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/health/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health Workers
+         * @description Agrega os 3 workers em paralelo, 1 thread cada (F5R-09: urllib stdlib, sem httpx em
+         *     produção).
+         */
+        get: operations["health_workers_api_health_workers_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -150,6 +174,53 @@ export interface paths {
          *     é o ativo continua respondendo 200 com o projeto, mas **não** republica o evento.
          */
         post: operations["activate_project_api_projects__project_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Project
+         * @description Arquivo de projeto (bundle) para portabilidade entre instalações (spec §3.1).
+         *
+         *     `require_admin`: mesmo sem segredos, o bundle revela a topologia OPC completa da
+         *     planta (RF-102, PRD §2). Exporta **qualquer** projeto por id, não só o ativo.
+         */
+        get: operations["export_project_api_projects__project_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Project
+         * @description Import de projeto (spec §3.2, RF-103): quatro camadas de validação, a maioria em
+         *     memória e antes de qualquer insert. As duas exceções — nome de projeto duplicado (só o
+         *     banco responde) e a camada 4 (que precisa dos ids gerados pelo insert de conexões/tags
+         *     para traduzir o grafo) — inserem via `flush()` e desfazem com `rollback()` se falharem;
+         *     o `commit()` só acontece depois que as quatro camadas passam.
+         */
+        post: operations["import_project_api_projects_import_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -747,7 +818,7 @@ export interface components {
         };
         /**
          * DvOut
-         * @description Projeção de uma DV do bloco (spec §4.1-1).
+         * @description Projeção de uma DV do bloco (spec §4.1-1) — `range` opcional (§4.2, RF-702).
          */
         DvOut: {
             /** Id */
@@ -756,6 +827,7 @@ export interface components {
             name: string;
             /** Eu */
             eu: string;
+            range?: components["schemas"]["Range"] | null;
         };
         /** EventOut */
         EventOut: {
@@ -861,6 +933,27 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HealthOut
+         * @description Forma de `/health` (spec §3.3): as 5 chaves sempre presentes, tipadas para o OpenAPI
+         *     carregar `redis_ok`/`db_ok` — antes a rota devolvia `dict` cru e o gerador de contratos
+         *     (`frontend/openapi.json`/`api-types.ts`, tarefa 6.1) não tinha como nomear os campos.
+         */
+        HealthOut: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "degraded";
+            /** Service */
+            service: string;
+            /** Version */
+            version: string;
+            /** Redis Ok */
+            redis_ok: boolean;
+            /** Db Ok */
+            db_ok: boolean;
         };
         /** HistoryResponse */
         HistoryResponse: {
@@ -1035,6 +1128,20 @@ export interface components {
             /** Du Max */
             du_max: number;
         };
+        /**
+         * PendingSecretOut
+         * @description Pendência de segredo de uma conexão importada (spec F6 §3.2-8, decisão A-4).
+         */
+        PendingSecretOut: {
+            /** Connection Name */
+            connection_name: string;
+            /** Needs Password */
+            needs_password: boolean;
+            /** Needs Server Certificate */
+            needs_server_certificate: boolean;
+            /** Needs App Certificate */
+            needs_app_certificate: boolean;
+        };
         /** ProjectCreate */
         ProjectCreate: {
             /** Name */
@@ -1044,6 +1151,12 @@ export interface components {
              * @default
              */
             description: string;
+        };
+        /** ProjectImportOut */
+        ProjectImportOut: {
+            project: components["schemas"]["ProjectOut"];
+            /** Pending Secrets */
+            pending_secrets: components["schemas"]["PendingSecretOut"][];
         };
         /** ProjectOut */
         ProjectOut: {
@@ -1255,6 +1368,26 @@ export interface components {
 export type $defs = Record<string, never>;
 export interface operations {
     health_api_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthOut"];
+                };
+            };
+        };
+    };
+    health_workers_api_health_workers_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1652,6 +1785,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_project_api_projects__project_id__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_project_api_projects_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Name */
+                    name?: string | null;
+                    /** Bundle */
+                    bundle: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectImportOut"];
                 };
             };
         };

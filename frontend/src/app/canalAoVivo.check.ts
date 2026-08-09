@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { CODIGO_SESSAO_INVALIDA, type AmbienteAoVivo } from "../features/flows/useFlowStatus";
+import { CODIGO_SESSAO_INVALIDA, type AmbienteAoVivo } from "../features/flows/canalPrimitivos";
 import {
   abrirCanalSessao,
   analisarMensagemCanal,
@@ -15,6 +15,7 @@ import {
   type RegistroInteresses,
 } from "./CanalAoVivo";
 import { resolverAlarmes, type CondicaoAtiva } from "./alarmes";
+import { criarRelogioAlarmes, INTERVALO_TIQUE_ALARMES_MS, type AmbienteRelogio } from "./useRelogioAlarmes";
 
 /** O `Location` do browser tem muito mais superfície do que a URL do WS precisa. */
 function origem(protocol: string, host: string): Location {
@@ -694,4 +695,104 @@ test("ciclo completo (WS real, não sintético): evento ativa/assina, estado con
   );
   varredura();
   expect(b.sockets[0].enviados).toEqual(['{"subscribe":{"mpc_state":["1/mpc"]}}']);
+});
+
+// ----------------------------------------------------------------------------------------
+// Relógio de alarmes (tarefa 6.1, spec F6 §6.6-1; débito 1 de frontend da F5; RF-705): tique
+// de 5 s que reavalia a família TTL de `resolverAlarmes` sem bumpar `EstadoContext`
+// ----------------------------------------------------------------------------------------
+
+/** Dublê de `AmbienteRelogio`: o intervalo NUNCA dispara sozinho — quem decide quando
+ *  "5 s se passaram" é o teste, via `avancar` (mesma razão de `SocketFalso`/`bancada`
+ *  acima: um teste de TTL de 60 s não pode esperar 60 s de verdade, `agendar`/`cancelar`
+ *  registrados aqui do jeito que `window.setInterval`/`clearInterval` fariam). */
+function relogioFalso(inicio = new Date("2026-01-01T00:00:00.000Z")) {
+  let agoraAtual = inicio;
+  let capturado: { acao: () => void; intervaloMs: number } | null = null;
+  const cancelados: number[] = [];
+  const ID = 1;
+
+  const ambiente: AmbienteRelogio = {
+    agora: () => agoraAtual,
+    agendar: (acao, intervaloMs) => {
+      capturado = { acao, intervaloMs };
+      return ID;
+    },
+    cancelar: (id) => cancelados.push(id),
+  };
+
+  return {
+    ambiente,
+    cancelados,
+    intervaloRegistradoMs: () => capturado?.intervaloMs ?? null,
+    /** Simula `ms` se passando: avança o relógio simulado e, se um tique estiver agendado,
+     *  dispara a ação registrada — do jeito que `window.setInterval` dispararia de verdade. */
+    avancar(ms: number): void {
+      agoraAtual = new Date(agoraAtual.getTime() + ms);
+      capturado?.acao();
+    },
+  };
+}
+
+
+test("relógio: desmontar cancela exatamente o intervalo agendado — sem vazamento entre montagens", () => {
+  const f = relogioFalso();
+  const ciclo = criarRelogioAlarmes(() => {}, f.ambiente);
+
+  ciclo.desmontar();
+
+  expect(f.cancelados).toEqual([1]);
+});
+
+test("TTL (mpc_arm_failed) cessa sozinho depois da janela de 60 s guiado só pelo tique — zero mensagens novas no meio", () => {
+  const b = bancada();
+  b.abrir();
+  b.sockets[0].abrir();
+
+  const f = relogioFalso(new Date("2026-01-01T00:00:00.000Z"));
+  const instantes: Date[] = [];
+  const ciclo = criarRelogioAlarmes((agora) => instantes.push(agora), f.ambiente);
+
+  b.sockets[0].receber(
+    envelope("events", {
+      ts: f.ambiente.agora().toISOString(),
+      severity: "alarm",
+      origin: "flow:1/block:mpc",
+      message: "armar rejeitado: worker não pronto",
+      payload: { kind: "mpc_arm_failed" },
+    }),
+  );
+
+  // 55 s depois (11 tiques de 5 s), ainda dentro da janela de 60 s: continua ativa.
+  for (let i = 0; i < 11; i++) f.avancar(INTERVALO_TIQUE_ALARMES_MS);
+  expect(
+    resolverAlarmes(b.estado().eventos, b.estado().flowStatus, b.estado().mpcStates, instantes.at(-1)!),
+  ).toHaveLength(1);
+
+  // Mais 2 tiques (65 s decorridos no total — folga sobre os 60 s exatos, cobre o "relógio
+  // avançado 61 s" do brief): a janela fechou, e NENHUM evento novo chegou no meio.
+  f.avancar(INTERVALO_TIQUE_ALARMES_MS);
+  f.avancar(INTERVALO_TIQUE_ALARMES_MS);
+  expect(
+    resolverAlarmes(b.estado().eventos, b.estado().flowStatus, b.estado().mpcStates, instantes.at(-1)!),
+  ).toEqual([]);
+
+  ciclo.desmontar();
+});
+
+test("relógio: o `estado` do canal (o `value` de `EstadoContext.Provider`) é o mesmo objeto antes e depois do tique — nada aqui chama `setEstado`", () => {
+  const b = bancada();
+  b.abrir();
+  b.sockets[0].abrir();
+  b.sockets[0].receber(envelope("events", EVENTO));
+  const estadoAntes = b.estado();
+
+  const f = relogioFalso();
+  const ciclo = criarRelogioAlarmes(() => {}, f.ambiente);
+  f.avancar(INTERVALO_TIQUE_ALARMES_MS);
+  f.avancar(INTERVALO_TIQUE_ALARMES_MS);
+  f.avancar(INTERVALO_TIQUE_ALARMES_MS);
+
+  expect(b.estado()).toBe(estadoAntes);
+  ciclo.desmontar();
 });

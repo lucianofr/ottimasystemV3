@@ -22,6 +22,12 @@
   --color-pen-4: oklch(0.78 0.09 330); /* magenta */
   --color-pen-5: oklch(0.75 0.06 55); /* castanho */
   --color-pen-6: oklch(0.80 0.02 250); /* cinza neutro */
+  /* §6.6-5: teto de 8 penas do trend de operação (trendOperacao.ts, TETO_PENAS_OPERACAO)
+     tinha só 6 cores — as 7ª/8ª colidiam. Duas novas, dessaturadas, na mesma família, com
+     matiz longe de severidade e do Azul Único (justificativa e distância OKLab no relatório
+     da tarefa 6.5). */
+  --color-pen-7: oklch(0.83 0.06 211); /* teal acinzentado */
+  --color-pen-8: oklch(0.83 0.08 293); /* lilás-azulado */
 
   --font-sans: "Archivo", system-ui, sans-serif;
   --font-label: "Archivo Narrow", "Archivo", sans-serif;

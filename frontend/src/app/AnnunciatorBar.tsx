@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { resolverAlarmes, type CondicaoAtiva } from "./alarmes";
 import { useCanalAoVivo } from "./CanalAoVivo";
+import { useRelogioAlarmes } from "./useRelogioAlarmes";
 
 /** Triângulo de alerta reaproveitado dos demais estados de falha da UI (mesmo path de
  *  `ConnectionsPage.tsx`/`FlowsPage.tsx`) — cor muda por severidade (`text-alarm`/`text-warn`),
@@ -60,13 +61,21 @@ function BadgeContagem({ severidade, total }: { severidade: CondicaoAtiva["sever
  *  Colapsada em 1 linha quando não há condição ativa. Com condições: contagem por severidade
  *  sempre visível + lista expansível (cor + ícone + texto por item — Regra do Canal
  *  Redundante); qualquer clique (resumo ou item) navega a `/eventos` — sem ACK, a única ação
- *  disponível numa condição ativa é ver o log completo (ADR-020). */
+ *  disponível numa condição ativa é ver o log completo (ADR-020).
+ *
+ *  `agora` vem de `useRelogioAlarmes` (tarefa 6.1, spec §6.6-1), não de `new Date()` direto
+ *  no corpo do componente: sem o tique, a família TTL (`mpc_arm_failed`) só reavaliaria
+ *  quando `eventos`/`flowStatus`/`mpcStates` mudassem — ou seja, nunca, numa tela silenciosa
+ *  depois do último evento. O tique é estado local deste componente (nunca do canal
+ *  compartilhado): um re-render aqui não alcança `TrendOperacao`, que mora em `<Outlet />`,
+ *  irmão desta faixa sob o mesmo `CanalAoVivoProvider` (`AppShell.tsx`). */
 export function AnnunciatorBar() {
   const { eventos, flowStatus, mpcStates } = useCanalAoVivo();
   const [expandida, setExpandida] = useState(false);
+  const agora = useRelogioAlarmes();
   const condicoes = useMemo(
-    () => resolverAlarmes(eventos, flowStatus, mpcStates, new Date()),
-    [eventos, flowStatus, mpcStates],
+    () => resolverAlarmes(eventos, flowStatus, mpcStates, agora),
+    [eventos, flowStatus, mpcStates, agora],
   );
 
   if (condicoes.length === 0) {

@@ -29,6 +29,7 @@ testpaths = ["packages", "services", "tests"]
 markers = [
   "e2e: testes end-to-end contra o stack docker compose (fora do run default)",
   "slow: testes de carga/desempenho (RNF-02) — fora do run default, rodados via -m slow",
+  "rnf09: suíte MPC↔TFS do aceite RNF-09 (ADR-022)",
 ]
 # --import-mode=importlib: os serviços têm tests/test_health.py homônimos sem __init__.py
 addopts = "-m 'not e2e and not slow' --import-mode=importlib"

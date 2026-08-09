@@ -59,10 +59,44 @@ function formulario(pares: Record<string, string>): FormData {
 }
 
 test("variavelDvDoFormulario lê nome/eu pelo id e cai no padrão quando ausente", () => {
-  const atual = { id: "dv_e5f6", name: "Vazão de carga", eu: "m3/h" };
+  const atual = { id: "dv_e5f6", name: "Vazão de carga", eu: "m3/h", range: null };
   const dados = formulario({ [nomeCampoVar("dv_e5f6", "name")]: "Nova DV" });
   const nova = variavelDvDoFormulario(atual, dados);
-  expect(nova).toEqual({ id: "dv_e5f6", name: "Nova DV", eu: "m3/h" });
+  expect(nova).toEqual({ id: "dv_e5f6", name: "Nova DV", eu: "m3/h", range: null });
+});
+
+test("variavelDvDoFormulario: os dois campos de faixa preenchidos montam o range (spec §4.2-5)", () => {
+  const atual = { id: "dv_e5f6", name: "Vazão de carga", eu: "m3/h", range: null };
+  const dados = formulario({
+    [nomeCampoVar("dv_e5f6", "range_low")]: "0",
+    [nomeCampoVar("dv_e5f6", "range_high")]: "100",
+  });
+  expect(variavelDvDoFormulario(atual, dados).range).toEqual({ low: 0, high: 100 });
+});
+
+test("variavelDvDoFormulario: os dois campos de faixa vazios (ou ausentes) devolvem range null", () => {
+  const comFaixa = { id: "dv_e5f6", name: "", eu: "", range: { low: 0, high: 100 } };
+  const dados = formulario({
+    [nomeCampoVar("dv_e5f6", "range_low")]: "  ",
+    [nomeCampoVar("dv_e5f6", "range_high")]: "",
+  });
+  expect(variavelDvDoFormulario(comFaixa, dados).range).toBeNull();
+});
+
+test("variavelDvDoFormulario: só um campo de faixa preenchido não deixa a faixa pela metade — o vazio cai no valor anterior (decisão desta tarefa, servidor recusaria faixa parcial)", () => {
+  const semFaixaAinda = { id: "dv_novo", name: "", eu: "", range: null };
+  const soLow = variavelDvDoFormulario(
+    semFaixaAinda,
+    formulario({ [nomeCampoVar("dv_novo", "range_low")]: "10" }),
+  );
+  expect(soLow.range).toEqual({ low: 10, high: 0 }); // sem faixa anterior, o vazio cai em 0
+
+  const comFaixaAnterior = { id: "dv_e5f6", name: "", eu: "", range: { low: 5, high: 50 } };
+  const soHigh = variavelDvDoFormulario(
+    comFaixaAnterior,
+    formulario({ [nomeCampoVar("dv_e5f6", "range_high")]: "80" }),
+  );
+  expect(soHigh.range).toEqual({ low: 5, high: 80 }); // low vazio preserva o low anterior
 });
 
 test("variavelMvDoFormulario sem pid devolve pid null mesmo com campos de pid no formulário", () => {

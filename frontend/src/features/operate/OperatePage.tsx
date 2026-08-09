@@ -2,11 +2,11 @@ import { Navigate, useParams } from "react-router";
 
 import { useAssinatura, useCanalAoVivo } from "../../app/CanalAoVivo";
 import { Card } from "../../components/ui/card";
-import type { MpcState } from "../../lib/contracts.gen";
 import { FaceplatePrincipal } from "./FaceplatePrincipal";
-import FaceplateVariavel, { type FaceplateVariavelProps } from "./FaceplateVariavel";
+import FaceplateVariavel from "./FaceplateVariavel";
+import { gradeDeVariaveis } from "./gradeVariaveis";
 import { TrendOperacao } from "./TrendOperacao";
-import { useMpcs, type MpcNodeOut } from "./useMpcs";
+import { useMpcs } from "./useMpcs";
 
 /**
  * Casca real da tela de operação (spec §7.4-1/2/3/5; RF-701/702): resolve o MPC de
@@ -18,75 +18,6 @@ import { useMpcs, type MpcNodeOut } from "./useMpcs";
  * o trend central com predição (Etapa 5) monta abaixo da fileira de faceplates.
  */
 
-/** Monta a lista de props de `FaceplateVariavel` na ordem fixada pelo spec (MV → CV →
- *  Restrição → DV) a partir de `GET /api/operate/mpcs` (definição) e `mpc.state.vars`
- *  (valor ao vivo). `modos` cai no default de partida do deploy (LOCAL/MAN) enquanto o
- *  primeiro `mpc.state` não chega — mantém todo campo de escrita desabilitado até então,
- *  nunca finge um modo que ainda não foi confirmado. */
-function gradeDeVariaveis(
-  mpc: MpcNodeOut,
-  mpcState: MpcState | undefined,
-  flowId: number,
-  blockId: string,
-): (FaceplateVariavelProps & { key: string })[] {
-  const modos = mpcState?.modes ?? { local_remote: "local" as const, man_auto: "man" as const };
-  const tsMpcSegundos = mpc.flow_ts_seconds * mpc.multiplier;
-  const comum = { flowId, blockId, tsMpcSegundos, modos };
-  return [
-    ...mpc.variables.mvs.map((mv) => ({
-      key: `mv-${mv.id}`,
-      tipo: "mv" as const,
-      definicao: {
-        id: mv.id,
-        name: mv.name,
-        eu: mv.eu,
-        limits: mv.limits,
-        sp_limits: null,
-        range: null,
-        du_max: mv.du_max,
-      },
-      valor: mpcState?.vars[mv.id],
-      ...comum,
-    })),
-    ...mpc.variables.cvs.map((cv) => ({
-      key: `cv-${cv.id}`,
-      tipo: "cv" as const,
-      definicao: {
-        id: cv.id,
-        name: cv.name,
-        eu: cv.eu,
-        limits: null,
-        sp_limits: cv.sp_limits,
-        range: null,
-        du_max: null,
-      },
-      valor: mpcState?.vars[cv.id],
-      ...comum,
-    })),
-    ...mpc.variables.constraints.map((restricao) => ({
-      key: `constraint-${restricao.id}`,
-      tipo: "constraint" as const,
-      definicao: {
-        id: restricao.id,
-        name: restricao.name,
-        eu: restricao.eu,
-        limits: null,
-        sp_limits: null,
-        range: restricao.range,
-        du_max: null,
-      },
-      valor: mpcState?.vars[restricao.id],
-      ...comum,
-    })),
-    ...mpc.variables.dvs.map((dv) => ({
-      key: `dv-${dv.id}`,
-      tipo: "dv" as const,
-      definicao: { id: dv.id, name: dv.name, eu: dv.eu, limits: null, sp_limits: null, range: null, du_max: null },
-      valor: mpcState?.vars[dv.id],
-      ...comum,
-    })),
-  ];
-}
 
 function OperacaoDoMpc({ flowId, blockId }: { flowId: number; blockId: string }) {
   const mpcs = useMpcs();

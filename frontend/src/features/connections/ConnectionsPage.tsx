@@ -1,12 +1,23 @@
-import { useState } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
+import { Link } from "react-router";
 
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { ApiError, type ConnectionOut } from "../../lib/api";
 import { useCanMutate } from "../auth/useAuth";
+import { ChapaCertificadoApp } from "../certificates/ChapaCertificadoApp";
+import { useAppCertificate } from "../certificates/useAppCertificate";
 import { ConnectionForm } from "./ConnectionForm";
-import { useActiveProject, useConnections, useDeleteConnection } from "./useConnections";
+import { EFEITO_PENDENCIA, pendenciasDaConexao, ROTULO_PENDENCIA } from "./pendencias";
+import { useConnections, useDeleteConnection } from "./useConnections";
+import { useActiveProject } from "../projects/useProjects";
 import { useLastConnectionState, type UltimoEstado } from "./useLastConnectionState";
+import {
+  certificadoExcedeLimite,
+  MAX_SERVER_CERT_BYTES,
+  useClearServerCertificate,
+  useTrustServerCertificate,
+} from "./useServerCertificate";
 
 const POLICY: Record<ConnectionOut["security_policy"], string> = {
   none: "Sem segurança",
@@ -37,6 +48,7 @@ const COLUNAS = [
   "Autenticação",
   "Watchdog",
   "Senha",
+  "Pendências",
   "Último estado",
 ] as const;
 
@@ -56,6 +68,54 @@ function CelulaWatchdog({ conexao }: { conexao: ConnectionOut }) {
       <span className="process-value">{conexao.watchdog_period_ms}</span>{" "}
       <span className="text-xs text-fg-muted">ms</span>
     </span>
+  );
+}
+
+/**
+ * Pendência de segredo derivável (spec §6.3, decisão A-4, UX-01, plano F6b tarefa 4.1): ícone +
+ * rótulo em Texto Secundário (`text-fg-muted`), NUNCA em cor de severidade. Pendência é estado
+ * de configuração, não advertência de processo — a Regra da Cor Anormal fica reservada à
+ * coluna "Último estado" (`conn-last-state`), o canal correto para a falha real. Os predicados
+ * vêm só de `pendenciasDaConexao` (tarefa 1.4); esta célula não reimplementa nenhum.
+ */
+function CelulaPendencias({
+  conexao,
+  appCertExiste,
+}: {
+  conexao: ConnectionOut;
+  appCertExiste: boolean | null;
+}) {
+  const pendencias = pendenciasDaConexao(conexao, appCertExiste);
+  if (pendencias.length === 0) {
+    return (
+      <span data-testid="conn-pendencias" className="text-fg-muted">
+        Nenhuma pendência
+      </span>
+    );
+  }
+  return (
+    <ul data-testid="conn-pendencias" className="space-y-0.5">
+      {pendencias.map((pendencia) => (
+        <li
+          key={pendencia}
+          data-testid={`conn-pendencia-${pendencia.replace(/_/g, "-")}`}
+          title={EFEITO_PENDENCIA[pendencia]}
+          className="flex items-center gap-1.5 text-fg-muted"
+        >
+          <svg
+            aria-hidden="true"
+            width="8"
+            height="8"
+            viewBox="0 0 10 10"
+            fill="currentColor"
+            className="shrink-0"
+          >
+            <circle cx="5" cy="5" r="4" />
+          </svg>
+          {ROTULO_PENDENCIA[pendencia]}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -85,6 +145,96 @@ function CelulaUltimoEstado({ estado }: { estado: UltimoEstado | undefined }) {
       </svg>
       {estado.rotulo}
     </span>
+  );
+}
+
+/**
+ * "Confiar certificado" / "Deixar de confiar" por linha (spec §6.2-2, RF-202, ADR-021,
+ * tarefa 3.2). O `<input type="file">` fica sempre no DOM assim que a linha renderiza — nunca
+ * atrás de um menu — porque o roteiro E2E (B-F6-04) sobe o arquivo direto nele. O fingerprint
+ * só existe no cliente depois de um trust bem-sucedido nesta sessão: a API devolve o
+ * `fingerprint_sha256` só de quem acabou de gravar, não há rota para reler o de um certificado
+ * já persistido (`ConnectionOut` só traz `server_cert_file`, o nome do arquivo).
+ */
+function CelulaCertificadoServidor({
+  conexao,
+  onErro,
+}: {
+  conexao: ConnectionOut;
+  onErro: (mensagem: string | null) => void;
+}) {
+  const confiar = useTrustServerCertificate();
+  const descartar = useClearServerCertificate();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [fingerprint, setFingerprint] = useState<string | null>(null);
+
+  async function selecionarArquivo(evento: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const arquivo = evento.target.files?.[0];
+    evento.target.value = ""; // permite reenviar o mesmo arquivo depois de um erro
+    if (!arquivo) return;
+    onErro(null);
+    if (certificadoExcedeLimite(arquivo.size)) {
+      const teto = String(MAX_SERVER_CERT_BYTES / 1024);
+      onErro(`Certificado maior que ${teto} KiB — o servidor recusaria; escolha um arquivo menor.`);
+      return;
+    }
+    try {
+      const resultado = await confiar.mutateAsync({ id: conexao.id, arquivo });
+      setFingerprint(resultado.fingerprint_sha256);
+    } catch (err) {
+      onErro(err instanceof ApiError ? err.message : "Erro de comunicação com o servidor");
+    }
+  }
+
+  async function descartarCertificado(): Promise<void> {
+    onErro(null);
+    try {
+      await descartar.mutateAsync(conexao.id);
+      setFingerprint(null);
+    } catch (err) {
+      onErro(err instanceof ApiError ? err.message : "Erro de comunicação com o servidor");
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <input
+        ref={inputRef}
+        type="file"
+        data-testid="cert-servidor-upload-input"
+        className="hidden"
+        onChange={(evento) => void selecionarArquivo(evento)}
+      />
+      {conexao.server_cert_file ? (
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="cert-servidor-descartar"
+          disabled={descartar.isPending}
+          onClick={() => void descartarCertificado()}
+        >
+          Deixar de confiar
+        </Button>
+      ) : (
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="cert-servidor-confiar"
+          disabled={confiar.isPending}
+          onClick={() => inputRef.current?.click()}
+        >
+          Confiar certificado
+        </Button>
+      )}
+      {fingerprint && (
+        <span
+          data-testid="cert-servidor-fingerprint"
+          className="process-value text-xs text-fg-muted"
+        >
+          {fingerprint}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -124,11 +274,18 @@ export function ConnectionsPage() {
   }
 
   const podeMutar = useCanMutate();
+  // GET /api/certificates/app é require_admin (certificates.py:25) — decisão de RBAC do
+  // preâmbulo do plano F6b, não reaberta aqui. Para o operador `appCertExiste` fica `null`
+  // ("não avaliável"), e o terceiro predicado simplesmente não aparece na célula.
+  const certificadoApp = useAppCertificate(podeMutar);
+  const appCertExiste = podeMutar ? (certificadoApp.data?.exists ?? null) : null;
   const linhas = conexoes.data ?? [];
-  const totalColunas = COLUNAS.length + (podeMutar ? 1 : 0);
+  const totalColunas = COLUNAS.length + (podeMutar ? 2 : 0);
 
   return (
     <section className="space-y-4">
+      <ChapaCertificadoApp conexoes={linhas} />
+
       <div className="flex items-center justify-between">
         <h1 className="plaqueta text-sm">Conexões</h1>
         {podeMutar && (
@@ -164,6 +321,11 @@ export function ConnectionsPage() {
                 </th>
               ))}
               {podeMutar && (
+                <th className="plaqueta px-3 py-2 text-left text-xs text-fg-muted">
+                  Certificado do servidor
+                </th>
+              )}
+              {podeMutar && (
                 <th className="px-3 py-2">
                   <span className="sr-only">Ações</span>
                 </th>
@@ -174,7 +336,11 @@ export function ConnectionsPage() {
             {projeto.isSuccess && projectId === null && (
               <tr>
                 <td colSpan={totalColunas} className="px-3 py-4 text-fg-muted">
-                  Nenhum projeto ativo: ative um projeto para cadastrar conexões.
+                  Nenhum projeto ativo:{" "}
+                  <Link to="/engenharia/projetos" className="text-accent hover:underline">
+                    ative um projeto
+                  </Link>{" "}
+                  para cadastrar conexões.
                 </td>
               </tr>
             )}
@@ -212,8 +378,16 @@ export function ConnectionsPage() {
                   {conexao.has_password ? "definida" : <span className="text-fg-muted">—</span>}
                 </td>
                 <td className="px-3 py-2">
+                  <CelulaPendencias conexao={conexao} appCertExiste={appCertExiste} />
+                </td>
+                <td className="px-3 py-2">
                   <CelulaUltimoEstado estado={estados.get(conexao.id)} />
                 </td>
+                {podeMutar && (
+                  <td className="px-3 py-2">
+                    <CelulaCertificadoServidor conexao={conexao} onErro={setErro} />
+                  </td>
+                )}
                 {podeMutar && (
                   <td className="px-3 py-2">
                     {aConfirmar === conexao.id ? (

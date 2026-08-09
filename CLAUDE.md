@@ -97,6 +97,9 @@ cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -
 # deploy/.env é obrigatório e gitignored. Se a 6379 já estiver ocupada por outro projeto da
 # máquina, defina OTTIMA_E2E_REDIS_PORT (ex.: 6399) — senão a L2 fala com o Redis do vizinho.
 # Rebuild de um serviço só: use --no-deps, senão `--build frontend` arrasta o `api` junto.
+# RNF-04/ADR-018: o flow-runtime NÃO recebe mais o `.env` inteiro — o `env_file` do
+# docker-compose.yml lista só OTTIMA_DATABASE_URL, OTTIMA_REDIS_URL e OTTIMA_LOG_LEVEL,
+# mantendo OTTIMA_SECRET_KEY/OTTIMA_FERNET_KEY fora do processo que executa o bloco Script.
 
 # Gate E2E — 3 camadas (docs/specs/F1-testes-e2e.md; F2 §11.2; F3 §7.2):
 OTTIMA_E2E=1 bash deploy/smoke.sh                   # L1 — stack, retenção, login, conexão up, boot parado
@@ -110,12 +113,15 @@ E2E_ADMIN_USERNAME=$(grep -m1 '^OTTIMA_ADMIN_USERNAME=' deploy/.env|cut -d= -f2-
 # F4: POST /api/operate/{flow_id}/{block_id}/mode|sp|mv publica FlowCommand (202); o runtime
 # materializa e audita — a API não emite evento (spec F4 §6.1).
 # F5: GET /api/history/mpc, GET /api/operate/mpcs, GET /api/health/workers (todas require_operator).
+# F6: GET /api/projects/{project_id}/export e POST /api/projects/import (ambas require_admin).
 # Envs novos: OTTIMA_HEALTH_URL_OPC_WORKER/_FLOW_RUNTIME/_RECORDER (defaults
 # http://opc-worker:8001/health, http://flow-runtime:8002/health, http://recorder:8003/health)
 # e OTTIMA_MPC_QUEUE_MAX (default 100000, teto do buffer de mpc_samples no recorder).
 # Telas da F5b (operador; admin herda): /operacao (seletor; 1 MPC redireciona direto),
 # /operacao/:flowId/:blockId (faceplate principal + faceplates de variável + trend com
 # predição) e /eventos. Nav do shell em dois grupos: Operação · Eventos | engenharia.
+# Grupo engenharia com 5 itens (F6b acrescentou a rota `/engenharia/projetos`, com
+# "Projetos" no início do grupo): Projetos, Conexões, Tags, Flows, Trend.
 # data-testid: operate-*, faceplate-*, eventos-*, home-* (o roteiro L3 depende deles).
 # Ambiente do L3: `uv run python scripts/setup-l3.py` (idempotente) cria projeto ativo,
 # conexão opcsim-l3, flow MPC↔TFS deployado e o usuário operador_e2e.

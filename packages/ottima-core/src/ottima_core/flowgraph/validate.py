@@ -575,6 +575,13 @@ def _check_mpc_numbers(node: FlowNode, config: MpcConfig, errors: list[str]) -> 
             errors.append(
                 f"nó '{node.id}' (mpc): a Restrição '{co_var.id}' precisa de range.low < range.high"
             )
+    for dv_var in variables.dvs:
+        if dv_var.range is None:
+            continue
+        if not _less_than(dv_var.range.low, dv_var.range.high):
+            errors.append(
+                f"nó '{node.id}' (mpc): a DV '{dv_var.id}' precisa de range.low < range.high"
+            )
 
 
 def _check_pid_tag(

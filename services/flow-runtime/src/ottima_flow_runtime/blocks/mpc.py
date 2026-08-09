@@ -459,7 +459,7 @@ class MpcBlock(Block):
             severity="warning",
             message=f"MPC '{self.block_id}': orçamento do solve estourado",
             kind=KIND_MPC_OVERRUN,
-            payload={},
+            payload={"overruns": self._overruns},
         )
 
     async def _report_solver_error(self, reason: str, detail: str) -> None:

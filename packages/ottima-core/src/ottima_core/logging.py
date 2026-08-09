@@ -9,11 +9,16 @@ from datetime import UTC, datetime
 class JsonFormatter(logging.Formatter):
     """Serializa cada registro como uma linha JSON com timestamp UTC."""
 
+    def __init__(self, service: str = "unknown") -> None:
+        super().__init__()
+        self._service = service
+
     def format(self, record: logging.LogRecord) -> str:
         entry = {
             "ts": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
+            "service": self._service,
             "message": record.getMessage(),
         }
         if record.exc_info:
@@ -21,10 +26,10 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(entry, ensure_ascii=False)
 
 
-def setup_logging(level: str = "INFO") -> None:
+def setup_logging(level: str = "INFO", service: str = "unknown") -> None:
     """Substitui os handlers do logger raiz por um único handler JSON em stdout."""
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter())
+    handler.setFormatter(JsonFormatter(service=service))
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level.upper())

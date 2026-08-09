@@ -1,10 +1,11 @@
 # PRD — OttimaSystem (reescrita, v1)
 
 **Produto:** OttimaSystem — plataforma on-premise de Controle Avançado de Processos (APC) com MPC
-**Versão do documento:** 1.3 · 2026-08-06 · **Status:** aprovado para implementação (F1 e F2 concluídas)
+**Versão do documento:** 1.4 · 2026-08-08 · **Status:** aprovado para implementação (F1-F5 concluídas)
 **Changelog 1.1:** adicionado o requisito de **ordem de execução explícita por bloco** (`exec_order`) — RF-307 e RF-401 revisados, ADR-024 criado (altera ADR-007). Sem impacto retroativo em F1/F2; efetivo a partir da F3.
 **Changelog 1.2:** payload do canal `flow.status.<flow_id>` estendido com `ports` (valores de porta por varredura, para o canvas ao vivo) — resolve a lacuna do RF-404, que exigia publicar valores de portas sem definir onde. Decisão aprovada no brainstorm da F3 (2026-08-04, `docs/specs/F3-motor-canvas.md` Anexo A-3).
 **Changelog 1.3:** payload do canal `mpc.state.<flow_id>.<block_id>` ganha `ts` e `prediction.ts`; consumidor `recorder` adicionado (§7.1); nova hypertable `MpcSample` (§4, retenção 1 mês, CAgg `mpc_samples_1m`); RF-703 passa a citar a fonte concreta (`mpc_samples`/`mpc_samples_1m`). PRD avança de 1.2 para v1.3 — decisão A-2 · F5R-01/11/26 (spec F5 §1.3-1, `docs/specs/F5-operacao.md`, 2026-08-06).
+**Changelog 1.4:** §7.2 (JSON de projeto) reescrito para espelhar o schema real do bundle de export/import (`ts_seconds`, `direction`, `security_*`/`watchdog_*` planos, `data_type`/`description` nas tags, `auth_mode`/`auth_username` nas conexões, `exported_at`, `desired_state`, `tag_ref` objeto no `graph`); **RF-102** deixa de amarrar o export ao projeto **ativo** e passa a exportar **um projeto** (por id); §7.1 remove `api(WS)` dos consumidores de `opc.values.<conn_id>`; §7.3 detalha o `/ws` como `flow.status`, `mpc.state`, `events`. PRD avança de 1.3 para v1.4 — decisão A-14 · F6R-02 · RFC-05/06 (spec F6 §2.1-4, `docs/specs/F6-portabilidade-hardening.md`, 2026-08-08).
 **Autor:** Luciano França Rocha (LFR Automação), consolidado em sessão de grilling
 **Documentos-irmãos (normativos):** `adr/ADR-001 … ADR-024` · `GLOSSARY.md`
 
@@ -79,7 +80,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 
 ### 5.2 Projetos
 - **RF-101** CRUD de projetos; N projetos armazenados, **apenas 1 ativo**; ativar um projeto encerra a execução do atual. (ADR-017)
-- **RF-102** **Export** do projeto ativo em **JSON** contendo flows + configurações (conexões OPC, tags) com `schema_version`; **sem dados históricos e sem segredos** (senhas/chaves re-informadas no import). (ADR-012, 021)
+- **RF-102** **Export** de **um projeto** (por id) em **JSON** contendo flows + configurações (conexões OPC, tags) com `schema_version`; **sem dados históricos e sem segredos** (senhas/chaves re-informadas no import). (ADR-012, 021)
 - **RF-103** **Import** de projeto JSON com validação de schema; import cria projeto inativo.
 - **RF-104** No boot do servidor, todos os flows sobem **parados**, aguardando deploy manual. (ADR-017)
 
@@ -169,7 +170,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 
 | Canal | Produtor | Consumidores | Payload (JSON) |
 |---|---|---|---|
-| `opc.values.<conn_id>` | opc-worker | flow-runtime, recorder, api(WS) | {tag_id, ts, value, quality} |
+| `opc.values.<conn_id>` | opc-worker | flow-runtime, recorder | {tag_id, ts, value, quality} |
 | `opc.writes` | flow-runtime, api | opc-worker | {conn_id, tag_id, value, source, ts} |
 | `flow.status.<flow_id>` | flow-runtime | api(WS) | {state, scan_ms, overruns, ts, ports{block_id→{porta:{v, ok}}}} |
 | `flow.commands` | api | flow-runtime | {flow_id, cmd, args, user, ts} |
@@ -178,18 +179,22 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 
 ### 7.2 JSON de projeto (export/import) (ADR-012)
 ```json
-{
-  "schema_version": 1,
-  "project": {"name": "...", "description": "..."},
-  "connections": [{"name": "...", "endpoint": "...", "security": {...}, "watchdog": {...}}],
-  "tags": [{"name": "...", "connection": "...", "node_id": "...", "dir": "R", "eu": "..."}],
-  "flows": [{"name": "...", "ts": 1, "graph": { /* React Flow: nodes[], edges[] */ }}]
-}
+{"schema_version": 1, "exported_at": "2026-08-07T21:40:00Z",
+ "project": {"name": "Planta C-101", "description": "Coluna debutanizadora"},
+ "connections": [{"name": "gateway-1", "endpoint": "opc.tcp://10.0.0.5:4840",
+   "security_policy": "basic256sha256", "security_mode": "sign_and_encrypt",
+   "auth_mode": "user_password", "auth_username": "ottima",
+   "watchdog_read_node_id": "ns=2;s=WD_R", "watchdog_write_node_id": "ns=2;s=WD_W",
+   "watchdog_period_ms": 1500}],
+ "tags": [{"connection": "gateway-1", "name": "TT-101", "node_id": "ns=2;s=TT101",
+   "direction": "r", "data_type": "float", "eu": "C", "description": "Temperatura de topo"}],
+ "flows": [{"name": "Coluna C-101", "ts_seconds": 1.0, "desired_state": "stopped",
+   "graph": {"nodes": [], "edges": []}}]}
 ```
-Sem segredos; credenciais re-informadas no import (RF-102/103).
+Nós do `graph` que referenciam tags (blocos `opc_read`/`opc_write` e variáveis do MPC) usam o objeto `tag_ref: {"connection": "...", "tag": "..."}` em vez de id numérico interno — omitido no exemplo acima (`graph` vazio, por brevidade). Sem segredos; credenciais re-informadas no import (RF-102/103).
 
 ### 7.3 API (grupos)
-`/auth` · `/users` · `/projects` (+ `/activate`, `/export`, `/import`) · `/connections` (+ certificados) · `/tags` · `/flows` (+ `/deploy`, `/stop`) · `/operate` (modos, SP, MV) · `/history` · `/events` · `/ws` (valores, mpc.state, flow.status, events).
+`/auth` · `/users` · `/projects` (+ `/activate`, `/export`, `/import`) · `/connections` (+ certificados) · `/tags` · `/flows` (+ `/deploy`, `/stop`) · `/operate` (modos, SP, MV) · `/history` · `/events` · `/ws` (flow.status, mpc.state, events).
 
 ## 8. Fases de implementação e critérios de aceite
 

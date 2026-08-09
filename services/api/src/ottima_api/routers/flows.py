@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_api.deps import get_db, get_redis, require_admin, require_operator
-from ottima_api.messages import MSG_FLOW_NAO_ENCONTRADO
+from ottima_api.messages import MSG_FLOW_NAO_ENCONTRADO, MSG_PROJETO_NAO_ENCONTRADO
 from ottima_core.bus import (
     CHANNEL_FLOW_COMMANDS,
     KIND_FLOW_CREATED,
@@ -131,7 +131,7 @@ async def create_flow(
 ) -> Flow:
     """Flow nasce parado (ADR-017) e com grafo vazio; o desenho chega pelo PUT."""
     if await db.get(Project, body.project_id) is None:
-        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+        raise HTTPException(status_code=404, detail=MSG_PROJETO_NAO_ENCONTRADO)
     flow = Flow(**body.model_dump(), graph_json={"nodes": [], "edges": []})
     db.add(flow)
     try:

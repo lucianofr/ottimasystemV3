@@ -32,6 +32,14 @@ function lerFaixaMpc(bruto: unknown): FaixaMpc {
   return { low: numero(cru.low, 0), high: numero(cru.high, 0) };
 }
 
+/** `range` da DV é opcional (spec §4.2-2), ao contrário do de Restrição: `null` explícito,
+ *  ausente, ou qualquer valor que não seja objeto viram `null` — DV salva antes da F6 carrega
+ *  sem faixa (compatibilidade retroativa), igual à leitura de `output_eu` em `graph.ts`. */
+function lerFaixaMpcOuNull(bruto: unknown): FaixaMpc | null {
+  const cru = objeto(bruto);
+  return cru === null ? null : { low: numero(cru.low, 0), high: numero(cru.high, 0) };
+}
+
 function lerModoValoresMpc(bruto: unknown): ValoresModoPid {
   const cru = objeto(bruto) ?? {};
   return { auto: inteiroSimples(cru.auto, 0), target: inteiroSimples(cru.target, 0) };
@@ -108,7 +116,12 @@ function lerVariavelDv(bruto: unknown): VariavelDv | null {
   if (cru === null) return null;
   const id = texto(cru.id, "");
   if (id === "") return null;
-  return { id, name: texto(cru.name, ""), eu: texto(cru.eu, "") };
+  return {
+    id,
+    name: texto(cru.name, ""),
+    eu: texto(cru.eu, ""),
+    range: lerFaixaMpcOuNull(cru.range),
+  };
 }
 
 function lerListaMpc<T>(bruto: unknown, ler: (item: unknown) => T | null): T[] {

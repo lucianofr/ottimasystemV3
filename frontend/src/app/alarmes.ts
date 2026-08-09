@@ -179,14 +179,18 @@ function condicoesContador(
     }
   }
 
-  // `mpc_overrun` não carrega `overruns` no payload (`blocks/mpc.py::_report_overrun`,
-  // payload `{}`) — sem valor de referência, a comparação de contador de `flow_overrun` não
-  // se aplica aqui. `status.solver` é o espelho equivalente já publicado: só sai de
-  // `"overrun"` no MESMO `_apply_result` que rearma o dedupe (`blocks/mpc.py:313`), o mesmo
-  // instante que "overruns inalterado" descreveria — sem precisar do contador. A checagem de
-  // frescor (`estadoMaisNovoQueEvento`, fix round 1) cobre a mesma reocorrência da família
-  // "estado" acima: sem ela, um `solver` já rearmado ANTES de uma nova ocorrência do mesmo
-  // `mpc_overrun` silenciaria a reincidência.
+  // `mpc_overrun` carrega `overruns` no payload desde a tarefa F6a 5.1 (`blocks/mpc.py::_report_overrun`,
+  // payload `{"overruns": self._overruns}`, linha 462) — mas a comparação de contador de `flow_overrun`
+  // continua não se aplicando aqui: dois eventos `mpc_overrun` consecutivos NUNCA carregam o mesmo
+  // valor. O dedupe de `_overrun_reported` só reabre com `status != "overrun"` (`_apply_result`,
+  // `blocks/mpc.py:345-346`) ou com `reset()` (`blocks/mpc.py:236`), e `_overruns` sempre incrementa
+  // ANTES de publicar (`blocks/mpc.py:376-378`) — o próximo evento reportado já chega com um valor
+  // maior, nunca igual. `status.solver` segue o espelho equivalente usado para a cessação: só sai de
+  // `"overrun"` no MESMO `_apply_result` que rearma o dedupe, o mesmo instante em que uma comparação
+  // de contador entre eventos tentaria capturar — sem precisar dela. A checagem de frescor
+  // (`estadoMaisNovoQueEvento`, fix round 1) cobre a mesma reocorrência da família "estado" acima: sem
+  // ela, um `solver` já rearmado ANTES de uma nova ocorrência do mesmo `mpc_overrun` silenciaria a
+  // reincidência.
   //
   // Borda conhecida (fix round 1, achado 2 da tarefa 2.1): `_build_state` (`blocks/mpc.py`)
   // sobrepõe `solver` para "idle"/"building" fora de AUTO, INDEPENDENTE do `_overrun_reported`

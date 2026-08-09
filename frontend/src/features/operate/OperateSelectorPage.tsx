@@ -2,6 +2,7 @@ import { Link, Navigate, useLocation } from "react-router";
 
 import { Card } from "../../components/ui/card";
 import { useMpcs, type MpcNodeOut } from "./useMpcs";
+import { useActiveProject } from "../projects/useProjects";
 
 /** `nome do flow · nome do bloco` — mesma composição de rótulo do atalho da Home
  *  (`HomePage.tsx::LinhaFlow`, "Operar <nome>"), só que aqui o flow também precisa aparecer:
@@ -21,6 +22,8 @@ function rotuloMpc(mpc: MpcNodeOut): string {
  * `state.aviso` — lido aqui, nunca uma tela de aviso à parte.
  */
 export function OperateSelectorPage() {
+  const projeto = useActiveProject();
+  const projectId = projeto.data?.id ?? null;
   const mpcs = useMpcs();
   const aviso = (useLocation().state as { aviso?: string } | null)?.aviso ?? null;
 
@@ -43,10 +46,20 @@ export function OperateSelectorPage() {
           Falha ao consultar blocos MPC
         </p>
       )}
-      {mpcs.isSuccess && mpcs.data.length === 0 && (
-        <p data-testid="operate-selector-empty" className="mt-2 text-sm text-fg-muted">
-          Nenhum bloco MPC configurado no projeto ativo.
-        </p>
+      {mpcs.isSuccess && mpcs.data.length === 0 && projeto.isSuccess && (
+        projectId === null ? (
+          <p data-testid="operate-selector-sem-projeto" className="mt-2 text-sm text-fg-muted">
+            Nenhum projeto ativo:{" "}
+            <Link to="/engenharia/projetos" className="text-accent hover:underline">
+              ative um projeto
+            </Link>{" "}
+            para operar
+          </p>
+        ) : (
+          <p data-testid="operate-selector-empty" className="mt-2 text-sm text-fg-muted">
+            Nenhum bloco MPC configurado no projeto ativo.
+          </p>
+        )
       )}
       {mpcs.isSuccess && mpcs.data.length > 1 && (
         <ul className="mt-2 divide-y divide-hairline" data-testid="operate-selector-lista">

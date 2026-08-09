@@ -5,7 +5,6 @@ import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { api, ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
-import type { MpcState } from "../../lib/contracts.gen";
 import { clampNaFaixa, type Faixa } from "./clamp";
 import { reduzirPendencia, type Pendencia } from "./pendencia";
 
@@ -56,15 +55,26 @@ const ROTULO_TIPO: Record<VariavelTipo, string> = {
 };
 
 /** Faixa da escala: `limits` (MV) / `sp_limits` (CV) já chegam como `{min,max}` (schema
- *  `Limits` do backend, sem conversão); `range` da Restrição é `{low,high}` — normalizado
- *  aqui só para alimentar a mesma barra. DV não tem faixa publicada (`DvOut` não traz
- *  `limits`/`range`): sem dado para demarcar, a barra não é desenhada — só PV + EU. */
-function faixaDaEscala(props: FaceplateVariavelProps): Faixa | null {
+ *  `Limits` do backend, sem conversão); `range` da Restrição e da DV é `{low,high}` (schema
+ *  `Range`, decisão A-11) — normalizado aqui só para alimentar a mesma barra. DV sem `range`
+ *  publicado (`DvOut.range` opcional) segue sem faixa: só PV + EU, sem barra (spec §4.2/§6.5).
+ *
+ *  `range` só alimenta a barra com os dois lados finitos e `low` estritamente menor que
+ *  `high`. O backend garante essa invariante para Restrição na validação semântica do flow
+ *  (`validate.py:_less_than`, `range.low < range.high`), mas **não** cobre `DvVar.range`
+ *  (`_check_mpc_numbers` varre `mvs`/`cvs`/`constraints`, não `dvs`) — sem esta guarda um
+ *  `range` degenerado de DV (`low >= high` ou não-finito) dividiria por zero em
+ *  `percentualNaBarra` ou desenharia barra invertida. Tratado como ausência de faixa. */
+export function faixaDaEscala(props: FaceplateVariavelProps): Faixa | null {
   if (props.tipo === "mv") return props.definicao.limits ?? null;
   if (props.tipo === "cv") return props.definicao.sp_limits ?? null;
-  if (props.tipo === "constraint") {
+  if (props.tipo === "constraint" || props.tipo === "dv") {
     const range = props.definicao.range;
-    return range ? { min: range.low, max: range.high } : null;
+    if (!range) return null;
+    if (!Number.isFinite(range.low) || !Number.isFinite(range.high) || range.low >= range.high) {
+      return null;
+    }
+    return { min: range.low, max: range.high };
   }
   return null;
 }
@@ -142,10 +152,11 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
 
   // "estadoPublicado": cada `valor` novo (mpc.state.vars[id] republicado) tenta materializar a
   // pendência. `lerCaminho` (pendencia.ts) só lê `vars.<id>.<campo>` do objeto abaixo — o resto
-  // do shape de `MpcState` nunca é acessado, então o cast não finge um estado completo real.
+  // do shape de `MpcState` nunca é acessado. `state` do redutor é `unknown` (§6.6-3), então
+  // este recorte parcial não precisa mais fingir ser um `MpcState` completo.
   useEffect(() => {
     if (valor === undefined) return;
-    const estadoMinimo = { vars: { [definicao.id]: valor } } as unknown as MpcState;
+    const estadoMinimo = { vars: { [definicao.id]: valor } };
     setPendencia((atual) =>
       reduzirPendencia(atual, { tipo: "estadoPublicado", state: estadoMinimo, agora: Date.now() }),
     );

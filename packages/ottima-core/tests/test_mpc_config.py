@@ -154,6 +154,44 @@ def test_id_com_prefixo_errado_e_rejeitado(caminho, categoria, id_invalido):
 
 
 # --------------------------------------------------------------------------------------
+# DvVar.range — spec §4.2, RF-702
+# --------------------------------------------------------------------------------------
+
+
+def test_dv_sem_range_e_valida_com_none():
+    data = mpc_skeleton()
+    config = MpcConfig.model_validate(data)
+    assert config.variables.dvs[0].range is None
+
+
+def test_dv_com_range_valida():
+    data = mpc_skeleton()
+    data["variables"]["dvs"][0]["range"] = {"low": 0.0, "high": 100.0}
+    config = MpcConfig.model_validate(data)
+    assert config.variables.dvs[0].range.low == 0.0
+    assert config.variables.dvs[0].range.high == 100.0
+
+
+def test_dv_com_range_incompleto_e_rejeitado():
+    data = mpc_skeleton()
+    data["variables"]["dvs"][0]["range"] = {"low": 0.0}
+    with pytest.raises(ValidationError):
+        MpcConfig.model_validate(data)
+
+
+def test_dv_com_range_low_maior_que_high_e_aceito_como_a_restricao():
+    """`Range` não valida `low < high` neste nível (regra semântica de `validate.py`,
+    tarefa 1.2 do plano F4a) — mesmo comportamento hoje aceito pela Restrição, replicado
+    sem introduzir regra nova."""
+    data = mpc_skeleton()
+    data["variables"]["constraints"][0]["range"] = {"low": 80.0, "high": 20.0}
+    data["variables"]["dvs"][0]["range"] = {"low": 80.0, "high": 20.0}
+    config = MpcConfig.model_validate(data)
+    assert config.variables.constraints[0].range.low > config.variables.constraints[0].range.high
+    assert config.variables.dvs[0].range.low > config.variables.dvs[0].range.high
+
+
+# --------------------------------------------------------------------------------------
 # derive_horizons — spec §2.2-5, RF-603
 # --------------------------------------------------------------------------------------
 

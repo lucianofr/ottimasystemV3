@@ -416,12 +416,16 @@ class MpcOrchestrator:
 
     async def shutdown_mpc(self, runtime: _FlowRuntime, *, flow_id: int) -> None:
         """Devolve o PID de todo bloco MPC armado (`revert_armed_mpc`) e mata os workers
-        da tarefa, de forma SÍNCRONA — usado por `_force_stop`/`_teardown`/pelo redeploy
-        de `_deploy`, que precisam do processo realmente morto antes de seguir (nenhum dos
-        três compete pelo MESMO canal sequencial de `flow.commands` do jeito que
-        `_stop`/hot-swap competem — spec F5 §6.3, tarefa 4.2 F5a — F-1). `Supervisor._stop`
-        e `reconcile_mpc_hosts` (hot-swap) usam a variante destacada (`detach_hosts` +
-        `stop_host_background`) em vez desta função.
+        da tarefa, de forma SÍNCRONA — usado SÓ por `Supervisor._teardown` (spec F5 §6.5),
+        que precisa do processo realmente morto antes de considerar o flow desmontado e
+        não roda sob `Supervisor._lock` (chamado por `Supervisor.stop()`, fora do canal
+        sequencial de `flow.commands`), então esperar aqui não bloqueia comando nenhum.
+
+        F6R-06 (spec F6 §5.2, débito F5 §8, tarefa 5.2): `_deploy` (redeploy sobre o
+        `old_runtime`), `_handback_failed_mpc` e `_force_stop` usavam esta função SOB o
+        lock — os três passaram para a variante destacada (`revert_armed_mpc` +
+        `detach_hosts` + `stop_host_background`, mesma sequência de `Supervisor._stop`);
+        `shutdown_mpc` sobrevive só para `_teardown`.
 
         Idempotente: repetir numa `_FlowRuntime` já tratada não escreve `mode_cmd` de novo
         nem falha ao re-parar host (`MpcHost.stop()` já é idempotente) — é o que deixa o

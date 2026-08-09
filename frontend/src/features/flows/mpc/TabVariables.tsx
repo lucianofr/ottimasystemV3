@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -46,7 +46,10 @@ function CampoNumero({
   id: string;
   campo: string;
   rotulo: string;
-  valor: number;
+  /** `null` renderiza o campo VAZIO — é o que mantém `range: null` alcançável na DV: um "0"
+   *  impresso aqui volta como texto não-vazio no Aplicar e vira a faixa degenerada `{0, 0}`,
+   *  que o servidor recusa (`range.low < range.high`) e deixa o flow insalvável. */
+  valor: number | null;
 }) {
   return (
     <div className="space-y-1">
@@ -57,7 +60,7 @@ function CampoNumero({
         type="text"
         inputMode="decimal"
         className="process-value"
-        defaultValue={String(valor)}
+        defaultValue={valor === null ? "" : String(valor)}
       />
     </div>
   );
@@ -341,6 +344,40 @@ function ListaRestricao({
   );
 }
 
+/** Linha de uma DV. Os dois campos de faixa seguem não-controlados (padrão do modal), mas a
+ *  nota precisa sumir assim que o operador digita — senão contradiz o que ele está vendo. Um
+ *  `onInput` no par de campos basta: lê o DOM sob demanda, sem tornar os inputs controlados. */
+function LinhaDv({ dv, aoRemover }: { dv: VariavelDv; aoRemover: () => void }) {
+  const [digitou, setDigitou] = useState(dv.range !== null);
+  const faixa = useRef<HTMLDivElement>(null);
+  return (
+    <LinhaVariavel varId={dv.id} testid={`mpc-var-row-${dv.id}`} aoRemover={aoRemover}>
+      <CampoNomeEu id={dv.id} nome={dv.name} eu={dv.eu} />
+      <div
+        ref={faixa}
+        className="grid grid-cols-2 gap-3"
+        onInput={() => {
+          const campos = faixa.current?.querySelectorAll("input") ?? [];
+          setDigitou(Array.from(campos).some((campo) => campo.value.trim() !== ""));
+        }}
+      >
+        <CampoNumero id={dv.id} campo="range_low" rotulo="Faixa mín." valor={dv.range?.low ?? null} />
+        <CampoNumero id={dv.id} campo="range_high" rotulo="Faixa máx." valor={dv.range?.high ?? null} />
+      </div>
+      {!digitou && (
+        <p className="text-[10px] text-fg-muted">
+          Sem faixa: o faceplate desta DV ficará sem barra (RF-702).
+        </p>
+      )}
+    </LinhaVariavel>
+  );
+}
+
+/** DVs têm faixa OPCIONAL (spec §4.2-5, RFC-16, ao contrário de MV/CV/Restrição, que sempre
+ *  têm uma): os dois campos ficam ao lado de Nome/EU, mesmo padrão `CampoNumero` que a
+ *  Restrição já usa para `range_low`/`range_high` (`ListaRestricao` acima). Sem faixa, uma
+ *  nota discreta avisa que o faceplate (§6.5) ficará sem barra — RF-702 pede limites, e
+ *  omissão silenciosa é exatamente o defeito que RFC-16 fecha. */
 function ListaDv({
   dvs,
   aoMudar,
@@ -356,20 +393,17 @@ function ListaDv({
           type="button"
           size="sm"
           data-testid="mpc-add-dv"
-          onClick={() => aoMudar([...dvs, { id: gerarIdVariavel("dv"), name: "", eu: "" }])}
+          onClick={() => aoMudar([...dvs, { id: gerarIdVariavel("dv"), name: "", eu: "", range: null }])}
         >
           Adicionar DV
         </Button>
       </div>
       {dvs.map((dv) => (
-        <LinhaVariavel
+        <LinhaDv
           key={dv.id}
-          varId={dv.id}
-          testid={`mpc-var-row-${dv.id}`}
+          dv={dv}
           aoRemover={() => aoMudar(dvs.filter((item) => item.id !== dv.id))}
-        >
-          <CampoNomeEu id={dv.id} nome={dv.name} eu={dv.eu} />
-        </LinhaVariavel>
+        />
       ))}
     </div>
   );

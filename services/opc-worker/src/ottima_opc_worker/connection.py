@@ -88,6 +88,7 @@ class ConnectionRuntime:
         backoff_max_s: float = BACKOFF_MAX_S,
         heartbeat_interval_s: float = HEARTBEAT_INTERVAL_S,
         watchdog_freeze_threshold_s: float = FREEZE_THRESHOLD_S,
+        failure_pending: bool = False,
     ) -> None:
         self._config = config
         self._redis = redis_client
@@ -111,7 +112,13 @@ class ConnectionRuntime:
         self._gate_generation = 0
         self._watchdog_freeze_threshold_s = watchdog_freeze_threshold_s
         # Edge-trigger dos eventos: só há `comm_restored` depois de um `comm_failure`.
-        self._failure_pending = False
+        # O supervisor repassa o valor do runtime anterior ao trocar a sessão (mudança de
+        # campo da conexão desmonta e remonta): o `comm_failure` publicado pelo runtime
+        # antigo continua de pé no `/eventos` e na coluna "Último estado", entao a obrigacao
+        # de retratá-lo é herdada. Sem isso, resolver a causa da falha por edicao — confiar
+        # no certificado do servidor, reinformar a senha — subia a sessao de verdade e
+        # deixava a tela vermelha para sempre (achado do gate L3, cenario B-F6-04 passo 3).
+        self._failure_pending = failure_pending
         # Geração da tentativa de conexão: fail() a incrementa para invalidar um connect
         # que ainda esteja em voo (ele não pode subir a conexão depois do alarme).
         self._generation = 0
@@ -124,6 +131,11 @@ class ConnectionRuntime:
     @property
     def config(self) -> ConnectionConfig:
         return self._config
+
+    @property
+    def failure_pending(self) -> bool:
+        """Há um `comm_failure` publicado e ainda não retratado por este runtime."""
+        return self._failure_pending
 
     @property
     def snapshot(self) -> ConnectionSnapshot:

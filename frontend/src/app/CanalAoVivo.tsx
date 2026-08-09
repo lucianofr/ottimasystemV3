@@ -22,8 +22,9 @@ import {
   type AmbienteAoVivo,
   type FlowStatus,
   type PortsPorBloco,
-} from "../features/flows/useFlowStatus";
-import { useActiveProject, useConnections } from "../features/connections/useConnections";
+} from "../features/flows/canalPrimitivos";
+import { useConnections } from "../features/connections/useConnections";
+import { useActiveProject } from "../features/projects/useProjects";
 import { deGraphJson } from "../features/flows/graph";
 import { useFlows } from "../features/flows/useFlows";
 import {
@@ -552,7 +553,16 @@ function logarFalhaConsulta(nome: string, motivo: unknown): void {
 /** Montado no `AppShell`: um socket por aba, vivo enquanto a sessão durar. `events` sempre
  *  assinado (o banner é do shell). Dois contexts, não um: `estado` muda a cada mensagem do
  *  socket, e um componente que só chama `useAssinatura` (registra e esquece) não precisa
- *  re-renderizar a cada varredura. */
+ *  re-renderizar a cada varredura.
+ *
+ *  Débito 1 de frontend da F5 (spec F6 §6.6-1, tarefa 6.1 do plano F6b): o tique de 5 s que
+ *  reavalia a família TTL de `resolverAlarmes` (`mpc_arm_failed`, `alarmes.ts:220-229`)
+ *  NUNCA entra em `estado`/`EstadoContext` — vive em `app/useRelogioAlarmes.ts`, hook de
+ *  estado próprio consumido só por quem deriva alarmes (`AnnunciatorBar`). Bumpar `estado`
+ *  a cada tique re-renderizaria toda a árvore de `useCanalAoVivo()`, inclusive
+ *  `TrendOperacao` — que desmontaria o container do uPlot a cada 5 s. Não "conserte" a
+ *  suposta duplicação de relógio dobrando este comentário em `estado`: é a separação de
+ *  responsabilidade que fecha o débito. */
 export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
   const [estado, setEstado] = useState<EstadoDoCanal>(ESTADO_INICIAL);
   const [registro] = useState(() => criarRegistroInteresses());

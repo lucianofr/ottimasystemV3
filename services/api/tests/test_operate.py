@@ -613,9 +613,70 @@ async def test_mpcs_projecao_verbatim_sem_pid_nem_models(client, admin_headers, 
                         "range": {"low": 0.0, "high": 10.0},
                     }
                 ],
-                "dvs": [{"id": "dv_a", "name": "DV A", "eu": "C"}],
+                "dvs": [{"id": "dv_a", "name": "DV A", "eu": "C", "range": None}],
             },
         }
+    ]
+
+
+async def test_mpcs_projecao_de_dv_com_range(client, admin_headers, operator_headers):
+    """DV com `range` explícito projeta `{low, high}`; DV sem `range` projeta `null` (spec
+    §4.2, RF-702) — mesmo bloco, para provar que a ausência não vaza de uma DV para a outra."""
+    project_id = await _projeto(client, admin_headers, "MpcsDvRange")
+    conn_id = await _conexao(client, admin_headers, project_id, "plc-dv-range")
+    flow = await _flow(client, admin_headers, project_id, "MpcsDvRange")
+
+    tag_cv = await _tag(client, admin_headers, conn_id, "IN-CV", "r")
+    tag_dv_sem = await _tag(client, admin_headers, conn_id, "IN-DV-SEM", "r")
+    tag_dv_com = await _tag(client, admin_headers, conn_id, "IN-DV-COM", "r")
+
+    mv_a = _mv("a")
+    cv_a = _cv("a")
+    dv_sem = {"id": "dv_sem", "name": "DV sem faixa", "eu": "C"}
+    dv_com = {
+        "id": "dv_com",
+        "name": "DV com faixa",
+        "eu": "C",
+        "range": {"low": 0.0, "high": 50.0},
+    }
+    params = _selfreg_params()
+
+    data = {
+        "name": "MPC DV Range",
+        "multiplier": 1,
+        "variables": {"mvs": [mv_a], "cvs": [cv_a], "constraints": [], "dvs": [dv_sem, dv_com]},
+        "models": {
+            "cv_a": {
+                "mv_a": {"enabled": True, "params": params},
+                "dv_sem": {"enabled": True, "params": params},
+                "dv_com": {"enabled": True, "params": params},
+            }
+        },
+    }
+    graph = {
+        "nodes": [
+            _no("r1", "opc_read", 1, tag_id=tag_cv),
+            _no("r2", "opc_read", 2, tag_id=tag_dv_sem),
+            _no("r3", "opc_read", 3, tag_id=tag_dv_com),
+            _no("m1", "mpc", 4, **data),
+        ],
+        "edges": [
+            _aresta("r1", "out", "m1", "cv_a", id_="e1"),
+            _aresta("r2", "out", "m1", "dv_sem", id_="e2"),
+            _aresta("r3", "out", "m1", "dv_com", id_="e3"),
+        ],
+    }
+    await _salvar(client, admin_headers, flow["id"], graph)
+    r = await client.post(f"/api/projects/{project_id}/activate", headers=admin_headers)
+    assert r.status_code == 200, r.text
+
+    r = await client.get("/api/operate/mpcs", headers=operator_headers)
+
+    assert r.status_code == 200, r.text
+    dvs = r.json()[0]["variables"]["dvs"]
+    assert dvs == [
+        {"id": "dv_sem", "name": "DV sem faixa", "eu": "C", "range": None},
+        {"id": "dv_com", "name": "DV com faixa", "eu": "C", "range": {"low": 0.0, "high": 50.0}},
     ]
 
 

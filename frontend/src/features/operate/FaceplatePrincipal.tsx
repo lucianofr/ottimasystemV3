@@ -271,7 +271,8 @@ export function FaceplatePrincipal({ mpc, flowStatus, mpcState, flowId, blockId 
           Overruns{" "}
           <span className="process-value text-fg" data-testid="faceplate-overruns">
             {mpcState !== undefined ? formatarNumero(mpcState.status.overruns) : "—"}
-          </span>
+          </span>{" "}
+          contagem
         </span>
         <span>
           Última solução{" "}

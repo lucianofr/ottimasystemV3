@@ -24,3 +24,25 @@ class ProjectOut(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class PendingSecretOut(BaseModel):
+    """Pendência de segredo de uma conexão importada (spec F6 §3.2-8, decisão A-4)."""
+
+    connection_name: str
+    needs_password: bool
+    needs_server_certificate: bool
+    needs_app_certificate: bool
+
+
+class ProjectImportIn(BaseModel):
+    """`bundle` é `dict` de propósito: a validação em camadas do arquivo de projeto
+    acontece no router de import (tarefa 2.3), não aqui."""
+
+    name: str | None = None
+    bundle: dict
+
+
+class ProjectImportOut(BaseModel):
+    project: ProjectOut
+    pending_secrets: list[PendingSecretOut]

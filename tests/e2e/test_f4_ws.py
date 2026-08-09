@@ -207,6 +207,7 @@ def _grafo_hot_swap(admin: httpx.Client, ambiente: AmbienteMpc, *, peso_mpc1: fl
     return {"nodes": nodes, "edges": edges}
 
 
+@pytest.mark.rnf09
 def test_e2e_f4_10_ws_fanout_e_hot_swap(
     admin: httpx.Client,
     ambiente_mpc: AmbienteMpc,

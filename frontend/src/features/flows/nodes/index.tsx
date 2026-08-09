@@ -24,6 +24,14 @@ function portas(ids: readonly string[]): Porta[] {
   return ids.map((id) => ({ id, rotulo: id }));
 }
 
+/** Portas de SAÍDA do Script/TFS com a EU declarada por porta (spec §4.1, §6.4): mesmo
+ *  tratamento tipográfico que `ValorPorta` já dá à EU de OPC-Read/Write, só que por handle
+ *  em vez de por bloco inteiro — cada porta de saída pode ter a sua. Chave ausente ou `''`
+ *  em `output_eu` cai em `undefined` (sem unidade), igual ao default de `Tag.eu`. */
+function portasComEu(ids: readonly string[], output_eu: Record<string, string>): Porta[] {
+  return ids.map((id) => ({ id, rotulo: id, eu: output_eu[id] }));
+}
+
 /** Portas do MPC rotulam `nome (EU)` — ao contrário do resto do canvas, que rotula pelo
  *  handle id (decisão A-10, spec F4 §7.2). Nome vazio cai no id (variável ainda sem nome). */
 function portasMpc(
@@ -92,11 +100,13 @@ export function NoEscritaOpc({ id, data, selected }: NodeProps<NoEscrita>) {
   );
 }
 
-/** Débito m4 (EU nas portas): Script e TFS não têm EU por porta em nenhuma fonte hoje
- *  (config sem campo `eu`; `PortValue`/`bus.py` também não carrega EU no valor ao vivo —
- *  achado registrado no relatório da tarefa 4.1). `BlocoChapa` já aceita `eu` por bloco
- *  (usado por Leitura/Escrita OPC, que têm uma tag ⇒ uma EU); Script/TFS não passam o
- *  prop de propósito — nenhum valor fabricado é melhor que uma unidade inventada. */
+/** EU por porta de saída (spec §4.1, tarefa 5.2): cada `OUT<n>`/`y1`/`y2` mostra a unidade
+ *  que `output_eu` declarar para aquela porta específica, mesmo tratamento tipográfico das
+ *  portas de OPC-Read/Write (`ValorPorta`, mono tabular + EU em Texto Secundário menor).
+ *  Porta sem EU declarada mostra só o valor — EU é opcional (§4.1-5). Entradas não mostram
+ *  EU herdada aqui: `euDaPortaDeEntrada` (`graph.ts`) resolve a herança e é testada em
+ *  isolado (`graph.check.ts`); nada no canvas ainda a consome (fora do escopo desta tarefa,
+ *  que cobre só a declaração na porta de saída, §6.4). */
 export function NoScriptPython({ id, data, selected }: NodeProps<NoScript>) {
   const linhas = data.code === "" ? 0 : data.code.split("\n").length;
   return (
@@ -106,7 +116,7 @@ export function NoScriptPython({ id, data, selected }: NodeProps<NoScript>) {
       execOrder={data.exec_order}
       selecionado={selected}
       entradas={portas(portasScript("IN", data.n_inputs))}
-      saidas={portas(portasScript("OUT", data.n_outputs))}
+      saidas={portasComEu(portasScript("OUT", data.n_outputs), data.output_eu)}
       blockId={id}
     >
       <div className="space-y-0.5">
@@ -130,7 +140,7 @@ export function NoTfsMatriz({ id, data, selected }: NodeProps<NoTfs>) {
       execOrder={data.exec_order}
       selecionado={selected}
       entradas={portas(portasFixas("tfs", "input"))}
-      saidas={portas(portasFixas("tfs", "output"))}
+      saidas={portasComEu(portasFixas("tfs", "output"), data.output_eu)}
       blockId={id}
     >
       <div className="flex items-center justify-between gap-3">

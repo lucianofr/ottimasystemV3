@@ -51,6 +51,8 @@ A tela de trend da F2 consome `GET /api/history` por **polling** (sem WS); "ao v
 
 > Nota (spec F5 §1.2): o registro de valores de tag (`opc.values.<conn_id>` no `/ws`) é reapontado — fica F6 ou nunca, só com consumidor real; eventos (faixa anunciadora com dados reais) seguem F5.
 
+> Nota (spec F6 §6.2): a linha "UI de gestão de certificados | F6" (§1.2) é cumprida por `docs/specs/F6-portabilidade-hardening.md` §6.2.
+
 ---
 
 ## 2. opc-worker — arquitetura interna

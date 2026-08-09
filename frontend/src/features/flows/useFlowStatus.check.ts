@@ -6,15 +6,13 @@ import {
   CODIGO_SESSAO_INVALIDA,
   deveReconectar,
   ehEstado,
-  formatarNumero,
-  formatarValorPorta,
   lerPorts,
   mesclarPorts,
-  selecionarCanvas,
   urlDoWs,
   type FlowStatus,
   type PortsPorBloco,
-} from "./useFlowStatus";
+} from "./canalPrimitivos";
+import { formatarNumero, formatarValorPorta, selecionarCanvas } from "./useFlowStatus";
 
 /** O `Location` do browser tem muito mais superfície do que a URL do WS precisa. */
 function origem(protocol: string, host: string): Location {

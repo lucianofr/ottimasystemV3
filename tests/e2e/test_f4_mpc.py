@@ -306,6 +306,7 @@ def _armar_ate_auto(admin: httpx.Client, fluxo: Any, flow_id: int, block_id: str
 # --------------------------------------------------------------------------------------
 
 
+@pytest.mark.rnf09
 def test_e2e_f4_03_arme_local_remoto_auto_sem_salto(
     admin: httpx.Client,
     ambiente_mpc: AmbienteMpc,
@@ -395,6 +396,7 @@ def test_e2e_f4_04_auto_converge_cv_para_sp_na_malha_tfs(
 # --------------------------------------------------------------------------------------
 
 
+@pytest.mark.rnf09
 def test_e2e_f4_05_restricao_vence_cv(
     admin: httpx.Client,
     ambiente_mpc: AmbienteMpc,
