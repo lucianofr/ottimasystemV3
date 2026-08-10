@@ -22,6 +22,7 @@ frontend/openapi.json
 .impeccable/
 .serena/
 .tokensave/
+.worktrees/
 
 # graphify: trava transitoria de rebuild (PID), nunca versionada
 graphify-out/.rebuild.lock
