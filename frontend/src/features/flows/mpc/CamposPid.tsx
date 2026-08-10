@@ -47,7 +47,7 @@ export function CamposPid({
   const c = (campo: string): string => `pid-${varId}-${campo}`;
 
   return (
-    <div className="grid grid-cols-2 gap-3 border-t border-hairline pt-2">
+    <div className="grid grid-cols-2 gap-3 border-t border-border pt-2">
       <div className="space-y-1">
         <Label htmlFor={c("write")}>Tag de escrita (W)</Label>
         <SelectTag

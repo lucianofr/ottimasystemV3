@@ -70,10 +70,10 @@ export function FlowPropsModal({ flow, onFechar }: Props) {
       ref={dialogo}
       onClose={onFechar}
       data-testid="flow-props-modal"
-      className="modal-bloco w-[min(480px,92vw)] overflow-auto rounded-panel border border-hairline bg-panel p-0 text-fg"
+      className="modal-bloco w-[min(480px,92vw)] overflow-auto rounded-sm border border-border bg-surface p-0 text-fg"
     >
       <form onSubmit={aoSubmeter}>
-        <header className="flex items-center justify-between border-b border-hairline bg-well px-4 py-3">
+        <header className="flex items-center justify-between border-b border-border bg-well px-4 py-3">
           <h2 className="plaqueta text-sm text-fg">Propriedades do flow</h2>
         </header>
 
@@ -134,7 +134,7 @@ export function FlowPropsModal({ flow, onFechar }: Props) {
           )}
         </div>
 
-        <footer className="flex justify-end gap-2 border-t border-hairline px-4 py-3">
+        <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">
           {confirmando ? (
             <>
               <Button

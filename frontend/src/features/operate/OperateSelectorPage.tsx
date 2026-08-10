@@ -33,16 +33,24 @@ export function OperateSelectorPage() {
   }
 
   return (
-    <Card className="max-w-lg p-6" data-testid="operate-selector">
-      <h2 className="plaqueta text-xs text-fg-muted">Operação</h2>
+    <Card className="max-w-lg p-7" data-testid="operate-selector">
+      <h2 className="font-display text-xl font-semibold tracking-tight">Operação</h2>
       {aviso !== null && (
-        <p role="status" data-testid="operate-selector-aviso" className="mt-2 text-sm text-warn">
+        <p
+          role="status"
+          data-testid="operate-selector-aviso"
+          className="mt-3 rounded-md bg-warn-soft px-3 py-2 text-sm text-warn-fg"
+        >
           {aviso}
         </p>
       )}
       {mpcs.isPending && <p className="mt-2 text-sm text-fg-muted">Carregando…</p>}
       {mpcs.isError && (
-        <p role="alert" data-testid="operate-selector-error" className="mt-2 text-sm text-alarm">
+        <p
+          role="alert"
+          data-testid="operate-selector-error"
+          className="mt-3 rounded-md bg-alarm-soft px-3 py-2 text-sm text-alarm"
+        >
           Falha ao consultar blocos MPC
         </p>
       )}
@@ -62,15 +70,15 @@ export function OperateSelectorPage() {
         )
       )}
       {mpcs.isSuccess && mpcs.data.length > 1 && (
-        <ul className="mt-2 divide-y divide-hairline" data-testid="operate-selector-lista">
+        <ul className="mt-4 divide-y divide-border" data-testid="operate-selector-lista">
           {mpcs.data.map((mpc) => (
-            <li key={`${String(mpc.flow_id)}/${mpc.block_id}`} className="py-2">
+            <li key={`${String(mpc.flow_id)}/${mpc.block_id}`} className="py-2.5">
               <Link
                 to={`/operacao/${String(mpc.flow_id)}/${mpc.block_id}`}
                 data-testid="operate-mpc-link"
                 data-flow-id={mpc.flow_id}
                 data-block-id={mpc.block_id}
-                className="text-sm text-accent hover:underline"
+                className="text-sm font-medium text-accent hover:underline"
               >
                 {rotuloMpc(mpc)}
               </Link>

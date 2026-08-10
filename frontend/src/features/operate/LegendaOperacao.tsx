@@ -48,9 +48,9 @@ export function LegendaOperacao({
   const nomeFoco = foco !== null ? (porIdDefinicao.get(foco)?.name ?? foco) : null;
 
   return (
-    <Card data-testid="operate-trend-legend" className="divide-y divide-hairline">
+    <Card data-testid="operate-trend-legend" className="divide-y divide-border">
       {nomeFoco !== null && (
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-surface-2 px-4 py-2.5">
           <span className="plaqueta text-xs text-fg-muted">Escala Y · {nomeFoco}</span>
           <EditorEscala escala={focoEscala} prefixoTestid="operate" aoMudar={onMudarEscalaFoco} />
         </div>
@@ -63,7 +63,7 @@ export function LegendaOperacao({
             key={pena.id}
             data-testid="operate-trend-legend-item"
             data-var-id={pena.id}
-            className="flex cursor-pointer items-center gap-3 px-3 py-1.5"
+            className="flex cursor-pointer items-center gap-3 px-4 py-2 transition-colors duration-[var(--duration-fast)] hover:bg-surface-2"
           >
             <input
               type="checkbox"
@@ -75,7 +75,7 @@ export function LegendaOperacao({
             />
             <span
               aria-hidden="true"
-              className="h-1 w-6 shrink-0"
+              className="h-1.5 w-6 shrink-0 rounded-pill"
               style={{ backgroundColor: cores.get(pena.id) }}
             />
             <span className="plaqueta grow text-xs">
@@ -87,7 +87,7 @@ export function LegendaOperacao({
             {pena.excedente && !ligada && (
               <span
                 data-testid="operate-trend-legend-teto"
-                className="plaqueta rounded-panel border border-warn px-1.5 text-xs text-warn"
+                className="plaqueta rounded-pill bg-warn-soft px-2 py-0.5 text-xs text-warn-fg"
               >
                 Acima do teto
               </span>

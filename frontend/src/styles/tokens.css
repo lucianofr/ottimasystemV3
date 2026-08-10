@@ -1,65 +1,160 @@
 @import "tailwindcss";
 
 @theme {
-  /* Neutros grafite (DESIGN.md §Colors; valores exatos: spec F1 §8.1) */
-  --color-field: oklch(0.25 0.012 250);
-  --color-panel: oklch(0.29 0.012 250);
-  --color-well: oklch(0.21 0.01 250);
-  --color-hairline: oklch(0.38 0.01 250);
-  --color-fg: oklch(0.93 0.005 250);
-  --color-fg-muted: oklch(0.72 0.01 250);
-  /* Azul único de interação */
-  --color-accent: oklch(0.66 0.1 242);
+  /* Neutros — tema claro default (design system ottimaSystem, projeto Claude Design
+     1315493f-a57c-4083-aa36-834ebc614659; substitui o grafite ISA-101 único por
+     claro/escuro alternável — decisão confirmada pelo usuário em 2026-08-10) */
+  --color-bg: oklch(0.97 0.006 255);
+  --color-surface: oklch(0.995 0.002 255);
+  --color-surface-2: oklch(0.945 0.008 255);
+  --color-well: oklch(0.92 0.01 255);
+  --color-border: oklch(0.87 0.012 255);
+  --color-fg: oklch(0.24 0.02 255);
+  --color-fg-muted: oklch(0.5 0.015 255);
+  --color-fg-subtle: oklch(0.62 0.012 255);
+  /* Acento — par gradiente (azul + ciano) para hero/CTA; permanece funcional-only
+     fora desses contextos (A Regra da Cor Anormal continua valendo p/ severidade) */
+  --color-accent: oklch(0.58 0.19 258);
+  --color-accent-strong: oklch(0.5 0.2 258);
+  --color-accent-soft: oklch(0.94 0.03 258);
+  --color-accent-2: oklch(0.7 0.14 195);
   /* Severidade — uso restrito (A Regra da Cor Anormal) */
-  --color-alarm: oklch(0.6 0.19 27);
-  --color-warn: oklch(0.74 0.14 80);
-  --color-running: oklch(0.6 0.09 150);
+  --color-alarm: oklch(0.58 0.22 24);
+  --color-alarm-soft: oklch(0.95 0.04 24);
+  --color-warn: oklch(0.78 0.15 75);
+  --color-warn-soft: oklch(0.95 0.05 75);
+  --color-warn-fg: oklch(0.4 0.1 75);
+  --color-success: oklch(0.7 0.16 148);
+  --color-success-soft: oklch(0.94 0.05 148);
+  --color-success-fg: oklch(0.4 0.12 148);
+  --gradient-accent: linear-gradient(135deg, oklch(0.58 0.19 258), oklch(0.64 0.16 225) 55%, oklch(0.7 0.14 195));
+  --gradient-mesh: radial-gradient(at 15% 20%, oklch(0.9 0.05 258 / 0.5), transparent 55%), radial-gradient(at 85% 0%, oklch(0.92 0.05 195 / 0.4), transparent 50%);
+  --glass-bg: oklch(0.995 0.002 255 / 0.6);
+  --glass-border: oklch(1 0 0 / 0.6);
+
   /* Penas de trend — paleta de série própria, fora da severidade e do azul único
-     (spec F2 §9.3; DESIGN.md §Colors "A Regra do Azul Único"). Consumidas por JS (uPlot). */
+     (spec F2 §9.3; "A Regra do Azul Único"). Consumidas por JS (uPlot).
+     NÃO alterar: distância OKLab validada contra severidade e acento (relatório 6.5);
+     o design system importado usa matizes 258/230 que colidiriam com o acento — mantida
+     a paleta original. */
   --color-pen-1: oklch(0.78 0.10 190); /* ciano-petróleo */
   --color-pen-2: oklch(0.78 0.09 300); /* violeta */
   --color-pen-3: oklch(0.78 0.10 110); /* oliva */
   --color-pen-4: oklch(0.78 0.09 330); /* magenta */
   --color-pen-5: oklch(0.75 0.06 55); /* castanho */
   --color-pen-6: oklch(0.80 0.02 250); /* cinza neutro */
-  /* §6.6-5: teto de 8 penas do trend de operação (trendOperacao.ts, TETO_PENAS_OPERACAO)
-     tinha só 6 cores — as 7ª/8ª colidiam. Duas novas, dessaturadas, na mesma família, com
-     matiz longe de severidade e do Azul Único (justificativa e distância OKLab no relatório
-     da tarefa 6.5). */
+  /* §6.6-5: teto de 8 penas do trend de operação — 7ª/8ª dessaturadas, mesma família,
+     matiz longe de severidade e do Azul Único. */
   --color-pen-7: oklch(0.83 0.06 211); /* teal acinzentado */
   --color-pen-8: oklch(0.83 0.08 293); /* lilás-azulado */
 
-  --font-sans: "Archivo", system-ui, sans-serif;
-  --font-label: "Archivo Narrow", "Archivo", sans-serif;
-  --font-mono: "Spline Sans Mono", ui-monospace, monospace;
+  --font-display: "Sora", "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-sans: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+  --fs-display: 48px;
+  --lh-display: 1.06;
+  --fw-display: 700;
+  --fs-headline: 30px;
+  --lh-headline: 1.2;
+  --fw-headline: 600;
+  --fs-title: 20px;
+  --lh-title: 1.35;
+  --fw-title: 600;
+  --fs-body: 15px;
+  --lh-body: 1.6;
+  --fw-body: 400;
+  --fs-body-sm: 13px;
+  --lh-body-sm: 1.5;
+  --fs-label: 11px;
+  --lh-label: 1.3;
+  --ls-label: 0.07em;
+  --fs-mono-lg: 32px;
+  --lh-mono-lg: 1.05;
+  --fs-mono-md: 16px;
+  --fs-mono-sm: 13px;
 
-  /* Bisel de instrumento 2–4px (DESIGN.md §Shapes) */
-  --radius-panel: 3px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+
+  /* Substitui o bisel de instrumento único de 3px por escala sm/md/lg/pill */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 1px 2px oklch(0.2 0.02 285 / 0.06), 0 1px 1px oklch(0.2 0.02 285 / 0.04);
+  --shadow-md: 0 8px 24px oklch(0.2 0.02 285 / 0.10), 0 2px 6px oklch(0.2 0.02 285 / 0.06);
+  --shadow-lg: 0 24px 64px oklch(0.2 0.02 285 / 0.16), 0 8px 20px oklch(0.2 0.02 285 / 0.08);
+  --shadow-glow-accent: 0 0 0 1px oklch(0.58 0.19 258 / 0.35), 0 8px 30px oklch(0.58 0.19 258 / 0.32);
+  --blur-glass: 20px;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 140ms;
+  --duration-base: 220ms;
+}
+
+/* Tema escuro — alternável via data-theme no <html> (default é o claro acima) */
+[data-theme="dark"] {
+  --color-bg: oklch(0.17 0.022 255);
+  --color-surface: oklch(0.22 0.02 255);
+  --color-surface-2: oklch(0.27 0.02 255);
+  --color-well: oklch(0.14 0.02 255);
+  --color-border: oklch(0.33 0.02 255);
+  --color-fg: oklch(0.95 0.006 255);
+  --color-fg-muted: oklch(0.68 0.012 255);
+  --color-fg-subtle: oklch(0.5 0.012 255);
+  --color-accent: oklch(0.7 0.17 258);
+  --color-accent-strong: oklch(0.78 0.15 258);
+  --color-accent-soft: oklch(0.3 0.08 258);
+  --color-accent-2: oklch(0.75 0.13 195);
+  --color-alarm: oklch(0.68 0.2 24);
+  --color-alarm-soft: oklch(0.3 0.09 24);
+  --color-warn: oklch(0.8 0.14 75);
+  --color-warn-soft: oklch(0.32 0.07 75);
+  --color-warn-fg: oklch(0.88 0.1 75);
+  --color-success: oklch(0.75 0.15 148);
+  --color-success-soft: oklch(0.3 0.07 148);
+  --color-success-fg: oklch(0.85 0.13 148);
+  --gradient-accent: linear-gradient(135deg, oklch(0.7 0.17 258), oklch(0.73 0.15 225) 55%, oklch(0.75 0.13 195));
+  --gradient-mesh: radial-gradient(at 15% 20%, oklch(0.4 0.09 258 / 0.35), transparent 55%), radial-gradient(at 85% 0%, oklch(0.4 0.08 195 / 0.3), transparent 50%);
+  --glass-bg: oklch(0.22 0.02 255 / 0.55);
+  --glass-border: oklch(1 0 0 / 0.08);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-md: 0 8px 24px oklch(0 0 0 / 0.45), 0 2px 6px oklch(0 0 0 / 0.3);
+  --shadow-lg: 0 24px 64px oklch(0 0 0 / 0.55), 0 8px 20px oklch(0 0 0 / 0.3);
+  --shadow-glow-accent: 0 0 0 1px oklch(0.7 0.17 258 / 0.5), 0 0 40px oklch(0.7 0.17 258 / 0.4);
 }
 
 /* Compatibilidade shadcn/ui (spec §8.1): componentes adicionados via CLI nas fases
    seguintes herdam o tema automaticamente */
 :root {
-  --background: var(--color-field);
+  --background: var(--color-bg);
   --foreground: var(--color-fg);
-  --card: var(--color-panel);
+  --card: var(--color-surface);
   --card-foreground: var(--color-fg);
-  --popover: var(--color-panel);
+  --popover: var(--color-surface);
   --popover-foreground: var(--color-fg);
   --primary: var(--color-accent);
-  --primary-foreground: var(--color-field);
+  --primary-foreground: var(--color-bg);
   --muted: var(--color-well);
   --muted-foreground: var(--color-fg-muted);
   --destructive: var(--color-alarm);
-  --border: var(--color-hairline);
-  --input: var(--color-hairline);
+  --border: var(--color-border);
+  --input: var(--color-border);
   --ring: var(--color-accent);
-  --radius: 3px;
+  --radius: var(--radius-sm);
 }
 
 @layer base {
   body {
-    @apply bg-field font-sans text-fg antialiased;
+    @apply bg-bg font-sans text-fg antialiased;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -72,16 +167,40 @@
   }
 }
 
-/* A Regra da Plaqueta (DESIGN.md §Typography) */
+/* A Regra da Plaqueta */
 @utility plaqueta {
-  font-family: var(--font-label);
-  font-weight: 500;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  letter-spacing: var(--ls-label);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  color: var(--color-fg-muted);
 }
 
-/* A Regra do Número Tabular (DESIGN.md §Typography) */
+/* A Regra do Número Tabular */
 @utility process-value {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+@utility glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  border: 1px solid var(--glass-border);
+}
+
+@utility focus-ring {
+  &:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+@keyframes ds-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

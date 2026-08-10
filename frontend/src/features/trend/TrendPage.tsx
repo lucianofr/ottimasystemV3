@@ -107,7 +107,7 @@ export function TrendPage() {
           {historico.data && (
             <span
               data-testid="trend-mode"
-              className="plaqueta rounded-panel border border-hairline bg-well px-2 py-1 text-xs text-fg-muted"
+              className="plaqueta rounded-sm border border-border bg-well px-2 py-1 text-xs text-fg-muted"
             >
               {ROTULO_MODO[historico.data.mode]}
             </span>
@@ -189,7 +189,7 @@ export function TrendPage() {
                 key={tag.id}
                 data-testid="trend-tag-option"
                 data-tag-id={tag.id}
-                className="flex cursor-pointer items-center gap-2 border-b border-hairline py-1.5 last:border-b-0"
+                className="flex cursor-pointer items-center gap-2 border-b border-border py-1.5 last:border-b-0"
               >
                 <input
                   type="checkbox"
@@ -205,7 +205,7 @@ export function TrendPage() {
             ))}
           </div>
           {aviso && (
-            <p role="alert" className="mt-2 text-xs text-warn">
+            <p role="alert" className="mt-2 text-xs text-warn-fg">
               {aviso}
             </p>
           )}
@@ -242,7 +242,7 @@ export function TrendPage() {
           )}
 
           {resumos.length > 0 && (
-            <Card data-testid="trend-legend" className="divide-y divide-hairline">
+            <Card data-testid="trend-legend" className="divide-y divide-border">
               {resumos.map((resumo, indice) => {
                 const tag = porId.get(resumo.tagId);
                 return (
@@ -261,7 +261,7 @@ export function TrendPage() {
                     {resumo.bad && (
                       <span
                         data-testid="trend-legend-bad"
-                        className="plaqueta rounded-panel border border-warn px-1.5 text-xs text-warn"
+                        className="plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg"
                       >
                         BAD
                       </span>
@@ -272,7 +272,7 @@ export function TrendPage() {
                     {resumo.semDado && (
                       <span
                         data-testid="trend-legend-sem-dado"
-                        className="plaqueta rounded-panel border border-warn px-1.5 text-xs text-warn"
+                        className="plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg"
                       >
                         SEM DADO
                       </span>

@@ -46,7 +46,7 @@ function portasMpc(
 function CorpoTag({ tagId, tag }: { tagId: number | null; tag: TagOut | undefined }) {
   if (tag === undefined) {
     return (
-      <p className="text-warn">
+      <p className="text-warn-fg">
         {tagId === null ? "Tag não configurada" : "Tag fora do projeto ativo"}
       </p>
     );
@@ -155,7 +155,7 @@ export function NoTfsMatriz({ id, data, selected }: NodeProps<NoTfs>) {
                 className={
                   elemento.enabled
                     ? "h-3.5 w-3.5 rounded-[2px] border border-accent bg-accent"
-                    : "h-3.5 w-3.5 rounded-[2px] border border-hairline bg-field"
+                    : "h-3.5 w-3.5 rounded-[2px] border border-border bg-bg"
                 }
               />
             )),

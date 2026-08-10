@@ -177,7 +177,7 @@ export function ConnectionForm({ conexao, projectId, onClose }: Props) {
           </div>
         </div>
 
-        <fieldset className="grid grid-cols-2 gap-4 border-t border-hairline pt-4">
+        <fieldset className="grid grid-cols-2 gap-4 border-t border-border pt-4">
           <legend className="plaqueta text-xs text-fg-muted">Segurança</legend>
           <div className="space-y-1.5">
             <Label htmlFor="conn-policy">Política</Label>
@@ -207,7 +207,7 @@ export function ConnectionForm({ conexao, projectId, onClose }: Props) {
           </div>
         </fieldset>
 
-        <fieldset className="grid grid-cols-2 gap-4 border-t border-hairline pt-4">
+        <fieldset className="grid grid-cols-2 gap-4 border-t border-border pt-4">
           <legend className="plaqueta text-xs text-fg-muted">Autenticação</legend>
           <div className="space-y-1.5">
             <Label htmlFor="conn-auth-mode">Modo</Label>
@@ -260,7 +260,7 @@ export function ConnectionForm({ conexao, projectId, onClose }: Props) {
           )}
         </fieldset>
 
-        <fieldset className="space-y-4 border-t border-hairline pt-4">
+        <fieldset className="space-y-4 border-t border-border pt-4">
           <legend className="plaqueta text-xs text-fg-muted">Watchdog</legend>
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-1.5">
@@ -301,7 +301,7 @@ export function ConnectionForm({ conexao, projectId, onClose }: Props) {
             </div>
           </div>
           {/* Aviso fixo, sempre visível (spec F2 §3.5) */}
-          <p data-testid="conn-wd-aviso" className="text-xs text-warn">
+          <p data-testid="conn-wd-aviso" className="text-xs text-warn-fg">
             Sem watchdog, a conexão fica somente leitura: nenhuma escrita será executada.
           </p>
         </fieldset>

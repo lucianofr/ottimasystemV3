@@ -53,7 +53,7 @@ export function lerTemaTrend(): TemaTrend {
   const estilo = getComputedStyle(document.documentElement);
   return {
     penas: PENAS.map((pena) => estilo.getPropertyValue(pena.token).trim()),
-    linha: estilo.getPropertyValue("--color-hairline").trim(),
+    linha: estilo.getPropertyValue("--color-border").trim(),
     texto: estilo.getPropertyValue("--color-fg-muted").trim(),
     mono: estilo.getPropertyValue("--font-mono").trim(),
     accent: estilo.getPropertyValue("--color-accent").trim(),

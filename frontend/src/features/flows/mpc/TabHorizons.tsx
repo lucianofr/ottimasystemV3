@@ -40,7 +40,7 @@ function CampoTss({
 }) {
   const [texto, setTexto] = useState(String(valorAtual));
   return (
-    <div className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-panel border border-hairline bg-well p-2">
+    <div className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-sm border border-border bg-well p-2">
       <Label htmlFor={`tss-${id}`} className="text-xs">
         {rotulo}
       </Label>
@@ -157,7 +157,7 @@ export function TabHorizons({
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-3 border-t border-hairline pt-3">
+      <div className="grid grid-cols-3 gap-3 border-t border-border pt-3">
         <CampoDerivado
           rotulo="Ts_mpc (derivado)"
           testid="mpc-horizontes-ts-mpc"
@@ -179,13 +179,13 @@ export function TabHorizons({
       </p>
 
       {avisoNp60 !== undefined && (
-        <p data-testid="mpc-aviso-np60" className="text-xs text-warn">
+        <p data-testid="mpc-aviso-np60" className="text-xs text-warn-fg">
           <span className="plaqueta mr-2 text-[10px]">Aviso</span>
           {avisoNp60}
         </p>
       )}
       {avisoDimensao !== undefined && (
-        <p data-testid="mpc-aviso-dimensao" className="text-xs text-warn">
+        <p data-testid="mpc-aviso-dimensao" className="text-xs text-warn-fg">
           <span className="plaqueta mr-2 text-[10px]">Aviso</span>
           {avisoDimensao}
         </p>

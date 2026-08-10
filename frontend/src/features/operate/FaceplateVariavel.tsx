@@ -106,9 +106,15 @@ function BarraVertical({
   return (
     <div className="flex flex-col items-center gap-1">
       <span className="process-value text-[10px] text-fg-muted">{faixa.max.toFixed(2)}</span>
-      <div className="relative h-32 w-4 rounded-panel border border-hairline bg-well" data-testid={testId}>
+      <div
+        className="relative h-32 w-4 overflow-hidden rounded-pill border border-border bg-well"
+        data-testid={testId}
+      >
         {pvPercentual !== null && (
-          <div className="absolute inset-x-0 bottom-0 bg-fg-muted/30" style={{ height: `${String(pvPercentual)}%` }} />
+          <div
+            className="absolute inset-x-0 bottom-0 bg-[image:var(--gradient-accent)] opacity-25"
+            style={{ height: `${String(pvPercentual)}%` }}
+          />
         )}
         {pvPercentual !== null && (
           <div
@@ -213,7 +219,7 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
 
   return (
     <Card
-      className="flex w-40 shrink-0 flex-col gap-2 p-3"
+      className="flex w-44 shrink-0 flex-col gap-3 p-4 transition-shadow duration-[var(--duration-fast)] hover:shadow-md"
       data-testid={`faceplate-${tipo}-${definicao.id}`}
       data-var-id={definicao.id}
       data-pendente={pendenciaAtiva !== null ? "true" : "false"}
@@ -235,10 +241,13 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
           />
         )}
         <div className="text-right">
-          <p className="process-value text-2xl leading-none" data-testid={`faceplate-pv-${definicao.id}`}>
+          <p
+            className="process-value text-3xl font-medium leading-none tracking-tight"
+            data-testid={`faceplate-pv-${definicao.id}`}
+          >
             {valor?.v !== undefined ? valor.v.toFixed(2) : "—"}
           </p>
-          <p className="text-xs text-fg-muted">{definicao.eu}</p>
+          <p className="plaqueta mt-1 text-[10px]">{definicao.eu}</p>
         </div>
       </div>
 
@@ -276,7 +285,11 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
       )}
 
       {erro !== null && (
-        <p role="alert" data-testid={`faceplate-erro-${definicao.id}`} className="text-xs text-alarm">
+        <p
+          role="alert"
+          data-testid={`faceplate-erro-${definicao.id}`}
+          className="rounded-sm bg-alarm-soft px-2 py-1 text-xs text-alarm"
+        >
           {erro}
         </p>
       )}

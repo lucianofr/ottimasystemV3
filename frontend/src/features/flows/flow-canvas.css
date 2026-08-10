@@ -8,7 +8,7 @@
  */
 
 .canvas-flow {
-  --xy-background-pattern-color: var(--color-hairline);
+  --xy-background-pattern-color: var(--color-border);
   --xy-edge-stroke: var(--color-fg-muted);
   --xy-edge-stroke-width: 1.5;
   --xy-edge-stroke-selected: var(--color-accent);
@@ -17,6 +17,7 @@
   --xy-attribution-background-color: transparent;
 
   background-color: var(--color-well);
+  background-image: var(--gradient-mesh);
 }
 
 /* Portas: quadradinho de bisel, nunca o círculo default da biblioteca. */
@@ -25,9 +26,9 @@
   height: 9px;
   min-width: 9px;
   min-height: 9px;
-  border: 1px solid var(--color-hairline);
-  border-radius: 2px;
-  background-color: var(--color-field);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface);
 }
 
 .canvas-flow .react-flow__handle.connectionindicator:hover,
@@ -56,15 +57,15 @@
 
 .canvas-flow .react-flow__controls {
   overflow: hidden;
-  border: 1px solid var(--color-hairline);
-  border-radius: 3px;
-  box-shadow: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
 }
 
 .canvas-flow .react-flow__controls-button {
   border: none;
-  border-bottom: 1px solid var(--color-hairline);
-  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
   color: var(--color-fg);
 }
 
@@ -73,7 +74,7 @@
 }
 
 .canvas-flow .react-flow__controls-button:hover {
-  background: var(--color-field);
+  background: var(--color-surface-2);
   color: var(--color-accent);
 }
 
@@ -88,5 +89,6 @@
 
 /* Modal de config: `<dialog>` nativo dá foco preso e Esc de graça; só o vestido é nosso. */
 .modal-bloco::backdrop {
-  background: oklch(0 0 0 / 0.6);
+  background: oklch(0.2 0.02 285 / 0.45);
+  backdrop-filter: blur(4px);
 }

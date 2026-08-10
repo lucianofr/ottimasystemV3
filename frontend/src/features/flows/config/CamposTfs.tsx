@@ -87,7 +87,7 @@ export function CamposTfs({ dados, aoMudar }: Props) {
             return (
               <fieldset
                 key={`${titulo}-${elemento.kind}`}
-                className="space-y-2 rounded-panel border border-hairline bg-well p-2"
+                className="space-y-2 rounded-sm border border-border bg-well p-2"
               >
                 <legend className="plaqueta px-1 text-[10px] text-fg-muted">{titulo}</legend>
 
