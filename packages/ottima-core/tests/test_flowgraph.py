@@ -733,3 +733,26 @@ def test_aresta_invertida_gera_warning_sem_erro():
 
 def test_grafo_em_ordem_nao_gera_warning():
     assert validate_graph(parse_graph(base_graph()), base_tags(), TS).warnings == []
+
+
+# regra 9 — código do bloco script sem nomes dunder (TD-001, defesa em profundidade)
+
+
+def test_script_com_name_dunder_e_reprovado():
+    """`__import__` como `ast.Name` isolado já basta — nem precisa virar chamada."""
+    graph = base_graph()
+    node_of(graph, "s1")["data"]["code"] = "OUT1 = 1.0\n__import__\n"
+    assert has(errors_of(graph), "s1", "dunder")
+
+
+def test_script_com_attribute_dunder_e_reprovado():
+    """Cadeia clássica de fuga de sandbox via `ast.Attribute` (`__class__`/`__mro__`)."""
+    graph = base_graph()
+    node_of(graph, "s1")["data"]["code"] = "OUT1 = len(().__class__.__mro__)\n"
+    assert has(errors_of(graph), "s1", "dunder")
+
+
+def test_script_aritmetico_normal_e_aceito():
+    graph = base_graph()
+    node_of(graph, "s1")["data"]["code"] = "OUT1 = (IN1 * 2 + 1) / 3\n"
+    assert errors_of(graph) == []

@@ -1,6 +1,8 @@
 """CRUD de flows (RF-302/306/307): leitura para operador, escrita para admin (ADR-015)."""
 
+import asyncio
 import logging
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -20,7 +22,17 @@ from ottima_core.bus import (
     FlowCommand,
     publish_event,
 )
-from ottima_core.flowgraph import GraphParseError, parse_graph, validate_graph
+from ottima_core.connections import conexoes_sem_watchdog
+from ottima_core.flowgraph import (
+    FlowGraph,
+    FlowNode,
+    GraphParseError,
+    MpcConfig,
+    TagRef,
+    ValidationResult,
+    parse_graph,
+    validate_graph,
+)
 from ottima_core.models import Flow, Project, User
 from ottima_core.schemas.flows import (
     MAX_BIGINT,
@@ -63,6 +75,78 @@ def _reprovado(mensagens: list[str]) -> HTTPException:
     (frontend/src/lib/api.ts) e mostraria "Erro inesperado" no lugar da reprovação.
     """
     return HTTPException(status_code=422, detail=SEPARADOR_REPROVACOES.join(mensagens))
+
+
+def _validar_grafo(
+    graph_json: dict,
+    tags: Mapping[int, TagRef],
+    ts_seconds: float,
+    conexoes_sem_watchdog: Mapping[int, str],
+) -> ValidationResult:
+    """Parse + validação semântica + avisos de watchdog (TD-004) num passo só, para rodar
+    inteiro fora do event loop.
+
+    As etapas são CPU-bound sobre dados já materializados (TD-002): num grafo grande
+    seguram o loop e travam o WS de status de todo mundo enquanto um engenheiro salva.
+    """
+    grafo = parse_graph(graph_json)
+    resultado = validate_graph(grafo, tags, ts_seconds)
+    if resultado.errors:
+        return resultado
+    avisos_watchdog = _avisos_watchdog(grafo, tags, conexoes_sem_watchdog)
+    if not avisos_watchdog:
+        return resultado
+    return ValidationResult(
+        errors=resultado.errors, warnings=[*resultado.warnings, *avisos_watchdog]
+    )
+
+
+def _aviso_watchdog(node: FlowNode, nome_conexao: str) -> str:
+    label = node.label or node.id
+    return (
+        f"O bloco '{label}' escreve na conexão '{nome_conexao}' sem watchdog: as escritas "
+        "serão recusadas (somente leitura de fato)."
+    )
+
+
+def _avisos_watchdog_mpc(
+    node: FlowNode, tags: Mapping[int, TagRef], conexoes_sem_watchdog: Mapping[int, str]
+) -> Iterator[str]:
+    """MV com `pid` escreve pelas próprias tags do binding (`write_tag_id`/`mode_cmd_tag_id`),
+    sem depender de aresta nenhuma — MV direta já cai no `opc_write` genérico de
+    `_avisos_watchdog`, seja qual for o bloco que alimenta (TD-004)."""
+    config = MpcConfig.model_validate(node.config.model_dump())
+    ja_avisados: set[str] = set()
+    for mv in config.variables.mvs:
+        if mv.pid is None:
+            continue
+        for tag_id in (mv.pid.write_tag_id, mv.pid.mode_cmd_tag_id):
+            tag = tags.get(tag_id)
+            if tag is None or tag.conn_id not in conexoes_sem_watchdog:
+                continue
+            nome = conexoes_sem_watchdog[tag.conn_id]
+            if nome not in ja_avisados:
+                ja_avisados.add(nome)
+                yield _aviso_watchdog(node, nome)
+
+
+def _avisos_watchdog(
+    grafo: FlowGraph, tags: Mapping[int, TagRef], conexoes_sem_watchdog: Mapping[int, str]
+) -> list[str]:
+    """TD-004: um aviso por bloco que escreve numa conexão sem watchdog completo — o
+    opc-worker recusa TODA escrita nesse caso (`writes.py`, ADR-009), então o flow vira
+    somente leitura de fato sem ninguém avisar."""
+    if not conexoes_sem_watchdog:
+        return []
+    avisos: list[str] = []
+    for node in grafo.nodes:
+        if node.type == "opc_write":
+            tag = tags.get(node.config.tag_id)
+            if tag is not None and tag.conn_id in conexoes_sem_watchdog:
+                avisos.append(_aviso_watchdog(node, conexoes_sem_watchdog[tag.conn_id]))
+        elif node.type == "mpc":
+            avisos.extend(_avisos_watchdog_mpc(node, tags, conexoes_sem_watchdog))
+    return avisos
 
 
 async def _publicar_evento(
@@ -165,26 +249,36 @@ async def update_flow(
     user: User = Depends(require_admin),
     redis_client: Redis = Depends(get_redis),
 ) -> FlowSaved:
-    """Valida o grafo antes de gravar (spec §5.2); avisos de inversão não bloqueiam (RF-307)."""
-    flow = await _carregar(db, flow_id)
-    try:
-        graph = parse_graph(body.graph_json)
-    except GraphParseError as erro:
-        raise _reprovado(erro.errors) from None
+    """Valida o grafo antes de gravar (spec §5.2); avisos de inversão não bloqueiam (RF-307).
 
+    `graph_json` e `ts_seconds` ausentes mantêm o que já está salvo — o diálogo de
+    propriedades troca nome/Ts sem carregar o desenho. Qualquer que seja a combinação, o par
+    (grafo, Ts) EFETIVO é revalidado junto: trocar só o Ts pode estourar o teto de atraso de
+    um TFS que era válido no Ts anterior.
+    """
+    flow = await _carregar(db, flow_id)
+    graph_json = flow.graph_json if body.graph_json is None else body.graph_json
     # `ts_seconds` é Numeric(4,1): SQLAlchemy devolve Decimal e a validação faz aritmética
     # com o Ts (teto de atraso do TFS), onde Decimal com float levanta TypeError.
-    resultado = validate_graph(
-        graph, await project_tags(db, flow.project_id), float(flow.ts_seconds)
-    )
+    ts_efetivo = float(flow.ts_seconds if body.ts_seconds is None else body.ts_seconds)
+    tags = await project_tags(db, flow.project_id)
+    sem_watchdog = await conexoes_sem_watchdog(db, flow.project_id)
+    try:
+        resultado = await asyncio.to_thread(
+            _validar_grafo, graph_json, tags, ts_efetivo, sem_watchdog
+        )
+    except GraphParseError as erro:
+        raise _reprovado(erro.errors) from None
     if resultado.errors:
         raise _reprovado(resultado.errors)
 
     if body.name is not None:
         flow.name = body.name
+    if body.ts_seconds is not None:
+        flow.ts_seconds = body.ts_seconds
     # Gravado verbatim: o editor é o dono do JSON e guarda nele estado de layout que a
     # validação ignora de propósito.
-    flow.graph_json = body.graph_json
+    flow.graph_json = graph_json
     try:
         await db.commit()
     except IntegrityError:

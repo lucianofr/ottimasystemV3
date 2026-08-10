@@ -15,7 +15,7 @@ import math
 from collections.abc import Sequence
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 RowKind = Literal["selfreg", "integrating"]
 TargetMode = Literal["rcas", "cas", "rout"]
@@ -84,6 +84,13 @@ class MvVar(BaseModel):
     essa tag (transferência bumpless para REMOTO); em REMOTO ela é o `u_applied` do solve.
     Só faz sentido na MV direta: com `pid`, quem já cumpre esse papel é
     `pid.readback_tag_id`.
+
+    `du_min`: banda morta do atuador, na mesma EU de `du_max`. Movimento pedido menor que
+    ela não é aplicado (a válvula não responderia mesmo) — quem quantiza é o worker, para
+    o modelo interno nunca divergir do que foi escrito. `0.0` desliga.
+
+    `move_weight`: fator multiplicativo do peso de movimento desta MV no custo do solve.
+    `1.0` mantém o comportamento anterior; maior deixa a MV mais preguiçosa que as outras.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -93,6 +100,8 @@ class MvVar(BaseModel):
     eu: str
     limits: Limits
     du_max: float
+    du_min: float = Field(default=0.0, ge=0.0)
+    move_weight: float = Field(default=1.0, gt=0.0)
     initial_value: float = 0.0
     operating_point: float = 0.0
     readback_tag_id: int | None = None
@@ -102,6 +111,12 @@ class MvVar(BaseModel):
     @classmethod
     def _valida_prefixo(cls, value: str) -> str:
         return _exigir_prefixo(value, "mv_", "MV")
+
+    @model_validator(mode="after")
+    def _valida_banda_morta(self) -> "MvVar":
+        if self.du_min > self.du_max:
+            raise ValueError("du_min deve ser menor ou igual a du_max")
+        return self
 
 
 class CvVar(BaseModel):

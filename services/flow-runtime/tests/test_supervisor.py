@@ -47,6 +47,7 @@ from ottima_core.bus import (
     KIND_DEPLOY_REJECTED,
     KIND_FLOW_DEPLOYED,
     KIND_FLOW_FAILED,
+    KIND_FLOW_RESUMED,
     KIND_FLOW_STOPPED,
     KIND_PROJECT_ACTIVATED,
     KIND_SCRIPT_ERROR,
@@ -335,13 +336,57 @@ async def test_comm_failure_derruba_so_os_flows_da_conexao(
     assert len(events.events(KIND_FLOW_FAILED)) == 1
 
 
-async def test_comm_restored_nao_retoma_o_flow(
+async def test_comm_restored_retoma_o_flow_automaticamente(
     harness_factory: Factory,
     collect: Collect,
     session_factory: Sessions,
     redis_client: Redis,
 ) -> None:
-    """Retomada é só por deploy manual (spec §2.2-8, ADR-017)."""
+    """TD-005/ADR-025: `desired_state == "running"` sobrevive à queda -> `comm_restored`
+    redeploya o flow sozinho, sem comando manual nenhum."""
+    project_id = await create_project(session_factory)
+    conn_id = await create_connection(session_factory, project_id)
+    tag_id = await create_tag(session_factory, conn_id)
+    flow_id = await create_flow(
+        session_factory,
+        project_id,
+        graph=read_only_graph(tag_id),
+        desired_state="running",
+    )
+    events = await collect(CHANNEL_EVENTS)
+    harness = await harness_factory(poll_interval_s=FAST_POLL_S)
+
+    await harness.command("deploy", flow_id)
+    await harness.await_state(flow_id, "running")
+    await comm_failure(redis_client, conn_id)
+    await harness.await_state(flow_id, "failed")
+
+    await publish_event(
+        redis_client,
+        severity="info",
+        origin=f"conn:{conn_id}",
+        message="Conexão restaurada",
+        kind=KIND_COMM_RESTORED,
+        payload={"conn_id": conn_id},
+    )
+    await harness.await_state(flow_id, "running")
+
+    await await_until(lambda: len(events.events(KIND_FLOW_RESUMED)) == 1)
+    resumido = events.events(KIND_FLOW_RESUMED)[0]
+    assert resumido.payload["flow_id"] == flow_id
+    assert resumido.payload["conn_id"] == conn_id
+    assert len(events.events(KIND_FLOW_DEPLOYED)) == 2  # deploy original + retomada
+
+
+async def test_comm_restored_nao_retoma_flow_com_desired_state_parado(
+    harness_factory: Factory,
+    collect: Collect,
+    session_factory: Sessions,
+    redis_client: Redis,
+) -> None:
+    """O operador pode ter parado o flow durante a queda: a retomada automática respeita
+    `desired_state` do banco, não o estado em memória de quando ele caiu (RNF-05, comando
+    manual sempre vence)."""
     project_id = await create_project(session_factory)
     conn_id = await create_connection(session_factory, project_id)
     tag_id = await create_tag(session_factory, conn_id)
@@ -365,10 +410,52 @@ async def test_comm_restored_nao_retoma_o_flow(
     await asyncio.sleep(QUIET_WINDOW_S)
 
     assert harness.flow_state(flow_id) == "failed"
-    assert len(events.events(KIND_FLOW_DEPLOYED)) == 1  # só o deploy original
+    assert events.events(KIND_FLOW_RESUMED) == []
 
-    await harness.command("deploy", flow_id)  # deploy manual retoma
+    await harness.command("deploy", flow_id)  # deploy manual continua retomando
     await harness.await_state(flow_id, "running")
+
+
+async def test_deploy_manual_apos_queda_limpa_a_retomada_pendente(
+    harness_factory: Factory,
+    collect: Collect,
+    session_factory: Sessions,
+    redis_client: Redis,
+) -> None:
+    """Guarda (§2.2-8): `deploy`/`stop` manuais limpam a entrada pendente — um
+    `comm_restored` chegando DEPOIS não redeploya de novo por cima."""
+    project_id = await create_project(session_factory)
+    conn_id = await create_connection(session_factory, project_id)
+    tag_id = await create_tag(session_factory, conn_id)
+    flow_id = await create_flow(
+        session_factory,
+        project_id,
+        graph=read_only_graph(tag_id),
+        desired_state="running",
+    )
+    events = await collect(CHANNEL_EVENTS)
+    harness = await harness_factory(poll_interval_s=FAST_POLL_S)
+
+    await harness.command("deploy", flow_id)
+    await harness.await_state(flow_id, "running")
+    await comm_failure(redis_client, conn_id)
+    await harness.await_state(flow_id, "failed")
+
+    await harness.command("deploy", flow_id)  # operador redeploya na mão antes da conexão voltar
+    await harness.await_state(flow_id, "running")
+
+    await publish_event(
+        redis_client,
+        severity="info",
+        origin=f"conn:{conn_id}",
+        message="Conexão restaurada",
+        kind=KIND_COMM_RESTORED,
+        payload={"conn_id": conn_id},
+    )
+    await asyncio.sleep(QUIET_WINDOW_S)
+
+    assert events.events(KIND_FLOW_RESUMED) == []
+    assert len(events.events(KIND_FLOW_DEPLOYED)) == 2  # inicial + manual, sem retomada somando
 
 
 # --------------------------------------------------------------------------------------

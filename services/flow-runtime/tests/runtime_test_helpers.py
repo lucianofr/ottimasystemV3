@@ -43,6 +43,10 @@ from testkit.await_until import await_until
 # Teto das esperas do flow-runtime: o Redis dos testes é local e o laço de reassinatura tem
 # freio de 1 s, então não satisfazer a condição em 5 s é falha real, não lentidão.
 AWAIT_TIMEOUT_S = 5.0
+# `deploy` aqui paga `MpcHost.start()` — um `spawn` real reimportando `casadi`/`do-mpc`
+# do zero no processo filho (custo de import a frio, não do solve): sob carga da máquina,
+# esse boot pode passar de 5s mesmo com o worker falso.
+DEPLOY_TIMEOUT_S = 30.0  # Permite boot lento do worker + solve lento inicial
 
 
 # --------------------------------------------------------------------------------------
@@ -62,6 +66,10 @@ QUIET_WINDOW_S = 0.8
 # bloqueou outro flow" precisa fechar ANTES do host ficar pronto), mas dentro do
 # `_BOOT_TIMEOUT_S` real de 30 s (o handshake tem de chegar, não estourar o deadline).
 MPC_SLOW_BUILD_DELAY_S = 7.0
+# Atraso real do solve para injetar overrun determinístico (TD-008): bem além do orçamento
+# de 0.5 s (Ts padrão dos testes), forçando timeout no dispatch. Análogo a
+# `mpc_host_sleeper_worker`, mas mantém worker vivo entre solves.
+MPC_SLOW_SOLVE_DELAY_S = 0.6
 
 
 # --------------------------------------------------------------------------------------
@@ -80,8 +88,17 @@ async def create_project(
 
 
 async def create_connection(
-    factory: async_sessionmaker[AsyncSession], project_id: int, *, name: str = "Forno 1"
+    factory: async_sessionmaker[AsyncSession],
+    project_id: int,
+    *,
+    name: str = "Forno 1",
+    watchdog_read_node_id: str | None = "ns=2;s=WD_R",
+    watchdog_write_node_id: str | None = "ns=2;s=WD_W",
 ) -> int:
+    """Watchdog configurado por padrão (TD-004): cenários de MPC com `pid` escrevem por
+    tags desta conexão de verdade, e o gate de arme (`auto_arm_blocked_reason`) bloqueia
+    REMOTO sem watchdog — passe `watchdog_read_node_id=None` para simular a conexão sem
+    watchdog nos testes que exercitam esse gate."""
     async with factory() as session:
         connection = OpcConnection(
             project_id=project_id,
@@ -90,6 +107,8 @@ async def create_connection(
             security_policy="none",
             security_mode="none",
             auth_mode="anonymous",
+            watchdog_read_node_id=watchdog_read_node_id,
+            watchdog_write_node_id=watchdog_write_node_id,
             watchdog_period_ms=1000,
         )
         session.add(connection)
@@ -261,7 +280,9 @@ def counter_graph(node_id: str = "s1") -> dict:
     return graph([script_node(node_id, 1)])
 
 
-def mpc_graph_valido(tag_id: int, *, node_id: str = "m1", du_max: float = 5.0) -> dict:
+def mpc_graph_valido(
+    tag_id: int, *, node_id: str = "m1", du_max: float = 5.0, weight: float = 1.0
+) -> dict:
     """Esqueleto mínimo válido do §2.1 (spec F4): 1 MV direta + 1 CV, matriz cheia.
 
     Compartilhado entre `test_supervisor.py` (deploy), `test_hotswap.py` (reload) e
@@ -295,7 +316,7 @@ def mpc_graph_valido(tag_id: int, *, node_id: str = "m1", du_max: float = 5.0) -
                         "eu": "C",
                         "kind": "selfreg",
                         "tss": 30.0,
-                        "weight": 1.0,
+                        "weight": weight,
                         "sp_limits": {"min": 80.0, "max": 120.0},
                     }
                 ],
@@ -577,6 +598,36 @@ def mpc_host_slow_build_worker(conn: Connection, config_json: str, ts_flow: floa
                     cost=0.0,
                     status="ok",
                     wall_ms=1.0,
+                    detail="",
+                )
+            )
+    except (EOFError, OSError):
+        return
+
+
+def mpc_host_slow_solve_worker(conn: Connection, config_json: str, ts_flow: float) -> None:
+    """TD-008: Atraso real no SOLVE (não no boot) para forçar overrun determinístico.
+    Fica pronto na hora, mas cada solve leva `MPC_SLOW_SOLVE_DELAY_S` (~0.6s) — bem além
+    do orçamento de `Ts = 0.5s` dos testes, causando timeout e overrun. Análogo a
+    `mpc_host_sleeper_worker`, mas responde depois do atraso (worker vivo, não pendurado)."""
+    import time
+
+    conn.send(("ready", 1))
+    try:
+        while True:
+            request = conn.recv()
+            if request is None:
+                return
+            time.sleep(MPC_SLOW_SOLVE_DELAY_S)
+            conn.send(
+                SolveResult(
+                    u_plan=dict(request.u_applied),
+                    prediction_t=[],
+                    prediction_cv=[],
+                    prediction_mv=[],
+                    cost=0.0,
+                    status="ok",
+                    wall_ms=float(MPC_SLOW_SOLVE_DELAY_S * 1000),
                     detail="",
                 )
             )

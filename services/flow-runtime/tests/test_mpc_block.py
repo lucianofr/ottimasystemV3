@@ -204,6 +204,7 @@ def _block(
     multiplier: int = 1,
     now: Callable[[], datetime] | None = None,
     readback_direto: int | None = None,
+    escreve_sem_watchdog: bool = False,
 ) -> tuple[MpcBlock, FakeHost, FakeSnapshot, Publishes, Writes, Events]:
     host = FakeHost()
     snapshot = FakeSnapshot()
@@ -221,6 +222,7 @@ def _block(
         write_opc=write_opc,
         emit_event=emit_event,
         now=now,
+        escreve_sem_watchdog=escreve_sem_watchdog,
     )
     return block, host, snapshot, publish, write_opc, emit_event
 
@@ -933,6 +935,42 @@ async def test_auto_arm_blocked_reason_exige_readback_do_pid() -> None:
 
     snapshot.set(503, 42.0)  # readback chega
     assert block.auto_arm_blocked_reason() is None
+
+
+# --------------------------------------------------------------------------------------
+# TD-004: `auto_arm_blocked_reason()` barra o arme quando o bloco escreve numa conexão
+# sem watchdog — a causa é estática (config da conexão), então o gate é a defesa: o
+# `writes.py` do opc-worker recusaria a escrita de qualquer forma (somente leitura de
+# fato), e armar sobre isso seria uma ilusão de controle.
+# --------------------------------------------------------------------------------------
+
+
+async def test_auto_arm_blocked_reason_bloqueia_quando_escreve_sem_watchdog() -> None:
+    block, _, snapshot, *_ = _block(escreve_sem_watchdog=True, readback_direto=601)
+    await block.step(entradas(20.0))
+    snapshot.set(503, 42.0)
+    snapshot.set(601, 4.25)  # entradas quentes: sem a flag, o bloco armaria normalmente
+
+    assert block.auto_arm_blocked_reason() == "write_target_sem_watchdog"
+
+
+async def test_auto_arm_blocked_reason_sem_a_flag_e_inalterado() -> None:
+    """`escreve_sem_watchdog=False` (padrão) reproduz exatamente o gate de antes desta
+    tarefa — guard de não-regressão."""
+    block, _, snapshot, *_ = _block(escreve_sem_watchdog=False, readback_direto=601)
+    await block.step(entradas(20.0))
+    snapshot.set(503, 42.0)
+    snapshot.set(601, 4.25)
+
+    assert block.auto_arm_blocked_reason() is None
+
+
+async def test_auto_arm_blocked_reason_com_a_flag_precede_cold_input() -> None:
+    """Entrada fria E flag ligada: o motivo novo ganha — erro de configuração precede
+    condição transiente (a entrada pode esquentar; a conexão sem watchdog, não)."""
+    block, *_ = _block(escreve_sem_watchdog=True)
+
+    assert block.auto_arm_blocked_reason() == "write_target_sem_watchdog"
 
 
 # --------------------------------------------------------------------------------------

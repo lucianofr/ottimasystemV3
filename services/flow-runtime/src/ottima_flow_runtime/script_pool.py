@@ -18,6 +18,7 @@ import asyncio
 import logging
 import math
 import multiprocessing as mp
+import os
 import pickle
 import traceback
 from dataclasses import dataclass, field
@@ -113,6 +114,12 @@ def _run_script(code: str, inputs: dict[str, float], state: Any, n_outputs: int)
 
 def _worker_main(conn: Connection) -> None:
     """Alvo do `spawn`: laço de jobs. Nível de módulo porque `spawn` precisa importá-lo."""
+    # TD-001: o filho herda OTTIMA_DATABASE_URL/OTTIMA_REDIS_URL do pai (únicas variáveis
+    # que o compose injeta no flow-runtime) — essas URLs carregam credencial. Depois do
+    # clear, uma eventual fuga do sandbox do Script não encontra segredo nenhum no
+    # ambiente. `numpy` já foi importado no import do módulo, então nada depende de
+    # variável de ambiente daqui em diante.
+    os.environ.clear()
     conn.send(_READY)
     try:
         while True:

@@ -5,6 +5,7 @@ Núcleo puro — nada de SQLAlchemy nem de `services/` aqui: o chamador traduz l
 `ottima_core/flowgraph/__init__.py` para a divisão de responsabilidade completa do pacote.
 """
 
+import ast
 import math
 from collections.abc import Mapping
 from typing import Literal
@@ -82,6 +83,7 @@ def validate_graph(
     _check_exec_order(graph.nodes, errors)
     _check_tags(graph.nodes, tags, errors)
     _check_tfs_delay(graph.nodes, ts_seconds, errors)
+    _check_script_code(graph.nodes, errors)
 
     linked = _check_edge_endpoints(graph.edges, by_id, errors)
     resolved = _check_handles(linked, by_id, mpc_configs, errors)
@@ -204,6 +206,40 @@ def _check_tfs_delay(nodes: list[FlowNode], ts_seconds: float, errors: list[str]
                         f"{samples} amostras de tempo morto (theta={element.params.theta} s, "
                         f"Ts={ts_seconds} s), acima do teto de {MAX_DELAY_SAMPLES}"
                     )
+
+
+def _is_dunder(identifier: str) -> bool:
+    return identifier.startswith("__") and identifier.endswith("__")
+
+
+def _check_script_code(nodes: list[FlowNode], errors: list[str]) -> None:
+    """TD-001 (defesa em profundidade, ADR-018): nenhum nome dunder no código do Script.
+
+    `ALLOWED_BUILTINS` (ottima_flow_runtime.script_pool) já tira `__import__` do escopo de
+    execução, mas literais de linguagem (`()`, `[]`, ...) continuam alcançáveis e, a partir
+    deles, `().__class__.__mro__[...].__subclasses__()` é a fuga clássica de sandbox restrito
+    — nem `ast.Name` nem `ast.Attribute` com identificador dunder precisam de `import` para
+    isso. Sintaxe inválida não é problema desta checagem (`_run_script` já reporta o erro em
+    runtime); aqui só se percorre uma AST que compilou.
+    """
+    for node in nodes:
+        if node.type != "script":
+            continue
+        try:
+            tree = ast.parse(node.config.code)
+        except SyntaxError:
+            continue
+        for sub in ast.walk(tree):
+            identifier = None
+            if isinstance(sub, ast.Name):
+                identifier = sub.id
+            elif isinstance(sub, ast.Attribute):
+                identifier = sub.attr
+            if identifier is not None and _is_dunder(identifier):
+                errors.append(
+                    f"nó '{node.id}' (script): código de Script não pode acessar nomes dunder"
+                )
+                break
 
 
 def _check_edge_endpoints(

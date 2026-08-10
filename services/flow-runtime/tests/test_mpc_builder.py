@@ -23,6 +23,7 @@ def _mv(
     limits: tuple[float, float] = (0.0, 1000.0),
     du_max: float = 50.0,
     operating_point: float = 0.0,
+    move_weight: float = 1.0,
 ) -> dict:
     return {
         "id": id_,
@@ -32,6 +33,7 @@ def _mv(
         "du_max": du_max,
         "initial_value": 0.0,
         "operating_point": operating_point,
+        "move_weight": move_weight,
         "pid": None,
     }
 
@@ -423,3 +425,41 @@ def test_bounds_de_mv_permanecem_na_coordenada_absoluta_da_planta():
     for k in range(built.horizons.np):
         u_k = float(built.mpc.opt_x_num["_u", k, 0, "mv_1"])
         assert -folga <= u_k <= 100.0 + folga
+
+
+# --------------------------------------------------------------------------------------
+# move_weight (TD-007) — pondera o custo de movimento por MV
+# --------------------------------------------------------------------------------------
+
+
+def _move_weight_config(*, move_weight: float) -> MpcConfig:
+    """1 MV/1 CV com `du_max` folgado (não satura) — só o balanço custo-de-rastreio vs.
+    custo-de-movimento decide o tamanho do primeiro passo."""
+    return MpcConfig.model_validate(
+        {
+            "name": "move_weight",
+            "multiplier": 1,
+            "variables": {
+                "mvs": [_mv("mv_1", limits=(0.0, 100.0), du_max=50.0, move_weight=move_weight)],
+                "cvs": [_cv("cv_1", sp_limits=(0.0, 100.0))],
+                "constraints": [],
+                "dvs": [],
+            },
+            "models": {"cv_1": {"mv_1": _par(1.0, 5.0, 2.0, 0.0)}},
+        }
+    )
+
+
+def test_move_weight_maior_encarece_o_movimento_e_reduz_o_primeiro_passo():
+    """`move_weight` pondera `R_DELTA_U` no objetivo (builder.py) — com o MESMO alvo de SP,
+    uma MV 4x mais preguiçosa (`move_weight=4`) tem que mover MENOS no primeiro passo que a
+    MV de referência (`move_weight=1`), porque mover custa mais caro no mesmo objetivo."""
+    built_leve = build_mpc(_move_weight_config(move_weight=1.0), ts_flow=1.0)
+    _solve(built_leve, sp={"cv_1": 10.0})
+    passo_leve = abs(_mv_plan(built_leve, "mv_1")[1] - _mv_plan(built_leve, "mv_1")[0])
+
+    built_pesada = build_mpc(_move_weight_config(move_weight=4.0), ts_flow=1.0)
+    _solve(built_pesada, sp={"cv_1": 10.0})
+    passo_pesada = abs(_mv_plan(built_pesada, "mv_1")[1] - _mv_plan(built_pesada, "mv_1")[0])
+
+    assert passo_pesada < passo_leve

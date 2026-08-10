@@ -16,10 +16,24 @@ async def _projeto(client, headers, nome: str) -> int:
     return r.json()["id"]
 
 
-async def _conexao(client, headers, project_id: int, nome: str = "plc") -> int:
+async def _conexao(
+    client,
+    headers,
+    project_id: int,
+    nome: str = "plc",
+    *,
+    watchdog_read_node_id: str | None = "ns=2;s=WD_R",
+    watchdog_write_node_id: str | None = "ns=2;s=WD_W",
+) -> int:
     r = await client.post(
         "/api/connections",
-        json={"project_id": project_id, "name": nome, "endpoint": "opc.tcp://x:4840"},
+        json={
+            "project_id": project_id,
+            "name": nome,
+            "endpoint": "opc.tcp://x:4840",
+            "watchdog_read_node_id": watchdog_read_node_id,
+            "watchdog_write_node_id": watchdog_write_node_id,
+        },
         headers=headers,
     )
     assert r.status_code == 201, r.text
@@ -245,6 +259,28 @@ async def test_put_grafo_valido_grava_e_nao_avisa(client, admin_headers):
 
     relido = await client.get(f"/api/flows/{flow['id']}", headers=admin_headers)
     assert relido.json()["graph_json"] == graph
+
+
+async def test_put_opc_write_em_conexao_sem_watchdog_avisa_e_grava(client, admin_headers):
+    """TD-004: `writes.py` (opc-worker) recusa TODA escrita numa conexão sem watchdog — o
+    PUT precisa avisar, não bloquear (a mesma conexão segue valendo para leitura)."""
+    projeto = await _projeto(client, admin_headers, "SemWatchdog")
+    conexao = await _conexao(
+        client, admin_headers, projeto, watchdog_read_node_id=None, watchdog_write_node_id=None
+    )
+    leitura = await _tag(client, admin_headers, conexao, "FT-SemWatchdog", "r")
+    escrita = await _tag(client, admin_headers, conexao, "FV-SemWatchdog", "w")
+    flow = await _flow(client, admin_headers, projeto)
+    graph = _grafo_read_write(leitura, escrita)
+
+    r = await _salvar(client, admin_headers, flow["id"], graph)
+    assert r.status_code == 200, r.text
+    corpo = r.json()
+    assert corpo["warnings"] == [
+        "O bloco 'w1' escreve na conexão 'plc' sem watchdog: as escritas serão recusadas "
+        "(somente leitura de fato)."
+    ]
+    assert corpo["flow"]["graph_json"] == graph
 
 
 async def test_put_ciclo_422(client, admin_headers):

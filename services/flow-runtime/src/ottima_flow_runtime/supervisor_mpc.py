@@ -441,13 +441,21 @@ class MpcOrchestrator:
 
     async def reconcile_mpc_hosts(
         self, runtime: _FlowRuntime, staged: StagedDefinition, *, flow_id: int
-    ) -> list[str]:
+    ) -> tuple[list[str], list[str]]:
         """Hot-swap de host por `MpcHost` (spec §4.7): bloco cujo config não mudou preserva
         o MESMO host (identidade de objeto, §4.1-3) — só quem mudou (ou saiu do grafo) ganha
-        host novo e sheda o antigo a LOCAL antes de matar o processo velho. Devolve os
-        `block_id` substituídos (config mudou, ainda presentes no grafo novo) — `_stage`
-        publica `mpc_mode_changed{reason: hot_swap}` para eles só DEPOIS de já ter
-        atualizado `runtime.blocks`/`runtime.hosts`, nunca aqui dentro.
+        host novo. Devolve `(swapped, swapped_bumpless)` — dois conjuntos de `block_id`
+        substituídos (config mudou, ainda presentes no grafo novo), por MOTIVO do evento
+        que `_stage` publica para eles só DEPOIS de já ter atualizado
+        `runtime.blocks`/`runtime.hosts`, nunca aqui dentro:
+        - `swapped`: sheda a LOCAL (`mpc_mode_changed{reason: hot_swap}`) — comportamento
+          herdado (ADR-011), config mudou E o conjunto de MVs mudou (ou não havia bloco
+          MPC velho para transplantar).
+        - `swapped_bumpless`: o bloco novo já nasceu transplantado (TD-006,
+          `definition.py::build_definition` chamou `aplicar_estado` — `block.transplantado`
+          é `True`) — os modos NÃO mudaram, então o `mode_cmd=auto` do shed de sempre é
+          PULADO (devolvê-lo aqui destruiria o REMOTO que acabou de ser preservado);
+          `mpc_mode_changed{reason: hot_swap_bumpless}` é só auditoria.
 
         Achado 4 da revisão F4 (race contra `_auto_revert` do watchdog, que roda FORA de
         `self._lock`): `cancel_watchdog` pode achar o dict já vazio — o watchdog se
@@ -463,14 +471,21 @@ class MpcOrchestrator:
             if old_hosts.get(block_id) is not host:
                 self.start_host_background(runtime, host, flow_id=flow_id, block_id=block_id)
         swapped: list[str] = []
+        swapped_bumpless: list[str] = []
         for block_id, old_host in old_hosts.items():
             if new_hosts.get(block_id) is old_host:
                 continue  # bloco não mudou: host e estado preservados (§4.1-3)
             await self.cancel_watchdog(runtime, block_id)
             old_entry = runtime.blocks.get(block_id)
+            new_entry = staged.blocks.get(block_id)
+            transplantado = (
+                new_entry is not None
+                and isinstance(new_entry[1], MpcBlock)
+                and new_entry[1].transplantado
+            )
             if old_entry is not None and isinstance(old_entry[1], MpcBlock):
                 old_block = old_entry[1]
-                if old_block.local_remote == "remote":
+                if old_block.local_remote == "remote" and not transplantado:
                     await write_mode_cmd(
                         runtime.mpc_write_opc,
                         old_block.pid_bindings,
@@ -478,6 +493,6 @@ class MpcOrchestrator:
                         source=mpc_block_origin(flow_id, block_id),
                     )
                 if block_id in new_hosts:  # substituído (config mudou), não removido do grafo
-                    swapped.append(block_id)
+                    (swapped_bumpless if transplantado else swapped).append(block_id)
             self.stop_host_background(runtime, old_host, flow_id=flow_id, block_id=block_id)
-        return swapped
+        return swapped, swapped_bumpless

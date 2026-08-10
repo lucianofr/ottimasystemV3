@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Response
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,10 +28,12 @@ from ottima_core.bus import CHANNEL_FLOW_COMMANDS, FlowCommand
 from ottima_core.flowgraph import (
     CvVar,
     GraphParseError,
+    Horizons,
     Limits,
     MpcConfig,
     MvVar,
     Range,
+    derive_horizons,
     parse_graph,
 )
 from ottima_core.models import Flow, Project, User
@@ -114,7 +116,11 @@ class MpcVariablesOut(BaseModel):
 
 class MpcNodeOut(BaseModel):
     """Um bloco `mpc` projetado (spec §4.1-1) — sem `models`/pesos/TSS (§4.1-3); estado
-    rodando/parado do flow não entra (§4.1-4)."""
+    rodando/parado do flow não entra (§4.1-4).
+
+    `horizons` é derivado no servidor porque a projeção não expõe `tss` (§4.1-3): sem ele o
+    cliente teria de duplicar a regra de `derive_horizons` com metade da entrada.
+    """
 
     flow_id: int
     flow_name: str
@@ -123,6 +129,7 @@ class MpcNodeOut(BaseModel):
     name: str
     multiplier: int
     variables: MpcVariablesOut
+    horizons: Horizons
 
 
 def _reprovado(mensagem: str) -> HTTPException:
@@ -249,6 +256,15 @@ async def set_mv(
     return Response(status_code=202)
 
 
+def _horizontes(config: MpcConfig, ts_flow: float) -> Horizons:
+    """Ts do MPC, Np e Nc do bloco (spec §2.2-5) — a mesma função pura que o runtime usa."""
+    return derive_horizons(
+        config.multiplier,
+        ts_flow,
+        [linha.tss for linha in (*config.variables.cvs, *config.variables.constraints)],
+    )
+
+
 def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
     """Projeta os blocos `mpc` de um flow (spec §4.1-1). `graph_json` que não parseia, ou
     cujo bloco `mpc` não tipa como `MpcConfig` (grafo estruturalmente válido mas conteúdo do
@@ -292,9 +308,10 @@ def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
                             for dv in config.variables.dvs
                         ],
                     ),
+                    horizons=_horizontes(config, float(flow.ts_seconds)),
                 )
             )
-    except (GraphParseError, ValidationError):
+    except (GraphParseError, ValueError):
         logger.warning(
             "Flow %s ('%s') com graph_json inválido; ignorado na projeção de MPCs",
             flow.id,

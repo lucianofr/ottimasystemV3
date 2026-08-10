@@ -72,6 +72,7 @@ def build_definition(
     redis_client: Redis,
     pool: ScriptPool,
     snapshot: ValueSnapshot,
+    conns_sem_watchdog: frozenset[int] = frozenset(),
     mpc_worker_target: Callable[[Connection, str, float], None] = worker_main,
 ) -> StagedDefinition:
     """Instancia os blocos do grafo (reaproveitando os que não mudaram) e monta a fiação.
@@ -87,10 +88,10 @@ def build_definition(
     for node in sorted(graph.nodes, key=lambda item: item.exec_order):
         functional = node.functional_config()
         kept = reuse.get(node.id)
-        block = (
-            kept[1]
-            if kept is not None and kept[0] == functional
-            else _instantiate(
+        if kept is not None and kept[0] == functional:
+            block = kept[1]
+        else:
+            block = _instantiate(
                 node,
                 flow_id=flow_id,
                 ts_seconds=ts_seconds,
@@ -100,8 +101,22 @@ def build_definition(
                 snapshot=snapshot,
                 write_opc=write_opc,
                 mpc_worker_target=mpc_worker_target,
+                graph=graph,
+                conns_sem_watchdog=conns_sem_watchdog,
             )
-        )
+            # TD-006: config mudou (ou o bloco é novo) — quando o bloco velho é um
+            # `MpcBlock` e o conjunto de MVs é IDÊNTICO, o novo transplanta o estado do
+            # velho (`EstadoMpcTransplante`) em vez de nascer zerado em LOCAL (ADR-011 já
+            # cobre "config não mudou": esse caso nem entra aqui, reuse acima resolve
+            # sozinho). Conjunto de MVs mudou, ou o Ts do flow mudou (`reuse={}` inteiro
+            # antes deste laço, então `kept is None`) -> comportamento herdado, nasce
+            # zerado.
+            if kept is not None and isinstance(kept[1], MpcBlock) and isinstance(block, MpcBlock):
+                mvs_velhas = _mv_ids_de_functional(kept[0])
+                mvs_novas = _mv_ids_de_functional(functional)
+                if mvs_velhas is not None and mvs_velhas == mvs_novas:
+                    block.aplicar_estado(kept[1].snapshot_estado())
+                    block.transplantado = True
         blocks[node.id] = (functional, block)
         instances.append(block)
         if isinstance(block, MpcBlock):
@@ -120,6 +135,23 @@ def build_definition(
         hosts=hosts,
         mpc_write_opc=write_opc,
     )
+
+
+def _mv_ids_de_functional(functional: dict[str, Any]) -> frozenset[str] | None:
+    """IDs das MVs de um `functional_config()` de bloco `mpc` (TD-006): compara o
+    conjunto de MVs entre a config velha e a nova direto nos dicts crus, sem reinstanciar
+    `MpcConfig` nem tocar o estado privado do `MpcBlock` velho. `None` fora do tipo `mpc`
+    ou de uma forma inesperada — o chamador só invoca isto já sob `isinstance(..., MpcBlock)`
+    dos dois lados, então a forma normal é sempre a esperada."""
+    if functional.get("type") != "mpc":
+        return None
+    variables = functional.get("variables")
+    if not isinstance(variables, dict):
+        return None
+    mvs = variables.get("mvs")
+    if not isinstance(mvs, list):
+        return None
+    return frozenset(mv["id"] for mv in mvs if isinstance(mv, dict) and "id" in mv)
 
 
 def _make_write_opc(
@@ -149,6 +181,8 @@ def _instantiate(
     snapshot: ValueSnapshot,
     write_opc: Callable[[OpcWrite], Awaitable[None]],
     mpc_worker_target: Callable[[Connection, str, float], None],
+    graph: FlowGraph,
+    conns_sem_watchdog: frozenset[int],
 ) -> Block:
     """Instancia o bloco com os serviços do runtime. Bloco novo nasce zerado (§4.1-3)."""
     config: Any = node.config
@@ -184,6 +218,7 @@ def _instantiate(
             redis_client=redis_client,
             write_opc=write_opc,
             worker_target=mpc_worker_target,
+            escreve_sem_watchdog=_mpc_escreve_sem_watchdog(node, graph, tags, conns_sem_watchdog),
         )
     return TfsBlock(node.id, matrix=config.matrix, ts_seconds=ts_seconds)
 
@@ -197,6 +232,7 @@ def _instantiate_mpc(
     redis_client: Redis,
     write_opc: Callable[[OpcWrite], Awaitable[None]],
     worker_target: Callable[[Connection, str, float], None],
+    escreve_sem_watchdog: bool = False,
 ) -> MpcBlock:
     config = MpcConfig.model_validate(node.config.model_dump())
     host = MpcHost(node.id, config, ts_seconds, worker_target=worker_target)
@@ -218,6 +254,7 @@ def _instantiate_mpc(
         publish=publish,
         write_opc=write_opc,
         emit_event=emit_event,
+        escreve_sem_watchdog=escreve_sem_watchdog,
     )
 
 
@@ -265,3 +302,71 @@ def _mpc_pid_tag_ids(node: FlowNode) -> Iterator[int]:
         yield mv.pid.readback_tag_id
         if mv.pid.mode_read_tag_id is not None:
             yield mv.pid.mode_read_tag_id
+
+
+def _mpc_escreve_sem_watchdog(
+    node: FlowNode,
+    graph: FlowGraph,
+    tags: Mapping[int, TagRef],
+    conns_sem_watchdog: frozenset[int],
+) -> bool:
+    """TD-004: alguma MV deste bloco escreve numa conexão sem watchdog completo — o
+    `writes.py` do opc-worker recusa TODA escrita nesse caso (somente leitura de fato), e
+    a causa é 100% estática (config da conexão), então previne-se aqui, no deploy, em vez
+    de esperar a recusa dinâmica.
+
+    MV com `pid` escreve pelas próprias tags do binding (`write_tag_id`/`mode_cmd_tag_id`),
+    sem depender de aresta nenhuma; MV "direta" (decisão A-8) escreve por onde as arestas
+    da sua porta de saída levarem, até um `opc_write`.
+    """
+    if not conns_sem_watchdog:
+        return False
+    config = MpcConfig.model_validate(node.config.model_dump())
+    for mv in config.variables.mvs:
+        if mv.pid is not None:
+            escreve = any(
+                tags[tag_id].conn_id in conns_sem_watchdog
+                for tag_id in (mv.pid.write_tag_id, mv.pid.mode_cmd_tag_id)
+                if tag_id in tags
+            )
+        else:
+            escreve = _mv_direta_escreve_sem_watchdog(
+                node.id, mv.id, graph, tags, conns_sem_watchdog
+            )
+        if escreve:
+            return True
+    return False
+
+
+def _mv_direta_escreve_sem_watchdog(
+    origem_id: str,
+    handle: str,
+    graph: FlowGraph,
+    tags: Mapping[int, TagRef],
+    conns_sem_watchdog: frozenset[int],
+) -> bool:
+    """Segue as arestas a partir da porta de saída de uma MV direta até um `opc_write`
+    (TD-004). Blocos intermediários (TFS/Script) repassam por QUALQUER saída deles — o
+    grafo não deixa saber qual handle carrega o sinal desta MV especificamente depois do
+    primeiro salto, e um falso positivo aqui é só um aviso/gate extra, nunca uma escrita
+    sem watchdog despercebida (o custo de errar para o lado cauteloso é aceitável)."""
+    visitados: set[str] = set()
+    fronteira: list[tuple[str, str | None]] = [(origem_id, handle)]
+    while fronteira:
+        source_id, source_handle = fronteira.pop()
+        for aresta in graph.edges:
+            if aresta.source != source_id:
+                continue
+            if source_handle is not None and aresta.source_handle != source_handle:
+                continue
+            if aresta.target in visitados:
+                continue
+            visitados.add(aresta.target)
+            alvo = graph.node(aresta.target)
+            if alvo.type == "opc_write":
+                tag = tags.get(alvo.config.tag_id)
+                if tag is not None and tag.conn_id in conns_sem_watchdog:
+                    return True
+            else:
+                fronteira.append((alvo.id, None))
+    return False

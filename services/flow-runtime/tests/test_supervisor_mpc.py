@@ -152,12 +152,19 @@ def mpc_graph_com_pid(
     return graph([read_node("r1", 1, cv_tag_id), mpc_node], [edge("r1", "out", node_id, "cv_a")])
 
 
-async def _scenario(session_factory: Sessions, *, with_mode_read: bool = True) -> dict:
+async def _scenario(
+    session_factory: Sessions, *, with_mode_read: bool = True, with_watchdog: bool = True
+) -> dict:
     """Projeto + conexão + as tags do `pid` + flow com `mpc_graph_com_pid`. Devolve os ids
     que os testes precisam — evita repetir a mesma sequência de `create_*` uma dúzia de
     vezes."""
     project_id = await create_project(session_factory)
-    connection_id = await create_connection(session_factory, project_id)
+    connection_id = await create_connection(
+        session_factory,
+        project_id,
+        watchdog_read_node_id="ns=2;s=WD_R" if with_watchdog else None,
+        watchdog_write_node_id="ns=2;s=WD_W" if with_watchdog else None,
+    )
     cv_tag_id = await create_tag(session_factory, connection_id, name="cv", direction="r")
     write_tag_id = await create_tag(session_factory, connection_id, name="write", direction="w")
     mode_cmd_tag_id = await create_tag(
@@ -807,12 +814,14 @@ async def test_mpc_mv_clamp_em_limits(
 
 
 # --------------------------------------------------------------------------------------
-# 15: hot-swap (§4.7) — config alterada com flow rodando: host novo + shed a LOCAL +
-#     mpc_mode_changed{reason: hot_swap}; flow segue rodando (§4.1-5)
+# 15: hot-swap (§4.7, TD-006/ADR-011) — sintonia alterada (`du_max`) com o MESMO conjunto
+#     de MVs, flow rodando: host novo TRANSPLANTA o estado do velho (bumpless) — REMOTO
+#     preservado, NENHUM mode_cmd=auto devolvido, mpc_mode_changed{reason: hot_swap_
+#     bumpless}; flow segue rodando (§4.1-5).
 # --------------------------------------------------------------------------------------
 
 
-async def test_hot_swap_config_alterado_com_flow_rodando_zera_worker_e_sheda_a_local(
+async def test_hot_swap_sintonia_alterada_mvs_iguais_preserva_remoto_bumpless(
     harness_factory: Factory, collect: Collect, session_factory: Sessions
 ) -> None:
     scenario = await _scenario(session_factory)
@@ -847,14 +856,19 @@ async def test_hot_swap_config_alterado_com_flow_rodando_zera_worker_e_sheda_a_l
         lambda: len(events.events(KIND_MPC_MODE_CHANGED)) == 2, timeout_s=AWAIT_TIMEOUT_S
     )
     hot_swap_event = events.events(KIND_MPC_MODE_CHANGED)[1]
-    assert hot_swap_event.payload == {"kind": KIND_MPC_MODE_CHANGED, "reason": "hot_swap"}
+    assert hot_swap_event.payload == {"kind": KIND_MPC_MODE_CHANGED, "reason": "hot_swap_bumpless"}
     assert hot_swap_event.origin == f"flow:{scenario['flow_id']}/block:m1"
 
+    # Bumpless: SÓ o write do arme original (`target`) — o shed de sempre devolveria
+    # `mode_cmd=auto` aqui, mas o modo não mudou, então não há o que devolver.
     mode_cmd = writes_of(writes, tag_id=scenario["mode_cmd_tag_id"])
-    assert [w.value for w in mode_cmd] == [float(_MODE_TARGET), float(_MODE_AUTO)]
+    assert [w.value for w in mode_cmd] == [float(_MODE_TARGET)]
 
     host_after = harness.supervisor._runtimes[scenario["flow_id"]].hosts["m1"]  # noqa: SLF001
     assert host_after is not host_before, "hot-swap tem de trocar o MpcHost por um novo"
+
+    novo_bloco = harness.supervisor._runtimes[scenario["flow_id"]].blocks["m1"][1]  # noqa: SLF001
+    assert novo_bloco.local_remote == "remote", "TD-006: REMOTO preservado no transplante"
 
     assert harness.flow_state(scenario["flow_id"]) == "running", (
         "hot-swap nunca derruba flow (§4.1-5)"
@@ -1349,3 +1363,33 @@ async def test_force_stop_libera_o_lock_antes_do_kill_do_host_mpc(
 
     gate.set()
     await await_until(lambda: not runtime.mpc_stop_tasks, timeout_s=AWAIT_TIMEOUT_S)
+
+
+# --------------------------------------------------------------------------------------
+# 24: TD-004 — conexão sem watchdog bloqueia o arme REMOTO (config estática, gate no
+#     deploy: `definition.py` computa `escreve_sem_watchdog` e injeta no `MpcBlock`)
+# --------------------------------------------------------------------------------------
+
+
+async def test_local_para_remoto_com_conexao_sem_watchdog_falha_write_target_sem_watchdog(
+    harness_factory: Factory, collect: Collect, session_factory: Sessions
+) -> None:
+    """A MV com `pid` deste cenário escreve em `write_tag_id`/`mode_cmd_tag_id` da MESMA
+    conexão sem watchdog. Mesmo com host pronto e entrada quente e válida — o cenário de
+    sucesso normal de `_deploy_and_warm` — o gate de `auto_arm_blocked_reason` barra ANTES
+    de materializar o comando: `escreve_sem_watchdog` é o NOVO PRIMEIRO check."""
+    scenario = await _scenario(session_factory, with_watchdog=False)
+    events = await collect(CHANNEL_EVENTS)
+    harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
+    await _deploy_and_warm(harness, collect, scenario)
+
+    await harness.command("mpc_mode", scenario["flow_id"], args=_arm_args())
+    await await_until(lambda: len(events.events(KIND_MPC_ARM_FAILED)) == 1)
+
+    falha = events.events(KIND_MPC_ARM_FAILED)[0]
+    assert falha.payload["axis"] == "local_remote"
+    assert falha.payload["reason"] == "write_target_sem_watchdog"
+    assert events.events(KIND_MPC_MODE_CHANGED) == []
+
+    runtime = harness.supervisor._runtimes[scenario["flow_id"]]  # noqa: SLF001
+    assert runtime.blocks["m1"][1].local_remote == "local"

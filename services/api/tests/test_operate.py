@@ -615,6 +615,10 @@ async def test_mpcs_projecao_verbatim_sem_pid_nem_models(client, admin_headers, 
                 ],
                 "dvs": [{"id": "dv_a", "name": "DV A", "eu": "C", "range": None}],
             },
+            # Derivado no servidor (`derive_horizons`): a projeção não expõe `tss` (§4.1-3),
+            # então o cliente não teria como calcular. `Ts_mpc = 1 x 1 s`; a maior TSS das
+            # linhas (CV + Restrição) é 30 s, logo `Np = 30` e `Nc = max(2, ceil(30/4)) = 8`.
+            "horizons": {"ts_mpc": 1.0, "np": 30, "nc": 8},
         }
     ]
 

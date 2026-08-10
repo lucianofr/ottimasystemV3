@@ -23,8 +23,10 @@ class FlowCreate(BaseModel):
 class FlowUpdate(BaseModel):
     # `graph_json` entra como dict e é validado pelo `flowgraph` no handler: modelá-lo aqui
     # criaria uma segunda fonte de verdade sobre a forma do grafo, com erro fora do pt-BR.
+    # `None` mantém o grafo salvo: o diálogo de propriedades troca nome/Ts sem tocar no desenho.
     name: str | None = Field(default=None, min_length=1)
-    graph_json: dict
+    ts_seconds: TsSeconds | None = None
+    graph_json: dict | None = None
 
 
 class FlowOut(BaseModel):

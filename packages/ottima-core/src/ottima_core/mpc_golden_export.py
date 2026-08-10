@@ -46,6 +46,12 @@ def _mv(sufixo: str, **overrides: object) -> dict[str, object]:
         "eu": "",
         "limits": {"min": 0.0, "max": 100.0},
         "du_max": 1.0,
+        # TD-007: defaults neutros de `MvVar.du_min`/`.move_weight` — as regras espelhadas em
+        # `validarConfigMpc` (piso `du_min >= 0`/`du_min <= du_max`, `move_weight > 0`) exigem
+        # os dois campos presentes, senão os casos de validação existentes ganhariam erros
+        # espúrios do lado TS (campo ausente vira `undefined`, nunca `>= 0`).
+        "du_min": 0.0,
+        "move_weight": 1.0,
         "initial_value": 0.0,
         "pid": None,
     }

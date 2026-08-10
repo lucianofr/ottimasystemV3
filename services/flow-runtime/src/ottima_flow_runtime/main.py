@@ -91,6 +91,7 @@ async def lifespan(app: FastAPI):
     events = build_event_listener(
         client,
         on_comm_failure=supervisor.on_comm_failure,
+        on_comm_restored=supervisor.on_comm_restored,
         on_project_activated=supervisor.on_project_activated,
     )
     app.state.events = events

@@ -285,7 +285,7 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
     for mv in mvs:
         u = model.u[mv.id]
         uprev = model.x[f"uprev_{mv.id}"]
-        du_cost = du_cost + R_DELTA_U * ((u - uprev) / spans[mv.id]) ** 2
+        du_cost = du_cost + R_DELTA_U * mv.move_weight * ((u - uprev) / spans[mv.id]) ** 2
 
     mpc.set_objective(mterm=cv_cost_terminal, lterm=cv_cost + slack_cost + du_cost)
 

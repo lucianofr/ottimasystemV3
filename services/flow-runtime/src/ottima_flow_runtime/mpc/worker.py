@@ -110,6 +110,8 @@ class _Runtime:
     aqui — o que é exatamente o que a avaliação de `C·x` do bias precisa (ver `_write_bias`).
     `x_current`: estado agregado vigente (DM achatado, compatível com `mpc.make_step` e com
     `Simulator.x0`) — a mesma variável serve de x0 do MPC e de x0 do propagador.
+    `du_min`: mv_id -> banda morta do atuador (`MvVar.du_min`), lida uma vez no boot — a
+    quantização pós-solve (`_aplicar_banda_morta`, TD-007) é a única consumidora.
     """
 
     built: BuiltMpc
@@ -118,6 +120,7 @@ class _Runtime:
     row_fun: dict[str, ca.Function]
     cost_fun: ca.Function
     x_current: ca.DM
+    du_min: dict[str, float]
 
 
 def _build_runtime(config: MpcConfig, ts_flow: float) -> _Runtime:
@@ -158,6 +161,7 @@ def _build_runtime(config: MpcConfig, ts_flow: float) -> _Runtime:
         row_fun=row_fun,
         cost_fun=cost_fun,
         x_current=model.x(0.0).cat,
+        du_min={mv.id: mv.du_min for mv in config.variables.mvs},
     )
 
 
@@ -235,6 +239,35 @@ def _extract_prediction(
     return t, prediction_cv, prediction_mv
 
 
+def _aplicar_banda_morta(
+    runtime: _Runtime, u_plan: dict[str, float], prediction_mv: list[list[float]]
+) -> None:
+    """Banda morta do atuador (`MvVar.du_min`, TD-007) — quantizada AQUI e só aqui: se o
+    bloco também descartasse movimentos pequenos, o modelo interno (que já viu o Δu do
+    solve) e o valor de fato escrito na planta divergiriam com o tempo.
+
+    Movimento menor que `du_min` não é aplicado (a válvula não responderia mesmo): o
+    primeiro passo do plano publicado (`u_plan[mv]`/`prediction_mv[k][1]`) volta a ser o
+    `u_prev` vigente — o mesmo `registrador uprev_{mv}` que ancora o Δu do solve
+    (`prediction_mv[k][0]`, `_extract_prediction`). Como esse registrador é recalculado a
+    CADA pedido a partir do `u_applied` que o chamador reporta (nunca acumulado aqui), o
+    valor quantizado devolvido agora É o `u_applied` do PRÓXIMO pedido — fechar o loop pela
+    resposta é a única fonte de verdade, sem estado extra para o worker manter e derivar.
+
+    A cauda da predição (`k >= 2`, índice `>= 2` de cada lista) fica como o solver
+    devolveu: só o primeiro movimento é de fato aplicado (receding horizon) — requantizar
+    a cauda equivaleria a resolver o solve de novo, o que o próximo ciclo já faz.
+    """
+    for i, mv_id in enumerate(runtime.built.mv_order):
+        du_min = runtime.du_min[mv_id]
+        if du_min <= 0.0:
+            continue
+        u_prev = prediction_mv[i][0]
+        if abs(u_plan[mv_id] - u_prev) < du_min:
+            u_plan[mv_id] = u_prev
+            prediction_mv[i][1] = u_prev
+
+
 def empty_result(*, status: str, detail: str = "", wall_ms: float) -> SolveResult:
     return SolveResult(
         u_plan={},
@@ -272,6 +305,7 @@ def _solve(runtime: _Runtime, request: SolveRequest) -> SolveResult:
 
     u_plan = {mv_id: float(built.mpc.opt_x_num["_u", 0, 0, mv_id]) for mv_id in built.mv_order}
     prediction_t, prediction_cv, prediction_mv = _extract_prediction(runtime)
+    _aplicar_banda_morta(runtime, u_plan, prediction_mv)
     cost = float(runtime.cost_fun(built.mpc.opt_x_num, built.mpc.opt_p_num))
 
     return SolveResult(

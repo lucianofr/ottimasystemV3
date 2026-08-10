@@ -1,7 +1,9 @@
 """CRUD de projetos (RF-101, ADR-017): leitura para operador, escrita e ativação para admin."""
 
+import asyncio
 import json
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -22,7 +24,13 @@ from ottima_core.bus import (
 )
 from ottima_core.certs import read_app_certificate
 from ottima_core.config import Settings
-from ottima_core.flowgraph import GraphParseError, TagRef, parse_graph, validate_graph
+from ottima_core.flowgraph import (
+    GraphParseError,
+    TagRef,
+    ValidationResult,
+    parse_graph,
+    validate_graph,
+)
 from ottima_core.models import Flow, OpcConnection, Project, Tag, User
 from ottima_core.portability import (
     SCHEMA_VERSION,
@@ -60,6 +68,16 @@ async def _carregar(db: AsyncSession, project_id: int) -> Project:
     if project is None:
         raise HTTPException(status_code=404, detail=MSG_PROJETO_NAO_ENCONTRADO)
     return project
+
+
+def _parse_e_validar(
+    graph_banco: dict, tags: Mapping[int, TagRef], ts_seconds: float
+) -> ValidationResult:
+    """Parse + validação num passo só (mesmo padrão de `routers.flows._validar_grafo`), para
+    rodar inteiro dentro de um `asyncio.to_thread` sem reentrar no event loop no meio do
+    parse (TD-002).
+    """
+    return validate_graph(parse_graph(graph_banco), tags, ts_seconds)
 
 
 @router.get("", response_model=list[ProjectOut], dependencies=[Depends(require_operator)])
@@ -376,16 +394,23 @@ async def import_project(
     # Camada 4 (§3.2-4): `parse_graph` + `validate_graph` por flow, com o mapa de tags
     # materializado pelo `flush()` acima. `grafo_para_banco` nunca levanta aqui: toda
     # `tag_ref` já foi conferida contra o próprio bundle na camada 3.
+    #
+    # `parse_graph`/`validate_graph` são CPU-bound sobre dados já materializados (funções
+    # puras, thread-safe); `await asyncio.to_thread(...)` por flow (não um só para o bundle
+    # inteiro) devolve o event loop entre flows — uvicorn é single-worker e o nginx roteia
+    # `/api` e `/ws` para o mesmo processo, então um bundle grande sem isso congelava a IHM
+    # inteira durante o import (TD-002).
     problemas_grafo: list[str] = []
     flows_novos: list[Flow] = []
     for bf in bundle.flows:
         graph_banco = grafo_para_banco(bf.graph, id_por_ref)
         try:
-            grafo_tipado = parse_graph(graph_banco)
+            resultado = await asyncio.to_thread(
+                _parse_e_validar, graph_banco, tags_para_validacao, float(bf.ts_seconds)
+            )
         except GraphParseError as exc:
             problemas_grafo.extend(f"fluxo '{bf.name}': {p}" for p in exc.errors)
             continue
-        resultado = validate_graph(grafo_tipado, tags_para_validacao, float(bf.ts_seconds))
         if resultado.errors:
             problemas_grafo.extend(f"fluxo '{bf.name}': {p}" for p in resultado.errors)
             continue

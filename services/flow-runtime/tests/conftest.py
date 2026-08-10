@@ -138,6 +138,7 @@ async def harness_factory(
         events = build_event_listener(
             redis_client,
             on_comm_failure=supervisor.on_comm_failure,
+            on_comm_restored=supervisor.on_comm_restored,
             on_project_activated=supervisor.on_project_activated,
         )
         harness = Harness(supervisor, state, pool, snapshot, redis_client, events)

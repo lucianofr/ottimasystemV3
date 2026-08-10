@@ -22,6 +22,7 @@ from redis.asyncio import Redis
 from ottima_core.bus import (
     CHANNEL_EVENTS,
     KIND_COMM_FAILURE,
+    KIND_COMM_RESTORED,
     KIND_DEPLOY_REJECTED,
     KIND_FLOW_DEPLOYED,
     KIND_FLOW_STOPPED,
@@ -40,12 +41,14 @@ def build_event_listener(
     redis_client: Redis,
     *,
     on_comm_failure: Callable[[int], Awaitable[None]],
+    on_comm_restored: Callable[[int], Awaitable[None]],
     on_project_activated: Callable[[int], Awaitable[None]],
 ) -> ChannelListener:
-    """Assinante do canal `events` com os dois `kind` que o runtime consome (§2.2-8).
+    """Assinante do canal `events` com os `kind` que o runtime consome (§2.2-8; TD-005
+    ADR-025 acrescenta `comm_restored`).
 
-    Payloads verificados no código da F2: `comm_failure` traz `conn_id`/`reason`/`detail` e
-    `project_activated` traz `project_id`/`name`.
+    Payloads verificados no código da F2: `comm_failure`/`comm_restored` trazem `conn_id`
+    e `project_activated` traz `project_id`/`name`.
     """
 
     async def handle(data: str) -> None:
@@ -59,6 +62,10 @@ def build_event_listener(
             conn_id = event.payload.get("conn_id")
             if isinstance(conn_id, int):
                 await on_comm_failure(conn_id)
+        elif kind == KIND_COMM_RESTORED:
+            conn_id = event.payload.get("conn_id")
+            if isinstance(conn_id, int):
+                await on_comm_restored(conn_id)
         elif kind == KIND_PROJECT_ACTIVATED:
             project_id = event.payload.get("project_id")
             if isinstance(project_id, int):
@@ -108,19 +115,34 @@ async def publish_flow_stopped(
     )
 
 
-async def publish_mpc_hot_swap(redis_client: Redis, *, flow_id: int, block_id: str) -> None:
-    """`mpc_mode_changed {reason: hot_swap}` (spec F4 §4.7) — forma DIFERENTE do evento que
-    `MpcBlock._audit_mode_changed` publicaria (`{axis, from, to, user}`): o bloco antigo é
-    descartado no hot-swap, então quem materializa este evento é sempre o supervisor, nunca
-    o bloco. A escrita de `mode_cmd=auto` (se o bloco antigo estava armado) é
-    responsabilidade de quem chama, ANTES deste publish (`mpc_arming.write_mode_cmd`)."""
+async def publish_mpc_hot_swap(
+    redis_client: Redis, *, flow_id: int, block_id: str, bumpless: bool = False
+) -> None:
+    """`mpc_mode_changed {reason: hot_swap | hot_swap_bumpless}` (spec F4 §4.7; TD-006
+    ADR-011) — forma DIFERENTE do evento que `MpcBlock._audit_mode_changed` publicaria
+    (`{axis, from, to, user}`): o bloco antigo é descartado no hot-swap, então quem
+    materializa este evento é sempre o supervisor, nunca o bloco.
+
+    `bumpless=True` (TD-006): a config mudou com o MESMO conjunto de MVs — o bloco novo já
+    nasceu transplantado (`definition.py::build_definition` chamou `aplicar_estado`), os
+    modos NÃO mudaram; este evento é só auditoria, nenhum `mode_cmd` foi escrito.
+    `bumpless=False` (padrão, comportamento herdado): o bloco novo nasceu zerado em LOCAL,
+    e quem chama JÁ escreveu `mode_cmd=auto` (se o velho estava armado) ANTES deste
+    publish (`mpc_arming.write_mode_cmd`)."""
+    reason = "hot_swap_bumpless" if bumpless else "hot_swap"
+    message = (
+        f"MPC '{block_id}': sintonia alterada com o flow {flow_id} rodando"
+        " (hot-swap, modo preservado)"
+        if bumpless
+        else f"MPC '{block_id}': config alterada com o flow {flow_id} rodando (hot-swap)"
+    )
     await publish_event(
         redis_client,
         severity="info",
         origin=mpc_block_origin(flow_id, block_id),
-        message=f"MPC '{block_id}': config alterada com o flow {flow_id} rodando (hot-swap)",
+        message=message,
         kind=KIND_MPC_MODE_CHANGED,
-        payload={"reason": "hot_swap"},
+        payload={"reason": reason},
     )
 
 

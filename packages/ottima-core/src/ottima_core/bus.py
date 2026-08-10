@@ -174,6 +174,9 @@ KIND_SCRIPT_RECOVERED = "script_recovered"  # severity "info"
 KIND_PROJECT_EXPORTED = "project_exported"  # severity "info"
 KIND_PROJECT_IMPORTED = "project_imported"  # severity "info"
 
+# Retomada automática após `comm_restored` (TD-005, ADR-025).
+KIND_FLOW_RESUMED = "flow_resumed"  # severity "info"
+
 
 async def publish_event(
     redis_client: Redis,

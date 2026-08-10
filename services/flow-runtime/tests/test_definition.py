@@ -6,7 +6,7 @@ serviços de runtime — mesmo padrão de `test_flowgraph.py`/`test_flowgraph_mp
 """
 
 from ottima_core.flowgraph import TagRef, parse_graph
-from ottima_flow_runtime.definition import _conn_ids, _mpc_pid_tag_ids
+from ottima_flow_runtime.definition import _conn_ids, _mpc_escreve_sem_watchdog, _mpc_pid_tag_ids
 
 
 def opc_read_node(node_id: str, *, tag_id: int, exec_order: int) -> dict:
@@ -15,6 +15,33 @@ def opc_read_node(node_id: str, *, tag_id: int, exec_order: int) -> dict:
         "type": "opc_read",
         "position": {"x": 0.0, "y": 0.0},
         "data": {"exec_order": exec_order, "tag_id": tag_id},
+    }
+
+
+def opc_write_node(node_id: str, *, tag_id: int, exec_order: int) -> dict:
+    return {
+        "id": node_id,
+        "type": "opc_write",
+        "position": {"x": 0.0, "y": 0.0},
+        "data": {"exec_order": exec_order, "tag_id": tag_id},
+    }
+
+
+def tfs_pass_through_node(node_id: str, *, exec_order: int) -> dict:
+    """TFS 2x2 com `y1<-u1` habilitado — bloco intermediário para provar que a travessia
+    de `_mpc_escreve_sem_watchdog` atravessa blocos que não são `opc_write`."""
+    habilitado = {
+        "enabled": True,
+        "kind": "sopdt",
+        "params": {"K": 1.0, "tau1": 1.0, "tau2": 1.0, "theta": 0.0},
+    }
+    desabilitado = {"enabled": False, "kind": "iopdt", "params": {"Ki": 0.0, "theta": 0.0}}
+    matrix = [[habilitado, desabilitado], [desabilitado, desabilitado]]
+    return {
+        "id": node_id,
+        "type": "tfs",
+        "position": {"x": 0.0, "y": 0.0},
+        "data": {"exec_order": exec_order, "matrix": matrix},
     }
 
 
@@ -200,3 +227,139 @@ def test_mpc_pid_tag_ids_devolve_exatamente_as_tags_do_pid():
     graph = parse_graph({"nodes": [node], "edges": []})
 
     assert set(_mpc_pid_tag_ids(graph.node("m1"))) == {100, 101, 102, 200, 201, 202, 203}
+
+
+# --------------------------------------------------------------------------------------
+# TD-004: `_mpc_escreve_sem_watchdog` — análise estática no deploy (config da conexão)
+# --------------------------------------------------------------------------------------
+
+
+def test_mpc_escreve_sem_watchdog_false_sem_conexoes_sem_watchdog():
+    """Nenhuma conexão do projeto está sem watchdog: curto-circuita sem olhar o config."""
+    m = mv("a", pid=pid_binding(100))
+    node, cv_id, input_tag_id = mpc_node("m1", exec_order=2, mvs=[m], input_tag_id=1)
+    graph = parse_graph(
+        {
+            "nodes": [opc_read_node("r1", tag_id=input_tag_id, exec_order=1), node],
+            "edges": [
+                edge("e1", source="r1", target="m1", source_handle="out", target_handle=cv_id)
+            ],
+        }
+    )
+    tags = {
+        1: TagRef(id=1, conn_id=10, direction="r", data_type="float"),
+        100: TagRef(id=100, conn_id=30, direction="w", data_type="float"),
+    }
+    assert _mpc_escreve_sem_watchdog(graph.node("m1"), graph, tags, frozenset()) is False
+
+
+def test_mpc_escreve_sem_watchdog_true_quando_pid_write_tag_sem_watchdog():
+    """MV com `pid` escreve pelas próprias tags do binding — sem depender de aresta."""
+    m = mv("a", pid=pid_binding(100))
+    node, cv_id, input_tag_id = mpc_node("m1", exec_order=2, mvs=[m], input_tag_id=1)
+    graph = parse_graph(
+        {
+            "nodes": [opc_read_node("r1", tag_id=input_tag_id, exec_order=1), node],
+            "edges": [
+                edge("e1", source="r1", target="m1", source_handle="out", target_handle=cv_id)
+            ],
+        }
+    )
+    tags = {
+        1: TagRef(id=1, conn_id=10, direction="r", data_type="float"),
+        100: TagRef(id=100, conn_id=30, direction="w", data_type="float"),  # write_tag_id
+        101: TagRef(id=101, conn_id=30, direction="w", data_type="float"),  # mode_cmd_tag_id
+        102: TagRef(id=102, conn_id=30, direction="r", data_type="float"),  # readback_tag_id
+        103: TagRef(id=103, conn_id=30, direction="r", data_type="float"),  # mode_read_tag_id
+    }
+    assert _mpc_escreve_sem_watchdog(graph.node("m1"), graph, tags, frozenset({30})) is True
+
+
+def test_mpc_escreve_sem_watchdog_false_quando_pid_conexao_tem_watchdog():
+    """Mesmo bloco do teste anterior, mas a conexão 30 não está no conjunto sem watchdog."""
+    m = mv("a", pid=pid_binding(100))
+    node, cv_id, input_tag_id = mpc_node("m1", exec_order=2, mvs=[m], input_tag_id=1)
+    graph = parse_graph(
+        {
+            "nodes": [opc_read_node("r1", tag_id=input_tag_id, exec_order=1), node],
+            "edges": [
+                edge("e1", source="r1", target="m1", source_handle="out", target_handle=cv_id)
+            ],
+        }
+    )
+    tags = {
+        1: TagRef(id=1, conn_id=10, direction="r", data_type="float"),
+        100: TagRef(id=100, conn_id=30, direction="w", data_type="float"),
+        101: TagRef(id=101, conn_id=30, direction="w", data_type="float"),
+        102: TagRef(id=102, conn_id=30, direction="r", data_type="float"),
+        103: TagRef(id=103, conn_id=30, direction="r", data_type="float"),
+    }
+    assert _mpc_escreve_sem_watchdog(graph.node("m1"), graph, tags, frozenset({999})) is False
+
+
+def test_mpc_escreve_sem_watchdog_false_quando_mv_direta_desconectada():
+    """MV direta sem aresta nenhuma na saída (esqueleto de `mpc_graph_valido`, o cenário
+    mais comum dos testes de deploy): nada a rastrear, nunca escreve em lugar nenhum."""
+    m = mv("a")  # sem pid
+    node, cv_id, input_tag_id = mpc_node("m1", exec_order=2, mvs=[m], input_tag_id=1)
+    graph = parse_graph(
+        {
+            "nodes": [opc_read_node("r1", tag_id=input_tag_id, exec_order=1), node],
+            "edges": [
+                edge("e1", source="r1", target="m1", source_handle="out", target_handle=cv_id)
+            ],
+        }
+    )
+    tags = {1: TagRef(id=1, conn_id=10, direction="r", data_type="float")}
+    assert _mpc_escreve_sem_watchdog(graph.node("m1"), graph, tags, frozenset({999})) is False
+
+
+def test_mpc_escreve_sem_watchdog_true_quando_mv_direta_alcanca_opc_write_sem_watchdog():
+    """MV direta ligada direto a um `opc_write` cuja conexão está sem watchdog."""
+    m = mv("a")  # sem pid
+    node, cv_id, input_tag_id = mpc_node("m1", exec_order=2, mvs=[m], input_tag_id=1)
+    graph = parse_graph(
+        {
+            "nodes": [
+                opc_read_node("r1", tag_id=input_tag_id, exec_order=1),
+                node,
+                opc_write_node("w1", tag_id=2, exec_order=3),
+            ],
+            "edges": [
+                edge("e1", source="r1", target="m1", source_handle="out", target_handle=cv_id),
+                edge("e2", source="m1", target="w1", source_handle="mv_a", target_handle="in"),
+            ],
+        }
+    )
+    tags = {
+        1: TagRef(id=1, conn_id=10, direction="r", data_type="float"),
+        2: TagRef(id=2, conn_id=20, direction="w", data_type="float"),
+    }
+    assert _mpc_escreve_sem_watchdog(graph.node("m1"), graph, tags, frozenset({20})) is True
+
+
+def test_mpc_escreve_sem_watchdog_true_atravessando_bloco_intermediario():
+    """A MV direta pode passar por um bloco de sinal (TFS) antes do `opc_write` — a
+    travessia não pode parar no primeiro salto."""
+    m = mv("a")  # sem pid
+    node, cv_id, input_tag_id = mpc_node("m1", exec_order=2, mvs=[m], input_tag_id=1)
+    graph = parse_graph(
+        {
+            "nodes": [
+                opc_read_node("r1", tag_id=input_tag_id, exec_order=1),
+                node,
+                tfs_pass_through_node("t1", exec_order=3),
+                opc_write_node("w1", tag_id=2, exec_order=4),
+            ],
+            "edges": [
+                edge("e1", source="r1", target="m1", source_handle="out", target_handle=cv_id),
+                edge("e2", source="m1", target="t1", source_handle="mv_a", target_handle="u1"),
+                edge("e3", source="t1", target="w1", source_handle="y1", target_handle="in"),
+            ],
+        }
+    )
+    tags = {
+        1: TagRef(id=1, conn_id=10, direction="r", data_type="float"),
+        2: TagRef(id=2, conn_id=20, direction="w", data_type="float"),
+    }
+    assert _mpc_escreve_sem_watchdog(graph.node("m1"), graph, tags, frozenset({20})) is True

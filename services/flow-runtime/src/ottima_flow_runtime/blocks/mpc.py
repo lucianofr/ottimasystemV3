@@ -39,6 +39,7 @@ mudar o comportamento desta tarefa (achado da tarefa 2.2, documentado no relató
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -77,6 +78,27 @@ def _empty_prediction(ts: datetime) -> MpcPrediction:
     return MpcPrediction(ts=ts, t=[], cv=[], mv=[])
 
 
+@dataclass(frozen=True, slots=True)
+class EstadoMpcTransplante:
+    """Estado transplantável de um `MpcBlock` para hot-swap sem queda de modo (TD-006) e
+    para a retomada automática pós `comm_restored` (TD-005, ADR-025).
+
+    Tirado do bloco velho ANTES de ele sair de cena (`snapshot_estado`) e aplicado no
+    bloco novo logo depois de instanciado (`aplicar_estado`) — os dois métodos moram no
+    próprio `MpcBlock` porque só ele conhece o nome real dos atributos internos que
+    compõem o estado "vivo" de um MPC armado: os dois eixos de modo, o último valor
+    manual/aplicado de cada MV e o SP de cada CV. Não inclui plano/predição/custo: são
+    artefatos do ÚLTIMO solve, presos ao worker antigo — o novo nasce sem eles e
+    reconstrói tudo no primeiro solve genuíno (bumpless, `_run_frontier`).
+    """
+
+    local_remote: _LocalRemote
+    man_auto: _ManAuto
+    mv_manual: dict[str, float]
+    mv_last: dict[str, float]
+    sp: dict[str, float]
+
+
 class MpcBlock(Block):
     """Entradas: uma por CV/Restrição/DV (ordem do config, spec §2.1-5). Saídas: uma por MV.
 
@@ -101,6 +123,7 @@ class MpcBlock(Block):
         write_opc: Callable[[OpcWrite], Awaitable[None]],
         emit_event: Callable[..., Awaitable[None]],
         now: Callable[[], datetime] | None = None,
+        escreve_sem_watchdog: bool = False,
     ) -> None:
         super().__init__(block_id)
         self._snapshot = snapshot
@@ -108,6 +131,11 @@ class MpcBlock(Block):
         self._publish = publish
         self._write_opc = write_opc
         self._emit_event = emit_event
+        # TD-004: alguma MV deste bloco escreve numa conexão sem watchdog (`definition.py`
+        # decide, config estática) — `auto_arm_blocked_reason()` barra o arme antes de o
+        # supervisor materializar um comando que o `writes.py` do opc-worker recusaria de
+        # qualquer forma (somente leitura de fato).
+        self._escreve_sem_watchdog = escreve_sem_watchdog
         # Clock injetável (spec F5 §2.1, achado da tarefa 1.2): fallback para quando `step()`
         # não recebe `ts` do scheduler (publicações imediatas, que não têm fronteira; e
         # testes de unidade que chamam `step()` direto). Em produção o scheduler SEMPRE passa
@@ -133,6 +161,13 @@ class MpcBlock(Block):
         self._dv_ids = tuple(v.id for v in config.variables.dvs)
         self._row_ids = self._cv_ids + self._co_ids
         self._entrada_ids = self._row_ids + self._dv_ids
+        # TD-006 (hot-swap bumpless): `True` só quando ESTE bloco nasceu de um transplante
+        # de estado (`definition.py::build_definition`) — `MpcOrchestrator.
+        # reconcile_mpc_hosts` usa o flag para pular a devolução de `mode_cmd=auto` ao PLC
+        # (os modos não mudaram, não há o que devolver) e para escolher o motivo do evento
+        # de auditoria (`hot_swap_bumpless` em vez de `hot_swap`). Atributo público
+        # (não `_transplantado`): quem marca é `definition.py`, de fora da instância.
+        self.transplantado = False
 
         self.reset()
 
@@ -187,7 +222,15 @@ class MpcBlock(Block):
 
         Só LÊ estado — quem decide o que fazer com o motivo (emitir `mpc_arm_failed` e não
         materializar o comando) é o supervisor, que intercepta o comando ANTES de rotear a
-        `command()` (tarefa 2.2)."""
+        `command()` (tarefa 2.2).
+
+        TD-004 (achado do registro de débitos): "escreve numa conexão sem watchdog" é o
+        NOVO PRIMEIRO check, antes até de `worker_not_ready` — a causa é 100% estática
+        (config da conexão, resolvida no deploy por `definition.py`) e nunca se resolve
+        sozinha como um host que ainda vai ficar pronto ou uma entrada que ainda vai
+        esquentar; erro de configuração ganha de condição transiente."""
+        if self._escreve_sem_watchdog:
+            return "write_target_sem_watchdog"
         if not self._host.ready:
             return "worker_not_ready"
         warm = all(var_id in self._last_measured for var_id in self._entrada_ids)
@@ -243,6 +286,35 @@ class MpcBlock(Block):
         # reaproveitado num reset() de hot-swap — para nunca acusar "crash" por um respawn
         # anterior a este bloco/host observar pela 1a vez.
         self._last_respawns: int = self._host.stats()["respawns"]
+
+    def snapshot_estado(self) -> EstadoMpcTransplante:
+        """Tira uma foto do estado transplantável (TD-006/TD-005) — cópias defensivas dos
+        dicts internos, nunca as referências vivas (o bloco velho segue mutando os seus até
+        sair de cena de vez)."""
+        return EstadoMpcTransplante(
+            local_remote=self._local_remote,
+            man_auto=self._man_auto,
+            mv_manual=dict(self._mv_manual),
+            mv_last=dict(self._mv_last),
+            sp=dict(self._sp),
+        )
+
+    def aplicar_estado(self, estado: EstadoMpcTransplante) -> None:
+        """Aplica um snapshot (TD-006 hot-swap; TD-005 retomada pós `comm_restored`): modos
+        e últimos valores voltam a valer no bloco novo, SEM o degrau de um `reset()` normal
+        (que os zeraria para LOCAL/MAN/`initial_value`).
+
+        `_plan` é forçado a `None` — mesma semântica MAN->AUTO do TD-003 (`_command_mode`,
+        §4.4): a saída segura `mv_last` até o primeiro `SolveResult` NOVO deste worker
+        chegar, nunca salta para um plano calculado por outro processo/config. `_n = 0`
+        realinha a fase de cadência do multiplicador, igual a um hot-swap comum."""
+        self._local_remote = estado.local_remote
+        self._man_auto = estado.man_auto
+        self._mv_manual = dict(estado.mv_manual)
+        self._mv_last = dict(estado.mv_last)
+        self._sp = dict(estado.sp)
+        self._plan = None
+        self._n = 0
 
     # ------------------------------------------------------------------------------
     # Varredura

@@ -47,11 +47,13 @@ from ottima_core.bus import (
     KIND_RELOAD_REJECTED,
     FlowCommand,
 )
-from ottima_core.flowgraph import GraphParseError, parse_graph, validate_graph
+from ottima_core.connections import conexoes_sem_watchdog
+from ottima_core.flowgraph import FlowGraph, GraphParseError, TagRef, parse_graph, validate_graph
 from ottima_core.models import Flow, Project
 from ottima_core.tags import project_tags
 
 from .blocks.base import Block
+from .blocks.mpc import MpcBlock
 from .definition import StagedDefinition, build_definition
 from .events import (
     ChannelListener,
@@ -67,6 +69,7 @@ from .script_pool import ScriptPool
 from .snapshot import ValueSnapshot
 from .state import RuntimeState
 from .supervisor_mpc import MpcOrchestrator
+from .supervisor_resume import ResumeOrchestrator, RetomadaPendente
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +105,24 @@ class _Rejected(Exception):
         self.messages = list(messages)
         self.reason = reason
         super().__init__(" | ".join(self.messages))
+
+
+def _parse_e_validar(
+    graph_json: dict, tags: Mapping[int, TagRef], ts_seconds: float
+) -> tuple[FlowGraph, list[str]]:
+    """Parse + validação num passo só, para rodar inteiro fora do event loop dentro de um
+    único `asyncio.to_thread` — mesmo padrão de `ottima_api.routers.flows._validar_grafo`
+    (TD-002). Levanta `_Rejected` com todas as reprovações; puro e thread-safe, opera só
+    sobre o `graph_json` e as tags já carregadas do banco.
+    """
+    try:
+        graph = parse_graph(graph_json)
+    except GraphParseError as erro:
+        raise _Rejected(erro.errors) from None
+    result = validate_graph(graph, tags, ts_seconds)
+    if result.errors:
+        raise _Rejected(result.errors)
+    return graph, result.warnings
 
 
 @dataclass(slots=True)
@@ -170,6 +191,19 @@ class Supervisor:
         )
         # Nunca dois comandos (ou comando e watermark) mexendo no mesmo mapa em paralelo.
         self._lock = asyncio.Lock()
+        # TD-005/ADR-025: retomada automática pós `comm_restored`. Mesmo `self._runtimes`
+        # do `MpcOrchestrator` acima — delegação interna, API pública ganha só
+        # `on_comm_restored`. Precisa do lock JÁ criado (linha acima) para o rearme nunca
+        # prender um comando concorrente atrás de um `sleep` (ver `supervisor_resume.py`).
+        self._resume = ResumeOrchestrator(
+            self._runtimes,
+            redis_client,
+            session_factory,
+            lock=self._lock,
+            mpc=self._mpc,
+            deploy_flow=self._deploy_flow,
+            load_flow=self._load,
+        )
         self._commands = ChannelListener(
             redis_client,
             CHANNEL_FLOW_COMMANDS,
@@ -266,26 +300,36 @@ class Supervisor:
 
     async def _deploy(self, command: FlowCommand) -> None:
         flow_id = command.flow_id
-        old_runtime = self._runtimes.get(flow_id)
-        if old_runtime is not None and old_runtime.task.state == "running":
+        self._resume.descartar(flow_id)  # comando manual sempre vence (§2.2-8, RNF-05)
+        runtime = self._runtimes.get(flow_id)
+        if runtime is not None and runtime.task.state == "running":
             return  # no-op sem evento duplicado (RNF-05)
+        await self._deploy_flow(flow_id, command.user)
 
+    async def _deploy_flow(self, flow_id: int, user: str) -> _FlowRuntime | None:
+        """Miolo do deploy — comum ao comando manual (`_deploy`) e à retomada automática
+        pós `comm_restored` (TD-005/ADR-025, `ResumeOrchestrator._iniciar`). Devolve o
+        `_FlowRuntime` novo, ou `None` se o deploy foi recusado (flow desconhecido, projeto
+        inativo ou grafo inválido) — os dois chamadores decidem o que fazer com a recusa:
+        `_deploy` só sai (o `deploy_rejected` já saiu daqui); a retomada mantém a entrada
+        pendente para o próximo `comm_restored`."""
+        old_runtime = self._runtimes.get(flow_id)
         async with self._session_factory() as session:
             row = await self._load(session, flow_id)
             if row is None:
-                logger.info("Comando deploy de flow %s desconhecido; ignorado", flow_id)
-                return
+                logger.info("Deploy de flow %s desconhecido; ignorado", flow_id)
+                return None
             flow, project_active = row
             if not project_active:
                 await self._reject(
                     KIND_DEPLOY_REJECTED,
                     flow_id=flow_id,
-                    user=command.user,
+                    user=user,
                     reason=REASON_PROJECT_INACTIVE,
                     message=(f"Deploy do flow {flow_id} recusado: o projeto do flow não é o ativo"),
                     detail="ative o projeto do flow antes de executá-lo",
                 )
-                return
+                return None
             try:
                 # Deploy nasce zerado: `state` de bloco zera ao parar (RF-512), então não há
                 # o que preservar de uma execução anterior.
@@ -294,7 +338,7 @@ class Supervisor:
                 await self._reject(
                     KIND_DEPLOY_REJECTED,
                     flow_id=flow_id,
-                    user=command.user,
+                    user=user,
                     reason=rejected.reason,
                     message=(
                         f"Deploy do flow {flow_id} recusado: "
@@ -302,7 +346,7 @@ class Supervisor:
                     ),
                     detail=str(rejected),
                 )
-                return
+                return None
 
         task = FlowTask(staged.definition, redis_client=self._redis)
         runtime = _FlowRuntime(
@@ -322,13 +366,15 @@ class Supervisor:
         for block_id, host in staged.hosts.items():
             self._mpc.start_host_background(runtime, host, flow_id=flow_id, block_id=block_id)
         self._state.track(flow_id, task)
-        await task.start(user=command.user)
-        await publish_flow_deployed(self._redis, flow_id=flow_id, user=command.user)
+        await task.start(user=user)
+        await publish_flow_deployed(self._redis, flow_id=flow_id, user=user)
 
         if old_runtime is not None:
             # Redeploy sobre um runtime anterior (parado ou em falha, nunca "running" — o
-            # early-return acima cobre isso): a `StagedDefinition` nova é zerada (`reuse={}`),
-            # então qualquer `MpcHost`/watchdog do runtime velho ficaria órfão sem isto.
+            # early-return de `_deploy` cobre isso; a retomada nunca vê "running" por
+            # construção, `on_comm_failure` só cria pendência de flow que estava rodando e
+            # acabou de cair): a `StagedDefinition` nova é zerada (`reuse={}`), então
+            # qualquer `MpcHost`/watchdog do runtime velho ficaria órfão sem isto.
             # `revert_armed_mpc` (idempotente) devolve `mode_cmd=auto` se o bloco velho ainda
             # estiver armado REMOTO — achado 1 da revisão F4: sem isto, um redeploy logo após
             # uma falha interna (watermark ainda não passou) matava o worker antigo mas nunca
@@ -340,16 +386,18 @@ class Supervisor:
             # antigo mantinha `Supervisor._lock` preso pelo boot/kill/join real do worker
             # velho — mesma sequência de três passos que `_stop` já usa. A task destacada de
             # `stop_host_background` é registrada no `_FlowRuntime` NOVO (já publicado no
-            # mapa em `:317`), não no `old_runtime`: ele sai do mapa aqui mesmo, e uma task
-            # pendurada nele ficaria órfã — `_teardown` (que aguarda `runtime.mpc_stop_tasks`
-            # de propósito) voltaria a poder abandonar um kill em voo, reabrindo o defeito
-            # que a spec F5 §6.5 fechou.
+            # mapa algumas linhas acima), não no `old_runtime`: ele sai do mapa aqui mesmo, e
+            # uma task pendurada nele ficaria órfã — `_teardown` (que aguarda `runtime.
+            # mpc_stop_tasks` de propósito) voltaria a poder abandonar um kill em voo,
+            # reabrindo o defeito que a spec F5 §6.5 fechou.
             await self._mpc.revert_armed_mpc(old_runtime, flow_id=flow_id)
             for block_id, host in self._mpc.detach_hosts(old_runtime).items():
                 self._mpc.stop_host_background(runtime, host, flow_id=flow_id, block_id=block_id)
+        return runtime
 
     async def _stop(self, command: FlowCommand) -> None:
         flow_id = command.flow_id
+        self._resume.descartar(flow_id)  # comando manual sempre vence (§2.2-8, RNF-05)
         runtime = self._runtimes.get(flow_id)
         if runtime is None or runtime.task.state != "running":
             # Parado, em falha ou desconhecido: nada a materializar, nenhum evento.
@@ -419,7 +467,9 @@ class Supervisor:
             runtime.updated_at = flow.updated_at
             return
 
-        swapped_block_ids = await self._mpc.reconcile_mpc_hosts(runtime, staged, flow_id=flow.id)
+        swapped_block_ids, swapped_bumpless_ids = await self._mpc.reconcile_mpc_hosts(
+            runtime, staged, flow_id=flow.id
+        )
         runtime.task.stage(staged.definition)
         runtime.ts_seconds = staged.ts_seconds
         runtime.conn_ids = staged.conn_ids
@@ -428,12 +478,17 @@ class Supervisor:
         runtime.mpc_write_opc = staged.mpc_write_opc
         runtime.updated_at = flow.updated_at
         # O evento sai só DEPOIS do runtime já refletir a troca (blocks/hosts atualizados):
-        # publicar antes (dentro de `_reconcile_mpc_hosts`) deixava uma janela em que quem
-        # reagisse ao `mpc_mode_changed{reason: hot_swap}` ainda veria o host/bloco velhos
-        # em `self._runtimes` — achado desta tarefa, mesma classe de bug que `_publish_status`
-        # já evita na F3 (acertar o estado ANTES de publicar).
+        # publicar antes (dentro de `reconcile_mpc_hosts`) deixava uma janela em que quem
+        # reagisse ao `mpc_mode_changed` ainda veria o host/bloco velhos em `self._runtimes`
+        # — achado desta tarefa, mesma classe de bug que `_publish_status` já evita na F3
+        # (acertar o estado ANTES de publicar). `swapped_bumpless_ids` (TD-006): o bloco já
+        # nasceu transplantado — reason `hot_swap_bumpless`, nenhum PID foi tocado.
         for block_id in swapped_block_ids:
             await publish_mpc_hot_swap(self._redis, flow_id=flow.id, block_id=block_id)
+        for block_id in swapped_bumpless_ids:
+            await publish_mpc_hot_swap(
+                self._redis, flow_id=flow.id, block_id=block_id, bumpless=True
+            )
 
     async def _build(
         self,
@@ -443,18 +498,24 @@ class Supervisor:
         reuse: Mapping[str, tuple[dict[str, Any], Block]],
     ) -> StagedDefinition:
         """`graph_json` + tags do projeto -> definição da 1.4. Levanta `_Rejected` se recusado."""
-        try:
-            graph = parse_graph(flow.graph_json)
-        except GraphParseError as erro:
-            raise _Rejected(erro.errors) from None
         tags = await project_tags(session, flow.project_id)
+        # TD-004: config estática da conexão — decide no deploy se algum bloco MPC deste
+        # flow vai tentar escrever numa conexão sem watchdog (o opc-worker recusaria a
+        # escrita de qualquer jeito). Mesma consulta que `ottima_api.routers.flows` usa
+        # para o aviso do salvar — uma regra só (`ottima_core.connections`).
+        conns_sem_watchdog = frozenset(await conexoes_sem_watchdog(session, flow.project_id))
         # `Flow.ts_seconds` é Numeric(4,1) e chega como Decimal: `Decimal * float` levanta
         # TypeError na aritmética de fronteira (armadilha herdada da F1).
         ts_seconds = float(flow.ts_seconds)
-        result = validate_graph(graph, tags, ts_seconds)
-        if result.errors:
-            raise _Rejected(result.errors)
-        for aviso in result.warnings:
+        # `parse_graph`/`validate_graph` são CPU-bound sobre dados já materializados (funções
+        # puras, thread-safe); `await asyncio.to_thread(...)` devolve o event loop enquanto um
+        # grafo grande valida — o `Supervisor._lock` de quem chama (`_pass`) continua
+        # serializando comandos por design; o objetivo aqui é só `flow.status` das demais
+        # tasks continuar publicando durante o deploy/hot-swap (TD-002).
+        graph, warnings = await asyncio.to_thread(
+            _parse_e_validar, flow.graph_json, tags, ts_seconds
+        )
+        for aviso in warnings:
             logger.info("Flow %s: %s", flow.id, aviso)
 
         return build_definition(
@@ -466,6 +527,7 @@ class Supervisor:
             redis_client=self._redis,
             pool=self._pool,
             snapshot=self._snapshot,
+            conns_sem_watchdog=conns_sem_watchdog,
             mpc_worker_target=self._mpc_worker_target,
         )
 
@@ -491,6 +553,18 @@ class Supervisor:
                     continue
                 for block_id in list(runtime.mpc_watchdogs):
                     await self._mpc.cancel_watchdog(runtime, block_id)
+                # Snapshot ANTES de `fail()` (TD-005/ADR-025): a retomada automática pós
+                # `comm_restored` precisa dos modos/últimos valores/SPs de cada bloco MPC de
+                # antes da queda — depois de `fail()` eles já foram zerados por
+                # `_reset_blocks()` (`FlowTask.fail`). Vazio quando o flow não tem bloco
+                # `mpc` nenhum: o redeploy automático roda igual, só não há modo/SP nenhum
+                # para restaurar depois.
+                estados = {
+                    block_id: block.snapshot_estado()
+                    for block_id, (_, block) in runtime.blocks.items()
+                    if isinstance(block, MpcBlock)
+                }
+                self._resume.pendentes[flow_id] = RetomadaPendente(conn_id=conn_id, estados=estados)
                 try:
                     await runtime.task.fail(reason=REASON_COMM_FAILURE)
                 except Exception:
@@ -498,6 +572,12 @@ class Supervisor:
                     logger.exception(
                         "Falha ao derrubar o flow %s por queda da conexão %s", flow_id, conn_id
                     )
+
+    async def on_comm_restored(self, conn_id: int) -> None:
+        """Retomada automática completa pós `comm_restored` (TD-005, ADR-025) — delega a
+        `ResumeOrchestrator`, que guarda o próprio estado de pendências (`self._resume.
+        pendentes`, populado por `on_comm_failure` acima)."""
+        await self._resume.on_comm_restored(conn_id)
 
     async def on_project_activated(self, project_id: int) -> None:
         """Para **todos** os flows rodando: pertencem ao projeto anterior (§4.3, gancho RF-101)."""

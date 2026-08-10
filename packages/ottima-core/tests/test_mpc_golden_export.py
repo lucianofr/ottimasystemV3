@@ -86,5 +86,15 @@ def test_nomes_de_variavel_e_pid_batem_verbatim_com_os_campos_do_mpcconfig():
     variaveis = caso["config"]["variables"]
     assert set(variaveis) == {"mvs", "cvs", "constraints", "dvs"}
     mv = variaveis["mvs"][0]
-    assert set(mv) == {"id", "name", "eu", "limits", "du_max", "initial_value", "pid"}
+    assert set(mv) == {
+        "id",
+        "name",
+        "eu",
+        "limits",
+        "du_max",
+        "du_min",
+        "move_weight",
+        "initial_value",
+        "pid",
+    }
     assert mv["pid"] is None

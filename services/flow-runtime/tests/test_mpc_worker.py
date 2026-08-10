@@ -39,13 +39,20 @@ _JOIN_TIMEOUT_S = 2.0
 # --------------------------------------------------------------------------------------
 
 
-def _mv(id_: str, *, limits: tuple[float, float] = (0.0, 1000.0), du_max: float = 5.0) -> dict:
+def _mv(
+    id_: str,
+    *,
+    limits: tuple[float, float] = (0.0, 1000.0),
+    du_max: float = 5.0,
+    du_min: float = 0.0,
+) -> dict:
     return {
         "id": id_,
         "name": id_,
         "eu": "u",
         "limits": {"min": limits[0], "max": limits[1]},
         "du_max": du_max,
+        "du_min": du_min,
         "initial_value": 0.0,
         "pid": None,
     }
@@ -69,13 +76,15 @@ def _par(K: float, tau1: float, tau2: float, theta: float) -> dict:
     return {"enabled": True, "params": {"K": K, "tau1": tau1, "tau2": tau2, "theta": theta}}
 
 
-def _config(*, du_max: float = 5.0, limits: tuple[float, float] = (0.0, 1000.0)) -> MpcConfig:
+def _config(
+    *, du_max: float = 5.0, limits: tuple[float, float] = (0.0, 1000.0), du_min: float = 0.0
+) -> MpcConfig:
     return MpcConfig.model_validate(
         {
             "name": "worker_1x1",
             "multiplier": MULTIPLIER,
             "variables": {
-                "mvs": [_mv("mv_1", limits=limits, du_max=du_max)],
+                "mvs": [_mv("mv_1", limits=limits, du_max=du_max, du_min=du_min)],
                 "cvs": [_cv("cv_1")],
                 "constraints": [],
                 "dvs": [],
@@ -247,4 +256,69 @@ def test_excecao_provocada_status_error_e_worker_segue_vivo(
     good_result = _recv(conn)
 
     assert good_result.status == "ok"
+    assert proc.is_alive()
+
+
+# --------------------------------------------------------------------------------------
+# du_min (TD-007) — banda morta descarta movimento fantasma e não deriva entre solves
+# --------------------------------------------------------------------------------------
+
+
+def test_du_min_descarta_movimento_fantasma_e_nao_deriva_entre_solves(
+    spawn_worker: Callable[[MpcConfig], tuple[SpawnProcess, Connection]],
+) -> None:
+    """Δu natural (sem banda morta) para este SP é ~0.43 (abaixo de `du_min=0.5`): o
+    primeiro solve tem que devolver `u0 == u_prev` (movimento fantasma descartado). O
+    SEGUNDO solve, com o MESMO `u_applied`/`y` (a válvula de fato não se moveu), tem que
+    partir do MESMO `u_prev` — nada de drift acumulado no registrador interno entre
+    execuções sucessivas."""
+    du_min = 0.5
+    u_vigente = 30.0
+    config = _config(du_min=du_min)
+    proc, conn = spawn_worker(config)
+    _wait_ready(conn)
+
+    primeiro = SolveRequest(
+        y={"cv_1": 60.0}, u_applied={"mv_1": u_vigente}, d={}, sp={"cv_1": 60.5}, reinit=True
+    )
+    conn.send(primeiro)
+    resultado_1 = _recv(conn)
+    assert resultado_1.status == "ok"
+    assert resultado_1.u_plan["mv_1"] == pytest.approx(u_vigente, abs=1e-6)
+    assert resultado_1.prediction_mv[0][1] == pytest.approx(u_vigente, abs=1e-6)
+
+    segundo = SolveRequest(
+        y={"cv_1": 60.0}, u_applied={"mv_1": u_vigente}, d={}, sp={"cv_1": 60.5}, reinit=False
+    )
+    conn.send(segundo)
+    resultado_2 = _recv(conn)
+    assert resultado_2.status == "ok"
+    assert resultado_2.u_plan["mv_1"] == pytest.approx(u_vigente, abs=1e-6)
+
+    assert proc.is_alive()
+
+
+# --------------------------------------------------------------------------------------
+# Guard de não-regressão — du_min=0/move_weight=1 (defaults) reproduzem o resultado atual
+# --------------------------------------------------------------------------------------
+
+
+def test_du_min_zero_reproduz_o_resultado_atual_sem_quantizar(
+    spawn_worker: Callable[[MpcConfig], tuple[SpawnProcess, Connection]],
+) -> None:
+    """Guard de não-regressão (TD-007): `du_min=0.0`/`move_weight=1.0` são os defaults de
+    `MvVar` — sem quantização nenhuma, o resultado bate byte-a-byte com o valor fixado
+    ANTES desta tarefa (capturado do build sem banda morta nem ponderação de movimento)."""
+    config = _config()  # du_min=0.0 (default) -> _aplicar_banda_morta nunca quantiza
+    proc, conn = spawn_worker(config)
+    _wait_ready(conn)
+
+    request = SolveRequest(
+        y={"cv_1": 60.0}, u_applied={"mv_1": 30.0}, d={}, sp={"cv_1": 60.5}, reinit=True
+    )
+    conn.send(request)
+    resultado = _recv(conn)
+
+    assert resultado.status == "ok"
+    assert resultado.u_plan["mv_1"] == pytest.approx(30.43001689428463, abs=1e-6)
     assert proc.is_alive()
