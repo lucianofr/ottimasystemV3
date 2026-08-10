@@ -25,3 +25,5 @@ frontend/openapi.json
 
 # graphify: trava transitoria de rebuild (PID), nunca versionada
 graphify-out/.rebuild.lock
+# Added by code-review-graph
+.code-review-graph/
