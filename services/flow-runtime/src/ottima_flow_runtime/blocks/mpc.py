@@ -581,6 +581,15 @@ class MpcBlock(Block):
                 # só força isso sozinho em boot/respawn (docstring de `mpc/host.py`), não em
                 # MAN->AUTO, então o bloco carrega o sinalizador até o próximo `dispatch()`.
                 self._reinit_pending = True
+                # E o plano guardado MORRE aqui. Ele foi calculado antes de o operador
+                # assumir, contra outro `u_prev` e outra condição de planta; como a saída em
+                # AUTO é `_plan` quando existe, mantê-lo faria a MV pular para ele no
+                # primeiro quadro — degrau instantâneo, sem passar pelo Δu, exatamente no
+                # instante da devolução do controle. Sem plano, a saída segura o último valor
+                # do MAN (`_mv_last`) até o primeiro `SolveResult` NOVO chegar: é o "a partir
+                # do último valor em MAN" da §4.4. Visto em planta: MV reposta em 52 % no MAN
+                # e a volta para AUTO jogando o atuador para os 7 % de um plano anterior.
+                self._plan = None
             else:
                 self._mv_manual = dict(self._mv_last)  # AUTO->MAN: MV manual := MV vigente
             await self._audit_mode_changed("man_auto", old, value, user)

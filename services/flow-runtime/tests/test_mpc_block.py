@@ -381,6 +381,35 @@ async def test_remoto_auto_sem_plano_ainda_segura_o_valor_vigente() -> None:
     assert saida["mv_pid"] == PortSample(10.0, True)
 
 
+async def test_reentrar_em_auto_nao_reaplica_o_plano_velho() -> None:
+    """MAN->AUTO tem que partir do ÚLTIMO VALOR DA MV EM MAN (spec §4.4) — nunca de um
+    plano calculado antes de o operador assumir. O `_plan` guardado é de outra condição de
+    planta e de outro `u_prev`; reaplicá-lo é um degrau instantâneo, sem passar pelo Δu, no
+    exato instante em que o operador devolve o controle ao MPC.
+
+    Visto em planta: MV recolocada em 52 % no MAN, e a volta para AUTO jogou o atuador para
+    7 % (o plano de uma condição anterior) antes de qualquer solve novo — o oposto de
+    transferência sem salto. Só o primeiro `SolveResult` NOVO pode mover a MV."""
+    block, host, *_ = _block()
+    await _entra_remoto_auto(block)
+    host.pending = _resultado_ok({"mv_pid": 33.0, "mv_direto": -4.0})
+    await block.step(entradas(20.0))
+    assert (await block.step(entradas(20.0)))["mv_pid"] == PortSample(33.0, True)
+
+    # Operador assume e reposiciona a MV
+    await block.command("mpc_mode", {"axis": "man_auto", "value": "man"}, OPERADOR)
+    await block.command("mpc_mv", {"var_id": "mv_pid", "value": 60.0}, OPERADOR)
+    assert (await block.step(entradas(20.0)))["mv_pid"] == PortSample(60.0, True)
+
+    # Devolve para AUTO: sem plano novo ainda, a saída segura os 60 % do MAN
+    await block.command("mpc_mode", {"axis": "man_auto", "value": "auto"}, OPERADOR)
+    saida = await block.step(entradas(20.0))
+
+    assert saida["mv_pid"] == PortSample(60.0, True), (
+        "voltar para AUTO reaplicou o plano velho em vez de segurar o valor do MAN"
+    )
+
+
 # --------------------------------------------------------------------------------------
 # 1b. status.solver honesto: nunca "ok" antes do primeiro resultado real (spec §5.2)
 # --------------------------------------------------------------------------------------
