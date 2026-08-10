@@ -59,6 +59,15 @@ function lerPidMv(bruto: unknown): PidMv | null {
   };
 }
 
+/** `readback_tag_id` da MV direta é opcional (TD-003): ausente, não-inteiro, ou `0`
+ *  (sentinela de "sem tag", mesmo valor que os campos de tag do `pid` usam quando não há
+ *  seleção) viram `null` — MV salva antes desta tarefa carrega sem readback, mesmo padrão
+ *  retroativo documentado em `lerFaixaMpcOuNull`. */
+function lerReadbackTagIdMv(bruto: unknown): number | null {
+  const valor = inteiroSimples(bruto, 0);
+  return valor === 0 ? null : valor;
+}
+
 function lerTipoLinhaMpc(bruto: unknown): TipoLinhaMpc {
   return bruto === "integrating" ? "integrating" : "selfreg";
 }
@@ -75,6 +84,8 @@ function lerVariavelMv(bruto: unknown): VariavelMv | null {
     limits: lerLimitesMpc(cru.limits),
     du_max: numero(cru.du_max, 0),
     initial_value: numero(cru.initial_value, 0),
+    operating_point: numero(cru.operating_point, 0),
+    readback_tag_id: lerReadbackTagIdMv(cru.readback_tag_id),
     pid: lerPidMv(cru.pid),
   };
 }
@@ -121,6 +132,7 @@ function lerVariavelDv(bruto: unknown): VariavelDv | null {
     name: texto(cru.name, ""),
     eu: texto(cru.eu, ""),
     range: lerFaixaMpcOuNull(cru.range),
+    operating_point: numero(cru.operating_point, 0),
   };
 }
 

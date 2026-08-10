@@ -30,7 +30,9 @@ def pid_binding(tag_base: int, *, with_mode_read: bool = True) -> dict:
     return binding
 
 
-def mv(suffix: str, *, pid: dict | None = None, **overrides) -> dict:
+def mv(
+    suffix: str, *, pid: dict | None = None, readback_tag_id: int | None = None, **overrides
+) -> dict:
     node = {
         "id": f"mv_{suffix}",
         "name": f"MV {suffix}",
@@ -41,6 +43,8 @@ def mv(suffix: str, *, pid: dict | None = None, **overrides) -> dict:
     }
     if pid is not None:
         node["pid"] = pid
+    if readback_tag_id is not None:
+        node["readback_tag_id"] = readback_tag_id
     node.update(overrides)
     return node
 
@@ -184,6 +188,11 @@ def mpc_tags(node: dict) -> dict[int, TagRef]:
     for m in variables["mvs"]:
         pid = m.get("pid")
         if not pid:
+            readback_tag_id = m.get("readback_tag_id")
+            if readback_tag_id is not None:
+                tags[readback_tag_id] = TagRef(
+                    id=readback_tag_id, conn_id=2, direction="r", data_type="float"
+                )
             continue
         tags[pid["write_tag_id"]] = TagRef(
             id=pid["write_tag_id"], conn_id=2, direction="w", data_type="float"
@@ -720,6 +729,25 @@ def test_mv_sem_pid_e_direta():
     graph = mpc_graph(node)
     tags = mpc_tags(node)
     assert result_of(graph, tags).errors == []
+
+
+def test_mv_direta_readback_tag_inexistente_e_erro():
+    """Espelha `test_pid_tag_inexistente_e_erro`: mesma regra 6, agora para o
+    `readback_tag_id` da MV direta (sem `pid`), introduzido pelo TD-003."""
+    node = mpc_node(mvs=[mv("a", readback_tag_id=20)])
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    del tags[20]  # readback_tag_id não pertence (mais) ao projeto do flow
+    assert has(errors_of(graph, tags), "mv_a", "20", "não existe ou não pertence ao projeto")
+
+
+def test_mv_direta_readback_tag_direcao_trocada_e_erro():
+    """Espelha `test_pid_tag_direcao_trocada_na_leitura_e_erro`: readback exige 'r'."""
+    node = mpc_node(mvs=[mv("a", readback_tag_id=20)])
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    tags[20] = TagRef(id=20, conn_id=2, direction="w", data_type="float")  # readback exige 'r'
+    assert has(errors_of(graph, tags), "mv_a", "20", "direção")
 
 
 # --------------------------------------------------------------------------------------

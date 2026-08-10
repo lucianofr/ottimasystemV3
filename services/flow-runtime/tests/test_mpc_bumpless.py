@@ -17,7 +17,13 @@ from ottima_flow_runtime.mpc import BuiltMpc, build_mpc, init_bumpless
 # --------------------------------------------------------------------------------------
 
 
-def _mv(id_: str, *, limits: tuple[float, float] = (0.0, 1000.0), du_max: float = 5.0) -> dict:
+def _mv(
+    id_: str,
+    *,
+    limits: tuple[float, float] = (0.0, 1000.0),
+    du_max: float = 5.0,
+    operating_point: float = 0.0,
+) -> dict:
     return {
         "id": id_,
         "name": id_,
@@ -25,6 +31,7 @@ def _mv(id_: str, *, limits: tuple[float, float] = (0.0, 1000.0), du_max: float 
         "limits": {"min": limits[0], "max": limits[1]},
         "du_max": du_max,
         "initial_value": 0.0,
+        "operating_point": operating_point,
         "pid": None,
     }
 
@@ -58,13 +65,22 @@ def _par_integrating(Ki: float, theta: float) -> dict:
     return {"enabled": True, "params": {"Ki": Ki, "theta": theta}}
 
 
-def _selfreg_config(*, K: float = 2.0, theta: float = 0.0, du_max: float = 5.0) -> MpcConfig:
+def _selfreg_config(
+    *, K: float = 2.0, theta: float = 0.0, du_max: float = 5.0, operating_point: float = 0.0
+) -> MpcConfig:
     return MpcConfig.model_validate(
         {
             "name": "selfreg",
             "multiplier": 5,
             "variables": {
-                "mvs": [_mv("mv_1", limits=(0.0, 1000.0), du_max=du_max)],
+                "mvs": [
+                    _mv(
+                        "mv_1",
+                        limits=(0.0, 1000.0),
+                        du_max=du_max,
+                        operating_point=operating_point,
+                    )
+                ],
                 "cvs": [_cv("cv_1", kind="selfreg", sp_limits=(0.0, 2000.0))],
                 "constraints": [],
                 "dvs": [],
@@ -74,13 +90,22 @@ def _selfreg_config(*, K: float = 2.0, theta: float = 0.0, du_max: float = 5.0) 
     )
 
 
-def _integrating_config(*, Ki: float = 0.5, theta: float = 0.0, du_max: float = 5.0) -> MpcConfig:
+def _integrating_config(
+    *, Ki: float = 0.5, theta: float = 0.0, du_max: float = 5.0, operating_point: float = 0.0
+) -> MpcConfig:
     return MpcConfig.model_validate(
         {
             "name": "integrating",
             "multiplier": 5,
             "variables": {
-                "mvs": [_mv("mv_1", limits=(0.0, 1000.0), du_max=du_max)],
+                "mvs": [
+                    _mv(
+                        "mv_1",
+                        limits=(0.0, 1000.0),
+                        du_max=du_max,
+                        operating_point=operating_point,
+                    )
+                ],
                 "cvs": [_cv("cv_1", kind="integrating", sp_limits=(0.0, 2000.0))],
                 "constraints": [],
                 "dvs": [],
@@ -202,3 +227,41 @@ def test_bias_corrige_erro_de_ganho_do_modelo_em_regime():
     # Sem bias, o modelo (K=2.0) preveria K*u_now = 20.0 -- a correção é o próprio teste:
     # a predição batendo na planta real (K=2.4 -> 24.0) prova que o bias absorveu o erro.
     assert _y_pred_t0(built, "cv_1") != pytest.approx(k_model * u_now, abs=1.0)
+
+
+# --------------------------------------------------------------------------------------
+# Ponto de operação por coluna (TD-003) — o arme resolve na coordenada do modelo
+# --------------------------------------------------------------------------------------
+
+
+def test_arme_selfreg_no_ponto_de_operacao_deixa_o_estado_em_repouso():
+    """`init_bumpless` resolve `x_ss` na MESMA coordenada do modelo — desvio do ponto de
+    operação. Com a MV parada no ponto de operação o estado tem que ser o repouso, e todo o
+    valor medido vira bias. Resolvendo com `u` cru, `x_ss` sai em `K·u_op` e o bias nasce
+    com o simétrico: a predição em t=0 bate por compensação, mas o estado inicial (e todo o
+    resto do horizonte) parte de um ponto que a planta nunca ocupou."""
+    u_op = 52.0
+    built = build_mpc(_selfreg_config(K=2.0, operating_point=u_op), ts_flow=1.0)
+
+    init_bumpless(built, u_now={"mv_1": u_op}, y_now={"cv_1": 42.0}, d_now={})
+
+    for name in built.pair_init[0].state_names:
+        assert float(built.mpc.x0[name]) == pytest.approx(0.0, abs=1e-9)
+    bias = float(built.tvp_template["_tvp", 0, built.bias_tvp_name["cv_1"]])
+    assert bias == pytest.approx(42.0, abs=1e-9)
+    assert _y_pred_t0(built, "cv_1") == pytest.approx(42.0, abs=1e-6)
+
+
+def test_arme_com_atraso_preenche_o_shift_register_em_desvio():
+    """O registrador de atraso guarda a MESMA grandeza que alimenta o par: o desvio do ponto
+    de operação. Preenchê-lo com o valor absoluto injeta um degrau falso de `u_op` na entrada
+    do par assim que o registrador começa a girar."""
+    u_op = 52.0
+    built = build_mpc(_integrating_config(Ki=0.5, theta=10.0, operating_point=u_op), ts_flow=1.0)
+
+    init_bumpless(built, u_now={"mv_1": u_op}, y_now={"cv_1": 77.0}, d_now={})
+
+    pair = built.pair_init[0]
+    assert pair.delay_state_names, "theta=10 s com Ts_mpc=5 s tem que gerar shift register"
+    for name in pair.delay_state_names:
+        assert float(built.mpc.x0[name]) == pytest.approx(0.0, abs=1e-9)

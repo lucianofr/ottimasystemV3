@@ -75,6 +75,9 @@ export function variavelDvDoFormulario(atual: VariavelDv, dados: FormData): Vari
     name: texto(dados, c("name"), atual.name),
     eu: texto(dados, c("eu"), atual.eu),
     range,
+    // TD-003: ponto de linearização da DV — o modelo do MPC é incremental, então a porta de
+    // entrada fica na coordenada absoluta da planta em vez de precisar de um Script somando.
+    operating_point: n("operating_point", atual.operating_point),
   };
 }
 
@@ -93,6 +96,21 @@ export function variavelMvDoFormulario(
     limits: { min: n("limits_min", atual.limits.min), max: n("limits_max", atual.limits.max) },
     du_max: n("du_max", atual.du_max),
     initial_value: n("initial_value", atual.initial_value),
+    // TD-003: ponto de linearização da MV — o modelo do MPC é incremental, então a porta de
+    // saída fica na coordenada absoluta da planta em vez de precisar de um Script somando.
+    operating_point: n("operating_point", atual.operating_point),
+    // TD-003: readback da MV DIRETA (sem pid, que já tem o seu próprio). Ausente e vazio
+    // NÃO são a mesma coisa aqui: ausente é o campo fora desta submissão (troca de aba,
+    // mesma classe de bug da revisão 4.3) e preserva o valor; vazio é o engenheiro tirando
+    // a tag, e tem que remover mesmo — esta é a chave que decide se em LOCAL a MV segue a
+    // planta ou escreve nela um valor de config, então "limpei e continuou lá" seria grave.
+    readback_tag_id: (() => {
+      const bruto = dados.get(c("readback_tag_id"));
+      if (bruto === null) return atual.readback_tag_id;
+      if (bruto === "") return null;
+      const valor = Number(bruto);
+      return Number.isInteger(valor) && valor > 0 ? valor : null;
+    })(),
     pid: !comPid
       ? null
       : {

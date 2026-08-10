@@ -584,7 +584,7 @@ def _check_mpc_numbers(node: FlowNode, config: MpcConfig, errors: list[str]) -> 
             )
 
 
-def _check_pid_tag(
+def _check_mv_tag(
     node: FlowNode,
     mv_var: MvVar,
     field_name: str,
@@ -607,23 +607,33 @@ def _check_pid_tag(
         )
 
 
-def _check_mpc_pid_tags(
+def _check_mpc_tags(
     node: FlowNode, config: MpcConfig, tags: Mapping[int, TagRef], errors: list[str]
 ) -> None:
-    """Spec §2.2-6: tags do `pid` existem, direção correta, pertencem ao projeto do flow
-    (mesma barreira da F3 §5.2). `pid` é opcional por MV (decisão A-8) — MV "direta" sem
-    `pid` não tem nenhuma tag para checar."""
+    """Spec §2.2-6: tags referenciadas por uma MV existem, têm a direção certa e pertencem
+    ao projeto do flow (mesma barreira da F3 §5.2).
+
+    Dois grupos, ambos opcionais por MV (decisão A-8): as tags do `pid`, e a
+    `readback_tag_id` da posição real do atuador. MV "direta" sem nenhum dos dois não tem
+    tag para checar. `readback_tag_id` é checada sempre que preenchida — a precedência do
+    `pid.readback_tag_id` no runtime é regra de leitura, não licença para deixar passar uma
+    referência quebrada no config.
+    """
     for mv_var in config.variables.mvs:
+        if mv_var.readback_tag_id is not None:
+            _check_mv_tag(
+                node, mv_var, "readback_tag_id", mv_var.readback_tag_id, "r", tags, errors
+            )
         pid = mv_var.pid
         if pid is None:
             continue
         for field_name in _PID_WRITE_FIELDS:
-            _check_pid_tag(node, mv_var, field_name, getattr(pid, field_name), "w", tags, errors)
+            _check_mv_tag(node, mv_var, field_name, getattr(pid, field_name), "w", tags, errors)
         for field_name in _PID_READ_FIELDS:
             tag_id = getattr(pid, field_name)
             if tag_id is None:  # mode_read_tag_id é opcional (spec §2.1-3)
                 continue
-            _check_pid_tag(node, mv_var, field_name, tag_id, "r", tags, errors)
+            _check_mv_tag(node, mv_var, field_name, tag_id, "r", tags, errors)
 
 
 def _check_mpc_horizons(
@@ -677,7 +687,7 @@ def _check_mpc_nodes(
         _check_mpc_caps(node, config, errors)
         matrix_intact = _check_mpc_matrix(node, config, errors)
         _check_mpc_numbers(node, config, errors)
-        _check_mpc_pid_tags(node, config, tags, errors)
+        _check_mpc_tags(node, config, tags, errors)
         ts_mpc = _check_mpc_horizons(node, config, ts_seconds, errors, warnings)
 
         if ts_mpc is not None and matrix_intact:

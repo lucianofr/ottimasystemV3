@@ -154,6 +154,33 @@ def test_id_com_prefixo_errado_e_rejeitado(caminho, categoria, id_invalido):
 
 
 # --------------------------------------------------------------------------------------
+# MvVar/DvVar — operating_point e readback_tag_id (TD-003)
+# --------------------------------------------------------------------------------------
+
+
+def test_operating_point_e_readback_tag_id_tem_defaults_neutros():
+    """Compatibilidade retroativa (TD-003): config salvo antes destes campos não tinha
+    `operating_point` nem `readback_tag_id` — o esqueleto verbatim (sem eles) precisa
+    continuar carregando, com defaults que preservam o comportamento antigo (porta do MPC
+    já na coordenada absoluta da planta, sem readback na MV direta)."""
+    config = MpcConfig.model_validate(mpc_skeleton())
+    assert config.variables.mvs[0].operating_point == 0.0
+    assert config.variables.mvs[0].readback_tag_id is None
+    assert config.variables.dvs[0].operating_point == 0.0
+
+
+def test_operating_point_e_readback_tag_id_parseiam_quando_presentes():
+    data = mpc_skeleton()
+    data["variables"]["mvs"][0]["operating_point"] = 50.0
+    data["variables"]["mvs"][0]["readback_tag_id"] = 21
+    data["variables"]["dvs"][0]["operating_point"] = 10.0
+    config = MpcConfig.model_validate(data)
+    assert config.variables.mvs[0].operating_point == 50.0
+    assert config.variables.mvs[0].readback_tag_id == 21
+    assert config.variables.dvs[0].operating_point == 10.0
+
+
+# --------------------------------------------------------------------------------------
 # DvVar.range — spec §4.2, RF-702
 # --------------------------------------------------------------------------------------
 

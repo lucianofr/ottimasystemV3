@@ -21,9 +21,15 @@ from .builder import BuiltMpc, PairInit
 def _pair_input_value(
     pair_init: PairInit, u_now: Mapping[str, float], d_now: Mapping[str, float]
 ) -> float:
-    """Entrada vigente da coluna do par — MV ou DV, mesmo valor usado no `x_ss` e nos
-    estados de atraso (constante, então o atraso não muda o valor em regime)."""
-    return u_now[pair_init.col_id] if pair_init.is_mv_column else d_now[pair_init.col_id]
+    """Entrada vigente da coluna do par, JÁ em desvio do ponto de linearização — mesma
+    coordenada em que `builder.py` alimenta o par. É o valor usado no `x_ss` e nos estados
+    de atraso (constante, então o atraso não muda o valor em regime).
+
+    Resolver com o valor absoluto poria `x_ss` em `K·u_op` e o bias no simétrico: a
+    predição bateria em `t=0` por compensação, mas o estado inicial seria um ponto que a
+    planta nunca ocupou — e numa linha integradora o erro nem é constante, é uma rampa."""
+    absoluto = u_now[pair_init.col_id] if pair_init.is_mv_column else d_now[pair_init.col_id]
+    return absoluto - pair_init.col_operating_point
 
 
 def _steady_state(pair_init: PairInit, u_eff: float) -> np.ndarray:

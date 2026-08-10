@@ -173,10 +173,10 @@ class MpcBlock(Block):
     def auto_arm_blocked_reason(self) -> str | None:
         """Predicado puro e ÚNICO do gate de armar em AMBOS os eixos (fix-final, achado do
         arquiteto F-4): host pronto + entradas quentes (já medidas ao menos uma vez, nunca
-        frias) + válidas (última varredura `ok=True`) + toda MV com `pid` já com readback
-        publicado no `snapshot`. Sem o último item, `_effective_value` cai no
+        frias) + válidas (última varredura `ok=True`) + toda MV com tag de readback já com
+        valor publicado no `snapshot`. Sem o último item, `_effective_value` cai no
         `initial_value` — `u_applied` do solve e o init bumpless (§3.6) partiam de uma
-        ficção em vez da posição física real do PID. `local_remote -> remote` (contrato
+        ficção em vez da posição física real do atuador. `local_remote -> remote` (contrato
         com `MpcOrchestrator`, supervisor_mpc.py) e `MAN -> AUTO` (spec §4.4, tabela de
         transições) chamam o MESMO predicado — nenhum eixo arma sobre entrada fria.
 
@@ -193,12 +193,14 @@ class MpcBlock(Block):
         warm = all(var_id in self._last_measured for var_id in self._entrada_ids)
         if not warm:
             return "cold_input"
-        pid_sem_readback = any(
-            self._snapshot.get(mv.pid.readback_tag_id) is None
+        # Mesma régua de `_readback_value` (ausente OU qualidade ruim): armar sobre uma
+        # amostra que o próprio bloco não aceita como posição seria contraditório.
+        sem_readback = any(
+            self._readback_value(mv) is None
             for mv in self._mvs.values()
-            if mv.pid is not None
+            if self._readback_tag_id(mv) is not None
         )
-        if pid_sem_readback:
+        if sem_readback:
             return "cold_input"
         if not self._input_ok:
             return "invalid_input"
@@ -286,7 +288,12 @@ class MpcBlock(Block):
             await self._run_frontier(ts)
 
         outputs = self._compute_outputs(ok=valid)
-        self._mv_last = {mv_id: float(sample.v) for mv_id, sample in outputs.items()}  # type: ignore[arg-type]
+        # Saída fria (readback configurado e ainda sem valor) NÃO atualiza o hold: `_mv_last`
+        # é "o último valor que a porta de fato apresentou", e um `None` não é um valor.
+        self._mv_last = {
+            mv_id: self._mv_last[mv_id] if sample.v is None else float(sample.v)
+            for mv_id, sample in outputs.items()
+        }
         await self._write_pid(outputs, ok=valid)
 
         if is_frontier:
@@ -402,7 +409,11 @@ class MpcBlock(Block):
         outputs: dict[str, PortSample] = {}
         for mv in self._mvs.values():
             if self._local_remote == "local":
-                v = self._effective_value(mv)
+                rastreado = self._local_output(mv)
+                if rastreado is None:
+                    outputs[mv.id] = PortSample(None, False)
+                    continue
+                v = rastreado
             elif self._man_auto == "man":
                 v = _clamp(self._mv_manual[mv.id], mv.limits.min, mv.limits.max)
             else:
@@ -410,16 +421,58 @@ class MpcBlock(Block):
             outputs[mv.id] = PortSample(v, ok)
         return outputs
 
+    def _local_output(self, mv: MvVar) -> float | None:
+        """Saída da MV em LOCAL (spec §4.3): a posição real lida da planta.
+
+        `None` quando a MV tem tag de readback configurada e ela ainda não publicou nada — a
+        porta sai FRIA (padrão F3 §3.0) e o `opc_write` a jusante suprime a escrita. Emitir o
+        `initial_value` aqui seria pior que não emitir: em LOCAL quem manda no atuador é a
+        planta, e um valor de config escrito por cima é um degrau que ninguém comandou (o
+        caso concreto é a janela de cada redeploy, antes da 1a amostra da tag chegar). É o
+        mesmo estado que `auto_arm_blocked_reason()` já chama de `cold_input`.
+
+        Sem tag de readback não há o que esperar: vale o hold de sempre."""
+        if self._readback_tag_id(mv) is None:
+            return self._mv_last[mv.id]
+        return self._readback_value(mv)
+
+    def _readback_tag_id(self, mv: MvVar) -> int | None:
+        """Tag da posição real da MV: com `pid`, a do `pid` (spec §2.1-3); sem `pid`, a
+        `readback_tag_id` da própria MV, quando configurada. Uma pergunta só num lugar só —
+        `_effective_value` e `auto_arm_blocked_reason` têm que concordar sobre onde olhar."""
+        return mv.pid.readback_tag_id if mv.pid is not None else mv.readback_tag_id
+
+    def _readback_value(self, mv: MvVar) -> float | None:
+        """Posição real da MV lida do barramento. `None` quando não há tag de readback
+        configurada, quando a tag ainda não publicou nada, OU quando a última amostra veio
+        com qualidade ruim — quem chama decide se isso vira hold (`_effective_value`) ou
+        porta fria (`_local_output`).
+
+        `quality != 0` invalida, uncertain inclusive: é a mesma régua conservadora do
+        `opc_read` (spec F3 §3.1). Uma amostra ruim NÃO é medição de posição — adotá-la
+        faria a MV seguir lixo em LOCAL e semear `_mv_manual` com ele na entrada em
+        REMOTO+MAN. Visto em campo: num restart da planta as tags de readback voltaram
+        `0,0` com `quality=2`."""
+        tag_id = self._readback_tag_id(mv)
+        if tag_id is None:
+            return None
+        tag = self._snapshot.get(tag_id)
+        if tag is None or tag.quality != 0:
+            return None
+        return float(tag.value)
+
     def _effective_value(self, mv: MvVar) -> float:
-        """Valor físico "vigente" de uma MV: readback (com `pid`) ou hold do último
-        valor/`initial_value` (sem `pid`, ou com `pid` mas ainda sem readback desde o
-        deploy). Usado tanto para a saída em LOCAL (§4.3) quanto para `u_applied` do
-        `SolveRequest` (§3.3) — é a mesma pergunta ("qual é a posição real agora?")."""
-        if mv.pid is not None:
-            tag = self._snapshot.get(mv.pid.readback_tag_id)
-            if tag is not None:
-                return float(tag.value)
-        return self._mv_last[mv.id]
+        """Valor físico "vigente" de uma MV: a posição real lida da planta quando há tag de
+        readback, ou o hold do último valor/`initial_value` enquanto ela não chega. É o
+        `u_applied` do `SolveRequest` (§3.3) — "qual é a posição real agora?".
+
+        É também o que torna a transferência bumpless: entrar em REMOTO+MAN copia o valor
+        vigente (§4.4) e entrar em AUTO arma sobre esse mesmo valor (§3.6), então nenhuma
+        das duas transições move o atuador. O gate de `auto_arm_blocked_reason()` garante
+        que, com tag configurada, nenhum dos dois eixos arma antes de ela chegar — o hold
+        abaixo nunca é a base de um arme."""
+        value = self._readback_value(mv)
+        return self._mv_last[mv.id] if value is None else value
 
     async def _write_pid(self, outputs: Mapping[str, PortSample], *, ok: bool) -> None:
         """Publica `OpcWrite` por MV com `pid`, a cada varredura, só em REMOTO com entrada

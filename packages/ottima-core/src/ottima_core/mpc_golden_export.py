@@ -9,10 +9,10 @@ mesmo (§7.6-4, drift bidirecional); divergir do lado TS vira vermelho lá.
 
 Escopo espelhado no TS (`mpcLogic.ts:205-442`): `derivarHorizontes`, `arredondarBankers`,
 `dimensaoEstado`, tetos de variável e `validarConfigMpc`/`paramsValidosParaKind`. Fora do
-escopo (só servidor, nunca mirrorado no TS): integridade de tag do `pid` (§2.2-6,
-`_check_mpc_pid_tags`) — por isso todo `pid` aqui é sempre `None`, e o veredito reusa
-`_check_mpc_nodes` (que chama `_check_mpc_pid_tags` internamente, mas ela vira no-op com
-`pid=None` em toda MV, sem precisar de um mapa de tags real).
+escopo (só servidor, nunca mirrorado no TS): integridade de tag da MV (§2.2-6,
+`_check_mpc_tags`) — por isso toda MV aqui sai sem `pid` e sem `readback_tag_id`, e o
+veredito reusa `_check_mpc_nodes` (que chama `_check_mpc_tags` internamente, mas ela vira
+no-op sem tag referenciada, sem precisar de um mapa de tags real).
 
 Executável como `uv run python -m ottima_core.mpc_golden_export`.
 """
@@ -113,7 +113,7 @@ def _config(
 
 
 def _verdict(config_data: dict[str, object], ts_flow_segundos: float) -> dict[str, int]:
-    """Roda o mesmo caminho de `validate_graph` para o bloco `mpc` (sem `_check_mpc_pid_tags`
+    """Roda o mesmo caminho de `validate_graph` para o bloco `mpc` (sem `_check_mpc_tags`
     surtir efeito — todo `pid` é `None`), devolvendo só a contagem de erros/avisos: o texto
     pt-BR é livre entre Python e TS (§7.6-2), a comparação é pelo veredito estrutural."""
     config = MpcConfig.model_validate(config_data)

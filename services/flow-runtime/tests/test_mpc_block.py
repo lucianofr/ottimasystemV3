@@ -47,8 +47,11 @@ OPERADOR = "user:7"
 FLOW_ID = 1
 
 
-def _config(*, multiplier: int = 1) -> MpcConfig:
-    """1 CV + 2 MVs (uma com `pid`, outra direta) — cobre a tabela de modos inteira."""
+def _config(*, multiplier: int = 1, readback_direto: int | None = None) -> MpcConfig:
+    """1 CV + 2 MVs (uma com `pid`, outra direta) — cobre a tabela de modos inteira.
+
+    `readback_direto`: tag de posição real da MV DIRETA (sem `pid`). `None` mantém o
+    comportamento de hold do `initial_value`, que é o dos demais testes deste arquivo."""
     return MpcConfig.model_validate(
         {
             "name": "bloco_teste",
@@ -77,6 +80,7 @@ def _config(*, multiplier: int = 1) -> MpcConfig:
                         "limits": {"min": -10.0, "max": 10.0},
                         "du_max": 2.0,
                         "initial_value": 1.5,
+                        "readback_tag_id": readback_direto,
                         "pid": None,
                     },
                 ],
@@ -146,8 +150,8 @@ class FakeSnapshot:
     def __init__(self) -> None:
         self._values: dict[int, TagValue] = {}
 
-    def set(self, tag_id: int, value: float) -> None:
-        self._values[tag_id] = TagValue(value=value, quality=0, ts=datetime.now(UTC))
+    def set(self, tag_id: int, value: float, *, quality: int = 0) -> None:
+        self._values[tag_id] = TagValue(value=value, quality=quality, ts=datetime.now(UTC))
 
     def get(self, tag_id: int) -> TagValue | None:
         return self._values.get(tag_id)
@@ -196,7 +200,10 @@ class Events:
 
 
 def _block(
-    *, multiplier: int = 1, now: Callable[[], datetime] | None = None
+    *,
+    multiplier: int = 1,
+    now: Callable[[], datetime] | None = None,
+    readback_direto: int | None = None,
 ) -> tuple[MpcBlock, FakeHost, FakeSnapshot, Publishes, Writes, Events]:
     host = FakeHost()
     snapshot = FakeSnapshot()
@@ -205,7 +212,7 @@ def _block(
     emit_event = Events()
     block = MpcBlock(
         "m1",
-        config=_config(multiplier=multiplier),
+        config=_config(multiplier=multiplier, readback_direto=readback_direto),
         ts_flow=TS_FLOW,
         snapshot=snapshot,
         host=host,
@@ -251,17 +258,103 @@ async def test_local_com_pid_segue_o_readback_do_snapshot() -> None:
     assert saida["mv_pid"] == PortSample(42.0, True)
 
 
-async def test_local_sem_readback_ainda_segura_o_initial_value() -> None:
-    """`pid` presente mas sem nenhum readback publicado ainda: hold do `initial_value`."""
+async def test_local_com_readback_configurado_e_sem_valor_sai_frio() -> None:
+    """Tag de readback configurada e ainda sem nenhum valor publicado: a saída sai FRIA, não
+    com o `initial_value`. Em LOCAL quem manda no atuador é a planta — o `opc_write` a
+    jusante escreveria um degrau que ninguém comandou (é o que aconteceria a cada redeploy,
+    na janela entre subir o flow e a primeira amostra da tag chegar). É o mesmo estado que
+    `auto_arm_blocked_reason()` já classifica como `cold_input`: a porta agora concorda."""
     block, *_ = _block()
     saida = await block.step(entradas(20.0))
-    assert saida["mv_pid"] == PortSample(10.0, True)
+    assert saida["mv_pid"] == PortSample(None, False)
 
 
-async def test_local_sem_pid_segura_o_initial_value() -> None:
+async def test_local_sem_tag_de_readback_segura_o_initial_value() -> None:
+    """Sem tag de readback configurada não há o que esperar — vale o hold de sempre. É a MV
+    direta "cega", que não tem como saber a posição real."""
     block, *_ = _block()
     saida = await block.step(entradas(20.0))
     assert saida["mv_direto"] == PortSample(1.5, True)
+
+
+async def test_local_mv_direta_com_readback_configurado_e_sem_valor_sai_fria() -> None:
+    """Mesma regra na MV direta — e aqui ela é a que importa de verdade: a porta da MV
+    direta alimenta um `opc_write`, que escreve em TODOS os modos. Sair fria é o que faz o
+    `opc_write` suprimir a escrita (`write_suppressed`) em vez de mandar o `initial_value`
+    para a planta."""
+    block, *_ = _block(readback_direto=601)
+
+    saida = await block.step(entradas(20.0))
+
+    assert saida["mv_direto"] == PortSample(None, False)
+
+
+async def test_local_sem_pid_segue_o_readback_configurado() -> None:
+    """MV direta com `readback_tag_id`: em LOCAL a saída acompanha a variável OPC-UA à qual
+    a MV está ligada, não um `initial_value` de config. Sem isso o `opc_write` a jusante
+    escreve na planta, em LOCAL, um valor que ninguém comandou — e a passagem para REMOTO
+    dá um degrau do tamanho da diferença."""
+    block, _, snapshot, *_ = _block(readback_direto=601)
+    snapshot.set(601, 4.25)
+
+    saida = await block.step(entradas(20.0))
+
+    assert saida["mv_direto"] == PortSample(4.25, True)
+
+
+async def test_readback_com_qualidade_ruim_nao_e_posicao() -> None:
+    """`quality != 0` invalida a leitura (mesma regra do `opc_read`, spec F3 §3.1): uma
+    amostra ruim NÃO é medição de posição. Adotá-la faria a MV seguir lixo em LOCAL e, pior,
+    semear `_mv_manual` com ele na entrada em REMOTO+MAN.
+
+    Caso real: durante um restart da planta as tags de readback voltaram com 0,0 e
+    `quality=2`; com a leitura ruim tratada como verdade, a transferência para MAN parte de
+    zero e o clamp em `limits` manda o atuador para o batente mínimo."""
+    block, _, snapshot, *_ = _block(readback_direto=601)
+    snapshot.set(601, 4.25)
+    await block.step(entradas(20.0))
+    snapshot.set(601, 0.0, quality=2)  # planta reiniciando: valor ruim
+    saida = await block.step(entradas(20.0))
+
+    assert saida["mv_direto"] == PortSample(None, False), (
+        "sem posição confiável a porta sai fria — o `opc_write` a jusante suprime a escrita"
+    )
+
+    # O que de fato protege o atuador: a amostra ruim não vira o valor vigente, então a
+    # entrada em REMOTO+MAN parte da última posição BOA (4,25) e não de 0,0 — que o clamp
+    # em `limits` transformaria no batente mínimo da MV.
+    await block.command("mpc_mode", {"axis": "local_remote", "value": "remote"}, OPERADOR)
+    saida = await block.step(entradas(20.0))
+
+    assert saida["mv_direto"] == PortSample(4.25, True)
+
+
+async def test_local_para_remoto_man_parte_do_readback_sem_degrau() -> None:
+    """LOCAL -> REMOTO entra em MAN com a MV manual := valor vigente (spec §4.4). Vigente é
+    a posição real lida da planta, então a primeira saída em REMOTO repete exatamente a
+    última saída em LOCAL — é a transferência bumpless do eixo LOCAL/REMOTO."""
+    block, _, snapshot, *_ = _block(readback_direto=601)
+    snapshot.set(601, 4.25)
+    await block.step(entradas(20.0))
+
+    await block.command("mpc_mode", {"axis": "local_remote", "value": "remote"}, OPERADOR)
+    saida = await block.step(entradas(20.0))
+
+    assert saida["mv_direto"] == PortSample(4.25, True)
+
+
+async def test_auto_arm_blocked_reason_exige_readback_da_mv_direta() -> None:
+    """Mesma regra já vigente para o `pid` (`cold_input`): configurada a tag de posição, o
+    bloco não pode armar antes de ela chegar — `u_applied` e o init bumpless partiriam do
+    `initial_value`, uma ficção."""
+    block, _, snapshot, *_ = _block(readback_direto=601)
+    snapshot.set(503, 42.0)  # readback do PID presente; o da MV direta ainda não
+    await block.step(entradas(20.0))
+
+    assert block.auto_arm_blocked_reason() == "cold_input"
+
+    snapshot.set(601, 4.25)
+    assert block.auto_arm_blocked_reason() is None
 
 
 async def test_remoto_man_e_o_valor_manual_clampado_em_limits() -> None:

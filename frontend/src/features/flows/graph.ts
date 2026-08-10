@@ -87,6 +87,12 @@ export type PidMv = {
   mode_values: ValoresModoPid;
 };
 
+/** `operating_point`/`readback_tag_id` (TD-003): o modelo do MPC é incremental — o builder
+ *  alimenta cada par com `coluna - operating_point`, então `operating_point` é o ponto de
+ *  linearização. Por isso a porta do bloco fica na coordenada ABSOLUTA da planta (`limits`,
+ *  `du_max` e `initial_value` também), sem precisar de um bloco Script somando constantes.
+ *  `readback_tag_id` é a posição real da MV DIRETA (sem `pid`, que já tem o seu próprio); em
+ *  LOCAL a saída segue essa tag para a transferência bumpless até REMOTO. */
 export type VariavelMv = {
   id: string;
   name: string;
@@ -94,6 +100,8 @@ export type VariavelMv = {
   limits: LimitesMpc;
   du_max: number;
   initial_value: number;
+  operating_point: number;
+  readback_tag_id: number | null;
   pid: PidMv | null;
 };
 
@@ -121,7 +129,16 @@ export type VariavelRestricao = {
   priority: number;
 };
 
-export type VariavelDv = { id: string; name: string; eu: string; range: FaixaMpc | null };
+/** `operating_point` da DV (TD-003): mesmo ponto de linearização das MVs — o builder alimenta
+ *  o par com `coluna - operating_point`, então a porta de entrada da DV também fica na
+ *  coordenada absoluta da planta, sem bloco Script somando constantes. */
+export type VariavelDv = {
+  id: string;
+  name: string;
+  eu: string;
+  range: FaixaMpc | null;
+  operating_point: number;
+};
 
 /** Espelho de `MpcVariables` (spec F4 §2.1): entradas do nó = cvs+constraints+dvs, saída =
  *  mvs, sempre nesta ordem (decisão A-10, `validate.py::_input_handles`/`_output_handles`). */

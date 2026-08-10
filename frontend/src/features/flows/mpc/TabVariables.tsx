@@ -127,6 +127,10 @@ function ListaMv({
                 limits: { min: 0, max: 100 },
                 du_max: 1,
                 initial_value: 0,
+                // TD-003: ponto de linearização 0 e sem readback preservam o comportamento
+                // anterior à tarefa (porta já nascia na coordenada absoluta da planta).
+                operating_point: 0,
+                readback_tag_id: null,
                 pid: null,
               },
             ]);
@@ -152,6 +156,18 @@ function ListaMv({
               campo="initial_value"
               rotulo="Valor inicial"
               valor={mv.initial_value}
+            />
+            <CampoNumero
+              id={mv.id}
+              campo="operating_point"
+              rotulo="Ponto de operação"
+              valor={mv.operating_point}
+            />
+            <CampoNumero
+              id={mv.id}
+              campo="readback_tag_id"
+              rotulo="Tag de posição (readback)"
+              valor={mv.readback_tag_id}
             />
           </div>
           <label className="flex items-center gap-2 text-xs text-fg">
@@ -364,6 +380,14 @@ function LinhaDv({ dv, aoRemover }: { dv: VariavelDv; aoRemover: () => void }) {
         <CampoNumero id={dv.id} campo="range_low" rotulo="Faixa mín." valor={dv.range?.low ?? null} />
         <CampoNumero id={dv.id} campo="range_high" rotulo="Faixa máx." valor={dv.range?.high ?? null} />
       </div>
+      {/* TD-003: ponto de linearização — o modelo do MPC é incremental, então a porta de
+          entrada da DV fica na coordenada absoluta da planta, sem Script somando constantes. */}
+      <CampoNumero
+        id={dv.id}
+        campo="operating_point"
+        rotulo="Ponto de operação"
+        valor={dv.operating_point}
+      />
       {!digitou && (
         <p className="text-[10px] text-fg-muted">
           Sem faixa: o faceplate desta DV ficará sem barra (RF-702).
@@ -393,7 +417,12 @@ function ListaDv({
           type="button"
           size="sm"
           data-testid="mpc-add-dv"
-          onClick={() => aoMudar([...dvs, { id: gerarIdVariavel("dv"), name: "", eu: "", range: null }])}
+          onClick={() =>
+            aoMudar([
+              ...dvs,
+              { id: gerarIdVariavel("dv"), name: "", eu: "", range: null, operating_point: 0 },
+            ])
+          }
         >
           Adicionar DV
         </Button>

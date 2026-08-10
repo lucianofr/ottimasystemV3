@@ -75,6 +75,8 @@ function variavelMv(id: string, name: string, eu: string, comPid = false) {
     limits: { min: 0, max: 100 },
     du_max: 5,
     initial_value: 0,
+    operating_point: 0,
+    readback_tag_id: null,
     pid: comPid
       ? {
           write_tag_id: 12,
@@ -113,7 +115,7 @@ function variavelRestricao(id: string, name: string, eu: string) {
 }
 
 function variavelDv(id: string, name: string, eu: string, range: FaixaMpc | null = null) {
-  return { id, name, eu, range };
+  return { id, name, eu, range, operating_point: 0 };
 }
 
 function aresta(
@@ -637,7 +639,9 @@ test("DV sem range fica com null explícito na ida e volta (padrão de DV nova)"
   });
   const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson([no], []))));
   if (volta.nodes[0]?.type !== "mpc") throw new Error("tipo preservado");
-  expect(volta.nodes[0].data.variables.dvs).toEqual([{ id: "dv_1", name: "Vazão de carga", eu: "m3/h", range: null }]);
+  expect(volta.nodes[0].data.variables.dvs).toEqual([
+    { id: "dv_1", name: "Vazão de carga", eu: "m3/h", range: null, operating_point: 0 },
+  ]);
 });
 
 test("DV salva antes da F6, sem a chave range, carrega com null (compatibilidade retroativa)", () => {
@@ -666,5 +670,7 @@ test("DV salva antes da F6, sem a chave range, carrega com null (compatibilidade
   });
   const no = grafo.nodes.find((n) => n.id === "m");
   if (no?.type !== "mpc") throw new Error("tipo preservado");
-  expect(no.data.variables.dvs).toEqual([{ id: "dv_1", name: "Vazão de carga", eu: "m3/h", range: null }]);
+  expect(no.data.variables.dvs).toEqual([
+    { id: "dv_1", name: "Vazão de carga", eu: "m3/h", range: null, operating_point: 0 },
+  ]);
 });

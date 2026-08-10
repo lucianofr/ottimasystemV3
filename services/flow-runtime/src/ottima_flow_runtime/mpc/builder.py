@@ -49,12 +49,17 @@ class PairInit:
     estágios em passagem direta, `pair.a.shape[0] == 0` — ver `discretize_sopdt`); nesse caso
     `direct_gain` carrega o `K` que soma direto na linha (sem estado `_x` para inicializar).
 
+    `col_operating_point`: valor da coluna (MV ou DV) no ponto em que o par foi
+    linearizado. O par é alimentado com `coluna − col_operating_point`, então quem arma o
+    controller precisa resolver `x_ss` e o registrador de atraso na MESMA coordenada.
+
     `eq=False`: mesmo motivo do `PairSS`/`BuiltMpc` — `pair` carrega `np.ndarray`.
     """
 
     row_id: str
     col_id: str
     is_mv_column: bool
+    col_operating_point: float
     kind: RowKind
     state_names: tuple[str, ...]
     delay_state_names: tuple[str, ...]
@@ -125,6 +130,10 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
     mv_symbol = {mv.id: model.set_variable("_u", mv.id) for mv in mvs}
     dv_symbol = {dv.id: model.set_variable("_tvp", dv.id) for dv in dvs}
     col_symbol = {**mv_symbol, **dv_symbol}
+    # Ponto de linearização por coluna (MV ou DV): o modelo é incremental, a porta do bloco
+    # é absoluta. Fica aqui, e não em cada par, porque o ponto é da planta — duas linhas que
+    # olham a mesma MV não podem discordar de onde é o zero dela.
+    operating_point = {var.id: var.operating_point for var in (*mvs, *dvs)}
     bias_symbol = {row_id: model.set_variable("_tvp", f"bias_{row_id}") for row_id in row_ids}
     for cv in cvs:
         model.set_variable("_tvp", f"sp_{cv.id}")
@@ -157,7 +166,10 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
                 pair = discretize_iopdt(params["Ki"], params["theta"], ts_mpc)
 
             is_mv_column = col_id in mv_symbol
-            pair_input = col_symbol[col_id]
+            col_op = operating_point[col_id]
+            # Desvio do ponto de linearização. `col_op == 0` mantém a expressão idêntica à
+            # de antes deste campo existir (nenhum termo a mais no grafo do CasADi).
+            pair_input = col_symbol[col_id] if col_op == 0.0 else col_symbol[col_id] - col_op
             delay_names: list[str] = []
             for i in range(1, pair.delay + 1):
                 name = f"delay_{row_id}_{col_id}_{i}"
@@ -189,6 +201,7 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
                         row_id=row_id,
                         col_id=col_id,
                         is_mv_column=is_mv_column,
+                        col_operating_point=col_op,
                         kind=kind,
                         state_names=(),
                         delay_state_names=tuple(delay_names),
@@ -212,6 +225,7 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
                     row_id=row_id,
                     col_id=col_id,
                     is_mv_column=is_mv_column,
+                    col_operating_point=col_op,
                     kind=kind,
                     state_names=tuple(names),
                     delay_state_names=tuple(delay_names),

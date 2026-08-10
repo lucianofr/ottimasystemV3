@@ -69,7 +69,22 @@ class PidBinding(BaseModel):
 
 
 class MvVar(BaseModel):
-    """Variável manipulada. Sem `pid` ⇒ MV "direta" (spec §2.1-3)."""
+    """Variável manipulada. Sem `pid` ⇒ MV "direta" (spec §2.1-3).
+
+    Coordenada da porta: ABSOLUTA, a mesma da variável OPC-UA ligada à saída. `limits`
+    (curso do atuador), `du_max` e `initial_value` estão todos nessa coordenada.
+
+    `operating_point`: valor desta MV no ponto em que a matriz `models` foi linearizada.
+    Os pares são incrementais (`Δy = K·Δu`, `dy/dt = Ki·Δu`), então o modelo interno é
+    alimentado com `u − operating_point` — sem isso uma linha integradora acumula
+    `Ki·Ts·u_op` por execução e a predição deriva sozinha (TD-003). `0.0` reproduz o
+    comportamento anterior, então config salva antes deste campo continua carregando.
+
+    `readback_tag_id`: tag de leitura com a posição REAL da MV. Em LOCAL a saída acompanha
+    essa tag (transferência bumpless para REMOTO); em REMOTO ela é o `u_applied` do solve.
+    Só faz sentido na MV direta: com `pid`, quem já cumpre esse papel é
+    `pid.readback_tag_id`.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -79,6 +94,8 @@ class MvVar(BaseModel):
     limits: Limits
     du_max: float
     initial_value: float = 0.0
+    operating_point: float = 0.0
+    readback_tag_id: int | None = None
     pid: PidBinding | None = None
 
     @field_validator("id")
@@ -126,7 +143,13 @@ class ConstraintVar(BaseModel):
 
 
 class DvVar(BaseModel):
-    """Variável de distúrbio — futura = último valor medido, constante no horizonte (§3.2)."""
+    """Variável de distúrbio — futura = último valor medido, constante no horizonte (§3.2).
+
+    Coordenada da porta: ABSOLUTA, igual à da MV. `operating_point` é o valor desta DV no
+    ponto de linearização da matriz `models`; o modelo interno recebe `d − operating_point`.
+    É o que permite ligar a medida crua da planta direto na porta, sem bloco de
+    condicionamento antes do MPC.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -134,6 +157,7 @@ class DvVar(BaseModel):
     name: str
     eu: str
     range: Range | None = None
+    operating_point: float = 0.0
 
     @field_validator("id")
     @classmethod
