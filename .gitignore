@@ -27,3 +27,10 @@ frontend/openapi.json
 graphify-out/.rebuild.lock
 # Added by code-review-graph
 .code-review-graph/
+
+# planta_virtual: saidas das campanhas (historico e identificacao). O `plant_history.sqlite`
+# sozinho passa de 40 MB e e regerado a cada rodada — nada disso e conhecimento de projeto.
+planta_virtual/plant_history.sqlite*
+planta_virtual/mpc_run.csv
+planta_virtual/mpc_step_response.csv
+planta_virtual/mpc_state_space.npz
