@@ -15,6 +15,8 @@ from .conftest import (
     TS_MPC,
     AmbienteMpc,
     OpcSim,
+    armar_ate_remoto,
+    armar_auto_com_retentativa,
     assinar_mpc_state,
     deploy_flow,
     evento_mpc,
@@ -218,3 +220,92 @@ def test_e2e_f5_06_ts_prediction_regime(
                     f"regime amostra {i}: delta_ts={delta_segundos:.3f}s, "
                     f"esperado ~{TS_MPC}s (±30%)"
                 )
+
+
+def _horizontes_do_bloco(admin: httpx.Client, flow_id: int, block_id: str) -> dict[str, Any]:
+    """`horizons` da projeção `/api/operate/mpcs`. O servidor é a fonte: a projeção não expõe
+    `tss` (spec F5 §4.1-3), então o cliente não teria como derivar Np sem duplicar a regra."""
+    resposta = admin.get("/api/operate/mpcs")
+    assert resposta.status_code == 200, f"GET /api/operate/mpcs: HTTP {resposta.status_code}"
+    for no in resposta.json():
+        if no["flow_id"] == flow_id and no["block_id"] == block_id:
+            return no
+    raise AssertionError(f"bloco {flow_id}/{block_id} ausente da projeção de MPCs")
+
+
+def test_e2e_td_08_predicao_tem_np_mais_um_ponto_e_parte_do_u_prev(
+    admin: httpx.Client,
+    ambiente_mpc: AmbienteMpc,
+    criar_flow_mpc: Any,
+    opcsim_client: OpcSim,
+) -> None:
+    """E2E-TD-08: em AUTO a predição tem Np+1 pontos e cada MV parte do u_prev aplicado.
+
+    Duas coisas são provadas juntas porque só fazem sentido juntas: o horizonte publicado é
+    o mesmo que o card da tela de operação vai desenhar (`horizons.np`), e o degrau fantasma
+    da MV parte do valor JÁ aplicado — sem degrau na emenda entre histórico e previsão
+    (contrato B-F5-05). Sem a segunda, a primeira só mediria o tamanho de uma lista.
+    """
+    resetar_atuador_mpc(opcsim_client)
+
+    flow_id = criar_flow_mpc("td-08", grafo=grafo_mpc_tfs(ambiente_mpc))
+
+    with assinar_mpc_state(admin, flow_id, "mpc1") as fluxo:
+        deploy_flow(admin, flow_id)
+        armar_ate_remoto(admin, fluxo, flow_id, "mpc1")
+        armar_auto_com_retentativa(admin, fluxo, flow_id, "mpc1")
+
+        projecao = _horizontes_do_bloco(admin, flow_id, "mpc1")
+        horizontes = projecao["horizons"]
+        ids_mv = [mv["id"] for mv in projecao["variables"]["mvs"]]
+        linhas = len(projecao["variables"]["cvs"]) + len(projecao["variables"]["constraints"])
+
+        # Janela contígua: a âncora da predição é uma fronteira de varredura anterior, então
+        # ela precisa estar DENTRO da janela coletada para o u_prev ser comparável.
+        amostras = fluxo.coletar(
+            quantidade=16,
+            timeout=60.0,
+            descricao="janela de quadros em AUTO",
+        )
+
+    com_predicao = [a for a in amostras if a["prediction"]["t"]]
+    assert com_predicao, "nenhum quadro em AUTO trouxe predição — pipeline vazio, não apresentação"
+
+    esperado = horizontes["np"] + 1
+    for amostra in com_predicao:
+        predicao = amostra["prediction"]
+        assert len(predicao["t"]) == esperado, (
+            f"predição com {len(predicao['t'])} pontos, esperado Np+1 = {esperado} "
+            f"(Np={horizontes['np']}, Ts_mpc={horizontes['ts_mpc']})"
+        )
+        assert len(predicao["cv"]) == linhas, (
+            f"predição com {len(predicao['cv'])} linhas de CV/Restrição, esperado {linhas}"
+        )
+        assert len(predicao["mv"]) == len(ids_mv), (
+            f"predição com {len(predicao['mv'])} linhas de MV, esperado {len(ids_mv)}"
+        )
+        for linha in (*predicao["cv"], *predicao["mv"]):
+            assert len(linha) == esperado, (
+                f"linha de predição com {len(linha)} pontos, desalinhada do eixo t ({esperado})"
+            )
+
+    # Âncora: o primeiro ponto de cada MV é o u_prev do quadro em que o solve foi despachado.
+    ultimo = com_predicao[-1]
+    ancora_ts = datetime.fromisoformat(ultimo["prediction"]["ts"])
+    ancora = min(
+        amostras,
+        key=lambda a: abs((datetime.fromisoformat(a["ts"]) - ancora_ts).total_seconds()),
+    )
+    distancia = abs((datetime.fromisoformat(ancora["ts"]) - ancora_ts).total_seconds())
+    assert distancia <= TS_MPC / 2, (
+        f"quadro da âncora da predição ({ancora_ts}) ficou fora da janela coletada "
+        f"(mais próximo a {distancia:.3f}s)"
+    )
+
+    for indice, mv_id in enumerate(ids_mv):
+        u_prev = ancora["vars"][mv_id]["v"]
+        primeiro = ultimo["prediction"]["mv"][indice][0]
+        assert primeiro == pytest.approx(u_prev, abs=1e-6), (
+            f"MV '{mv_id}': predição parte de {primeiro}, mas o valor aplicado na âncora "
+            f"era {u_prev} — degrau na emenda entre histórico e previsão"
+        )

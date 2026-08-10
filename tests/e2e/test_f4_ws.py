@@ -216,10 +216,11 @@ def test_e2e_f4_10_ws_fanout_e_hot_swap(
 ) -> None:
     """E2E-F4-10 (spec §9.2/§6.2/§4.7): (a) o `/ws` entrega o payload §5.1 exato, nenhuma
     chave a mais/a menos; (b) hot-swap (PUT de um peso com o flow rodando) muda só `mpc1` —
-    sheda a LOCAL, publica `mpc_mode_changed{reason:hot_swap}`, ganha um `MpcHost` NOVO
+    publica `mpc_mode_changed{reason:hot_swap_bumpless}` e ganha um `MpcHost` NOVO
     (`worker.last_solve_ms` reseta a `None` — só um host recém-nascido faz isso; um
-    respawn interno do MESMO host preserva o último valor) — e `mpc2` (irmão não alterado)
-    preserva estado (segue REMOTO+AUTO); o flow inteiro segue rodando nos dois blocos."""
+    respawn interno do MESMO host preserva o último valor), PRESERVANDO REMOTO+AUTO
+    (TD-006: conjunto de MVs inalterado ⇒ estado transplantado) — e `mpc2` (irmão não
+    alterado) preserva estado; o flow inteiro segue rodando nos dois blocos."""
     flow_id = criar_flow_mpc("f4-10", grafo=_grafo_hot_swap(admin, ambiente_mpc, peso_mpc1=1.0))
 
     with (
@@ -288,24 +289,25 @@ def test_e2e_f4_10_ws_fanout_e_hot_swap(
 
         origem_mpc1 = evento_mpc(KIND_MPC_MODE_CHANGED, flow_id, "mpc1")
         evento = eventos.esperar(
-            lambda e: origem_mpc1(e) and e["payload"].get("reason") == "hot_swap",
+            lambda e: origem_mpc1(e) and e["payload"].get("reason") == "hot_swap_bumpless",
             timeout=20.0,
-            descricao="mpc_mode_changed{reason: hot_swap} de mpc1 (não a transição de armar)",
-        )
-        estado_local_1 = fluxo1.esperar(
-            lambda e: e["modes"]["local_remote"] == "local",
-            timeout=15.0,
-            descricao="mpc1 shedar pra LOCAL",
+            descricao="mpc_mode_changed{reason: hot_swap_bumpless} de mpc1",
         )
 
         # Flow segue rodando: mpc.state dos dois blocos continua chegando normalmente.
         pos_swap_2 = fluxo2.esperar(
             lambda _e: True, timeout=10.0, descricao="mpc2 mpc.state pós-swap"
         )
-        fluxo1.esperar(lambda _e: True, timeout=10.0, descricao="mpc1 mpc.state pós-swap")
+        pos_swap_1 = fluxo1.esperar(
+            lambda _e: True, timeout=10.0, descricao="mpc1 mpc.state pós-swap"
+        )
 
-    assert evento["payload"] == {"kind": KIND_MPC_MODE_CHANGED, "reason": "hot_swap"}
-    assert estado_local_1["modes"]["local_remote"] == "local"
+    assert evento["payload"] == {"kind": KIND_MPC_MODE_CHANGED, "reason": "hot_swap_bumpless"}
+    # TD-006: mudar SÓ o peso de uma CV mantém o conjunto de MVs, então o estado é
+    # transplantado para o bloco novo e o comando NÃO é devolvido ao PLC. Antes do TD-006
+    # este mesmo PUT shedava `mpc1` para LOCAL — era um trip de controle disparado por ação
+    # de engenharia (incidente de 2026-08-09T15:19:58Z).
+    assert pos_swap_1["modes"] == {"local_remote": "remote", "man_auto": "auto"}
 
     # mpc2 (irmão não alterado) preserva estado — nunca sheda (spec §4.1-3).
     assert pos_swap_2["modes"] == {"local_remote": "remote", "man_auto": "auto"}

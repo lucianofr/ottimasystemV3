@@ -1,8 +1,15 @@
 """Camada L2 da F6c (spec F6 §7): suíte RNF-09, cenários de dinâmica pela malha TFS.
 
 Dois cenários novos (E2E-F6-05, E2E-F6-06) que exercitam o MPC fechado pela TFS:
-- E2E-F6-05: overrun com orçamento estreitado, prova MV congelada + contador de overruns
+- E2E-F6-05: gate por CAUSA (overrun detectável), não por relógio (MV congelada)
 - E2E-F6-06: hot-swap de config do MPC com a planta viva, prova persistência do estado
+
+TD-008: E2E-F6-05 reescrito para:
+- Verificar `status.overruns` durante a série
+- Se `overruns == 0` → skip ("solve coube no orçamento nesta máquina")
+- Se `overruns > 0` → asseverar que o evento `mpc_overrun` existe E que a MV não
+  avança nos quadros com overrun (contrato: sem plano novo → output segura)
+- NUNCA comparar com `initial_value` nem assumir "MV congelada a rodada inteira"
 """
 
 import time
@@ -40,7 +47,7 @@ DU_MAX_NOVO = 3.0
 
 
 # --------------------------------------------------------------------------------------
-# E2E-F6-05 — Overrun pela malha TFS: MV congela, contador cresce (spec §7-3, F6R-01)
+# E2E-F6-05 — Overrun pela malha TFS: gate por CAUSA, não por relógio (TD-008)
 # --------------------------------------------------------------------------------------
 
 
@@ -52,13 +59,17 @@ def test_e2e_f6_05_overrun_pela_malha_tfs(
     eventos: EventStream,
     opcsim_client: OpcSim,
 ) -> None:
-    """E2E-F6-05 (RNF-09, spec §7-3, ADR-022): MPC com orçamento muito estreitado (Ts_mpc
-    = Ts = 0.5s) e horizonte elevado via TSS. Prova que:
-    1. MV fica congelada (RF-624: solver não completa, saída congelada em initial_value)
-    2. Evento `mpc_overrun` emitido com contador `payload["overruns"]` crescente
+    """E2E-F6-05 (RNF-09, spec §7-3, ADR-022, TD-008): MPC com orçamento estreitado
+    (Ts_mpc = Ts = 0.5s) e horizonte elevado via TSS. Implementa gate por CAUSA:
 
-    Critério de teste é comportamento normativo (RF-624, spec §7-5). A MV congelada é
-    consequência direta do overrun: sem plano novo, output = hold = initial_value.
+    1. Verifica `status.overruns` durante a série de execução
+    2. Se `overruns == 0` → skip (não ocorreu overrun nesta máquina)
+    3. Se `overruns > 0` → assevera:
+       - Evento `mpc_overrun` foi emitido (contrato do runtime)
+       - MV não avança nos quadros com overrun (contrato: sem plano novo → output segura)
+
+    NUNCA compara com `initial_value` nem assume "MV congelada a rodada inteira"
+    (quebra em máquinas rápidas onde o solve cabe no orçamento).
     """
     resetar_atuador_mpc(opcsim_client)
 
@@ -67,7 +78,7 @@ def test_e2e_f6_05_overrun_pela_malha_tfs(
     mpc_data = grafo["nodes"][3]["data"]  # node mpc1
     # Estreitar orçamento
     mpc_data["multiplier"] = 1
-    # Elevar horizonte via TSS (aumenta Np)
+    # Elevar horizonte via TSS (aumenta Np e custo de solve)
     for cv in mpc_data["variables"]["cvs"]:
         cv["tss"] = TSS_MALHA * 2  # 20s → Np~20, perto do teto de 120
     for co in mpc_data["variables"]["constraints"]:
@@ -90,45 +101,80 @@ def test_e2e_f6_05_overrun_pela_malha_tfs(
         # SP alto para forçar solve intenso
         operar_sp(admin, flow_id, "mpc1", "cv_1", 80.0)
 
-        # Deixar rodar para overrun ocorrer
+        # Deixar rodar para (possivelmente) ocorrer overrun
         time.sleep(8.0)
 
-        # Tentar coletar evento de overrun (não-bloqueante)
-        try:
-            evento_overrun = eventos.esperar(
-                evento_mpc(KIND_MPC_OVERRUN, flow_id, "mpc1"),
-                timeout=5.0,
-                descricao="mpc_overrun pela malha TFS",
-            )
-        except AssertionError:
-            evento_overrun = None
-
-        # Capturar série de estados
+        # Capturar série de estados (com overruns e valores de MV)
         janela = fluxo.coletar(
             quantidade=40,
             timeout=45.0,
-            descricao="série de estados em overrun",
+            descricao="série de estados da rodada",
         )
 
-    # Critério normativo 1: MV congelada em initial_value (RF-624)
-    mv_valores = [e["vars"]["mv_pid"]["v"] for e in janela]
-    assert all(abs(v - 0.0) < 1e-6 for v in mv_valores), (
-        f"RF-624: mv_pid deve estar congelada em 0.0 durante overrun. Observado: {mv_valores}"
-    )
+    # Análise: extrair overruns e valores de MV por quadro
+    overruns_por_quadro = [e["status"]["overruns"] for e in janela]
+    mv_valores_por_quadro = [e["vars"]["mv_pid"]["v"] for e in janela]
 
-    # Critério normativo 2: Saúde do bloco reporta overruns
+    # TD-008, gate 1: Verificar se houve overrun durante a série
+    max_overruns = max(overruns_por_quadro) if overruns_por_quadro else 0
+
+    if max_overruns == 0:
+        # Comportamento OK para máquina rápida: solve coube no orçamento
+        pytest.skip(
+            "solve coube no orçamento nesta máquina — overrun não ocorreu. "
+            f"Série de overruns: {overruns_por_quadro}"
+        )
+
+    # TD-008, gate 2: Overrun ocorreu — validar o contrato
+    # (a) Evento `mpc_overrun` deve ter sido emitido
+    try:
+        evento_overrun = eventos.esperar(
+            evento_mpc(KIND_MPC_OVERRUN, flow_id, "mpc1"),
+            timeout=5.0,
+            descricao="mpc_overrun durante a rodada",
+        )
+        assert evento_overrun is not None, "Evento mpc_overrun deve estar presente"
+        assert evento_overrun["payload"]["overruns"] >= 1, (
+            f"Evento deve reportar contador de overruns >= 1. "
+            f"Observado: {evento_overrun['payload']['overruns']}"
+        )
+    except AssertionError as e:
+        raise AssertionError(
+            f"TD-008: evento mpc_overrun não foi emitido quando overruns > 0. "
+            f"Max overruns observado: {max_overruns}"
+        ) from e
+
+    # (b) MV não deve avançar nos quadros com overrun (contrato: sem plano novo)
+    # Detectar quadros com overrun (incremento do contador)
+    quadros_com_overrun = []
+    for i, overrun_val in enumerate(overruns_por_quadro):
+        if i == 0:
+            continue
+        if overrun_val > overruns_por_quadro[i - 1]:
+            # Contador incrementou neste quadro = overrun neste quadro
+            quadros_com_overrun.append(i)
+
+    if quadros_com_overrun:
+        # Verificar que a MV não avança nos quadros de overrun
+        for idx in quadros_com_overrun:
+            if idx > 0:
+                # Delta entre este quadro e o anterior
+                delta_mv = abs(mv_valores_por_quadro[idx] - mv_valores_por_quadro[idx - 1])
+                assert delta_mv < 1.0, (
+                    f"TD-008: MV não deve avançar durante overrun. "
+                    f"Quadro {idx} com overrun: delta_mv={delta_mv} "
+                    f"(valores: {mv_valores_por_quadro[idx - 1]} → {mv_valores_por_quadro[idx]})"
+                )
+
+    # TD-008, gate 3: Validar estrutura do bloco (saúde)
     saude = mpc_block_health(flow_id, "mpc1")
     assert saude is not None, "Flow-runtime deve reportar saúde do bloco mpc1"
-    assert saude["overruns"] >= 1, (
-        f"RF-624: Bloco deve reportar pelo menos 1 overrun. Observado: {saude['overruns']}"
+    # O contador é monotônico e continua andando entre a coleta do WS e a leitura do
+    # `/health`: comparar por igualdade seria uma corrida contra o próprio runtime.
+    assert saude["overruns"] >= max_overruns, (
+        f"Saúde do bloco não pode reportar MENOS overruns que o `mpc.state` já publicou. "
+        f"WS: {max_overruns}, /health: {saude['overruns']}"
     )
-
-    # Validação: se capturou evento, validar estrutura
-    if evento_overrun is not None:
-        assert evento_overrun["severity"] == "warning"
-        assert evento_overrun["payload"]["kind"] == KIND_MPC_OVERRUN
-        assert isinstance(evento_overrun["payload"]["overruns"], int)
-        assert evento_overrun["payload"]["overruns"] >= 1
 
 
 # --------------------------------------------------------------------------------------

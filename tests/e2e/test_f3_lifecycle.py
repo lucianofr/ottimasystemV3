@@ -21,8 +21,8 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import connect
 
 from ottima_core.bus import (
-    KIND_FLOW_DEPLOYED,
     KIND_FLOW_FAILED,
+    KIND_FLOW_RESUMED,
     KIND_FLOW_STOPPED,
     channel_flow_status,
 )
@@ -71,7 +71,8 @@ def test_e2e_f3_07_comm_failure_derruba_so_os_flows_da_conexao(
     assinar_status: Any,
     congelar_watchdog: Callable[[bool], None],
 ) -> None:
-    """RF-207/ADR-009/017: flow com tag vai a `failed`; flow puro segue; só deploy retoma."""
+    """RF-207/ADR-009: flow com tag vai a `failed`; flow puro segue; a comunicação voltando
+    retoma o flow sozinho (ADR-025/TD-005)."""
     ambiente = projeto_com_conexao
     esperar_conexao(ambiente.conn_id, timeout=120.0)
 
@@ -118,21 +119,22 @@ def test_e2e_f3_07_comm_failure_derruba_so_os_flows_da_conexao(
 
     congelar_watchdog(False)
     esperar_conexao(ambiente.conn_id, timeout=180.0)
-    ocioso = status_tag.silencio()
-    assert ocioso == [], f"o flow retomou sozinho após descongelar (ADR-017): {ocioso}"
-    assert flow_no_runtime(flow_tag)["state"] == "failed"
 
-    deploy(admin, flow_tag)
+    # ADR-025 (TD-005): `comm_restored` com `desired_state == "running"` retoma o flow SEM
+    # comando manual. Antes desta decisão o assert aqui era o oposto (`silencio() == []`,
+    # "só deploy retoma"): na campanha de 14 h isso obrigou um supervisor externo a religar
+    # os flows a cada piscada de OPC. O ADR-017 segue valendo para BOOT, que é outro caminho.
     eventos.esperar(
-        evento_de_flow(KIND_FLOW_DEPLOYED, flow_tag),
-        timeout=30.0,
-        descricao="flow_deployed do deploy manual que retoma",
+        evento_de_flow(KIND_FLOW_RESUMED, flow_tag),
+        timeout=120.0,
+        descricao="flow_resumed da retomada automática pós comm_restored",
     )
     retomado = status_tag.esperar(
-        de_varredura, timeout=30.0, descricao="varredura após o deploy manual"
+        de_varredura, timeout=60.0, descricao="varredura após a retomada automática"
     )
     assert retomado["state"] == "running"
-    print("\nE2E-F3-07: failed(comm_failure) só no flow da conexão; retomada apenas por deploy")
+    assert flow_no_runtime(flow_tag)["state"] == "running"
+    print("\nE2E-F3-07: failed(comm_failure) só no flow da conexão; retomada automática")
 
 
 # --------------------------------------------------------------------------------------
