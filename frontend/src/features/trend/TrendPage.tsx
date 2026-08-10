@@ -1,13 +1,17 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
+import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { Select } from "../../components/ui/select";
 import { cn } from "../../lib/cn";
 import { useConnections } from "../connections/useConnections";
 import { useActiveProject } from "../projects/useProjects";
-import { TrendChart } from "./TrendChart";
+import { EditorEscala } from "./EditorEscala";
+import { ESCALA_AUTO, gravarEscalas, lerEscalas, type EscalaVar } from "./escalas";
+import { TrendChart, type TrendChartHandle } from "./TrendChart";
 import { CLASSES_PENA, FORMATO_VALOR, LIMITE_PENAS } from "./trendTheme";
 import { montarMatriz, resumirSeries, useHistory, useTags } from "./useHistory";
+import { useJanelaDeslizante } from "./useJanelaDeslizante";
 
 const JANELAS = [
   { id: "30m", rotulo: "30 min", segundos: 1800 },
@@ -22,16 +26,25 @@ type JanelaId = (typeof JANELAS)[number]["id"];
 /** O engenheiro precisa saber quando está olhando agregado, não amostra bruta (spec F2 §9.2). */
 const ROTULO_MODO: Record<"raw" | "1m", string> = { raw: "bruto", "1m": "1 min" };
 
+/** Escalas Y por variável persistem por navegador, não por projeto: preferência de layout,
+ *  não dado de processo (mesmo raciocínio de `ottima.operate.escalas.v1`). */
+const CHAVE_ESCALAS = "ottima.trend.escalas.v1";
+
 export function TrendPage() {
   const [selecionadas, setSelecionadas] = useState<number[]>([]);
   const [janelaId, setJanelaId] = useState<JanelaId>("30m");
   const [aviso, setAviso] = useState<string | null>(null);
+  const [escalas, setEscalas] = useState<Record<string, EscalaVar>>(() =>
+    lerEscalas(CHAVE_ESCALAS),
+  );
+  const chartRef = useRef<TrendChartHandle>(null);
 
   const janela = JANELAS.find((item) => item.id === janelaId) ?? JANELAS[0];
+  const deslizante = useJanelaDeslizante(janela.segundos);
   const projeto = useActiveProject();
   const conexoes = useConnections(projeto.data?.id ?? null);
   const tags = useTags();
-  const historico = useHistory(selecionadas, janela.segundos);
+  const historico = useHistory(selecionadas, janela.segundos, deslizante.fimEpochS);
 
   // `selecionadas` é estado: a identidade só muda quando a seleção muda de fato.
   const dados = useMemo(
@@ -73,6 +86,19 @@ export function TrendPage() {
     setAviso(null);
   }
 
+  function definirEscala(tagId: number, escala: EscalaVar): void {
+    setEscalas((atual) => {
+      const proximo = { ...atual, [String(tagId)]: escala };
+      gravarEscalas(CHAVE_ESCALAS, proximo);
+      return proximo;
+    });
+  }
+
+  function resetLayout(): void {
+    deslizante.reset();
+    chartRef.current?.resetZoom();
+  }
+
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
@@ -101,6 +127,43 @@ export function TrendPage() {
               ))}
             </Select>
           </label>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="trend-janela-voltar"
+              aria-label="Voltar no tempo"
+              onClick={() => {
+                deslizante.voltar();
+              }}
+            >
+              {"<"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="trend-janela-avancar"
+              aria-label="Avançar no tempo"
+              disabled={deslizante.aoVivo}
+              onClick={() => {
+                deslizante.avancar();
+              }}
+            >
+              {">"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="trend-janela-reset"
+              disabled={deslizante.aoVivo}
+              onClick={resetLayout}
+            >
+              Reset layout
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -169,10 +232,12 @@ export function TrendPage() {
 
           {dados && (
             <TrendChart
+              ref={chartRef}
               dados={dados}
               ids={selecionadas}
               rotulos={rotulos}
               janelaSegundos={janela.segundos}
+              escalas={escalas}
             />
           )}
 
@@ -221,6 +286,13 @@ export function TrendPage() {
                       {resumo.valor === null ? "—" : FORMATO_VALOR.format(resumo.valor)}
                     </span>
                     <span className="w-12 text-xs text-fg-muted">{tag?.eu ?? ""}</span>
+                    <EditorEscala
+                      escala={escalas[String(resumo.tagId)] ?? ESCALA_AUTO}
+                      prefixoTestid="trend"
+                      aoMudar={(escala) => {
+                        definirEscala(resumo.tagId, escala);
+                      }}
+                    />
                   </div>
                 );
               })}

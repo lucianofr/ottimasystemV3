@@ -42,6 +42,7 @@ function CampoNumero({
   campo,
   rotulo,
   valor,
+  testid,
 }: {
   id: string;
   campo: string;
@@ -50,6 +51,7 @@ function CampoNumero({
    *  impresso aqui volta como texto não-vazio no Aplicar e vira a faixa degenerada `{0, 0}`,
    *  que o servidor recusa (`range.low < range.high`) e deixa o flow insalvável. */
   valor: number | null;
+  testid?: string;
 }) {
   return (
     <div className="space-y-1">
@@ -61,6 +63,7 @@ function CampoNumero({
         inputMode="decimal"
         className="process-value"
         defaultValue={valor === null ? "" : String(valor)}
+        data-testid={testid}
       />
     </div>
   );
@@ -126,6 +129,8 @@ function ListaMv({
                 eu: "",
                 limits: { min: 0, max: 100 },
                 du_max: 1,
+                du_min: 0,
+                move_weight: 1,
                 initial_value: 0,
                 // TD-003: ponto de linearização 0 e sem readback preservam o comportamento
                 // anterior à tarefa (porta já nascia na coordenada absoluta da planta).
@@ -151,6 +156,20 @@ function ListaMv({
             <CampoNumero id={mv.id} campo="limits_min" rotulo="Limite mín." valor={mv.limits.min} />
             <CampoNumero id={mv.id} campo="limits_max" rotulo="Limite máx." valor={mv.limits.max} />
             <CampoNumero id={mv.id} campo="du_max" rotulo="Δu máx." valor={mv.du_max} />
+            <CampoNumero
+              id={mv.id}
+              campo="du_min"
+              rotulo="Δu mínimo"
+              valor={mv.du_min}
+              testid="mpc-mv-du-min"
+            />
+            <CampoNumero
+              id={mv.id}
+              campo="move_weight"
+              rotulo="Peso de movimento"
+              valor={mv.move_weight}
+              testid="mpc-mv-move-weight"
+            />
             <CampoNumero
               id={mv.id}
               campo="initial_value"
@@ -267,7 +286,13 @@ function ListaCv({
             {/* TSS mora só na aba Horizontes (tarefa 4.3): precisa ser estado controlado
                 para Ts_mpc/Np/Nc derivarem ao vivo — um segundo campo aqui, não-controlado,
                 divergiria do que o usuário digitou lá. */}
-            <CampoNumero id={cv.id} campo="weight" rotulo="Peso" valor={cv.weight} />
+            <CampoNumero
+              id={cv.id}
+              campo="weight"
+              rotulo="Peso"
+              valor={cv.weight}
+              testid="mpc-cv-weight"
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <CampoNumero

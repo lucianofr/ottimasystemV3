@@ -34,6 +34,7 @@ import { useConnections } from "../connections/useConnections";
 import { useTags } from "../tags/useTags";
 import { ModalConfigBloco } from "./config/ModalConfigBloco";
 import { FlowPalette, MIME_BLOCO } from "./FlowPalette";
+import { FlowPropsModal } from "./FlowPropsModal";
 import {
   avisosInversao,
   compactarExecOrder,
@@ -48,13 +49,15 @@ import {
   TIPOS_BLOCO,
   type BlocoEdge,
   type BlocoNode,
+  type GraphJson,
   type MapaTags,
   type TipoBloco,
 } from "./graph";
+import { impactoDoSave, type ImpactoMpc } from "./impactoSave";
 import { MpcModal } from "./mpc/MpcModal";
 import { TIPOS_DE_NO } from "./nodes";
 import { ContextoTags, ContextoValores, type ValoresAoVivo } from "./nodes/contexto";
-import { formatarTs, useFlow, useSaveFlow } from "./useFlows";
+import { formatarTs, useComandarFlow, useFlow, useSaveFlow } from "./useFlows";
 import {
   formatarNumero,
   ROTULO_ESTADO,
@@ -184,16 +187,139 @@ function ContextosDoEditor({
   );
 }
 
+/**
+ * Comutador EDIT/ONLINE do editor (tarefa 3.2, spec F3 §6.2): EDIT desliga os valores ao
+ * vivo e libera paleta/arraste; ONLINE mostra os valores publicados por varredura (já
+ * expostos por `BlocoChapa.tsx`/`ContextoValores`, nada novo para buscar) e trava a tela em
+ * somente leitura. Mesmo comutador de posição (variante primária/discreta + `aria-pressed`)
+ * de `BotaoComando` em `FlowsPage.tsx` — cor nunca é o único canal.
+ */
+function BotaoModo({
+  modo,
+  onMudar,
+}: {
+  modo: "edit" | "online";
+  onMudar: (modo: "edit" | "online") => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5" role="group" aria-label="Modo do editor">
+      <Button
+        variant={modo === "edit" ? "outline" : "primary"}
+        size="sm"
+        data-testid="flow-modo-edit"
+        aria-pressed={modo === "edit"}
+        title={modo === "edit" ? "Modo atual" : undefined}
+        onClick={() => onMudar("edit")}
+      >
+        Edit
+      </Button>
+      <Button
+        variant={modo === "online" ? "outline" : "primary"}
+        size="sm"
+        data-testid="flow-modo-online"
+        aria-pressed={modo === "online"}
+        title={modo === "online" ? "Modo atual" : undefined}
+        onClick={() => onMudar("online")}
+      >
+        Online
+      </Button>
+    </div>
+  );
+}
+
+const ROTULO_EFEITO: Record<ImpactoMpc["efeito"], string> = {
+  preservado: "Preservado: modo e valores continuam iguais.",
+  rearme_bumpless: "modo preservado; MV segura o último valor por ~1 ciclo",
+  reset_local: "O controle atual será colocado em LOCAL",
+};
+
+const TOM_EFEITO: Record<ImpactoMpc["efeito"], string> = {
+  preservado: "text-fg-muted",
+  rearme_bumpless: "text-warn",
+  reset_local: "text-alarm",
+};
+
+/**
+ * Diálogo de impacto no MPC (tarefa 3.3, spec F3, TD-006): abre quando Salvar/Deploy muda a
+ * config funcional de algum bloco MPC com o flow rodando. Decisão registrada: dispara mesmo
+ * com o bloco em LOCAL — o editor não assina `mpc_state`, e ser conservador aqui é mais
+ * simples do que preciso. Confirmar/Cancelar limpam o estado do chamador diretamente (sem
+ * `dialogo.current?.close()`): o desmonte pelo React já basta, e evita o duplo disparo que
+ * fechar-e-depois-notificar teria via `onClose`.
+ */
+function DialogoImpacto({
+  impacto,
+  onConfirmar,
+  onCancelar,
+}: {
+  impacto: readonly ImpactoMpc[];
+  onConfirmar: () => void;
+  onCancelar: () => void;
+}) {
+  const dialogo = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const elemento = dialogo.current;
+    if (elemento !== null && !elemento.open) elemento.showModal();
+  }, []);
+
+  return (
+    <dialog
+      ref={dialogo}
+      onClose={onCancelar}
+      data-testid="flow-impacto-dialog"
+      className="modal-bloco w-[min(520px,92vw)] overflow-auto rounded-panel border border-hairline bg-panel p-0 text-fg"
+    >
+      <header className="flex items-center justify-between border-b border-hairline bg-well px-4 py-3">
+        <h2 className="plaqueta text-sm text-fg">Impacto no MPC</h2>
+      </header>
+      <div className="p-4">
+        <ul className="space-y-2 text-xs">
+          {impacto.map((item) => (
+            <li key={item.blockId}>
+              <span className="plaqueta text-fg">{item.label}</span>
+              <p className={TOM_EFEITO[item.efeito]}>{ROTULO_EFEITO[item.efeito]}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <footer className="flex justify-end gap-2 border-t border-hairline px-4 py-3">
+        <Button variant="outline" data-testid="flow-impacto-cancelar" onClick={onCancelar}>
+          Cancelar
+        </Button>
+        <Button data-testid="flow-impacto-confirmar" onClick={onConfirmar}>
+          Confirmar
+        </Button>
+      </footer>
+    </dialog>
+  );
+}
+
 function Editor({ flowId }: { flowId: number }) {
   const flow = useFlow(flowId);
   const salvar = useSaveFlow(flowId);
+  const comandar = useComandarFlow("deploy");
   const podeMutar = useCanMutate();
 
   // Um socket por editor aberto, assinando só este flow e morrendo com a página (§5.3).
   const aoVivo = useFlowStatus(flowId);
+
+  // Modo EDIT/ONLINE (tarefa 3.2): decidido UMA vez, na primeira varredura que o canal
+  // publica — antes disso o editor não sabe se o flow está rodando. Depois de decidido, o
+  // modo só muda pela mão do operador (o comutador do header), nunca sozinho.
+  const [modo, setModo] = useState<"edit" | "online" | null>(null);
+  useEffect(() => {
+    if (modo !== null || aoVivo.status === null) return;
+    setModo(aoVivo.status.state === "running" ? "online" : "edit");
+  }, [modo, aoVivo.status]);
+  const modoEfetivo = modo ?? "edit";
+
   const valores = useMemo<ValoresAoVivo>(
-    () => ({ ativo: aoVivo.status !== null, ports: aoVivo.ports }),
-    [aoVivo.status, aoVivo.ports],
+    () =>
+      modoEfetivo === "edit"
+        ? { ativo: false, ports: {} }
+        : { ativo: aoVivo.status !== null, ports: aoVivo.ports },
+    [modoEfetivo, aoVivo.status, aoVivo.ports],
   );
 
   const projectId = flow.data?.project_id ?? null;
@@ -221,10 +347,18 @@ function Editor({ flowId }: { flowId: number }) {
   const [recusa, setRecusa] = useState<string | null>(null);
   const [erroSave, setErroSave] = useState<string | null>(null);
   const [avisosServidor, setAvisosServidor] = useState<string[] | null>(null);
+  const [propsAbertas, setPropsAbertas] = useState(false);
+  // `null` = diálogo fechado; lista completa dos blocos MPC do grafo atual quando aberto
+  // (tarefa 3.3) — inclui os `preservado` também, para o operador ver que nada muda neles.
+  const [impacto, setImpacto] = useState<ImpactoMpc[] | null>(null);
 
   const areaRef = useRef<HTMLDivElement>(null);
   const carregado = useRef<number | null>(null);
   const motivoRef = useRef<string | null>(null);
+  // Grafo CARREGADO (ou do último save bem-sucedido) — base de comparação do diálogo de
+  // impacto (tarefa 3.3); atualizado no load (efeito abaixo) e em `salvarGrafo`.
+  const grafoOriginal = useRef<GraphJson | null>(null);
+  const acaoPendente = useRef<"salvar" | "deploy" | null>(null);
   const { screenToFlowPosition } = useReactFlow();
 
   // Carga única por flow: um refetch de fundo não pode atropelar o desenho em andamento.
@@ -235,6 +369,9 @@ function Editor({ flowId }: { flowId: number }) {
     const grafo = deGraphJson(detalhe.graph_json);
     setNodes(grafo.nodes);
     setEdges(grafo.edges);
+    // Normalizado pelo mesmo par deGraphJson/paraGraphJson que o save usa: comparar contra
+    // os bytes crus do servidor produziria diferença por formatação, não por edição real.
+    grafoOriginal.current = paraGraphJson(grafo.nodes, grafo.edges);
   }, [flow.data, setNodes, setEdges]);
 
   const adicionar = useCallback(
@@ -363,15 +500,56 @@ function Editor({ flowId }: { flowId: number }) {
     setAvisosServidor(null);
   }
 
-  async function salvarGrafo(): Promise<void> {
+  async function salvarGrafo(): Promise<boolean> {
     setErroSave(null);
     setRecusa(null);
+    const grafoParaSalvar = paraGraphJson(nodes, edges);
     try {
-      const salvo = await salvar.mutateAsync(paraGraphJson(nodes, edges));
+      const salvo = await salvar.mutateAsync(grafoParaSalvar);
       setAvisosServidor(salvo.warnings ?? []);
+      grafoOriginal.current = grafoParaSalvar;
+      return true;
     } catch (err) {
       setAvisosServidor(null);
       setErroSave(erroLegivel(err));
+      return false;
+    }
+  }
+
+  /**
+   * Salvar/Deploy do editor (tarefa 3.3): com o flow rodando, um efeito diferente de
+   * `preservado` em algum bloco MPC abre o diálogo de impacto ANTES do PUT — decisão
+   * registrada: o diálogo dispara mesmo com o bloco em LOCAL, porque o editor não assina
+   * `mpc_state` (conservador por simplicidade, não por precisão de estado). Flow parado não
+   * tem MPC rodando para impactar — sem diálogo.
+   */
+  function abrirFluxoDeSalvar(acao: "salvar" | "deploy"): void {
+    acaoPendente.current = acao;
+    const impactos =
+      grafoOriginal.current !== null && flow.data?.desired_state === "running"
+        ? impactoDoSave(grafoOriginal.current, paraGraphJson(nodes, edges), false)
+        : [];
+    if (impactos.some((item) => item.efeito !== "preservado")) {
+      setImpacto(impactos);
+      return;
+    }
+    void executarAcaoPendente();
+  }
+
+  /** Deploy é save + comando: o PUT de um flow rodando já publica `reload` (o comando fica
+   *  no-op no runtime); para flow parado/failed o deploy sobe o flow — cobre a retomada
+   *  manual sem precisar ir até a lista de flows. */
+  async function executarAcaoPendente(): Promise<void> {
+    const acao = acaoPendente.current;
+    acaoPendente.current = null;
+    setImpacto(null);
+    const salvouOk = await salvarGrafo();
+    if (acao === "deploy" && salvouOk) {
+      try {
+        await comandar.mutateAsync(flowId);
+      } catch (err) {
+        setErroSave(erroLegivel(err));
+      }
     }
   }
 
@@ -399,16 +577,47 @@ function Editor({ flowId }: { flowId: number }) {
             </Link>
             <h1 className="plaqueta text-sm text-fg">{flow.data.name}</h1>
             <span className="text-xs text-fg-muted">
-              Ts <span className="process-value text-fg">{formatarTs(flow.data.ts_seconds)}</span> s
+              Ts{" "}
+              <span data-testid="flow-header-ts" className="process-value text-fg">
+                {formatarTs(flow.data.ts_seconds)}
+              </span>{" "}
+              s
               · <span className="process-value text-fg">{nodes.length}</span> bloco(s)
             </span>
+            {podeMutar && (
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="flow-props-abrir"
+                onClick={() => setPropsAbertas(true)}
+              >
+                Propriedades
+              </Button>
+            )}
           </div>
-          <CabecalhoAoVivo aoVivo={aoVivo} />
-          {podeMutar && (
-            <Button data-testid="flow-salvar" disabled={salvar.isPending} onClick={() => void salvarGrafo()}>
-              {salvar.isPending ? "Salvando…" : "Salvar"}
-            </Button>
-          )}
+          <div className="flex items-center gap-3">
+            <CabecalhoAoVivo aoVivo={aoVivo} />
+            <BotaoModo modo={modoEfetivo} onMudar={setModo} />
+            {podeMutar && modoEfetivo === "edit" && (
+              <Button
+                variant="outline"
+                data-testid="flow-deploy-editor"
+                disabled={salvar.isPending || comandar.isPending}
+                onClick={() => abrirFluxoDeSalvar("deploy")}
+              >
+                {comandar.isPending ? "Publicando…" : "Deploy"}
+              </Button>
+            )}
+            {podeMutar && modoEfetivo === "edit" && (
+              <Button
+                data-testid="flow-salvar"
+                disabled={salvar.isPending}
+                onClick={() => abrirFluxoDeSalvar("salvar")}
+              >
+                {salvar.isPending ? "Salvando…" : "Salvar"}
+              </Button>
+            )}
+          </div>
         </header>
 
         {(recusa !== null || erroSave !== null || inversoes.length > 0 || avisosServidor !== null) && (
@@ -432,7 +641,7 @@ function Editor({ flowId }: { flowId: number }) {
         )}
 
         <div className="flex min-h-0 flex-1 gap-3">
-          {podeMutar && <FlowPalette onAdicionar={adicionarNoCentro} />}
+          {podeMutar && modoEfetivo === "edit" && <FlowPalette onAdicionar={adicionarNoCentro} />}
           <div
             ref={areaRef}
             className="min-h-0 flex-1 overflow-hidden rounded-panel border border-hairline"
@@ -457,12 +666,12 @@ function Editor({ flowId }: { flowId: number }) {
               onConnectEnd={aoTerminarConexao}
               isValidConnection={validarConexao}
               onNodeDoubleClick={(_evento, no) => {
-                setEmConfig(no.id);
+                if (modoEfetivo === "edit") setEmConfig(no.id);
               }}
-              nodesDraggable={podeMutar}
-              nodesConnectable={podeMutar}
+              nodesDraggable={podeMutar && modoEfetivo === "edit"}
+              nodesConnectable={podeMutar && modoEfetivo === "edit"}
               edgesReconnectable={false}
-              deleteKeyCode={podeMutar ? ["Backspace", "Delete"] : null}
+              deleteKeyCode={podeMutar && modoEfetivo === "edit" ? ["Backspace", "Delete"] : null}
               fitView
               fitViewOptions={
                 // Sem teto, o `fitView` de um grafo vazio abre o canvas no zoom máximo: a
@@ -502,6 +711,19 @@ function Editor({ flowId }: { flowId: number }) {
             onAplicar={aplicarConfig}
             onFechar={() => {
               setEmConfig(null);
+            }}
+          />
+        )}
+        {propsAbertas && (
+          <FlowPropsModal flow={flow.data} onFechar={() => setPropsAbertas(false)} />
+        )}
+        {impacto !== null && (
+          <DialogoImpacto
+            impacto={impacto}
+            onConfirmar={() => void executarAcaoPendente()}
+            onCancelar={() => {
+              acaoPendente.current = null;
+              setImpacto(null);
             }}
           />
         )}

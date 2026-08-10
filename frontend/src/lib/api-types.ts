@@ -376,6 +376,11 @@ export interface paths {
         /**
          * Update Flow
          * @description Valida o grafo antes de gravar (spec §5.2); avisos de inversão não bloqueiam (RF-307).
+         *
+         *     `graph_json` e `ts_seconds` ausentes mantêm o que já está salvo — o diálogo de
+         *     propriedades troca nome/Ts sem carregar o desenho. Qualquer que seja a combinação, o par
+         *     (grafo, Ts) EFETIVO é revalidado junto: trocar só o Ts pode estourar o teto de atraso de
+         *     um TFS que era válido no Ts anterior.
          */
         put: operations["update_flow_api_flows__flow_id__put"];
         post?: never;
@@ -924,10 +929,12 @@ export interface components {
         FlowUpdate: {
             /** Name */
             name?: string | null;
+            /** Ts Seconds */
+            ts_seconds?: (0.5 | 1 | 2 | 5 | 10 | 30 | 60) | null;
             /** Graph Json */
-            graph_json: {
+            graph_json?: {
                 [key: string]: unknown;
-            };
+            } | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -989,6 +996,18 @@ export interface components {
             v_min?: number[] | null;
             /** V Max */
             v_max?: number[] | null;
+        };
+        /**
+         * Horizons
+         * @description Horizontes derivados do multiplicador, Ts do flow e TSS das linhas (spec §2.2-5).
+         */
+        Horizons: {
+            /** Ts Mpc */
+            ts_mpc: number;
+            /** Np */
+            np: number;
+            /** Nc */
+            nc: number;
         };
         /**
          * Limits
@@ -1079,6 +1098,9 @@ export interface components {
          * MpcNodeOut
          * @description Um bloco `mpc` projetado (spec §4.1-1) — sem `models`/pesos/TSS (§4.1-3); estado
          *     rodando/parado do flow não entra (§4.1-4).
+         *
+         *     `horizons` é derivado no servidor porque a projeção não expõe `tss` (§4.1-3): sem ele o
+         *     cliente teria de duplicar a regra de `derive_horizons` com metade da entrada.
          */
         MpcNodeOut: {
             /** Flow Id */
@@ -1094,6 +1116,7 @@ export interface components {
             /** Multiplier */
             multiplier: number;
             variables: components["schemas"]["MpcVariablesOut"];
+            horizons: components["schemas"]["Horizons"];
         };
         /** MpcVariablesOut */
         MpcVariablesOut: {

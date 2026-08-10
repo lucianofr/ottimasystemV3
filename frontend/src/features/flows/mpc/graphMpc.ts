@@ -83,6 +83,10 @@ function lerVariavelMv(bruto: unknown): VariavelMv | null {
     eu: texto(cru.eu, ""),
     limits: lerLimitesMpc(cru.limits),
     du_max: numero(cru.du_max, 0),
+    // TD-007: `graph_json` salvo antes desta tarefa não tem os campos — `0`/`1` são os
+    // mesmos defaults do `MvVar` do servidor (`du_min: 0.0`, `move_weight: 1.0`).
+    du_min: numero(cru.du_min, 0),
+    move_weight: numero(cru.move_weight, 1),
     initial_value: numero(cru.initial_value, 0),
     operating_point: numero(cru.operating_point, 0),
     readback_tag_id: lerReadbackTagIdMv(cru.readback_tag_id),

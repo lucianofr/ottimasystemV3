@@ -95,6 +95,8 @@ export function variavelMvDoFormulario(
     eu: texto(dados, c("eu"), atual.eu),
     limits: { min: n("limits_min", atual.limits.min), max: n("limits_max", atual.limits.max) },
     du_max: n("du_max", atual.du_max),
+    du_min: n("du_min", atual.du_min),
+    move_weight: n("move_weight", atual.move_weight),
     initial_value: n("initial_value", atual.initial_value),
     // TD-003: ponto de linearização da MV — o modelo do MPC é incremental, então a porta de
     // saída fica na coordenada absoluta da planta em vez de precisar de um Script somando.
@@ -431,6 +433,15 @@ export function validarConfigMpc(
     }
     if (!(mv.du_max > 0)) {
       erros.push(`A MV '${rotuloVariavel(mv)}' precisa de Δu máx. maior que zero.`);
+    }
+    if (!(mv.du_min >= 0)) {
+      erros.push(`A MV '${rotuloVariavel(mv)}' precisa de Δu mínimo maior ou igual a zero.`);
+    }
+    if (!(mv.du_min <= mv.du_max)) {
+      erros.push(`A MV '${rotuloVariavel(mv)}' precisa de du_min menor ou igual a du_max.`);
+    }
+    if (!(mv.move_weight > 0)) {
+      erros.push(`A MV '${rotuloVariavel(mv)}' precisa de peso de movimento maior que zero.`);
     }
   }
   for (const cv of variaveis.cvs) {

@@ -118,6 +118,8 @@ test("variavelMvDoFormulario sem pid devolve pid null mesmo com campos de pid no
     eu: "m3/h",
     limits: { min: 0, max: 100 },
     du_max: 5,
+    du_min: 0,
+    move_weight: 1,
     initial_value: 0,
     operating_point: 0,
     readback_tag_id: null,
@@ -140,6 +142,8 @@ test("variavelMvDoFormulario com pid reconstrói os campos obrigatórios do pid"
     eu: "m3/h",
     limits: { min: 0, max: 100 },
     du_max: 5,
+    du_min: 0,
+    move_weight: 1,
     initial_value: 0,
     operating_point: 0,
     readback_tag_id: null,
@@ -171,6 +175,8 @@ test("variavelMvDoFormulario: operating_point e readback_tag_id da MV direta faz
     eu: "m3/h",
     limits: { min: 0, max: 100 },
     du_max: 5,
+    du_min: 0,
+    move_weight: 1,
     initial_value: 0,
     operating_point: 0,
     readback_tag_id: null,
@@ -192,6 +198,8 @@ test("variavelMvDoFormulario: readback_tag_id vazio cai no valor anterior, mesma
     eu: "",
     limits: { min: 0, max: 100 },
     du_max: 5,
+    du_min: 0,
+    move_weight: 1,
     initial_value: 0,
     operating_point: 0,
     readback_tag_id: 9,
@@ -290,6 +298,8 @@ function mv(id: string, parcial: Partial<VariavelMv> = {}): VariavelMv {
     eu: "",
     limits: { min: 0, max: 100 },
     du_max: 5,
+    du_min: 0,
+    move_weight: 1,
     initial_value: 0,
     operating_point: 0,
     readback_tag_id: null,
@@ -433,6 +443,23 @@ test("validarConfigMpc: pisos numéricos de weight/du_max/tss/faixas bloqueiam (
   expect(erros.some((e) => e.includes("faixa mínima menor que a máxima"))).toBe(true);
 });
 
+test("validarConfigMpc: du_min negativo, du_min > du_max e move_weight não positivo bloqueiam (TD-007)", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [
+      mv("mv_neg", { du_min: -1 }),
+      mv("mv_faixa", { du_min: 10 }),
+      mv("mv_peso", { move_weight: 0 }),
+    ],
+    cvs: [cv("cv_1")],
+    constraints: [],
+    dvs: [],
+  };
+  const { erros } = validarConfigMpc(variaveis, {}, 1, 1);
+  expect(erros.some((e) => e.includes("Δu mínimo maior ou igual a zero"))).toBe(true);
+  expect(erros).toContain("A MV 'mv_faixa' precisa de du_min menor ou igual a du_max.");
+  expect(erros.some((e) => e.includes("peso de movimento maior que zero"))).toBe(true);
+});
+
 test("validarConfigMpc: Np<2 e Np>120 usam as strings verbatim do 422 do servidor (spec §2.2-5)", () => {
   const baseVariaveis = (tss: number): VariaveisMpc => ({
     mvs: [mv("mv_1")],
@@ -558,6 +585,8 @@ test("mesmo mecanismo em TabVariables: limites/Δu digitados numa MV sobrevivem 
     eu: "m3/h",
     limits: { min: 5, max: 95 },
     du_max: 3.5,
+    du_min: 0,
+    move_weight: 1,
     initial_value: 10,
     operating_point: 0,
     readback_tag_id: null,
@@ -631,6 +660,8 @@ test("cenário do checkbox 'com PID': campos digitados sobrevivem a desmarcar+ma
     eu: "m3/h",
     limits: { min: 0, max: 100 },
     du_max: 1,
+    du_min: 0,
+    move_weight: 1,
     initial_value: 0,
     operating_point: 0,
     readback_tag_id: null,

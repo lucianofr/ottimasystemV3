@@ -53,6 +53,21 @@ export function useSaveFlow(flowId: number) {
   });
 }
 
+/** PUT de propriedades (nome/Ts, tarefa 3.1): `graph_json` fica de fora — o backend mantém
+ *  o grafo salvo quando o campo vem ausente (spec F3, contrato 0.3) — o editor não é tocado
+ *  por este PUT. Mesma invalidação de `useSaveFlow`. */
+export function useSalvarPropriedades(flowId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; ts_seconds: TsSegundos }) =>
+      api<FlowSaved>(`/api/flows/${String(flowId)}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: CHAVE }),
+  });
+}
+
 export function useCreateFlow() {
   const queryClient = useQueryClient();
   return useMutation({

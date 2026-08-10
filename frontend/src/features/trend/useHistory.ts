@@ -49,19 +49,30 @@ export function useTags(): UseQueryResult<TagOut[]> {
 }
 
 /**
- * Histórico das tags selecionadas na janela pedida. A janela é recalculada a cada busca
- * (`end = agora`), por isso start/end ficam fora da queryKey: senão cada poll criaria uma
- * entrada nova de cache e o gráfico piscaria.
+ * Histórico das tags selecionadas na janela pedida.
+ *
+ * `fimEpochS === null` (ao vivo): a janela é recalculada a cada busca (`end = agora`), por
+ * isso start/end ficam fora da queryKey — senão cada poll criaria uma entrada nova de cache e
+ * o gráfico piscaria; o polling continua ligado.
+ *
+ * `fimEpochS` setado (pausado/deslizado, `useJanelaDeslizante`): a janela fica fixa em
+ * `[fim − janelaSegundos, fim]`, `fim` entra na queryKey (cada posição do pan é uma entrada de
+ * cache própria) e o polling desliga — não faz sentido reconsultar uma janela do passado a
+ * cada 5 s.
  */
 export function useHistory(
   tagIds: readonly number[],
   janelaSegundos: number,
+  fimEpochS: number | null,
 ): UseQueryResult<HistoryResponse> {
   const ids = tagIds.join(",");
   return useQuery({
-    queryKey: ["history", ids, janelaSegundos],
+    queryKey:
+      fimEpochS === null
+        ? ["history", ids, janelaSegundos]
+        : ["history", ids, janelaSegundos, fimEpochS],
     queryFn: () => {
-      const fim = new Date();
+      const fim = fimEpochS === null ? new Date() : new Date(fimEpochS * 1000);
       const inicio = new Date(fim.getTime() - janelaSegundos * 1000);
       const busca = new URLSearchParams({
         tag_ids: ids,
@@ -71,7 +82,7 @@ export function useHistory(
       return api<HistoryResponse>(`/api/history?${busca.toString()}`);
     },
     enabled: tagIds.length > 0,
-    refetchInterval: INTERVALO_POLLING_MS,
+    refetchInterval: fimEpochS === null ? INTERVALO_POLLING_MS : false,
   });
 }
 

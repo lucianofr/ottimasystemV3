@@ -74,6 +74,8 @@ function variavelMv(id: string, name: string, eu: string, comPid = false) {
     eu,
     limits: { min: 0, max: 100 },
     du_max: 5,
+    du_min: 0,
+    move_weight: 1,
     initial_value: 0,
     operating_point: 0,
     readback_tag_id: null,

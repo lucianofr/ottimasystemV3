@@ -92,13 +92,20 @@ export type PidMv = {
  *  linearização. Por isso a porta do bloco fica na coordenada ABSOLUTA da planta (`limits`,
  *  `du_max` e `initial_value` também), sem precisar de um bloco Script somando constantes.
  *  `readback_tag_id` é a posição real da MV DIRETA (sem `pid`, que já tem o seu próprio); em
- *  LOCAL a saída segue essa tag para a transferência bumpless até REMOTO. */
+ *  LOCAL a saída segue essa tag para a transferência bumpless até REMOTO.
+ *
+ *  `du_min` (TD-007): banda morta do atuador, mesma EU de `du_max` — quem quantiza é o
+ *  worker, não o editor; aqui é só o valor de config. `move_weight`: peso multiplicativo do
+ *  custo de movimento desta MV no solve. `0`/`1` reproduzem o comportamento anterior a esta
+ *  tarefa (config salva antes dela carrega com os mesmos defaults do servidor). */
 export type VariavelMv = {
   id: string;
   name: string;
   eu: string;
   limits: LimitesMpc;
   du_max: number;
+  du_min: number;
+  move_weight: number;
   initial_value: number;
   operating_point: number;
   readback_tag_id: number | null;

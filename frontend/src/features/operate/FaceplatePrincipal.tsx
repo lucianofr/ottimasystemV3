@@ -6,6 +6,7 @@ import type { FlowStatus, MpcModes, MpcState } from "../../lib/contracts.gen";
 import { cn } from "../../lib/cn";
 import { ROTULO_ESTADO, formatarNumero, type EstadoFlow } from "../flows/useFlowStatus";
 import { reduzirPendencia, type Pendencia } from "./pendencia";
+import { RelogioAgora } from "./RelogioAgora";
 import type { MpcNodeOut } from "./useMpcs";
 
 /**
@@ -265,6 +266,23 @@ export function FaceplatePrincipal({ mpc, flowStatus, mpcState, flowId, blockId 
           {erroComando}
         </p>
       )}
+
+      <p className="mt-4 flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+        <span data-testid="faceplate-ts-mpc">
+          Ts MPC{" "}
+          <span className="process-value text-fg">{formatarNumero(mpc.horizons.ts_mpc)}</span> s
+        </span>
+        <span className="text-fg-muted">·</span>
+        <span data-testid="faceplate-horizontes">
+          Np <span className="process-value text-fg">{formatarNumero(mpc.horizons.np)}</span> (
+          <span className="process-value text-fg">
+            {formatarNumero((mpc.horizons.np * mpc.horizons.ts_mpc) / 60)}
+          </span>{" "}
+          min) · Nc{" "}
+          <span className="process-value text-fg">{formatarNumero(mpc.horizons.nc)}</span>
+        </span>
+        <RelogioAgora />
+      </p>
 
       <div className="mt-4 flex flex-wrap gap-6 text-sm text-fg-muted">
         <span>

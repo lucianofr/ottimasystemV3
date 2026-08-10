@@ -52,14 +52,21 @@ const COLUNAS = [
   "Último estado",
 ] as const;
 
-/** Watchdog só existe com o par de node_ids; sem ele a conexão é somente leitura (§3.5). */
+/** Watchdog só existe com o par de node_ids; sem ele a conexão é somente leitura (§3.5).
+ *  Badge em Texto Secundário (A Regra da Cor Anormal, DESIGN.md §Colors): é config estática
+ *  da conexão, não alarme de processo — a coluna "Último estado" é o canal certo pra falha
+ *  real (mesma régua de `CelulaPendencias`). TD-004: aviso explícito de que `writes.py`
+ *  (opc-worker) recusa TODA escrita nesta conexão. */
 function CelulaWatchdog({ conexao }: { conexao: ConnectionOut }) {
   const configurado =
     conexao.watchdog_read_node_id !== null && conexao.watchdog_write_node_id !== null;
   if (!configurado) {
     return (
-      <span className="text-fg-muted">
-        — <span className="ml-1 text-xs">somente leitura</span>
+      <span
+        data-testid="conn-somente-leitura"
+        className="plaqueta inline-flex items-center rounded-[2px] border border-hairline bg-field px-1.5 py-0.5 text-[10px] text-fg-muted"
+      >
+        Somente leitura (sem watchdog)
       </span>
     );
   }

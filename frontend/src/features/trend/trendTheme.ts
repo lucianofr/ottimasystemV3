@@ -1,4 +1,5 @@
 import type uPlot from "uplot";
+import { chaveEscala, type EscalasUplot } from "./escalas";
 
 /**
  * Penas na ordem da spec F2 §9.3; o tamanho da lista É o limite de séries do gráfico.
@@ -64,6 +65,10 @@ export interface OpcoesTrend {
   readonly tema: TemaTrend;
   /** Um rótulo por pena, na ordem da seleção. */
   readonly rotulos: readonly string[];
+  /** Um id por pena, mesma ordem de `rotulos` — chave da escala Y de cada série (`./escalas`). */
+  readonly ids: readonly string[];
+  /** Escalas Y por variável; a escala de tempo `x` é acrescentada aqui dentro. */
+  readonly escalas: EscalasUplot;
   /** Duração da janela em segundos: define a granularidade do eixo de tempo. */
   readonly janelaSegundos: number;
   readonly largura: number;
@@ -71,11 +76,35 @@ export interface OpcoesTrend {
 }
 
 /**
+ * Uma entrada de eixo Y por tag: cor da pena (módulo, para o caso hipotético de mais tags que
+ * penas cadastradas) e grade só no primeiro eixo — grades de escalas independentes empilhadas
+ * cruzariam sem relação nenhuma entre si. Pura e exportada porque o runner de `.check.ts` não
+ * tem DOM para instanciar o uPlot de verdade.
+ */
+export interface EixoValor {
+  readonly scale: string;
+  readonly stroke: string;
+  readonly grid: boolean;
+}
+
+export function montarEixosValor(
+  ids: readonly string[],
+  penas: readonly string[],
+  scaleKeyPorVar: ReadonlyMap<string, string>,
+): readonly EixoValor[] {
+  return ids.map((id, indice) => ({
+    scale: scaleKeyPorVar.get(id) ?? chaveEscala(id),
+    stroke: penas[indice % penas.length],
+    grid: indice === 0,
+  }));
+}
+
+/**
  * uPlot re-vestido (DESIGN.md §Don'ts: nada com cara default). Fundo Poço fica no
  * contêiner via classe; aqui vão só as cores que o canvas desenha.
  */
 export function construirOpcoes(opcoes: OpcoesTrend): uPlot.Options {
-  const { tema, rotulos, janelaSegundos, largura, altura } = opcoes;
+  const { tema, rotulos, ids, escalas, janelaSegundos, largura, altura } = opcoes;
   const fonte = `${String(ALTURA_TEXTO_EIXO)}px ${tema.mono}`;
   const grade = { stroke: tema.linha, width: 1 };
 
@@ -87,11 +116,28 @@ export function construirOpcoes(opcoes: OpcoesTrend): uPlot.Options {
     ...(janelaSegundos <= SEGUNDOS_2H ? { second: "2-digit" as const } : {}),
   });
 
+  // Um eixo Y por tag selecionada (teto de 6, `LIMITE_PENAS`, já garantido por quem monta a
+  // seleção); o uPlot empilha os eixos extras à esquerda sozinho.
+  const eixosValor: uPlot.Axis[] = montarEixosValor(ids, tema.penas, escalas.scaleKeyPorVar).map(
+    (eixo): uPlot.Axis => ({
+      scale: eixo.scale,
+      stroke: eixo.stroke,
+      font: fonte,
+      grid: eixo.grid ? grade : { show: false },
+      ticks: grade,
+      border: grade,
+      size: 64,
+      values: (_u, marcas) => marcas.map((v) => FORMATO_VALOR.format(v)),
+    }),
+  );
+
   return {
     width: largura,
     height: altura,
     legend: { show: false },
     cursor: { y: false, points: { show: false } },
+    // `construirEscalasUplot` devolve só as escalas Y; a de tempo entra aqui.
+    scales: { x: {}, ...escalas.scales },
     axes: [
       {
         stroke: tema.texto,
@@ -102,20 +148,13 @@ export function construirOpcoes(opcoes: OpcoesTrend): uPlot.Options {
         space: 90,
         values: (_u, marcas) => marcas.map((s) => formatoTempo.format(new Date(s * 1000))),
       },
-      {
-        stroke: tema.texto,
-        font: fonte,
-        grid: grade,
-        ticks: grade,
-        border: grade,
-        size: 64,
-        values: (_u, marcas) => marcas.map((v) => FORMATO_VALOR.format(v)),
-      },
+      ...eixosValor,
     ],
     series: [
       { label: "Tempo" },
       ...rotulos.map((label, indice) => ({
         label,
+        scale: escalas.scaleKeyPorVar.get(ids[indice]) ?? chaveEscala(ids[indice]),
         stroke: tema.penas[indice % tema.penas.length],
         width: 1.5,
         // Qualidade ruim vira null e precisa aparecer como buraco na pena, não como reta.

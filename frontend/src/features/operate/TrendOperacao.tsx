@@ -2,11 +2,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
-import { Card } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
 import { Select } from "../../components/ui/select";
 import type { MpcState } from "../../lib/contracts.gen";
+import {
+  chaveEscala,
+  construirEscalasUplot,
+  ESCALA_AUTO,
+  gravarEscalas,
+  lerEscalas,
+  type EscalaVar,
+} from "../trend/escalas";
 import { FORMATO_VALOR, lerTemaTrend, type TemaTrend } from "../trend/trendTheme";
 import "../trend/trend.css";
+import { useJanelaDeslizante } from "../trend/useJanelaDeslizante";
+import { LegendaOperacao } from "./LegendaOperacao";
+import { calcularRangeXOperacao, pluginSecaoFutura } from "./secaoFutura";
 import {
   CUSTO_PENAS,
   JANELAS_OPERACAO,
@@ -20,7 +31,6 @@ import {
   montarOverlayPrevisao,
   selecionarPenasDefault,
   type AmostraViva,
-  type CategoriaVarOperacao,
   type JanelaOperacao,
   type OverlayPrevisao,
   type PenaLegenda,
@@ -30,13 +40,20 @@ import { useHistoryMpc } from "./useHistoryMpc";
 import type { MpcNodeOut } from "./useMpcs";
 
 /**
- * Trend central com predição (spec F5 §7.4-6; plano F5b tarefas 5.1-5.3). uPlot re-vestido
- * no molde de `features/trend/TrendChart.tsx`/`trendTheme.ts`: mesma separação entre
- * "estrutura" (recriada só quando a janela ou o conjunto de penas ligadas muda) e "dados ao
- * vivo" (aplicados via `setData`, sem recriar a instância — o zoom do operador sobrevive ao
- * poll e à borda viva). Este arquivo faz a montagem visual; `trendOperacao.ts` guarda a
- * lógica pura testada em `trendOperacao.check.ts` (regra global 3: asserts leem dados, nunca
- * pixel).
+ * Trend central com predição (spec F5 §7.4-6; plano F5b tarefas 5.1-5.3; plano de melhorias
+ * Fase 2). uPlot re-vestido no molde de `features/trend/TrendChart.tsx`/`trendTheme.ts`:
+ * mesma separação entre "estrutura" (recriada só quando a janela, as penas ligadas, o foco
+ * de escala ou as escalas manuais mudam) e "dados ao vivo" (aplicados via `setData`, sem
+ * recriar a instância — o zoom do operador sobrevive ao poll e à borda viva). Este arquivo
+ * faz a montagem visual; `trendOperacao.ts` guarda a lógica pura de dados testada em
+ * `trendOperacao.check.ts`, `secaoFutura.ts` guarda a lógica pura da seção futura testada em
+ * `secaoFutura.check.ts` (regra global 3: asserts leem dados, nunca pixel).
+ *
+ * Duas seções (Histórico | Previsão, tarefa 2.2): o eixo x sempre reserva o horizonte futuro
+ * (`Np × Ts_mpc`) quando a vista está ao vivo — mesmo fora de AUTO, quando o overlay de
+ * predição chega vazio por norma (spec F5 §3.4). Escala Y por variável (tarefa 2.3) e janela
+ * deslizante `<`/`>`/Reset (tarefa 2.4) vêm de `features/trend/`, compartilhados com o trend
+ * de engenharia — ver `escalas.ts`/`useJanelaDeslizante.ts`.
  */
 
 const ALTURA = 420;
@@ -48,15 +65,6 @@ const FORMATO_HORA = new Intl.DateTimeFormat("pt-BR", {
   minute: "2-digit",
   second: "2-digit",
 });
-
-/** Mesmos rótulos de `FaceplateVariavel.tsx` (`ROTULO_TIPO`, não exportado de lá — duplicar
- *  um record de 4 linhas é mais barato que acoplar dois arquivos de tarefas diferentes). */
-const ROTULO_CATEGORIA: Record<CategoriaVarOperacao, string> = {
-  mv: "MV",
-  cv: "CV",
-  constraint: "Restrição",
-  dv: "DV",
-};
 
 // ----------------------------------------------------------------------------------------
 // Cor: paleta de série (matiz mais claro + fade ao horizonte) via `color-mix` nativo do CSS
@@ -99,7 +107,9 @@ function tracoComFade(corBase: string, agora: number | null): uPlot.Series.Strok
 
 /** Linha-cursor "agora" (§7.4-6): plugin de desenho, não série — não compete por espaço no
  *  teto de penas e não precisa de Y-range próprio. Lê de uma ref para atualizar a cada
- *  `setData` sem recriar a instância (mesma separação estrutura/dados do resto do arquivo). */
+ *  `setData` sem recriar a instância (mesma separação estrutura/dados do resto do arquivo).
+ *  A ref não é mais só `overlay.agora`: sem predição, ela vira o relógio (ver componente) —
+ *  o divisor entre "Histórico" e "Previsão" não pode sumir só porque o bloco está em LOCAL. */
 function pluginLinhaAgora(agoraRef: { current: number | null }, tema: TemaTrend): uPlot.Plugin {
   return {
     hooks: {
@@ -180,16 +190,21 @@ function montarColunas(
 
   // CVs (PV + SP) — linhas de `overlay.cv` = CVs na ordem do config, depois Restrições
   // (spec F4 §5.1/F5 §3.2); o índice de linha é sempre o da posição no config, ligada ou não.
+  // Cada variável tem escala própria (`chaveEscala`, tarefa 2.3): PV, previsto, SP e SP
+  // rastreado da MESMA CV compartilham a escala — sem isso uma CV em % e outra em t/h
+  // achatariam uma contra a outra no mesmo eixo.
   mpc.variables.cvs.forEach((cv, indiceLinha) => {
     if (!ligadas.has(cv.id)) return;
     const historica = porId.get(cv.id) ?? SERIE_VAZIA(cv.id);
     const cor = cores.get(cv.id) ?? corPadrao;
+    const scale = chaveEscala(cv.id);
     pushSerie(historica.t, historica.v, {
       label: `${cv.name} PV`,
       stroke: cor,
       width: 1.5,
       spanGaps: false,
       points: { show: false },
+      scale,
     });
     pushSerie(overlay.tAbs, overlay.cv[indiceLinha] ?? [], {
       label: `${cv.name} previsto`,
@@ -197,6 +212,7 @@ function montarColunas(
       width: 1.5,
       dash: [4, 3],
       points: { show: false },
+      scale,
     });
     const divisao = dividirSpPorAuto(historica.sp, historica.auto);
     pushSerie(historica.t, divisao.comandado, {
@@ -204,28 +220,33 @@ function montarColunas(
       stroke: tema.accent,
       width: 1.5,
       points: { show: false },
+      scale,
     });
     pushSerie(historica.t, divisao.rastreado, {
       label: `${cv.name} SP rastreado`,
       stroke: corDessaturada(tema.accent),
       width: 1.5,
       points: { show: false },
+      scale,
     });
   });
 
   // Restrições — banda low/high sombreada no Poço; a pena de PV conta no teto (brief 5.3), a
-  // banda em si não é uma pena adicional.
+  // banda em si não é uma pena adicional. Mesma escala da própria Restrição: PV, previsto e
+  // a banda low/high são a MESMA variável.
   mpc.variables.constraints.forEach((restricao, indiceRestricao) => {
     const indiceLinha = mpc.variables.cvs.length + indiceRestricao;
     if (!ligadas.has(restricao.id)) return;
     const historica = porId.get(restricao.id) ?? SERIE_VAZIA(restricao.id);
     const cor = cores.get(restricao.id) ?? corPadrao;
+    const scale = chaveEscala(restricao.id);
     pushSerie(historica.t, historica.v, {
       label: `${restricao.name} PV`,
       stroke: cor,
       width: 1.5,
       spanGaps: false,
       points: { show: false },
+      scale,
     });
     pushSerie(overlay.tAbs, overlay.cv[indiceLinha] ?? [], {
       label: `${restricao.name} previsto`,
@@ -233,16 +254,29 @@ function montarColunas(
       width: 1.5,
       dash: [4, 3],
       points: { show: false },
+      scale,
     });
     const idxLow = pushSerie(
       eixoX,
       eixoX.map(() => restricao.range.low),
-      { label: `${restricao.name} mín.`, stroke: "transparent", width: 0, points: { show: false } },
+      {
+        label: `${restricao.name} mín.`,
+        stroke: "transparent",
+        width: 0,
+        points: { show: false },
+        scale,
+      },
     );
     const idxHigh = pushSerie(
       eixoX,
       eixoX.map(() => restricao.range.high),
-      { label: `${restricao.name} máx.`, stroke: "transparent", width: 0, points: { show: false } },
+      {
+        label: `${restricao.name} máx.`,
+        stroke: "transparent",
+        width: 0,
+        points: { show: false },
+        scale,
+      },
     );
     bands.push({ series: [idxLow, idxHigh], fill: corBanda(tema.poco), dir: -1 });
   });
@@ -253,12 +287,14 @@ function montarColunas(
     if (!ligadas.has(mv.id)) return;
     const historica = porId.get(mv.id) ?? SERIE_VAZIA(mv.id);
     const cor = cores.get(mv.id) ?? corPadrao;
+    const scale = chaveEscala(mv.id);
     pushSerie(historica.t, historica.v, {
       label: `${mv.name} PV`,
       stroke: cor,
       width: 1.5,
       spanGaps: false,
       points: { show: false },
+      scale,
     });
     pushSerie(overlay.tAbs, overlay.mv[indiceMv] ?? [], {
       label: `${mv.name} previsto`,
@@ -270,6 +306,7 @@ function montarColunas(
           OPCOES_DEGRAU_MV,
         )(u, seriesIdx, idx0, idx1),
       points: { show: false },
+      scale,
     });
   });
 
@@ -284,6 +321,7 @@ function montarColunas(
       width: 1.5,
       spanGaps: false,
       points: { show: false },
+      scale: chaveEscala(dv.id),
     });
   });
 
@@ -295,7 +333,12 @@ function construirOpcoesOperacao(
   tema: TemaTrend,
   largura: number,
   altura: number,
-  agoraRef: { current: number | null },
+  agoraDivisorRef: { current: number | null },
+  semPredicaoRef: { current: boolean },
+  rangeXRef: { current: readonly [number, number] },
+  escalasY: uPlot.Scales,
+  eixoYChave: string,
+  eixoYCor: string,
 ): uPlot.Options {
   const grade = { stroke: tema.linha, width: 1 };
   const fonte = `11px ${tema.mono}`;
@@ -306,7 +349,17 @@ function construirOpcoesOperacao(
     cursor: { y: false, points: { show: false } },
     series: colunas.series,
     bands: colunas.bands,
-    plugins: [pluginLinhaAgora(agoraRef, tema)],
+    // `x` é dinâmico (tarefa 2.2, `calcularRangeXOperacao`): a função é reavaliada a cada
+    // re-range do uPlot, então lê `rangeXRef.current` sempre fresco sem recriar a instância.
+    // As escalas Y (tarefa 2.3) vêm prontas de `construirEscalasUplot`, uma por variável.
+    scales: {
+      x: { range: (): uPlot.Range.MinMax => rangeXRef.current as [number, number] },
+      ...escalasY,
+    },
+    plugins: [
+      pluginLinhaAgora(agoraDivisorRef, tema),
+      pluginSecaoFutura(agoraDivisorRef, semPredicaoRef, tema),
+    ],
     axes: [
       {
         stroke: tema.texto,
@@ -318,7 +371,10 @@ function construirOpcoesOperacao(
         values: (_u, marcas) => marcas.map((s) => FORMATO_HORA.format(new Date(s * 1000))),
       },
       {
-        stroke: tema.texto,
+        // Eixo Y visível único, vinculado à variável focada (tarefa 2.3) — as demais escalas
+        // existem (série a usa) mas não ganham eixo desenhado.
+        scale: eixoYChave,
+        stroke: eixoYCor,
         font: fonte,
         grid: grade,
         ticks: grade,
@@ -345,6 +401,9 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   const [janelaId, setJanelaId] = useState<JanelaOperacao["id"]>(JANELA_PADRAO_ID);
   const janela = JANELAS_OPERACAO.find((item) => item.id === janelaId) ?? JANELAS_OPERACAO[1];
 
+  // Janela deslizante `<`/`>`/Reset (tarefa 2.4) — `fimEpochS === null` é ao vivo.
+  const janelaDeslizante = useJanelaDeslizante(janela.segundos);
+
   // Todas as variáveis são buscadas de uma vez (teto de 14 do `/api/history/mpc` cobre o
   // teto de config do bloco inteiro — 4 MV + 6 CV/Restr + 4 DV): ligar uma pena pela legenda
   // nunca dispara requisição nova, só muda o que a estrutura do gráfico desenha.
@@ -358,7 +417,13 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     [mpc],
   );
 
-  const historico = useHistoryMpc(flowId, blockId, idsHistorico, janela.segundos);
+  const historico = useHistoryMpc(
+    flowId,
+    blockId,
+    idsHistorico,
+    janela.segundos,
+    janelaDeslizante.fimEpochS,
+  );
 
   // Borda viva (brief 5.1): cada `mpc.state` empilha uma amostra; o corte pela janela atual
   // acontece na leitura (useMemo abaixo), não aqui — trocar de janela não precisa esperar o
@@ -373,12 +438,17 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     ]);
   }, [mpcState]);
 
+  // Pausado/deslizado (tarefa 2.4), a borda viva para de entrar no gráfico: a vista congelada
+  // não pode ganhar pontos que "vazam" do fim escolhido pelo operador.
   const seriesMescladas = useMemo(() => {
     if (!historico.data) return null;
+    if (!janelaDeslizante.aoVivo) {
+      return mesclarSeriesVivas(historico.data, [], idsHistorico);
+    }
     const corte = Date.now() / 1000 - janela.segundos;
     const vivasNaJanela = vivas.filter((a) => Date.parse(a.ts) / 1000 >= corte);
     return mesclarSeriesVivas(historico.data, vivasNaJanela, idsHistorico);
-  }, [historico.data, vivas, janela.segundos, idsHistorico]);
+  }, [historico.data, vivas, janela.segundos, idsHistorico, janelaDeslizante.aoVivo]);
 
   const overlay = useMemo(
     () => (mpcState ? montarOverlayPrevisao(mpcState.prediction) : OVERLAY_VAZIO),
@@ -424,16 +494,41 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   const [ligadas, setLigadas] = useState<ReadonlySet<string>>(
     () => new Set(defaults.filter((pena) => pena.ligada).map((pena) => pena.id)),
   );
+  // Variável focada (tarefa 2.3): dona do único eixo Y visível. Default = primeira ligada;
+  // depois disso, a última ligada pela legenda assume o foco (ver `alternarPena`).
+  const [foco, setFoco] = useState<string | null>(
+    () => defaults.find((pena) => pena.ligada)?.id ?? null,
+  );
   const [aviso, setAviso] = useState<string | null>(null);
 
+  // Escala Y por variável (tarefa 2.3) — persistida por flow+bloco: trocar de MPC não herda
+  // a preferência de outro bloco.
+  const chaveEscalasStorage = `ottima.operate.escalas.v1:${String(flowId)}/${blockId}`;
+  const [escalasPorVar, setEscalasPorVar] = useState<Readonly<Record<string, EscalaVar>>>(() =>
+    lerEscalas(chaveEscalasStorage),
+  );
+
+  function mudarEscalaFoco(escala: EscalaVar): void {
+    if (foco === null) return;
+    const alvo = foco;
+    setEscalasPorVar((atual) => {
+      const proximo = { ...atual, [alvo]: escala };
+      gravarEscalas(chaveEscalasStorage, proximo);
+      return proximo;
+    });
+  }
+
   /** Clique na legenda (brief 5.3): desligar nunca é bloqueado; ligar respeita o mesmo teto
-   *  de 8 penas dos defaults — sem isso o operador furaria o teto pena por pena. */
+   *  de 8 penas dos defaults — sem isso o operador furaria o teto pena por pena. A variável
+   *  ligada por último vira o foco do eixo Y (tarefa 2.3); desligar a focada passa o foco
+   *  para outra ligada (ou nenhuma, se essa era a última). */
   function alternarPena(pena: PenaLegenda): void {
     if (ligadas.has(pena.id)) {
       const proxima = new Set(ligadas);
       proxima.delete(pena.id);
       setLigadas(proxima);
       setAviso(null);
+      if (foco === pena.id) setFoco([...proxima][0] ?? null);
       return;
     }
     const custoAtual = defaults.reduce(
@@ -445,6 +540,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
       return;
     }
     setLigadas(new Set([...ligadas, pena.id]));
+    setFoco(pena.id);
     setAviso(null);
   }
 
@@ -456,22 +552,66 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     [mpc, seriesMescladas, overlay, tema, cores, coresPena, ligadas],
   );
 
+  const escalasUplot = useMemo(
+    () =>
+      construirEscalasUplot(
+        [...ligadas].map((id) => ({ id, escala: escalasPorVar[id] ?? ESCALA_AUTO })),
+      ),
+    [ligadas, escalasPorVar],
+  );
+  const eixoYChave = (foco !== null ? escalasUplot.scaleKeyPorVar.get(foco) : undefined) ?? "y";
+  const eixoYCor = (foco !== null ? cores.get(foco) : undefined) ?? tema.texto;
+  const focoEscala = foco !== null ? (escalasPorVar[foco] ?? ESCALA_AUTO) : ESCALA_AUTO;
+
+  // Horizonte futuro (tarefa 2.1/2.2): `Np × Ts_mpc`, derivado pelo servidor (`mpc.horizons`)
+  // — o cliente nunca recalcula a partir de `tss` (a projeção não expõe, spec §4.1-3).
+  const horizonteFuturoS = mpc.horizons.np * mpc.horizons.ts_mpc;
+  const semPredicao = overlay.agora === null && janelaDeslizante.aoVivo;
+
   const container = useRef<HTMLDivElement>(null);
   const grafico = useRef<uPlot | null>(null);
-  const agoraRef = useRef<number | null>(null);
-  agoraRef.current = overlay.agora;
+  // Âncora do divisor "agora"/seção futura: sem predição, vira o relógio — nunca `null` em
+  // vista ao vivo (o divisor não pode sumir só porque o bloco está fora de AUTO).
+  const agoraDivisorRef = useRef<number | null>(null);
+  agoraDivisorRef.current = janelaDeslizante.aoVivo ? (overlay.agora ?? Date.now() / 1000) : null;
+  const semPredicaoRef = useRef(false);
+  semPredicaoRef.current = semPredicao;
+  const rangeXRef = useRef<readonly [number, number]>([0, 0]);
+  rangeXRef.current = calcularRangeXOperacao({
+    fimEpochS: janelaDeslizante.fimEpochS,
+    agoraEpochS: Date.now() / 1000,
+    janelaSegundos: janela.segundos,
+    horizonteFuturoS,
+  });
   const colunasAtuais = useRef(colunas);
   colunasAtuais.current = colunas;
 
   const idsEstrutura = defaults.filter((pena) => ligadas.has(pena.id)).map((pena) => pena.id);
-  const estrutura = `${janela.id}|${idsEstrutura.join(",")}`;
+  const escalaAssinatura = idsEstrutura
+    .map((id) => {
+      const e = escalasPorVar[id] ?? ESCALA_AUTO;
+      return e.auto ? `${id}:a` : `${id}:${String(e.min)}-${String(e.max)}`;
+    })
+    .join(",");
+  const estrutura = `${janela.id}|${idsEstrutura.join(",")}|${escalaAssinatura}|${foco ?? ""}`;
 
   useEffect(() => {
     const alvo = container.current;
     const atuais = colunasAtuais.current;
     if (!alvo || !atuais) return;
     const instancia = new uPlot(
-      construirOpcoesOperacao(atuais, tema, alvo.clientWidth, ALTURA, agoraRef),
+      construirOpcoesOperacao(
+        atuais,
+        tema,
+        alvo.clientWidth,
+        ALTURA,
+        agoraDivisorRef,
+        semPredicaoRef,
+        rangeXRef,
+        escalasUplot.scales,
+        eixoYChave,
+        eixoYCor,
+      ),
       atuais.dados,
       alvo,
     );
@@ -498,25 +638,67 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     instancia.setData(colunas.dados, !zoomado);
   }, [colunas]);
 
+  /** Reset layout (tarefa 2.4): volta ao vivo E limpa o zoom manual do uPlot no mesmo clique
+   *  — sem o `setData(dados, true)` explícito, um zoom/pan em andamento sobreviveria ao
+   *  `reset()` do hook (o efeito de dados acima preserva zoom por design). */
+  function aoClicarReset(): void {
+    janelaDeslizante.reset();
+    const instancia = grafico.current;
+    const atuais = colunasAtuais.current;
+    if (instancia && atuais) {
+      instancia.setData(atuais.dados, true);
+    }
+  }
+
   return (
     <div data-testid="operate-trend" className="space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="plaqueta text-xs text-fg-muted">Trend</h2>
-        <label className="flex items-center gap-2">
-          <span className="plaqueta text-xs text-fg-muted">Janela</span>
-          <Select
-            data-testid="operate-trend-window"
-            className="w-28"
-            value={janelaId}
-            onChange={(evento) => setJanelaId(evento.target.value as JanelaOperacao["id"])}
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2">
+            <span className="plaqueta text-xs text-fg-muted">Janela</span>
+            <Select
+              data-testid="operate-trend-window"
+              className="w-28"
+              value={janelaId}
+              onChange={(evento) => setJanelaId(evento.target.value as JanelaOperacao["id"])}
+            >
+              {JANELAS_OPERACAO.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.rotulo}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="operate-janela-voltar"
+            onClick={janelaDeslizante.voltar}
           >
-            {JANELAS_OPERACAO.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.rotulo}
-              </option>
-            ))}
-          </Select>
-        </label>
+            {"<"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="operate-janela-avancar"
+            disabled={janelaDeslizante.aoVivo}
+            onClick={janelaDeslizante.avancar}
+          >
+            {">"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="operate-janela-reset"
+            onClick={aoClicarReset}
+          >
+            Reset layout
+          </Button>
+        </div>
       </div>
 
       {historico.isError && (
@@ -536,49 +718,34 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
           data-testid="operate-trend-chart"
           className="rounded-panel border border-hairline bg-well p-2"
         >
+          <div className="flex justify-between px-1 text-xs text-fg-muted">
+            <span>Histórico</span>
+            {janelaDeslizante.aoVivo && (
+              <span data-testid="operate-trend-secao-futura">Previsão</span>
+            )}
+          </div>
           <div ref={container} className="w-full" />
+          {semPredicao && (
+            <p
+              data-testid="operate-trend-sem-predicao"
+              className="mt-1 text-center text-xs text-fg-muted"
+            >
+              Sem predição — MPC fora de AUTO
+            </p>
+          )}
         </div>
       )}
 
-      <Card data-testid="operate-trend-legend" className="divide-y divide-hairline">
-        {defaults.map((pena) => {
-          const definicao = porIdDefinicao.get(pena.id);
-          const ligada = ligadas.has(pena.id);
-          return (
-            <label
-              key={pena.id}
-              data-testid="operate-trend-legend-item"
-              data-var-id={pena.id}
-              className="flex cursor-pointer items-center gap-3 px-3 py-1.5"
-            >
-              <input
-                type="checkbox"
-                className="accent-accent"
-                checked={ligada}
-                onChange={() => {
-                  alternarPena(pena);
-                }}
-              />
-              <span
-                aria-hidden="true"
-                className="h-1 w-6 shrink-0"
-                style={{ backgroundColor: cores.get(pena.id) }}
-              />
-              <span className="plaqueta grow text-xs">
-                {ROTULO_CATEGORIA[pena.categoria]} · {definicao?.name ?? pena.id}
-              </span>
-              {pena.excedente && !ligada && (
-                <span
-                  data-testid="operate-trend-legend-teto"
-                  className="plaqueta rounded-panel border border-warn px-1.5 text-xs text-warn"
-                >
-                  Acima do teto
-                </span>
-              )}
-            </label>
-          );
-        })}
-      </Card>
+      <LegendaOperacao
+        defaults={defaults}
+        ligadas={ligadas}
+        porIdDefinicao={porIdDefinicao}
+        cores={cores}
+        foco={foco}
+        focoEscala={focoEscala}
+        onAlternarPena={alternarPena}
+        onMudarEscalaFoco={mudarEscalaFoco}
+      />
 
       {aviso && (
         <p role="alert" data-testid="operate-trend-aviso" className="text-xs text-warn">

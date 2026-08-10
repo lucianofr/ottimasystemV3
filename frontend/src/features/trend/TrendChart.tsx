@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
+import { ESCALA_AUTO, construirEscalasUplot, type EscalaVar } from "./escalas";
 import { construirOpcoes, lerTemaTrend } from "./trendTheme";
 import "./trend.css";
 
@@ -14,30 +15,67 @@ export interface TrendChartProps {
   /** Um rótulo por pena, na ordem de `ids`. Texto exibido, nunca estrutura. */
   readonly rotulos: readonly string[];
   readonly janelaSegundos: number;
+  /** Escala Y de cada tag (`./escalas`), chaveada pelo id da tag em texto. */
+  readonly escalas: Readonly<Record<string, EscalaVar>>;
 }
 
-export function TrendChart({ dados, ids, rotulos, janelaSegundos }: TrendChartProps) {
+/** Imperativo mínimo para o botão "Reset layout" do header: `TrendChart` detém a instância
+ *  do uPlot, `TrendPage` só precisa limpar o zoom no mesmo clique que volta ao vivo. */
+export interface TrendChartHandle {
+  readonly resetZoom: () => void;
+}
+
+export const TrendChart = forwardRef<TrendChartHandle, TrendChartProps>(function TrendChart(
+  { dados, ids, rotulos, janelaSegundos, escalas },
+  handleRef,
+) {
   const container = useRef<HTMLDivElement>(null);
   const grafico = useRef<uPlot | null>(null);
   // O efeito de criação só pode depender da estrutura; os dados vivos entram por ref para
   // não recriar o gráfico a cada polling (pisca e perde o zoom).
   const ultimosDados = useRef(dados);
   ultimosDados.current = dados;
+  const idsTexto = ids.map(String);
   // Os rótulos ficam fora da estrutura de propósito: `useTags()` resolve depois de
   // `useHistory()`, e trocar o fallback `String(id)` pelo nome real recriaria a instância —
   // e o zoom do engenheiro iria junto — sem que nada de estrutural tivesse mudado.
-  const estrutura = `${String(janelaSegundos)}|${ids.join(",")}`;
-  const estruturaAtual = useRef({ rotulos, janelaSegundos });
-  estruturaAtual.current = { rotulos, janelaSegundos };
+  const estruturaAtual = useRef({ rotulos, janelaSegundos, idsTexto, escalas });
+  estruturaAtual.current = { rotulos, janelaSegundos, idsTexto, escalas };
+  // Escala manual ENTRA na estrutura: editá-la é ação deliberada e rara, e o próprio ajuste
+  // de faixa já invalida qualquer zoom em andamento — não vale a pena imitar `setScale`
+  // imperativo do uPlot só para preservar um recorte que a edição descartaria de qualquer jeito.
+  const assinaturaEscalas = idsTexto
+    .map((id) => {
+      const escala = escalas[id] ?? ESCALA_AUTO;
+      return `${id}:${escala.auto ? "a" : "m"}:${String(escala.min)}:${String(escala.max)}`;
+    })
+    .join(",");
+  const estrutura = `${String(janelaSegundos)}|${idsTexto.join(",")}|${assinaturaEscalas}`;
+
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      resetZoom: () => {
+        grafico.current?.setData(ultimosDados.current, true);
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     const alvo = container.current;
     if (!alvo) return;
+    const atual = estruturaAtual.current;
+    const escalasUplot = construirEscalasUplot(
+      atual.idsTexto.map((id) => ({ id, escala: atual.escalas[id] ?? ESCALA_AUTO })),
+    );
     const instancia = new uPlot(
       construirOpcoes({
         tema: lerTemaTrend(),
-        rotulos: estruturaAtual.current.rotulos,
-        janelaSegundos: estruturaAtual.current.janelaSegundos,
+        rotulos: atual.rotulos,
+        ids: atual.idsTexto,
+        escalas: escalasUplot,
+        janelaSegundos: atual.janelaSegundos,
         largura: alvo.clientWidth,
         altura: ALTURA,
       }),
@@ -72,4 +110,4 @@ export function TrendChart({ dados, ids, rotulos, janelaSegundos }: TrendChartPr
       <div ref={container} className="w-full" />
     </div>
   );
-}
+});
