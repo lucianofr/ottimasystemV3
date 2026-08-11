@@ -212,15 +212,169 @@
   },
   "nodes": [
     {
+      "label": "_tech-debt.md",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "_tech-debt.md"
+    },
+    {
+      "label": "Tech Debt Registry",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_tech_debt_registry",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "tech debt registry"
+    },
+    {
+      "label": "Critical (Blocks Feature Work)",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L7",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_critical_blocks_feature_work",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "critical (blocks feature work)"
+    },
+    {
+      "label": "High (Causes Frequent Issues)",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L19",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_high_causes_frequent_issues",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "high (causes frequent issues)"
+    },
+    {
+      "label": "Medium (Slows Development)",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L31",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_medium_slows_development",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "medium (slows development)"
+    },
+    {
+      "label": "Low (Track for Later)",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L43",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_low_track_for_later",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "low (track for later)"
+    },
+    {
+      "label": "Resolved",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L57",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_resolved",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "resolved"
+    },
+    {
+      "label": "Metrics",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L128",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_metrics",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "metrics"
+    },
+    {
+      "label": "Guidelines",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L142",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_guidelines",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "guidelines"
+    },
+    {
+      "label": "When to Add Debt",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L144",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_when_to_add_debt",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "when to add debt"
+    },
+    {
+      "label": "Debt Item Format",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L154",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_debt_item_format",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "debt item format"
+    },
+    {
+      "label": "Priority Guidelines",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L165",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_priority_guidelines",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "priority guidelines"
+    },
+    {
+      "label": "Review Cadence",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L174",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_review_cadence",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "review cadence"
+    },
+    {
+      "label": "Commands",
+      "file_type": "document",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L180",
+      "_origin": "ast",
+      "id": "docs_reports_tech_debt_commands",
+      "community": 354,
+      "community_name": "Tech Debt Registry",
+      "norm_label": "commands"
+    },
+    {
       "label": "filtros.spec.ts",
       "file_type": "code",
       "source_file": "frontend/e2e/filtros.spec.ts",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "frontend_e2e_filtros_spec",
       "community": 123,
       "community_name": "fixtures.ts",
-      "norm_label": "filtros.spec.ts"
+      "norm_label": "filtros.spec.ts",
+      "id": "frontend_e2e_filtros_spec"
     },
     {
       "label": "FlowIdOut",
@@ -228,10 +382,10 @@
       "source_file": "frontend/e2e/filtros.spec.ts",
       "source_location": "L19",
       "_origin": "ast",
-      "id": "frontend_e2e_filtros_spec_flowidout",
       "community": 123,
       "community_name": "fixtures.ts",
-      "norm_label": "flowidout"
+      "norm_label": "flowidout",
+      "id": "frontend_e2e_filtros_spec_flowidout"
     },
     {
       "label": "FlowGraphOut",
@@ -239,10 +393,10 @@
       "source_file": "frontend/e2e/filtros.spec.ts",
       "source_location": "L23",
       "_origin": "ast",
-      "id": "frontend_e2e_filtros_spec_flowgraphout",
       "community": 123,
       "community_name": "fixtures.ts",
-      "norm_label": "flowgraphout"
+      "norm_label": "flowgraphout",
+      "id": "frontend_e2e_filtros_spec_flowgraphout"
     },
     {
       "label": "grafoFiltros()",
@@ -250,10 +404,10 @@
       "source_file": "frontend/e2e/filtros.spec.ts",
       "source_location": "L39",
       "_origin": "ast",
-      "id": "frontend_e2e_filtros_spec_grafofiltros",
       "community": 123,
       "community_name": "fixtures.ts",
-      "norm_label": "grafofiltros()"
+      "norm_label": "grafofiltros()",
+      "id": "frontend_e2e_filtros_spec_grafofiltros"
     },
     {
       "label": "configurarBloco()",
@@ -261,10 +415,10 @@
       "source_file": "frontend/e2e/filtros.spec.ts",
       "source_location": "L80",
       "_origin": "ast",
-      "id": "frontend_e2e_filtros_spec_configurarbloco",
       "community": 123,
       "community_name": "fixtures.ts",
-      "norm_label": "configurarbloco()"
+      "norm_label": "configurarbloco()",
+      "id": "frontend_e2e_filtros_spec_configurarbloco"
     },
     {
       "label": "ADR-0026",
@@ -272,10 +426,10 @@
       "source_file": "frontend/e2e/filtros.spec.ts",
       "source_location": "L6",
       "_origin": "ast",
-      "id": "docref_adr_0026",
       "community": 123,
       "community_name": "fixtures.ts",
-      "norm_label": "adr-0026"
+      "norm_label": "adr-0026",
+      "id": "docref_adr_0026"
     },
     {
       "label": "test_td_filtros.py",
@@ -283,10 +437,10 @@
       "source_file": "tests/e2e/test_td_filtros.py",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "tests_e2e_test_td_filtros",
       "community": 37,
       "community_name": "test_f3_lifecycle.py",
-      "norm_label": "test_td_filtros.py"
+      "norm_label": "test_td_filtros.py",
+      "id": "tests_e2e_test_td_filtros"
     },
     {
       "label": "fixture",
@@ -294,10 +448,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "id": "fixture",
       "community": 37,
       "community_name": "test_f3_lifecycle.py",
-      "norm_label": "fixture"
+      "norm_label": "fixture",
+      "id": "fixture"
     },
     {
       "label": "assinar_status()",
@@ -305,10 +459,10 @@
       "source_file": "tests/e2e/test_td_filtros.py",
       "source_location": "L48",
       "_origin": "ast",
-      "id": "tests_e2e_test_td_filtros_assinar_status",
       "community": 37,
       "community_name": "test_f3_lifecycle.py",
-      "norm_label": "assinar_status()"
+      "norm_label": "assinar_status()",
+      "id": "tests_e2e_test_td_filtros_assinar_status"
     },
     {
       "label": "Any",
@@ -316,10 +470,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "id": "any",
       "community": 37,
       "community_name": "test_f3_lifecycle.py",
-      "norm_label": "any"
+      "norm_label": "any",
+      "id": "any"
     },
     {
       "label": "criar_flow()",
@@ -327,10 +481,10 @@
       "source_file": "tests/e2e/test_td_filtros.py",
       "source_location": "L53",
       "_origin": "ast",
-      "id": "tests_e2e_test_td_filtros_criar_flow",
       "community": 37,
       "community_name": "test_f3_lifecycle.py",
-      "norm_label": "criar_flow()"
+      "norm_label": "criar_flow()",
+      "id": "tests_e2e_test_td_filtros_criar_flow"
     },
     {
       "label": "Client",
@@ -338,10 +492,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "id": "client",
       "community": 37,
       "community_name": "test_f3_lifecycle.py",
-      "norm_label": "client"
+      "norm_label": "client",
+      "id": "client"
     },
     {
       "label": "Ambiente",
@@ -349,10 +503,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "id": "ambiente",
       "community": 37,
       "community_name": "test_f3_lifecycle.py",
-      "norm_label": "ambiente"
+      "norm_label": "ambiente",
+      "id": "ambiente"
     },
     {
       "label": "_grafo_kalman()",
@@ -360,10 +514,10 @@
       "source_file": "tests/e2e/test_td_filtros.py",
       "source_location": "L57",
       "_origin": "ast",
-      "id": "tests_e2e_test_td_filtros_grafo_kalman",
       "community": 37,
       "community_name": "test_f3_lifecycle.py",
-      "norm_label": "_grafo_kalman()"
+      "norm_label": "_grafo_kalman()",
+      "id": "tests_e2e_test_td_filtros_grafo_kalman"
     },
     {
       "label": "test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta()",
@@ -371,10 +525,10 @@
       "source_file": "tests/e2e/test_td_filtros.py",
       "source_location": "L77",
       "_origin": "ast",
-      "id": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta",
       "community": 37,
       "community_name": "test_f3_lifecycle.py",
-      "norm_label": "test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta()"
+      "norm_label": "test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta()",
+      "id": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta"
     },
     {
       "label": "OpcSim",
@@ -382,10 +536,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "id": "opcsim",
       "community": 37,
       "community_name": "test_f3_lifecycle.py",
-      "norm_label": "opcsim"
+      "norm_label": "opcsim",
+      "id": "opcsim"
     },
     {
       "label": "L2 do fechamento de tech debts \u2014 blocos de filtro sem cen\u00e1rio no gate E2E\u2026",
@@ -393,10 +547,10 @@
       "source_file": "tests/e2e/test_td_filtros.py",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "tests_e2e_test_td_filtros_rationale_1",
       "community": 37,
       "community_name": "test_f3_lifecycle.py",
-      "norm_label": "l2 do fechamento de tech debts \u2014 blocos de filtro sem cenario no gate e2e..."
+      "norm_label": "l2 do fechamento de tech debts \u2014 blocos de filtro sem cenario no gate e2e...",
+      "id": "tests_e2e_test_td_filtros_rationale_1"
     },
     {
       "label": "E2E-TD-10/TD-012: `opc_read -> kalman -> opc_write` deployado contra o stack\u2026",
@@ -404,10 +558,10 @@
       "source_file": "tests/e2e/test_td_filtros.py",
       "source_location": "L84",
       "_origin": "ast",
-      "id": "tests_e2e_test_td_filtros_rationale_84",
       "community": 37,
       "community_name": "test_f3_lifecycle.py",
-      "norm_label": "e2e-td-10/td-012: `opc_read -> kalman -> opc_write` deployado contra o stack..."
+      "norm_label": "e2e-td-10/td-012: `opc_read -> kalman -> opc_write` deployado contra o stack...",
+      "id": "tests_e2e_test_td_filtros_rationale_84"
     },
     {
       "label": "FlowEditorPage.tsx",
@@ -5248,160 +5402,6 @@
       "community_name": "Report Registry",
       "norm_label": "archive",
       "id": "docs_reports_registry_archive"
-    },
-    {
-      "label": "_tech-debt.md",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "_tech-debt.md",
-      "id": "docs_reports_tech_debt"
-    },
-    {
-      "label": "Tech Debt Registry",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "tech debt registry",
-      "id": "docs_reports_tech_debt_tech_debt_registry"
-    },
-    {
-      "label": "Critical (Blocks Feature Work)",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L7",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "critical (blocks feature work)",
-      "id": "docs_reports_tech_debt_critical_blocks_feature_work"
-    },
-    {
-      "label": "High (Causes Frequent Issues)",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L19",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "high (causes frequent issues)",
-      "id": "docs_reports_tech_debt_high_causes_frequent_issues"
-    },
-    {
-      "label": "Medium (Slows Development)",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L49",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "medium (slows development)",
-      "id": "docs_reports_tech_debt_medium_slows_development"
-    },
-    {
-      "label": "Low (Track for Later)",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L70",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "low (track for later)",
-      "id": "docs_reports_tech_debt_low_track_for_later"
-    },
-    {
-      "label": "Resolved",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L109",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "resolved",
-      "id": "docs_reports_tech_debt_resolved"
-    },
-    {
-      "label": "Metrics",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L155",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "metrics",
-      "id": "docs_reports_tech_debt_metrics"
-    },
-    {
-      "label": "Guidelines",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L169",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "guidelines",
-      "id": "docs_reports_tech_debt_guidelines"
-    },
-    {
-      "label": "When to Add Debt",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L171",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "when to add debt",
-      "id": "docs_reports_tech_debt_when_to_add_debt"
-    },
-    {
-      "label": "Debt Item Format",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L181",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "debt item format",
-      "id": "docs_reports_tech_debt_debt_item_format"
-    },
-    {
-      "label": "Priority Guidelines",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L192",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "priority guidelines",
-      "id": "docs_reports_tech_debt_priority_guidelines"
-    },
-    {
-      "label": "Review Cadence",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L201",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "review cadence",
-      "id": "docs_reports_tech_debt_review_cadence"
-    },
-    {
-      "label": "Commands",
-      "file_type": "document",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L207",
-      "_origin": "ast",
-      "community": 354,
-      "community_name": "Tech Debt Registry",
-      "norm_label": "commands",
-      "id": "docs_reports_tech_debt_commands"
     },
     {
       "label": "README.md",
@@ -74733,15 +74733,158 @@
   ],
   "links": [
     {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt",
+      "target": "docs_reports_tech_debt_tech_debt_registry",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L7",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt_tech_debt_registry",
+      "target": "docs_reports_tech_debt_critical_blocks_feature_work",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L142",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt_tech_debt_registry",
+      "target": "docs_reports_tech_debt_guidelines",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L19",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt_tech_debt_registry",
+      "target": "docs_reports_tech_debt_high_causes_frequent_issues",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L43",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt_tech_debt_registry",
+      "target": "docs_reports_tech_debt_low_track_for_later",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L31",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt_tech_debt_registry",
+      "target": "docs_reports_tech_debt_medium_slows_development",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L128",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt_tech_debt_registry",
+      "target": "docs_reports_tech_debt_metrics",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L57",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt_tech_debt_registry",
+      "target": "docs_reports_tech_debt_resolved",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L180",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt_guidelines",
+      "target": "docs_reports_tech_debt_commands",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L154",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt_guidelines",
+      "target": "docs_reports_tech_debt_debt_item_format",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L165",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt_guidelines",
+      "target": "docs_reports_tech_debt_priority_guidelines",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L174",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt_guidelines",
+      "target": "docs_reports_tech_debt_review_cadence",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/reports/_tech-debt.md",
+      "source_location": "L144",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_reports_tech_debt_guidelines",
+      "target": "docs_reports_tech_debt_when_to_add_debt",
+      "confidence_score": 1.0
+    },
+    {
       "relation": "cites",
       "confidence": "EXTRACTED",
       "source_file": "frontend/e2e/filtros.spec.ts",
       "source_location": "L6",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "frontend_e2e_filtros_spec",
-      "target": "docref_adr_0026",
-      "confidence_score": 1.0
+      "target": "docref_adr_0026"
     },
     {
       "relation": "contains",
@@ -74750,9 +74893,9 @@
       "source_location": "L80",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "frontend_e2e_filtros_spec",
-      "target": "frontend_e2e_filtros_spec_configurarbloco",
-      "confidence_score": 1.0
+      "target": "frontend_e2e_filtros_spec_configurarbloco"
     },
     {
       "relation": "contains",
@@ -74761,9 +74904,9 @@
       "source_location": "L23",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "frontend_e2e_filtros_spec",
-      "target": "frontend_e2e_filtros_spec_flowgraphout",
-      "confidence_score": 1.0
+      "target": "frontend_e2e_filtros_spec_flowgraphout"
     },
     {
       "relation": "contains",
@@ -74772,9 +74915,9 @@
       "source_location": "L19",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "frontend_e2e_filtros_spec",
-      "target": "frontend_e2e_filtros_spec_flowidout",
-      "confidence_score": 1.0
+      "target": "frontend_e2e_filtros_spec_flowidout"
     },
     {
       "relation": "contains",
@@ -74783,9 +74926,9 @@
       "source_location": "L39",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "frontend_e2e_filtros_spec",
-      "target": "frontend_e2e_filtros_spec_grafofiltros",
-      "confidence_score": 1.0
+      "target": "frontend_e2e_filtros_spec_grafofiltros"
     },
     {
       "relation": "imports_from",
@@ -74795,9 +74938,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "frontend_e2e_filtros_spec",
-      "target": "frontend_e2e_fixtures",
-      "confidence_score": 1.0
+      "target": "frontend_e2e_fixtures"
     },
     {
       "relation": "imports",
@@ -74807,9 +74950,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "frontend_e2e_filtros_spec",
-      "target": "frontend_e2e_fixtures_ambientee2e",
-      "confidence_score": 1.0
+      "target": "frontend_e2e_fixtures_ambientee2e"
     },
     {
       "relation": "imports",
@@ -74819,9 +74962,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "frontend_e2e_filtros_spec",
-      "target": "frontend_e2e_fixtures_criarambiente",
-      "confidence_score": 1.0
+      "target": "frontend_e2e_fixtures_criarambiente"
     },
     {
       "relation": "imports",
@@ -74831,9 +74974,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "frontend_e2e_filtros_spec",
-      "target": "frontend_e2e_fixtures_entrarnoshell",
-      "confidence_score": 1.0
+      "target": "frontend_e2e_fixtures_entrarnoshell"
     },
     {
       "relation": "imports",
@@ -74843,9 +74986,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "frontend_e2e_filtros_spec",
-      "target": "frontend_e2e_fixtures_nodes",
-      "confidence_score": 1.0
+      "target": "frontend_e2e_fixtures_nodes"
     },
     {
       "relation": "imports",
@@ -74855,9 +74998,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "frontend_e2e_filtros_spec",
-      "target": "frontend_e2e_fixtures_run_id",
-      "confidence_score": 1.0
+      "target": "frontend_e2e_fixtures_run_id"
     },
     {
       "relation": "imports_from",
@@ -74867,9 +75010,9 @@
       "source_location": "L23",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros",
-      "target": "opcsim",
-      "confidence_score": 1.0
+      "target": "opcsim"
     },
     {
       "relation": "imports_from",
@@ -74879,9 +75022,9 @@
       "source_location": "L25",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros",
-      "target": "tests_e2e_conftest",
-      "confidence_score": 1.0
+      "target": "tests_e2e_conftest"
     },
     {
       "relation": "imports_from",
@@ -74891,9 +75034,9 @@
       "source_location": "L26",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros",
-      "target": "tests_e2e_f3_support",
-      "confidence_score": 1.0
+      "target": "tests_e2e_f3_support"
     },
     {
       "relation": "contains",
@@ -74902,9 +75045,9 @@
       "source_location": "L48",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros",
-      "target": "tests_e2e_test_td_filtros_assinar_status",
-      "confidence_score": 1.0
+      "target": "tests_e2e_test_td_filtros_assinar_status"
     },
     {
       "relation": "contains",
@@ -74913,9 +75056,9 @@
       "source_location": "L53",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros",
-      "target": "tests_e2e_test_td_filtros_criar_flow",
-      "confidence_score": 1.0
+      "target": "tests_e2e_test_td_filtros_criar_flow"
     },
     {
       "relation": "contains",
@@ -74924,9 +75067,9 @@
       "source_location": "L57",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros",
-      "target": "tests_e2e_test_td_filtros_grafo_kalman",
-      "confidence_score": 1.0
+      "target": "tests_e2e_test_td_filtros_grafo_kalman"
     },
     {
       "relation": "contains",
@@ -74935,9 +75078,9 @@
       "source_location": "L77",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros",
-      "target": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta",
-      "confidence_score": 1.0
+      "target": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta"
     },
     {
       "relation": "rationale_for",
@@ -74946,9 +75089,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_rationale_1",
-      "target": "tests_e2e_test_td_filtros",
-      "confidence_score": 1.0
+      "target": "tests_e2e_test_td_filtros"
     },
     {
       "relation": "references",
@@ -74958,9 +75101,9 @@
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_assinar_status",
-      "target": "fixture",
-      "confidence_score": 1.0
+      "target": "fixture"
     },
     {
       "relation": "references",
@@ -74970,9 +75113,9 @@
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_criar_flow",
-      "target": "fixture",
-      "confidence_score": 1.0
+      "target": "fixture"
     },
     {
       "relation": "references",
@@ -74982,9 +75125,9 @@
       "source_location": "L48",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_assinar_status",
-      "target": "any",
-      "confidence_score": 1.0
+      "target": "any"
     },
     {
       "relation": "calls",
@@ -74994,9 +75137,9 @@
       "source_location": "L87",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta",
-      "target": "tests_e2e_test_td_filtros_assinar_status",
-      "confidence_score": 1.0
+      "target": "tests_e2e_test_td_filtros_assinar_status"
     },
     {
       "relation": "references",
@@ -75006,9 +75149,9 @@
       "source_location": "L53",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_criar_flow",
-      "target": "any",
-      "confidence_score": 1.0
+      "target": "any"
     },
     {
       "relation": "references",
@@ -75018,9 +75161,9 @@
       "source_location": "L77",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta",
-      "target": "any",
-      "confidence_score": 1.0
+      "target": "any"
     },
     {
       "relation": "references",
@@ -75030,9 +75173,9 @@
       "source_location": "L53",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_criar_flow",
-      "target": "ambiente",
-      "confidence_score": 1.0
+      "target": "ambiente"
     },
     {
       "relation": "references",
@@ -75042,9 +75185,9 @@
       "source_location": "L53",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_criar_flow",
-      "target": "client",
-      "confidence_score": 1.0
+      "target": "client"
     },
     {
       "relation": "calls",
@@ -75054,9 +75197,9 @@
       "source_location": "L86",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta",
-      "target": "tests_e2e_test_td_filtros_criar_flow",
-      "confidence_score": 1.0
+      "target": "tests_e2e_test_td_filtros_criar_flow"
     },
     {
       "relation": "references",
@@ -75066,9 +75209,9 @@
       "source_location": "L77",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta",
-      "target": "client",
-      "confidence_score": 1.0
+      "target": "client"
     },
     {
       "relation": "references",
@@ -75114,9 +75257,9 @@
       "source_location": "L57",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_grafo_kalman",
-      "target": "ambiente",
-      "confidence_score": 1.0
+      "target": "ambiente"
     },
     {
       "relation": "references",
@@ -75126,9 +75269,9 @@
       "source_location": "L77",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta",
-      "target": "ambiente",
-      "confidence_score": 1.0
+      "target": "ambiente"
     },
     {
       "relation": "calls",
@@ -75138,9 +75281,9 @@
       "source_location": "L86",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta",
-      "target": "tests_e2e_test_td_filtros_grafo_kalman",
-      "confidence_score": 1.0
+      "target": "tests_e2e_test_td_filtros_grafo_kalman"
     },
     {
       "relation": "rationale_for",
@@ -75149,9 +75292,9 @@
       "source_location": "L84",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_rationale_84",
-      "target": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta",
-      "confidence_score": 1.0
+      "target": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta"
     },
     {
       "relation": "references",
@@ -75161,9 +75304,9 @@
       "source_location": "L77",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "tests_e2e_test_td_filtros_test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta",
-      "target": "opcsim",
-      "confidence_score": 1.0
+      "target": "opcsim"
     },
     {
       "relation": "imports_from",
@@ -89169,149 +89312,6 @@
       "confidence_score": 1.0,
       "source": "docs_reports_registry_report_registry",
       "target": "docs_reports_registry_yyyy_mm_dd"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L1",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt",
-      "target": "docs_reports_tech_debt_tech_debt_registry"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L7",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt_tech_debt_registry",
-      "target": "docs_reports_tech_debt_critical_blocks_feature_work"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L169",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt_tech_debt_registry",
-      "target": "docs_reports_tech_debt_guidelines"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L19",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt_tech_debt_registry",
-      "target": "docs_reports_tech_debt_high_causes_frequent_issues"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L70",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt_tech_debt_registry",
-      "target": "docs_reports_tech_debt_low_track_for_later"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L49",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt_tech_debt_registry",
-      "target": "docs_reports_tech_debt_medium_slows_development"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L155",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt_tech_debt_registry",
-      "target": "docs_reports_tech_debt_metrics"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L109",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt_tech_debt_registry",
-      "target": "docs_reports_tech_debt_resolved"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L207",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt_guidelines",
-      "target": "docs_reports_tech_debt_commands"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L181",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt_guidelines",
-      "target": "docs_reports_tech_debt_debt_item_format"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L192",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt_guidelines",
-      "target": "docs_reports_tech_debt_priority_guidelines"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L201",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt_guidelines",
-      "target": "docs_reports_tech_debt_review_cadence"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/reports/_tech-debt.md",
-      "source_location": "L171",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_reports_tech_debt_guidelines",
-      "target": "docs_reports_tech_debt_when_to_add_debt"
     },
     {
       "relation": "contains",
@@ -250944,5 +250944,5 @@
       "source_file": "docs/ottimasystem-docsv1.1/adr/ADR-023-escopo-plataforma-v1.md"
     }
   ],
-  "built_at_commit": "c1cf7ba5b782ed131dc63a87005155da46fff13d"
+  "built_at_commit": "6f41d9e7cccbe833f11c9248bce70acc1aa39468"
 }

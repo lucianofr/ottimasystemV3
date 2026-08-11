@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `c1cf7ba5`
+- Built from commit: `6f41d9e7`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1385,7 +1385,7 @@ Cohesion: 0.10
 Nodes (14): ABC, Block, null_outputs(), Protocolo comum dos blocos executáveis e as duas regras de base (spec F3 §3.0).…, Bloco de um flow. `block_id` é o id do nó React Flow (chave do hot-swap,…, Handles de entrada declarados (não necessariamente conectados)., Executa uma varredura e devolve os valores das portas de saída., Zera o estado interno (deploy/stop). Blocos sem estado não precisam… (+6 more)
 
 ## Knowledge Gaps
-- **707 isolated node(s):** `FlowIdOut`, `FlowGraphOut`, `ADR-0026`, `COR_LAMPADA`, `AGUARDO` (+702 more)
+- **707 isolated node(s):** `Critical (Blocks Feature Work)`, `High (Causes Frequent Issues)`, `Medium (Slows Development)`, `Low (Track for Later)`, `Resolved` (+702 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **113 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
