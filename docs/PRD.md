@@ -1,13 +1,14 @@
 # PRD — OttimaSystem (reescrita, v1)
 
 **Produto:** OttimaSystem — plataforma on-premise de Controle Avançado de Processos (APC) com MPC
-**Versão do documento:** 1.4 · 2026-08-08 · **Status:** aprovado para implementação (F1-F5 concluídas)
+**Versão do documento:** 1.5 · 2026-08-10 · **Status:** aprovado para implementação (F1-F6 concluídas)
 **Changelog 1.1:** adicionado o requisito de **ordem de execução explícita por bloco** (`exec_order`) — RF-307 e RF-401 revisados, ADR-024 criado (altera ADR-007). Sem impacto retroativo em F1/F2; efetivo a partir da F3.
 **Changelog 1.2:** payload do canal `flow.status.<flow_id>` estendido com `ports` (valores de porta por varredura, para o canvas ao vivo) — resolve a lacuna do RF-404, que exigia publicar valores de portas sem definir onde. Decisão aprovada no brainstorm da F3 (2026-08-04, `docs/specs/F3-motor-canvas.md` Anexo A-3).
 **Changelog 1.3:** payload do canal `mpc.state.<flow_id>.<block_id>` ganha `ts` e `prediction.ts`; consumidor `recorder` adicionado (§7.1); nova hypertable `MpcSample` (§4, retenção 1 mês, CAgg `mpc_samples_1m`); RF-703 passa a citar a fonte concreta (`mpc_samples`/`mpc_samples_1m`). PRD avança de 1.2 para v1.3 — decisão A-2 · F5R-01/11/26 (spec F5 §1.3-1, `docs/specs/F5-operacao.md`, 2026-08-06).
 **Changelog 1.4:** §7.2 (JSON de projeto) reescrito para espelhar o schema real do bundle de export/import (`ts_seconds`, `direction`, `security_*`/`watchdog_*` planos, `data_type`/`description` nas tags, `auth_mode`/`auth_username` nas conexões, `exported_at`, `desired_state`, `tag_ref` objeto no `graph`); **RF-102** deixa de amarrar o export ao projeto **ativo** e passa a exportar **um projeto** (por id); §7.1 remove `api(WS)` dos consumidores de `opc.values.<conn_id>`; §7.3 detalha o `/ws` como `flow.status`, `mpc.state`, `events`. PRD avança de 1.3 para v1.4 — decisão A-14 · F6R-02 · RFC-05/06 (spec F6 §2.1-4, `docs/specs/F6-portabilidade-hardening.md`, 2026-08-08).
+**Changelog 1.5:** dois blocos de filtro de sinal acrescentados à paleta — **Filtro 1ª ordem** e **Filtro Kalman**; RF-301 passa de 5 para **7 blocos**, nova §5.13 com RF-531/532/533, §1 e §4 atualizados. ADR-026 criado. Sem impacto retroativo: os cinco blocos originais e seus contratos seguem inalterados.
 **Autor:** Luciano França Rocha (LFR Automação), consolidado em sessão de grilling
-**Documentos-irmãos (normativos):** `adr/ADR-001 … ADR-024` · `GLOSSARY.md`
+**Documentos-irmãos (normativos):** `adr/ADR-001 … ADR-026` · `GLOSSARY.md`
 
 > Convenção: itens `RF-xxx` são requisitos funcionais; `RNF-xxx`, não-funcionais. Referências `(ADR-nnn)` apontam a decisão de arquitetura que governa o requisito. Em conflito entre este PRD e um ADR, **o ADR prevalece** e o PRD deve ser corrigido.
 
@@ -15,7 +16,7 @@
 
 ## 1. Visão e objetivo
 
-O OttimaSystem executa **estratégias de controle avançado (APC)** sobre plantas industriais: o engenheiro monta a lógica num **canvas de blocos** (leitura/escrita OPC-UA, MPC, script Python, simulador TFS), o **motor** executa essa lógica ciclicamente no servidor, e o **operador** conduz o MPC por uma tela de operação com faceplates e tendência com **predição futura**. O controle regulatório permanece nos PIDs do PLC; o OttimaSystem assume e devolve malhas de forma **bumpless** e falha sempre para o lado seguro (PLC no comando).
+O OttimaSystem executa **estratégias de controle avançado (APC)** sobre plantas industriais: o engenheiro monta a lógica num **canvas de blocos** (leitura/escrita OPC-UA, MPC, script Python, simulador TFS, filtros de sinal), o **motor** executa essa lógica ciclicamente no servidor, e o **operador** conduz o MPC por uma tela de operação com faceplates e tendência com **predição futura**. O controle regulatório permanece nos PIDs do PLC; o OttimaSystem assume e devolve malhas de forma **bumpless** e falha sempre para o lado seguro (PLC no comando).
 
 Esta v1 é uma **reescrita completa do zero** do sistema legado (Django), sem compromisso de compatibilidade, sobre a stack definida nos ADR-001…006.
 
@@ -66,7 +67,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 - **OpcConnection** (id, project_id, nome, endpoint, security_policy, security_mode, auth[anon|userpass|cert], credenciais/refs de certificado, tags de watchdog {read_bit, write_bit}, período de toggle) (ADR-009, 021)
 - **Tag** (id, connection_id, nome lógico, node_id OPC, direção[R|W], tipo de dado, EU, descrição)
 - **Flow** (id, project_id, nome, Ts∈{0.5,1,2,5,10,30,60}, estado_desejado[rodando|parado], graph_json) (ADR-007, 011, 017)
-- **Block/Edge** — dentro de `graph_json` (React Flow): nós tipados {opc_read, opc_write, mpc, script, tfs} com `config` própria — incluindo **`exec_order`** (int, 1..N, único no flow; ADR-024); arestas ligam portas tipadas (ADR-005)
+- **Block/Edge** — dentro de `graph_json` (React Flow): nós tipados {opc_read, opc_write, mpc, script, tfs, first_order, kalman} com `config` própria — incluindo **`exec_order`** (int, 1..N, único no flow; ADR-024); arestas ligam portas tipadas (ADR-005)
 - **Event** — hypertable (ts, severidade, origem, mensagem, payload JSON), retenção 1 mês (ADR-020)
 - **Sample** — hypertable (ts, tag_id, valor, qualidade), retenção 1 mês + continuous aggregate 1 min (ADR-003)
 - **MpcSample** — hypertable (ts, flow_id, block_id, var_id, v, sp, auto), retenção 1 mês + continuous aggregate `mpc_samples_1m` (ADR-003)
@@ -223,6 +224,6 @@ Nós do `graph` que referenciam tags (blocos `opc_read`/`opc_write` e variáveis
 
 ## 10. Referências
 
-- `adr/ADR-001…024` — decisões de arquitetura (normativas)
+- `adr/ADR-001…026` — decisões de arquitetura (normativas)
 - `GLOSSARY.md` — vocabulário do domínio
 - do-mpc · asyncua · React Flow (@xyflow/react) · TimescaleDB · uPlot
