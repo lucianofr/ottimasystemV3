@@ -9,7 +9,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          "border-transparent bg-[image:var(--gradient-accent)] text-white shadow-sm hover:-translate-y-px hover:shadow-[var(--shadow-glow-accent)]",
+          "border-transparent bg-accent text-white shadow-sm hover:-translate-y-px hover:bg-accent-strong hover:shadow-[var(--shadow-glow-accent)]",
         outline:
           "border-border bg-surface text-fg shadow-sm hover:-translate-y-px hover:border-accent hover:text-accent hover:shadow-md",
         ghost: "border-transparent bg-transparent text-fg-muted hover:bg-surface-2 hover:text-fg",

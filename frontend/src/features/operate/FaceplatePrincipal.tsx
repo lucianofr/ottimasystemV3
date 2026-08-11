@@ -140,7 +140,7 @@ function Comutador<T extends string>({
               className={cn(
                 "plaqueta rounded-pill px-4 py-1.5 text-[11px] transition-all duration-[var(--duration-fast)]",
                 ativo
-                  ? "bg-[image:var(--gradient-accent)] text-white shadow-sm"
+                  ? "bg-accent text-white shadow-sm"
                   : "text-fg-muted hover:bg-surface hover:text-fg",
                 emFantasma && "opacity-70 outline outline-2 -outline-offset-2 outline-accent",
                 desabilitado && "cursor-not-allowed opacity-40",
