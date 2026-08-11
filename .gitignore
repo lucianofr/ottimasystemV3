@@ -23,6 +23,8 @@ frontend/openapi.json
 .serena/
 .tokensave/
 .worktrees/
+# servidores MCP da maquina local (caminho absoluto no `cwd`, nao portavel)
+.mcp.json
 
 # graphify: trava transitoria de rebuild (PID), nunca versionada
 graphify-out/.rebuild.lock
