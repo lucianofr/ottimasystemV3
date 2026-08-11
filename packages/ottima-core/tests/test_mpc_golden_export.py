@@ -96,5 +96,9 @@ def test_nomes_de_variavel_e_pid_batem_verbatim_com_os_campos_do_mpcconfig():
         "move_weight",
         "initial_value",
         "pid",
+        # ADR-027 §9 estendido: o tipo TS os exige — o golden (fonte única) emite os
+        # defaults retrocompat, mesma lógica do TD-007 com `du_min`/`move_weight`.
+        "objective",
+        "psv",
     }
     assert mv["pid"] is None

@@ -23,6 +23,13 @@ RowKind = Literal["selfreg", "integrating"]
 TargetMode = Literal["rcas", "cas", "rout"]
 SolverName = Literal["highs", "osqp", "gurobi"]
 
+# Função objetivo por variável (ADR-027 §9 estendido): cada opção vira um termo do LP do
+# SSTO (ver ssto.py — tabela de semântica no cabeçalho do módulo). `none` (default) =
+# comportamento anterior, config salva antes da feature carrega idêntico.
+MvObjective = Literal["none", "maximize", "minimize", "psv", "equalize"]
+CvObjective = Literal["none", "maximize", "minimize", "observe_limit", "target", "psv"]
+ConstraintObjective = Literal["none", "maximize", "minimize"]
+
 
 def _exigir_prefixo(value: str, prefixo: str, categoria: str) -> str:
     """Confere o prefixo estável do id por categoria (spec §2.1-1); mensagem pt-BR vira 422."""
@@ -109,6 +116,13 @@ class MvVar(BaseModel):
     operating_point: float = 0.0
     readback_tag_id: int | None = None
     pid: PidBinding | None = None
+    objective: MvObjective = "none"
+    """Função objetivo desta MV no SSTO. `psv` ancora a MV no valor preferido; `equalize`
+    nivela todas as MVs marcadas em fração da escala (grupo único, validado em
+    `MpcVariables`)."""
+    psv: float | None = None
+    """Valor preferido da MV quando `objective == "psv"`, na coordenada absoluta da porta
+    (mesma de `limits`/`initial_value`). `None` fora do PSV — ver validators abaixo."""
 
     @field_validator("id")
     @classmethod
@@ -119,6 +133,15 @@ class MvVar(BaseModel):
     def _valida_banda_morta(self) -> "MvVar":
         if self.du_min > self.du_max:
             raise ValueError("du_min deve ser menor ou igual a du_max")
+        return self
+
+    @model_validator(mode="after")
+    def _valida_psv(self) -> "MvVar":
+        if self.objective == "psv":
+            if self.psv is None or not (self.limits.min <= self.psv <= self.limits.max):
+                raise ValueError("PSV exige um valor preferido dentro dos limites da MV")
+        elif self.psv is not None:
+            raise ValueError("psv só vale com objetivo PSV")
         return self
 
 
@@ -142,11 +165,22 @@ class CvVar(BaseModel):
     weight: float
     sp_limits: Limits
     priority: int = Field(default=1, ge=1)
+    objective: CvObjective = "none"
+    """Função objetivo desta CV no SSTO. Âncoras (`target`/`psv`/`observe_limit`) usam o SP
+    do operador; `maximize`/`minimize` viram preço linear na linha projetada por `c_row·G`."""
 
     @field_validator("id")
     @classmethod
     def _valida_prefixo(cls, value: str) -> str:
         return _exigir_prefixo(value, "cv_", "CV")
+
+    @model_validator(mode="after")
+    def _valida_objetivo_selfreg(self) -> "CvVar":
+        if self.objective != "none" and self.kind != "selfreg":
+            # Linha integradora decide TAXA no LP (ADR-027 §4), não nível — um objetivo
+            # econômico de nível não tem o que ancorar ali.
+            raise ValueError("Objetivo econômico exige linha autorregulável (selfreg)")
+        return self
 
 
 class ConstraintVar(BaseModel):
@@ -161,11 +195,19 @@ class ConstraintVar(BaseModel):
     tss: float
     range: Range
     priority: int = Field(ge=1)
+    objective: ConstraintObjective = "none"
+    """Função objetivo desta Restrição no SSTO — só preço linear (`maximize`/`minimize`)."""
 
     @field_validator("id")
     @classmethod
     def _valida_prefixo(cls, value: str) -> str:
         return _exigir_prefixo(value, "co_", "Restrição")
+
+    @model_validator(mode="after")
+    def _valida_objetivo_selfreg(self) -> "ConstraintVar":
+        if self.objective != "none" and self.kind != "selfreg":
+            raise ValueError("Objetivo econômico exige linha autorregulável (selfreg)")
+        return self
 
 
 class DvVar(BaseModel):
@@ -198,6 +240,15 @@ class MpcVariables(BaseModel):
     cvs: list[CvVar]
     constraints: list[ConstraintVar]
     dvs: list[DvVar]
+
+    @model_validator(mode="after")
+    def _valida_equalize(self) -> "MpcVariables":
+        # Equalize é um GRUPO único (todas as MVs marcadas nivelam entre si): exatamente 1
+        # marcada é um grupo de um membro só, que não equaliza nada — quase sempre um clique
+        # errado; zero é ausência do recurso, dois ou mais é o caso legítimo.
+        if sum(1 for mv in self.mvs if mv.objective == "equalize") == 1:
+            raise ValueError("Equalize exige pelo menos duas MVs com esse objetivo")
+        return self
 
 
 class PairModel(BaseModel):
@@ -276,6 +327,22 @@ def derive_horizons(multiplier: int, ts_flow: float, tss: Sequence[float]) -> Ho
     return Horizons(ts_mpc=ts_mpc, np=np_, nc=nc)
 
 
+def optimization_enabled(config: MpcConfig) -> bool:
+    """SSTO deve rodar neste bloco (ADR-027 §10 revisado): substitui o gate `economics.enabled`
+    puro — a camada de alvos também é exigida por qualquer variável com `objective != "none"`,
+    mesmo sem bloco `economics`. `economics.costs` continua sendo preço cru ADITIVO aos
+    termos derivados do objetivo (retrocompat de config salvo).
+    """
+    economics = config.economics
+    if economics is not None and economics.enabled:
+        return True
+    variables = config.variables
+    return any(
+        var.objective != "none"
+        for var in (*variables.mvs, *variables.cvs, *variables.constraints)
+    )
+
+
 def economics_config_hash(config: MpcConfig) -> str:
     """SHA-256 da versão do problema econômico (ADR-027 §9): custos, limites e ranks.
 
@@ -290,12 +357,17 @@ def economics_config_hash(config: MpcConfig) -> str:
     economics = config.economics
     payload = {
         "economics": None if economics is None else economics.model_dump(mode="json"),
-        "mvs": {mv.id: [mv.limits.min, mv.limits.max] for mv in config.variables.mvs},
+        "mvs": {
+            mv.id: [mv.limits.min, mv.limits.max, mv.objective, mv.psv]
+            for mv in config.variables.mvs
+        },
         "cvs": {
-            cv.id: [cv.sp_limits.min, cv.sp_limits.max, cv.priority] for cv in config.variables.cvs
+            cv.id: [cv.sp_limits.min, cv.sp_limits.max, cv.priority, cv.objective]
+            for cv in config.variables.cvs
         },
         "constraints": {
-            co.id: [co.range.low, co.range.high, co.priority] for co in config.variables.constraints
+            co.id: [co.range.low, co.range.high, co.priority, co.objective]
+            for co in config.variables.constraints
         },
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))

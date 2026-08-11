@@ -124,6 +124,8 @@ test("variavelMvDoFormulario sem pid devolve pid null mesmo com campos de pid no
     operating_point: 0,
     readback_tag_id: null,
     pid: null,
+    objective: "none" as const,
+    psv: null,
   };
   const dados = formulario({
     [nomeCampoVar("mv_x7k2", "limits_min")]: "1,5",
@@ -148,6 +150,8 @@ test("variavelMvDoFormulario com pid reconstrói os campos obrigatórios do pid"
     operating_point: 0,
     readback_tag_id: null,
     pid: null,
+    objective: "none" as const,
+    psv: null,
   };
   const dados = formulario({
     [nomeCampoVar("mv_x7k2", "pid_write_tag_id")]: "12",
@@ -181,6 +185,8 @@ test("variavelMvDoFormulario: operating_point e readback_tag_id da MV direta faz
     operating_point: 0,
     readback_tag_id: null,
     pid: null,
+    objective: "none" as const,
+    psv: null,
   };
   const dados = formulario({
     [nomeCampoVar("mv_x7k2", "operating_point")]: "42,5",
@@ -204,6 +210,8 @@ test("variavelMvDoFormulario: readback_tag_id vazio cai no valor anterior, mesma
     operating_point: 0,
     readback_tag_id: 9,
     pid: null,
+    objective: "none" as const,
+    psv: null,
   };
   const semCampo = variavelMvDoFormulario(comReadback, formulario({}), false);
   expect(semCampo.readback_tag_id).toBe(9); // campo ausente do FormData preserva o anterior
@@ -226,6 +234,7 @@ test("variavelCvDoFormulario e variavelRestricaoDoFormulario preservam kind (dec
     tss: 600,
     weight: 1,
     sp_limits: { min: 80, max: 120 },
+    objective: "none" as const,
   };
   const novaCv = variavelCvDoFormulario(
     cv,
@@ -242,6 +251,7 @@ test("variavelCvDoFormulario e variavelRestricaoDoFormulario preservam kind (dec
     tss: 900,
     range: { low: 20, high: 80 },
     priority: 1,
+    objective: "none" as const,
   };
   const novaRestricao = variavelRestricaoDoFormulario(
     restricao,
@@ -304,6 +314,8 @@ function mv(id: string, parcial: Partial<VariavelMv> = {}): VariavelMv {
     operating_point: 0,
     readback_tag_id: null,
     pid: null,
+    objective: "none",
+    psv: null,
     ...parcial,
   };
 }
@@ -317,6 +329,7 @@ function cv(id: string, parcial: Partial<VariavelCv> = {}): VariavelCv {
     tss: 600,
     weight: 1,
     sp_limits: { min: 0, max: 100 },
+    objective: "none",
     ...parcial,
   };
 }
@@ -330,6 +343,7 @@ function restricao(id: string, parcial: Partial<VariavelRestricao> = {}): Variav
     tss: 600,
     range: { low: 0, high: 100 },
     priority: 1,
+    objective: "none",
     ...parcial,
   };
 }
@@ -591,6 +605,8 @@ test("mesmo mecanismo em TabVariables: limites/Δu digitados numa MV sobrevivem 
     operating_point: 0,
     readback_tag_id: null,
     pid: null,
+    objective: "none" as const,
+    psv: null,
   };
   // Aba Resumo montada (nenhum campo `var_mv_1_*` no FormData) — a reconstrução deve
   // preservar o valor já sincronizado no estado, não cair nos campos padrão.
@@ -673,6 +689,8 @@ test("cenário do checkbox 'com PID': campos digitados sobrevivem a desmarcar+ma
       readback_tag_id: 0,
       mode_values: { auto: 0, target: 1 },
     },
+    objective: "none" as const,
+    psv: null,
   };
   // Passo 1 — checkbox ligado, engenheiro digita os campos do pid, sem trocar de aba.
   const camposDigitados = formulario({
@@ -712,4 +730,105 @@ test("cenário do checkbox 'Habilitado' na matriz: params digitados sobrevivem a
   const restaurado = parModeloDoFormulario(parAposUncheck, linha, coluna, "selfreg", formulario({}));
   expect(restaurado.params).toEqual({ K: 3, tau1: 40, tau2: 5, theta: 2 });
   expect(restaurado.params).not.toEqual(paramsPadraoLinha("selfreg"));
+});
+
+// --------------------------------------------------------------------------------------
+// Função objetivo por variável (ADR-027 §9 estendido) — formulário + espelho das 3 regras
+// de `mpc_config.py` (`_valida_objetivo_selfreg`, `_valida_psv`, `_valida_equalize`), com
+// as MESMAS mensagens pt-BR: o servidor devolve 422 com elas se o espelho deixar passar.
+// --------------------------------------------------------------------------------------
+
+test("variavelMvDoFormulario: objective é estado controlado e psv só existe com objective psv", () => {
+  const comPsv = mv("mv_1", { objective: "psv", psv: 30 });
+  const dados = formulario({ [nomeCampoVar("mv_1", "psv")]: "42,5" });
+  const nova = variavelMvDoFormulario(comPsv, dados, false);
+  expect(nova.objective).toBe("psv");
+  expect(nova.psv).toBe(42.5);
+
+  // Fora do PSV o campo não existe no DOM — qualquer resquício volta a null (o servidor
+  // rejeita "psv só vale com objetivo PSV").
+  const maximizando = mv("mv_1", { objective: "maximize", psv: null });
+  const deVolta = variavelMvDoFormulario(maximizando, formulario({}), false);
+  expect(deVolta.objective).toBe("maximize");
+  expect(deVolta.psv).toBeNull();
+});
+
+test("validarConfigMpc: equalize com uma MV só bloqueia com a mensagem verbatim do servidor", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [mv("mv_1", { objective: "equalize" })],
+    cvs: [cv("cv_1")],
+    constraints: [],
+    dvs: [],
+  };
+  const { erros } = validarConfigMpc(variaveis, {}, 1, 1);
+  expect(erros).toContain("Equalize exige pelo menos duas MVs com esse objetivo");
+});
+
+test("validarConfigMpc: equalize com duas MVs passa", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [mv("mv_1", { objective: "equalize" }), mv("mv_2", { objective: "equalize" })],
+    cvs: [cv("cv_1")],
+    constraints: [],
+    dvs: [],
+  };
+  const { erros } = validarConfigMpc(variaveis, {}, 1, 1);
+  expect(erros.some((e) => e.includes("Equalize"))).toBe(false);
+});
+
+test("validarConfigMpc: psv ausente ou fora dos limites bloqueia; dentro passa", () => {
+  const semValor: VariaveisMpc = {
+    mvs: [mv("mv_1", { objective: "psv", psv: null })],
+    cvs: [cv("cv_1")],
+    constraints: [],
+    dvs: [],
+  };
+  expect(validarConfigMpc(semValor, {}, 1, 1).erros).toContain(
+    "PSV exige um valor preferido dentro dos limites da MV",
+  );
+
+  const fora: VariaveisMpc = {
+    mvs: [mv("mv_1", { objective: "psv", psv: 150 })],
+    cvs: [cv("cv_1")],
+    constraints: [],
+    dvs: [],
+  };
+  expect(validarConfigMpc(fora, {}, 1, 1).erros).toContain(
+    "PSV exige um valor preferido dentro dos limites da MV",
+  );
+
+  const dentro: VariaveisMpc = {
+    mvs: [mv("mv_1", { objective: "psv", psv: 42 })],
+    cvs: [cv("cv_1")],
+    constraints: [],
+    dvs: [],
+  };
+  expect(
+    validarConfigMpc(dentro, {}, 1, 1).erros.some((e) => e.includes("PSV")),
+  ).toBe(false);
+});
+
+test("validarConfigMpc: psv preenchido com objective diferente de psv bloqueia", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [mv("mv_1", { objective: "maximize", psv: 50 })],
+    cvs: [cv("cv_1")],
+    constraints: [],
+    dvs: [],
+  };
+  expect(validarConfigMpc(variaveis, {}, 1, 1).erros).toContain(
+    "psv só vale com objetivo PSV",
+  );
+});
+
+test("validarConfigMpc: objetivo em linha integradora bloqueia (CV e Restrição)", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [mv("mv_1")],
+    cvs: [cv("cv_1", { kind: "integrating", objective: "maximize" })],
+    constraints: [restricao("co_1", { kind: "integrating", objective: "minimize" })],
+    dvs: [],
+  };
+  const { erros } = validarConfigMpc(variaveis, {}, 1, 1);
+  const ocorrencias = erros.filter(
+    (e) => e === "Objetivo econômico exige linha autorregulável (selfreg)",
+  );
+  expect(ocorrencias).toHaveLength(2);
 });

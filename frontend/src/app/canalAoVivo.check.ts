@@ -472,6 +472,51 @@ test("mensagem de mpc_state indexa por flowId/blockId e substitui a leitura inte
   expect(b.estado().mpcStates.get("1/b1")?.cost).toBe(0.42);
 });
 
+test("mpc_state carrega o ssto adiante: publicado uma vez, retido nos quadros seguintes sem ele", () => {
+  // O runtime publica `ssto` UMA vez por execução e depois `null` (consumo único do
+  // `_ssto_pending` em `blocks/mpc.py`) — sem o carry-forward o sumário do otimizador
+  // piscaria. O quadro novo sem `ssto` herda o último executado.
+  const execucao = {
+    run_id: "run-1",
+    config_hash: "a",
+    model_hash: "b",
+    status: "optimal",
+    solver: "highs",
+    solve_ms: 1,
+    objective: -1,
+    mv: {},
+    cv_ss: {},
+    bias: {},
+    dv: {},
+    costs: {},
+    delta_mv: {},
+    mv_target: { mv_1: 80 },
+    cv_target: {},
+    given_up: [],
+    active_constraints: [],
+    duals: {},
+  };
+  const b = bancada();
+  b.abrir();
+  b.sockets[0].abrir();
+
+  // Quadro COM execução: registra.
+  b.sockets[0].receber(envelope("mpc.state.1.b1", { ...MPC_STATE, ssto: execucao }));
+  expect(b.estado().mpcStates.get("1/b1")?.ssto?.run_id).toBe("run-1");
+
+  // Quadros seguintes SEM execução: retém o último, com o resto do estado atualizado.
+  b.sockets[0].receber(envelope("mpc.state.1.b1", { ...MPC_STATE, cost: 0.99 }));
+  const estado = b.estado().mpcStates.get("1/b1");
+  expect(estado?.cost).toBe(0.99);
+  expect(estado?.ssto?.run_id).toBe("run-1");
+
+  // Outra execução nova substitui a retida.
+  b.sockets[0].receber(
+    envelope("mpc.state.1.b1", { ...MPC_STATE, ssto: { ...execucao, run_id: "run-2" } }),
+  );
+  expect(b.estado().mpcStates.get("1/b1")?.ssto?.run_id).toBe("run-2");
+});
+
 test("eventos entram mais novo primeiro e respeitam o teto de memória", () => {
   const b = bancada();
   b.abrir();

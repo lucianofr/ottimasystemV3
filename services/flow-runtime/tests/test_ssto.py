@@ -23,20 +23,38 @@ from ottima_flow_runtime.target_calculation.ssto import (
 TS = 1.0
 
 
-def _mv(id_: str, *, lo: float = 0.0, hi: float = 100.0) -> dict:
-    return {
+def _mv(
+    id_: str,
+    *,
+    lo: float = 0.0,
+    hi: float = 100.0,
+    objective: str = "none",
+    psv: float | None = None,
+) -> dict:
+    mv = {
         "id": id_,
         "name": id_,
         "eu": "%",
         "limits": {"min": lo, "max": hi},
         "du_max": 5.0,
     }
+    if objective != "none":
+        mv["objective"] = objective
+    if psv is not None:
+        mv["psv"] = psv
+    return mv
 
 
 def _cv(
-    id_: str, *, lo: float = 0.0, hi: float = 200.0, priority: int = 1, kind: str = "selfreg"
+    id_: str,
+    *,
+    lo: float = 0.0,
+    hi: float = 200.0,
+    priority: int = 1,
+    kind: str = "selfreg",
+    objective: str = "none",
 ) -> dict:
-    return {
+    cv = {
         "id": id_,
         "name": id_,
         "eu": "degC",
@@ -46,10 +64,15 @@ def _cv(
         "sp_limits": {"min": lo, "max": hi},
         "priority": priority,
     }
+    if objective != "none":
+        cv["objective"] = objective
+    return cv
 
 
-def _co(id_: str, *, lo: float = 0.0, hi: float = 10.0, priority: int = 1) -> dict:
-    return {
+def _co(
+    id_: str, *, lo: float = 0.0, hi: float = 10.0, priority: int = 1, objective: str = "none"
+) -> dict:
+    co = {
         "id": id_,
         "name": id_,
         "eu": "bar",
@@ -58,6 +81,9 @@ def _co(id_: str, *, lo: float = 0.0, hi: float = 10.0, priority: int = 1) -> di
         "range": {"low": lo, "high": hi},
         "priority": priority,
     }
+    if objective != "none":
+        co["objective"] = objective
+    return co
 
 
 def _dv(id_: str) -> dict:
@@ -79,22 +105,22 @@ def _config(
     constraints: list[dict] | None = None,
     dvs: list[dict] | None = None,
     models: dict,
-    economics: dict,
+    economics: dict | None,
 ) -> MpcConfig:
-    return MpcConfig.model_validate(
-        {
-            "name": "MPC de teste",
-            "multiplier": 1,
-            "variables": {
-                "mvs": mvs,
-                "cvs": cvs,
-                "constraints": constraints or [],
-                "dvs": dvs or [],
-            },
-            "models": models,
-            "economics": economics,
-        }
-    )
+    bruto = {
+        "name": "MPC de teste",
+        "multiplier": 1,
+        "variables": {
+            "mvs": mvs,
+            "cvs": cvs,
+            "constraints": constraints or [],
+            "dvs": dvs or [],
+        },
+        "models": models,
+    }
+    if economics is not None:
+        bruto["economics"] = economics
+    return MpcConfig.model_validate(bruto)
 
 
 def _entrada(
@@ -103,8 +129,9 @@ def _entrada(
     bias: dict[str, float],
     d: dict | None = None,
     d_prev: dict | None = None,
+    sp: dict[str, float] | None = None,
 ) -> SstoInput:
-    return SstoInput(u=u, d=d or {}, d_prev=d_prev, bias=bias, delta_mv_prev=None)
+    return SstoInput(u=u, d=d or {}, d_prev=d_prev, bias=bias, delta_mv_prev=None, sp=sp)
 
 
 # ---------------------------------------------------------------------------------------
@@ -580,3 +607,154 @@ def test_delta_mv_respeita_os_limites_duros_como_array():
     result = SteadyStateOptimizer(config, TS).solve(_entrada({"mv_a": 15.0}, bias={"cv_a": 0.0}))
 
     assert np.isclose(result.mv_target["mv_a"], 20.0)
+
+
+# ---------------------------------------------------------------------------------------
+# Função objetivo por variável (ADR-027 §9 estendido): termos do LP derivados do enum
+# ---------------------------------------------------------------------------------------
+
+
+def test_cv_maximize_sem_economics_empurra_ao_limite_superior():
+    """`objective="maximize"` na CV, sem bloco `economics`: preço −1/span projetado por
+    `c_row·G` — equivalente ao custo negativo já coberto, agora derivado do enum."""
+    config = _config(
+        mvs=[_mv("mv_a")],
+        cvs=[_cv("cv_a", lo=0.0, hi=150.0, objective="maximize")],
+        models={"cv_a": {"mv_a": _sopdt(2.0)}},
+        economics=None,
+    )
+
+    result = SteadyStateOptimizer(config, TS).solve(_entrada({"mv_a": 40.0}, bias={"cv_a": 0.0}))
+
+    # CV = 2·MV: teto 150 ⇒ MV para em 75 (abaixo do limite duro 100).
+    assert result.cv_target["cv_a"] == pytest.approx(150.0)
+    assert result.mv_target["mv_a"] == pytest.approx(75.0)
+    assert result.status == "optimal"
+
+
+def test_cv_target_domina_o_preco_de_maximize_da_mv():
+    """Âncora `target` (W=50/span) vence o preço −1/span da MV: com SP=42 a CV para em 42
+    mesmo com a MV querendo maximizar."""
+    config = _config(
+        mvs=[_mv("mv_a", objective="maximize")],
+        cvs=[_cv("cv_a", lo=0.0, hi=200.0, objective="target")],
+        models={"cv_a": {"mv_a": _sopdt(1.0)}},
+        economics=None,
+    )
+
+    result = SteadyStateOptimizer(config, TS).solve(
+        _entrada({"mv_a": 10.0}, bias={"cv_a": 0.0}, sp={"cv_a": 42.0})
+    )
+
+    assert result.status == "optimal"
+    assert result.cv_target["cv_a"] == pytest.approx(42.0)
+    assert result.mv_target["mv_a"] == pytest.approx(42.0)
+
+
+def test_cv_psv_cede_ao_preco_de_maximize_da_mv():
+    """Âncora `psv` (W=0.1/span) é FRACA: o preço −1/span da MV a empurra para longe do SP —
+    o grau de liberdade só se acomoda no SP quando nada mais puxa."""
+    config = _config(
+        mvs=[_mv("mv_a", objective="maximize")],
+        cvs=[_cv("cv_a", lo=0.0, hi=200.0, objective="psv")],
+        models={"cv_a": {"mv_a": _sopdt(1.0)}},
+        economics=None,
+    )
+
+    result = SteadyStateOptimizer(config, TS).solve(
+        _entrada({"mv_a": 10.0}, bias={"cv_a": 0.0}, sp={"cv_a": 42.0})
+    )
+
+    # Preço vence: MV vai ao limite duro 100, CV acompanha (K=1), longe do SP=42.
+    assert result.mv_target["mv_a"] == pytest.approx(100.0)
+    assert result.cv_target["cv_a"] == pytest.approx(100.0)
+
+
+def test_mv_psv_sem_mais_nada_puxando_para_no_valor_preferido():
+    """PSV de MV com a CV totalmente folgada e sem preços: a âncora fraca é a única força —
+    a MV para exatamente no valor preferido."""
+    config = _config(
+        mvs=[_mv("mv_a", objective="psv", psv=30.0)],
+        cvs=[_cv("cv_a", lo=-1e6, hi=1e6)],
+        models={"cv_a": {"mv_a": _sopdt(1.0)}},
+        economics=None,
+    )
+
+    result = SteadyStateOptimizer(config, TS).solve(_entrada({"mv_a": 10.0}, bias={"cv_a": 0.0}))
+
+    assert result.status == "optimal"
+    assert result.mv_target["mv_a"] == pytest.approx(30.0)
+
+
+def test_equalize_nivela_fracao_de_escala():
+    """Duas MVs `equalize` com spans e posições iniciais distintas: o alvo nivela
+    `(mv_target − min)/span` entre as duas."""
+    config = _config(
+        mvs=[
+            _mv("mv_a", lo=0.0, hi=100.0, objective="equalize"),
+            _mv("mv_b", lo=0.0, hi=200.0, objective="equalize"),
+        ],
+        cvs=[_cv("cv_a", lo=-1e6, hi=1e6)],
+        models={"cv_a": {"mv_a": _sopdt(1.0), "mv_b": _sopdt(1.0)}},
+        economics=None,
+    )
+
+    result = SteadyStateOptimizer(config, TS).solve(
+        _entrada({"mv_a": 10.0, "mv_b": 40.0}, bias={"cv_a": 0.0})
+    )
+
+    assert result.status == "optimal"
+    fracao_a = (result.mv_target["mv_a"] - 0.0) / 100.0
+    fracao_b = (result.mv_target["mv_b"] - 0.0) / 200.0
+    assert fracao_a == pytest.approx(fracao_b, abs=1e-6)
+
+
+def test_observe_limit_com_folga_fica_no_sp():
+    """`observe_limit` com tudo viável: a CV não sai do SP (dev = 0)."""
+    config = _config(
+        mvs=[_mv("mv_a")],
+        cvs=[_cv("cv_a", lo=0.0, hi=200.0, objective="observe_limit")],
+        models={"cv_a": {"mv_a": _sopdt(1.0)}},
+        economics=None,
+    )
+
+    result = SteadyStateOptimizer(config, TS).solve(
+        _entrada({"mv_a": 50.0}, bias={"cv_a": 0.0}, sp={"cv_a": 50.0})
+    )
+
+    assert result.status == "optimal"
+    assert result.cv_target["cv_a"] == pytest.approx(50.0)
+
+
+def test_observe_limit_sai_do_sp_so_o_necessario_para_viabilizar():
+    """`observe_limit` com uma Restrição forçando a MV: a CV sai do SP só o que a restrição
+    exige — nem um EU a mais (âncora mais fraca, mas presente)."""
+    config = _config(
+        mvs=[_mv("mv_a")],
+        cvs=[_cv("cv_a", lo=0.0, hi=200.0, objective="observe_limit")],
+        constraints=[_co("co_a", lo=0.0, hi=60.0)],
+        models={"cv_a": {"mv_a": _sopdt(1.0)}, "co_a": {"mv_a": _sopdt(1.0)}},
+        economics=None,
+    )
+
+    # SP=80 mas a restrição `co_a = MV ≤ 60` impõe MV = 60: CV sai de 80 para 60.
+    result = SteadyStateOptimizer(config, TS).solve(
+        _entrada({"mv_a": 80.0}, bias={"cv_a": 0.0, "co_a": 0.0}, sp={"cv_a": 80.0})
+    )
+
+    assert result.status == "optimal"
+    assert result.cv_target["co_a"] == pytest.approx(60.0)
+    assert result.cv_target["cv_a"] == pytest.approx(60.0)
+    assert result.given_up == ()
+
+
+def test_optimization_disabled_sem_economics_e_sem_objetivos_recusa_montar():
+    config = _config(
+        mvs=[_mv("mv_a")],
+        cvs=[_cv("cv_a")],
+        models={"cv_a": {"mv_a": _sopdt(1.0)}},
+        economics=None,
+    )
+
+    with pytest.raises(ValueError, match="SSTO desabilitado"):
+        SteadyStateOptimizer(config, TS)

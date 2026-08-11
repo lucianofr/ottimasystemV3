@@ -6,6 +6,7 @@ import { Select } from "../../components/ui/select";
 import { FaceplatePrincipal } from "./FaceplatePrincipal";
 import FaceplateVariavel from "./FaceplateVariavel";
 import { gradeDeVariaveis } from "./gradeVariaveis";
+import { ResumoOtimizador } from "./ResumoOtimizador";
 import { TrendOperacao } from "./TrendOperacao";
 import { rotuloMpc, useMpcs } from "./useMpcs";
 
@@ -86,6 +87,9 @@ function OperacaoDoMpc({ flowId, blockId }: { flowId: number; blockId: string })
         flowId={flowId}
         blockId={blockId}
       />
+      <div className="mt-6">
+        <ResumoOtimizador mpc={mpc} mpcState={mpcState} flowId={flowId} blockId={blockId} />
+      </div>
       <div data-testid="operate-variaveis" className="mt-6 flex flex-wrap gap-4">
         {gradeDeVariaveis(mpc, mpcState, flowId, blockId).map(({ key, ...props }) => (
           <FaceplateVariavel key={key} {...props} />

@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from ottima_core.bus import SstoRun
+
 MAX_TAGS = 6
 MAX_WINDOW_DAYS = 31
 RAW_WINDOW_HOURS = 2
@@ -45,3 +47,11 @@ class MpcHistoryResponse(BaseModel):
     start: datetime
     end: datetime
     series: list[MpcHistorySeries]
+
+
+class SstoLastOut(BaseModel):
+    """Última execução do SSTO de um bloco (`GET /api/history/ssto/last`) — cold-start do
+    sumário do otimizador na Operação, sem esperar o próximo ciclo do MPC."""
+
+    ts: datetime
+    run: SstoRun

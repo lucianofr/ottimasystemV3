@@ -297,3 +297,46 @@ def test_worker_module_nao_importa_do_mpc_no_target_calculation():
         conteudo = fh.read()
     assert "do_mpc" not in conteudo
     assert worker_module is not None
+
+
+# ---------------------------------------------------------------------------------------
+# utarget_* — alvo econômico de MV chega ao custo dinâmico via `_apply_tvp` (Passo 3)
+# ---------------------------------------------------------------------------------------
+
+
+def _utarget_escrito(runtime) -> float:
+    return float(runtime.built.tvp_template["_tvp", 0, "utarget_mv_1"])
+
+
+def test_sem_objetivo_nenhum_tvp_utarget_existe():
+    runtime = _build_runtime(_config(), TS_FLOW)
+
+    assert runtime.built.utarget_tvp_name == {}
+
+
+def test_com_ssto_o_utarget_e_o_mv_target_do_run():
+    """MV com `objective="maximize"` (sem economics): o SSTO roda e o TVP `utarget_mv_1`
+    recebe o `mv_target` calculado — a âncora dinâmica persegue o alvo do LP."""
+    raw = _config(sp_limits=(0.0, 1e6)).model_dump()
+    raw["variables"]["mvs"][0]["objective"] = "maximize"
+    runtime = _build_runtime(MpcConfig.model_validate(raw), TS_FLOW)
+
+    result = _solve(runtime, _request(sp=50.0, y=20.0, u=10.0))
+
+    assert result.ssto is not None
+    assert _utarget_escrito(runtime) == pytest.approx(result.ssto.mv_target["mv_1"])
+    assert _utarget_escrito(runtime) == pytest.approx(100.0)
+
+
+def test_sem_ssto_o_utarget_cai_no_u_applied():
+    """SSTO falhou (backend quebrado): o fallback do TVP é o `u_applied` — âncora neutra
+    exatamente onde a MV já está, sem termo novo empurrando para lugar nenhum."""
+    raw = _config().model_dump()
+    raw["variables"]["mvs"][0].update({"objective": "psv", "psv": 42.0})
+    runtime = _build_runtime(MpcConfig.model_validate(raw), TS_FLOW)
+    runtime.ssto._backend = _BackendQuebrado()  # noqa: SLF001 - injeção de falha do teste
+
+    result = _solve(runtime, _request(sp=50.0, y=20.0, u=10.0))
+
+    assert result.ssto is not None and result.ssto.status == "error"
+    assert _utarget_escrito(runtime) == pytest.approx(10.0)

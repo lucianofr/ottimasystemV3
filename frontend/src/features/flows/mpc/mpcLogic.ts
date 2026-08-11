@@ -113,6 +113,12 @@ export function variavelMvDoFormulario(
       const valor = Number(bruto);
       return Number.isInteger(valor) && valor > 0 ? valor : null;
     })(),
+    // `objective` é estado controlado (como `kind` na CV): já vem decidido pelo Select no
+    // estado, o formulário não carrega campo para ele. `psv` é o contrário — campo
+    // não-controlado que só existe no DOM quando `objective === "psv"`; fora dele, `null`
+    // (o servidor valida as duas direções).
+    objective: atual.objective,
+    psv: atual.objective === "psv" ? n("psv", atual.psv ?? 0) : null,
     pid: !comPid
       ? null
       : {
@@ -177,6 +183,7 @@ export function variavelCvDoFormulario(atual: VariavelCv, dados: FormData): Vari
       min: n("sp_limits_min", atual.sp_limits.min),
       max: n("sp_limits_max", atual.sp_limits.max),
     },
+    objective: atual.objective,
   };
 }
 
@@ -194,6 +201,7 @@ export function variavelRestricaoDoFormulario(
     tss: n("tss", atual.tss),
     range: { low: n("range_low", atual.range.low), high: n("range_high", atual.range.high) },
     priority: Math.max(1, Math.trunc(n("priority", atual.priority))),
+    objective: atual.objective,
   };
 }
 
@@ -458,6 +466,28 @@ export function validarConfigMpc(
     if (!(co.range.low < co.range.high)) {
       erros.push(`A Restrição '${rotuloVariavel(co)}' precisa de faixa mínima menor que a máxima.`);
     }
+  }
+
+  // Função objetivo por variável (ADR-027 §9 estendido) — espelho das três regras de
+  // `mpc_config.py` (`_valida_objetivo_selfreg`, `_valida_psv`, `_valida_equalize`), com as
+  // MESMAS mensagens pt-BR: o servidor devolve 422 com elas se o espelho deixar passar.
+  for (const linha of linhas) {
+    if (linha.objective !== "none" && linha.kind !== "selfreg") {
+      erros.push("Objetivo econômico exige linha autorregulável (selfreg)");
+    }
+  }
+  for (const mv of variaveis.mvs) {
+    if (mv.objective === "psv") {
+      if (mv.psv === null || !(mv.limits.min <= mv.psv && mv.psv <= mv.limits.max)) {
+        erros.push("PSV exige um valor preferido dentro dos limites da MV");
+      }
+    } else if (mv.psv !== null) {
+      erros.push("psv só vale com objetivo PSV");
+    }
+  }
+  const equalizes = variaveis.mvs.filter((mv) => mv.objective === "equalize").length;
+  if (equalizes === 1) {
+    erros.push("Equalize exige pelo menos duas MVs com esse objetivo");
   }
 
   // §2.2-5/7 — horizontes e dimensão de estados (Np<2/Np>120 bloqueiam; Np>60 e dimensão>120

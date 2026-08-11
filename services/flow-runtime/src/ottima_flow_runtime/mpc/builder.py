@@ -31,6 +31,11 @@ R_DELTA_U = 0.1
 """Peso do termo `R_Δu·Δu²_norm` do objetivo (spec F4 §3.4) — constante nomeada: a spec fixa
 o valor, não é ajustável por bloco (não há aba de config para isso)."""
 
+U_TARGET_WEIGHT = 0.05
+"""Peso da âncora dinâmica da MV no alvo do SSTO (`(u − utarget)²/span²`, só MVs com
+`objective != "none"`). ponytail: peso fixo e suave — alvo econômico nunca compete com o
+rastreamento de CV (pesos ≥1); expor em `EconomicsConfig` se uma planta precisar calibrar."""
+
 SLACK_WEIGHT_MULTIPLIER = 1e4
 """Multiplicador de `w_slack = 1e4 × max(w_cv, 1.0) × priority` (spec F4 §3.4, ADR-019) — a
 dominância da Restrição sobre o CV é por construção: precisa ser grande o bastante para que
@@ -102,6 +107,9 @@ class BuiltMpc:
     """row_id (CV/Restrição) -> nome da expressão aux `y` agregada (`model.aux[...]`)."""
     sp_tvp_name: dict[str, str]
     """cv_id -> nome do `_tvp` de SP (escrito pelo worker em `tvp_template`)."""
+    utarget_tvp_name: dict[str, str]
+    """mv_id -> nome do `_tvp` `utarget_{mv}` (alvo do SSTO, escrito pelo worker). Só MVs
+    com `objective != "none"` — as demais não têm âncora nenhuma no custo dinâmico."""
     bias_tvp_name: dict[str, str]
     """row_id (CV/Restrição) -> nome do `_tvp` de bias (escrito pelo worker, DMC §3.3)."""
     dv_tvp_name: dict[str, str]
@@ -139,6 +147,9 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
         model.set_variable("_tvp", f"sp_{cv.id}")
     for mv in mvs:
         model.set_variable("_tvp", f"dumax_{mv.id}")
+    for mv in mvs:
+        if mv.objective != "none":
+            model.set_variable("_tvp", f"utarget_{mv.id}")
     for co in constraints:
         model.set_variable("_u", f"slack_{co.id}")
     for mv in mvs:
@@ -287,7 +298,20 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
         uprev = model.x[f"uprev_{mv.id}"]
         du_cost = du_cost + R_DELTA_U * mv.move_weight * ((u - uprev) / spans[mv.id]) ** 2
 
-    mpc.set_objective(mterm=cv_cost_terminal, lterm=cv_cost + slack_cost + du_cost)
+    # Âncora dinâmica no alvo do SSTO (ADR-027 §9 estendido): persegue `utarget_{mv}` que o
+    # worker escreve a cada ciclo (do `SstoRun.mv_target`). Sem ela, PSV/Equalize/Max/Min de
+    # MV só se materializam em planta "quadrada" — o grau de liberdade extra de uma planta
+    # gorda ficaria solto, pois o custo dinâmico rastreia só SP de CV. `lterm` aceita `_u`
+    # (é onde `du_cost` já vive); NUNCA no `mterm` (assinatura fixa do do-mpc não tem `_u`).
+    mv_anchor_cost = ca.DM(0)
+    for mv in mvs:
+        if mv.objective == "none":
+            continue
+        u = model.u[mv.id]
+        utarget = model.tvp[f"utarget_{mv.id}"]
+        mv_anchor_cost = mv_anchor_cost + U_TARGET_WEIGHT * ((u - utarget) / spans[mv.id]) ** 2
+
+    mpc.set_objective(mterm=cv_cost_terminal, lterm=cv_cost + slack_cost + du_cost + mv_anchor_cost)
 
     for mv in mvs:
         mpc.bounds["lower", "_u", mv.id] = mv.limits.min
@@ -312,6 +336,11 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
         name = f"dumax_{mv.id}"
         for k in range(horizons.np + 1):
             tvp_template["_tvp", k, name] = mv.du_max if k < horizons.nc else 0.0
+    for mv in mvs:
+        if mv.objective != "none":
+            # Âncora neutra até o primeiro SSTO: a posição configurada como inicial — o
+            # worker sobrescreve com `mv_target` (ou `u_applied` no fallback) a cada ciclo.
+            tvp_template["_tvp", :, f"utarget_{mv.id}"] = mv.initial_value
     mpc.set_tvp_fun(lambda _t_now: tvp_template)
 
     mpc.setup()
@@ -332,6 +361,9 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
         u_prev_state_name={mv.id: f"uprev_{mv.id}" for mv in mvs},
         output_expr_name=output_expr_name,
         sp_tvp_name={cv.id: f"sp_{cv.id}" for cv in cvs},
+        utarget_tvp_name={
+            mv.id: f"utarget_{mv.id}" for mv in mvs if mv.objective != "none"
+        },
         bias_tvp_name={row_id: f"bias_{row_id}" for row_id in row_ids},
         dv_tvp_name={dv.id: dv.id for dv in dvs},
         pair_init=tuple(pair_inits),

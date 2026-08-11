@@ -12,7 +12,13 @@ antes (SSTO desligado, ranks iguais).
 import pytest
 from pydantic import ValidationError
 
-from ottima_core.flowgraph import EconomicsConfig, MpcConfig, economics_config_hash, parse_graph
+from ottima_core.flowgraph import (
+    EconomicsConfig,
+    MpcConfig,
+    economics_config_hash,
+    optimization_enabled,
+    parse_graph,
+)
 
 
 def base_config() -> dict:
@@ -252,3 +258,196 @@ def test_config_hash_muda_quando_custo_limite_ou_rank_muda(mutacao):
     hash_mutado = economics_config_hash(MpcConfig.model_validate(raw_mutado))
 
     assert hash_base != hash_mutado
+
+
+# ---------------------------------------------------------------------------------------
+# Função objetivo por variável (ADR-027 §9 estendido)
+# ---------------------------------------------------------------------------------------
+
+
+def test_variaveis_sem_objective_carregam_com_none():
+    """Retrocompat: config salvo antes da feature carrega com `objective="none"` em todas
+    as variáveis e `psv=None` na MV — comportamento idêntico ao de antes."""
+    config = MpcConfig.model_validate(base_config())
+
+    assert config.variables.mvs[0].objective == "none"
+    assert config.variables.mvs[0].psv is None
+    assert config.variables.cvs[0].objective == "none"
+    assert config.variables.constraints[0].objective == "none"
+
+
+def test_objetivos_parseiam_quando_validos():
+    raw = base_config()
+    raw["variables"]["mvs"][0].update({"objective": "psv", "psv": 42.0})
+    raw["variables"]["cvs"][0]["objective"] = "target"
+    raw["variables"]["constraints"][0]["objective"] = "minimize"
+
+    config = MpcConfig.model_validate(raw)
+
+    assert config.variables.mvs[0].objective == "psv"
+    assert config.variables.mvs[0].psv == 42.0
+    assert config.variables.cvs[0].objective == "target"
+    assert config.variables.constraints[0].objective == "minimize"
+
+
+@pytest.mark.parametrize("kind", ["cv", "constraint"])
+def test_objetivo_em_linha_integradora_e_rejeitado(kind: str):
+    """Âncora/preço de nível não se aplica a linha integradora (ADR-027 §4: ali o LP decide
+    TAXA). Mesma mensagem para CV e Restrição."""
+    raw = base_config()
+    chave = "cvs" if kind == "cv" else "constraints"
+    raw["variables"][chave][0]["kind"] = "integrating"
+    raw["variables"][chave][0]["objective"] = "maximize"
+
+    with pytest.raises(
+        ValidationError, match="Objetivo econômico exige linha autorregulável \\(selfreg\\)"
+    ):
+        MpcConfig.model_validate(raw)
+
+
+def test_psv_sem_valor_preferido_e_rejeitado():
+    raw = base_config()
+    raw["variables"]["mvs"][0]["objective"] = "psv"
+
+    with pytest.raises(
+        ValidationError, match="PSV exige um valor preferido dentro dos limites da MV"
+    ):
+        MpcConfig.model_validate(raw)
+
+
+@pytest.mark.parametrize("psv", [-1.0, 101.0])
+def test_psv_fora_dos_limites_e_rejeitado(psv: float):
+    raw = base_config()
+    raw["variables"]["mvs"][0].update({"objective": "psv", "psv": psv})
+
+    with pytest.raises(
+        ValidationError, match="PSV exige um valor preferido dentro dos limites da MV"
+    ):
+        MpcConfig.model_validate(raw)
+
+
+def test_psv_preenchido_com_objetivo_diferente_de_psv_e_rejeitado():
+    raw = base_config()
+    raw["variables"]["mvs"][0].update({"objective": "maximize", "psv": 50.0})
+
+    with pytest.raises(ValidationError, match="psv só vale com objetivo PSV"):
+        MpcConfig.model_validate(raw)
+
+
+def test_psv_preenchido_com_objective_none_e_rejeitado():
+    raw = base_config()
+    raw["variables"]["mvs"][0]["psv"] = 50.0
+
+    with pytest.raises(ValidationError, match="psv só vale com objetivo PSV"):
+        MpcConfig.model_validate(raw)
+
+
+def test_equalize_com_apenas_uma_mv_e_rejeitado():
+    raw = base_config()
+    raw["variables"]["mvs"][0]["objective"] = "equalize"
+
+    with pytest.raises(
+        ValidationError, match="Equalize exige pelo menos duas MVs com esse objetivo"
+    ):
+        MpcConfig.model_validate(raw)
+
+
+def test_equalize_com_duas_mvs_e_aceito():
+    raw = base_config()
+    raw["variables"]["mvs"].append(
+        {
+            "id": "mv_b",
+            "name": "MV B",
+            "eu": "%",
+            "limits": {"min": 0.0, "max": 100.0},
+            "du_max": 5.0,
+        }
+    )
+    raw["variables"]["mvs"][0]["objective"] = "equalize"
+    raw["variables"]["mvs"][1]["objective"] = "equalize"
+
+    config = MpcConfig.model_validate(raw)
+
+    assert [mv.objective for mv in config.variables.mvs] == ["equalize", "equalize"]
+
+
+# ---------------------------------------------------------------------------------------
+# optimization_enabled: o gate que substitui `economics.enabled` puro (ADR-027 §10 revisado)
+# ---------------------------------------------------------------------------------------
+
+
+def test_optimization_enabled_falso_sem_economics_e_sem_objetivos():
+    assert optimization_enabled(MpcConfig.model_validate(base_config())) is False
+
+
+def test_optimization_enabled_verdadeiro_com_economics_habilitado():
+    raw = base_config()
+    raw["economics"] = {"enabled": True, "costs": {"mv_a": 1.0}}
+
+    assert optimization_enabled(MpcConfig.model_validate(raw)) is True
+
+
+def test_optimization_enabled_falso_com_economics_desabilitado_e_sem_objetivos():
+    raw = base_config()
+    raw["economics"] = {"enabled": False, "costs": {"mv_a": 1.0}}
+
+    assert optimization_enabled(MpcConfig.model_validate(raw)) is False
+
+
+@pytest.mark.parametrize(
+    "chave,indice,extra",
+    [
+        pytest.param("mvs", 0, {"objective": "maximize"}, id="mv"),
+        pytest.param("cvs", 0, {"objective": "target"}, id="cv"),
+        pytest.param("constraints", 0, {"objective": "minimize"}, id="restricao"),
+    ],
+)
+def test_optimization_enabled_verdadeiro_com_qualquer_objetivo_sem_economics(
+    chave: str, indice: int, extra: dict
+):
+    """Objetivo por variável liga o SSTO mesmo sem bloco `economics` — é o que permite a UI
+    operar a camada sem conhecer a tabela de preços crus."""
+    raw = base_config()
+    raw["variables"][chave][indice].update(extra)
+
+    assert optimization_enabled(MpcConfig.model_validate(raw)) is True
+
+
+# ---------------------------------------------------------------------------------------
+# config_hash com objetivos: o objetivo muda O PROBLEMA, então muda o hash
+# ---------------------------------------------------------------------------------------
+
+
+def test_config_hash_muda_quando_objective_muda():
+    raw_base = base_config()
+    raw_mutado = base_config()
+    raw_mutado["variables"]["cvs"][0]["objective"] = "maximize"
+
+    assert economics_config_hash(MpcConfig.model_validate(raw_base)) != economics_config_hash(
+        MpcConfig.model_validate(raw_mutado)
+    )
+
+
+def test_config_hash_muda_quando_psv_muda():
+    def com_psv(valor: float) -> dict:
+        raw = base_config()
+        raw["variables"]["mvs"][0].update({"objective": "psv", "psv": valor})
+        return raw
+
+    assert economics_config_hash(MpcConfig.model_validate(com_psv(40.0))) != (
+        economics_config_hash(MpcConfig.model_validate(com_psv(41.0)))
+    )
+
+
+def test_config_hash_nao_muda_quando_so_nome_da_variavel_muda():
+    """`name` é rótulo de exibição, não entra no problema econômico — mesma regra já
+    estabelecida para o nome do bloco."""
+    raw_base = base_config()
+    raw_base["variables"]["cvs"][0]["objective"] = "maximize"
+    raw_mutado = base_config()
+    raw_mutado["variables"]["cvs"][0]["objective"] = "maximize"
+    raw_mutado["variables"]["cvs"][0]["name"] = "Outro rótulo"
+
+    assert economics_config_hash(MpcConfig.model_validate(raw_base)) == economics_config_hash(
+        MpcConfig.model_validate(raw_mutado)
+    )

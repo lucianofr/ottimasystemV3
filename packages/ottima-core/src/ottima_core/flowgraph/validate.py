@@ -464,8 +464,14 @@ def _parse_mpc_configs(nodes: list[FlowNode], errors: list[str]) -> dict[str, Mp
         try:
             configs[node.id] = MpcConfig.model_validate(node.config.model_dump())
         except ValidationError as erro:
+            # `value_error` carrega a mensagem pt-BR do model_validator do config (ex.:
+            # "PSV exige um valor preferido dentro dos limites da MV") — ela É o contrato
+            # do 422 para o operador; erros de tipo/ausência seguem pela localização.
             campos = ", ".join(
-                ".".join(str(parte) for parte in item["loc"]) or "(raiz)" for item in erro.errors()
+                ".".join(str(parte) for parte in item["loc"]) or "(raiz)"
+                if item["type"] != "value_error"
+                else f"{'.'.join(str(parte) for parte in item['loc']) or '(raiz)'}: {item['msg']}"
+                for item in erro.errors()
             )
             errors.append(
                 f"nó '{node.id}' (mpc): config não confere com a spec F4 §2.1 (campos: {campos})"

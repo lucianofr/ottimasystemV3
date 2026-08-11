@@ -54,6 +54,11 @@ def _mv(sufixo: str, **overrides: object) -> dict[str, object]:
         "move_weight": 1.0,
         "initial_value": 0.0,
         "pid": None,
+        # ADR-027 §9 estendido: defaults retrocompat de `MvVar.objective`/`.psv` — o tipo TS
+        # `VariavelMv` os exige (leitor `lerObjetivoMv` os inventa, mas o golden compara o
+        # dado bruto), então a fonte única precisa emiti-los.
+        "objective": "none",
+        "psv": None,
     }
     var.update(overrides)
     return var
@@ -68,6 +73,7 @@ def _cv(sufixo: str, **overrides: object) -> dict[str, object]:
         "tss": 30.0,
         "weight": 1.0,
         "sp_limits": {"min": 0.0, "max": 100.0},
+        "objective": "none",
     }
     var.update(overrides)
     return var
@@ -82,6 +88,7 @@ def _co(sufixo: str, **overrides: object) -> dict[str, object]:
         "tss": 30.0,
         "range": {"low": 0.0, "high": 100.0},
         "priority": 1,
+        "objective": "none",
     }
     var.update(overrides)
     return var

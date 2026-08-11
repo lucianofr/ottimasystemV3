@@ -89,6 +89,8 @@ function variavelMv(id: string, name: string, eu: string, comPid = false) {
           mode_values: { auto: 1, target: 3 },
         }
       : null,
+    objective: "none" as const,
+    psv: null,
   };
 }
 
@@ -101,6 +103,7 @@ function variavelCv(id: string, name: string, eu: string) {
     tss: 600,
     weight: 1,
     sp_limits: { min: 80, max: 120 },
+    objective: "none" as const,
   };
 }
 
@@ -113,6 +116,7 @@ function variavelRestricao(id: string, name: string, eu: string) {
     tss: 900,
     range: { low: 20, high: 80 },
     priority: 1,
+    objective: "none" as const,
   };
 }
 
@@ -492,6 +496,86 @@ test("ida e volta pelo graph_json preserva o nó mpc com config completo (mvs co
         mv_x7k2: { enabled: false, params: { Ki: 0.4, theta: 2 } },
       },
     },
+  });
+  const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson([no], []))));
+  expect(volta.nodes).toEqual([no]);
+});
+
+test("nó mpc salvo antes da feature, sem objective/psv, carrega com defaults retrocompat (ADR-027 §9)", () => {
+  const grafo = deGraphJson({
+    nodes: [
+      {
+        id: "m",
+        type: "mpc",
+        position: POS,
+        data: {
+          exec_order: 1,
+          label: "",
+          name: "MPC antigo",
+          multiplier: 5,
+          variables: {
+            mvs: [
+              {
+                id: "mv_x7k2",
+                name: "Vazão de refluxo",
+                eu: "m3/h",
+                limits: { min: 0, max: 100 },
+                du_max: 5,
+                initial_value: 0,
+                pid: null,
+              },
+            ],
+            cvs: [
+              {
+                id: "cv_a1b2",
+                name: "Temperatura de topo",
+                eu: "C",
+                kind: "selfreg",
+                tss: 600,
+                weight: 1,
+                sp_limits: { min: 80, max: 120 },
+              },
+            ],
+            constraints: [
+              {
+                id: "co_c3d4",
+                name: "Nível do vaso",
+                eu: "%",
+                kind: "integrating",
+                tss: 900,
+                range: { low: 20, high: 80 },
+                priority: 1,
+              },
+            ],
+            dvs: [],
+          },
+          models: {},
+        },
+      },
+    ],
+    edges: [],
+  });
+  const no = grafo.nodes[0];
+  if (no?.type !== "mpc") throw new Error("tipo preservado");
+  expect(no.data.variables.mvs[0].objective).toBe("none");
+  expect(no.data.variables.mvs[0].psv).toBeNull();
+  expect(no.data.variables.cvs[0].objective).toBe("none");
+  expect(no.data.variables.constraints[0].objective).toBe("none");
+});
+
+test("ida e volta preserva objective/psv configurados nas variáveis do mpc", () => {
+  const no = mpc("m", 1, {
+    name: "MPC otimizado",
+    multiplier: 5,
+    variables: {
+      mvs: [{ ...variavelMv("mv_x7k2", "Vazão", "m3/h"), objective: "psv" as const, psv: 42 }],
+      cvs: [{ ...variavelCv("cv_a1b2", "Temperatura", "C"), objective: "target" as const }],
+      constraints: [
+        { ...variavelRestricao("co_c3d4", "Nível", "%"), objective: "minimize" as const, kind: "selfreg" as const },
+      ],
+      dvs: [],
+    },
+    models: {},
   });
   const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson([no], []))));
   expect(volta.nodes).toEqual([no]);

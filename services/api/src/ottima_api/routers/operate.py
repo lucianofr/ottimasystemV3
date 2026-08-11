@@ -26,11 +26,14 @@ from ottima_api.deps import get_db, get_redis, require_operator
 from ottima_api.messages import MSG_FLOW_NAO_ENCONTRADO
 from ottima_core.bus import CHANNEL_FLOW_COMMANDS, FlowCommand
 from ottima_core.flowgraph import (
+    ConstraintObjective,
+    CvObjective,
     CvVar,
     GraphParseError,
     Horizons,
     Limits,
     MpcConfig,
+    MvObjective,
     MvVar,
     Range,
     derive_horizons,
@@ -71,13 +74,14 @@ class MvCommand(BaseModel):
 
 
 class MvOut(BaseModel):
-    """Projeção de uma MV do bloco (spec §4.1-1) — sem `pid`/`initial_value` (§4.1-3)."""
+    """Projeção de uma MV do bloco (spec §4.1-1) — sem `pid`/`initial_value`/`psv` (§4.1-3)."""
 
     id: str
     name: str
     eu: str
     limits: Limits
     du_max: float
+    objective: MvObjective
 
 
 class CvOut(BaseModel):
@@ -87,6 +91,7 @@ class CvOut(BaseModel):
     name: str
     eu: str
     sp_limits: Limits
+    objective: CvObjective
 
 
 class ConstraintOut(BaseModel):
@@ -96,6 +101,7 @@ class ConstraintOut(BaseModel):
     name: str
     eu: str
     range: Range
+    objective: ConstraintObjective
 
 
 class DvOut(BaseModel):
@@ -291,16 +297,33 @@ def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
                     variables=MpcVariablesOut(
                         mvs=[
                             MvOut(
-                                id=mv.id, name=mv.name, eu=mv.eu, limits=mv.limits, du_max=mv.du_max
+                                id=mv.id,
+                                name=mv.name,
+                                eu=mv.eu,
+                                limits=mv.limits,
+                                du_max=mv.du_max,
+                                objective=mv.objective,
                             )
                             for mv in config.variables.mvs
                         ],
                         cvs=[
-                            CvOut(id=cv.id, name=cv.name, eu=cv.eu, sp_limits=cv.sp_limits)
+                            CvOut(
+                                id=cv.id,
+                                name=cv.name,
+                                eu=cv.eu,
+                                sp_limits=cv.sp_limits,
+                                objective=cv.objective,
+                            )
                             for cv in config.variables.cvs
                         ],
                         constraints=[
-                            ConstraintOut(id=co.id, name=co.name, eu=co.eu, range=co.range)
+                            ConstraintOut(
+                                id=co.id,
+                                name=co.name,
+                                eu=co.eu,
+                                range=co.range,
+                                objective=co.objective,
+                            )
                             for co in config.variables.constraints
                         ],
                         dvs=[

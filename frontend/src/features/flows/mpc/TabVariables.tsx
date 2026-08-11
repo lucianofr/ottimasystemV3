@@ -6,6 +6,9 @@ import { Label } from "../../../components/ui/label";
 import { Select } from "../../../components/ui/select";
 import type { TagOut } from "../../../lib/api";
 import type {
+  ObjetivoCv,
+  ObjetivoMv,
+  ObjetivoRestricao,
   TipoLinhaMpc,
   VariaveisMpc,
   VariavelCv,
@@ -15,6 +18,32 @@ import type {
 } from "../graph";
 import { CamposPid } from "./CamposPid";
 import { gerarIdVariavel, nomeCampoVar, pidAoAlternar, variavelMvDoFormulario } from "./mpcLogic";
+
+/** Rótulos do combobox "Função objetivo" por tipo de variável (ADR-027 §9 estendido) —
+ *  `Record` completo por tipo para o TS provar em compile-time que nenhuma opção ficou sem
+ *  rótulo (mesmo estilo dos `ROTULO_*` da casa). */
+const ROTULO_OBJETIVO_MV: Record<ObjetivoMv, string> = {
+  none: "Nenhuma",
+  maximize: "Maximizar",
+  minimize: "Minimizar",
+  psv: "PSV (valor preferido)",
+  equalize: "Equalizar",
+};
+
+const ROTULO_OBJETIVO_CV: Record<ObjetivoCv, string> = {
+  none: "Nenhuma",
+  maximize: "Maximizar",
+  minimize: "Minimizar",
+  observe_limit: "Observar limites",
+  target: "Alvo (Target)",
+  psv: "PSV (valor preferido)",
+};
+
+const ROTULO_OBJETIVO_RESTRICAO: Record<ObjetivoRestricao, string> = {
+  none: "Nenhuma",
+  maximize: "Maximizar",
+  minimize: "Minimizar",
+};
 
 interface Props {
   variaveis: VariaveisMpc;
@@ -137,6 +166,8 @@ function ListaMv({
                 operating_point: 0,
                 readback_tag_id: null,
                 pid: null,
+                objective: "none",
+                psv: null,
               },
             ]);
           }}
@@ -188,6 +219,48 @@ function ListaMv({
               rotulo="Tag de posição (readback)"
               valor={mv.readback_tag_id}
             />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor={`${mv.id}-objective`}>Função objetivo</Label>
+              <Select
+                id={`${mv.id}-objective`}
+                data-testid={`mpc-objective-${mv.id}`}
+                value={mv.objective}
+                onChange={(evento) => {
+                  const objective = evento.target.value as ObjetivoMv;
+                  aoMudar(
+                    mvs.map((item) =>
+                      item.id !== mv.id
+                        ? item
+                        : {
+                            ...item,
+                            objective,
+                            // PSV pede o valor preferido no mesmo gesto; fora dele o campo
+                            // some do DOM e o `psv` volta a `null` (servidor valida as duas
+                            // direções — "psv só vale com objetivo PSV").
+                            psv: objective === "psv" ? (item.psv ?? 0) : null,
+                          },
+                    ),
+                  );
+                }}
+              >
+                {(Object.keys(ROTULO_OBJETIVO_MV) as ObjetivoMv[]).map((valor) => (
+                  <option key={valor} value={valor}>
+                    {ROTULO_OBJETIVO_MV[valor]}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {mv.objective === "psv" && (
+              <CampoNumero
+                id={mv.id}
+                campo="psv"
+                rotulo="Valor preferido (PSV)"
+                valor={mv.psv}
+                testid="mpc-mv-psv"
+              />
+            )}
           </div>
           <label className="flex items-center gap-2 text-xs text-fg">
             <input
@@ -252,6 +325,7 @@ function ListaCv({
                 tss: 600,
                 weight: 1,
                 sp_limits: { min: 0, max: 100 },
+                objective: "none",
               },
             ]);
           }}
@@ -276,11 +350,44 @@ function ListaCv({
                 value={cv.kind}
                 onChange={(evento) => {
                   const kind = evento.target.value as TipoLinhaMpc;
-                  aoMudar(cvs.map((item) => (item.id !== cv.id ? item : { ...item, kind })));
+                  aoMudar(
+                    cvs.map((item) =>
+                      item.id !== cv.id
+                        ? item
+                        : // Linha integradora não tem objetivo econômico (o LP decide TAXA,
+                          // ADR-027 §4): trocar para ela zera no mesmo gesto — nunca fica um
+                          // config inválido escondido atrás de um select desabilitado.
+                          { ...item, kind, objective: kind === "integrating" ? "none" : item.objective },
+                    ),
+                  );
                 }}
               >
                 <option value="selfreg">Autorregulável (SOPDT)</option>
                 <option value="integrating">Integrador (IOPDT)</option>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor={`${cv.id}-objective`}>Função objetivo</Label>
+              <Select
+                id={`${cv.id}-objective`}
+                data-testid={`mpc-objective-${cv.id}`}
+                value={cv.objective}
+                disabled={cv.kind === "integrating"}
+                title={
+                  cv.kind === "integrating"
+                    ? "Linha integradora não tem função objetivo (o SSTO decide taxa, não nível)"
+                    : undefined
+                }
+                onChange={(evento) => {
+                  const objective = evento.target.value as ObjetivoCv;
+                  aoMudar(cvs.map((item) => (item.id !== cv.id ? item : { ...item, objective })));
+                }}
+              >
+                {(Object.keys(ROTULO_OBJETIVO_CV) as ObjetivoCv[]).map((valor) => (
+                  <option key={valor} value={valor}>
+                    {ROTULO_OBJETIVO_CV[valor]}
+                  </option>
+                ))}
               </Select>
             </div>
             {/* TSS mora só na aba Horizontes (tarefa 4.3): precisa ser estado controlado
@@ -341,6 +448,7 @@ function ListaRestricao({
                 tss: 600,
                 range: { low: 0, high: 100 },
                 priority: 1,
+                objective: "none",
               },
             ]);
           }}
@@ -365,12 +473,45 @@ function ListaRestricao({
               onChange={(evento) => {
                 const kind = evento.target.value as TipoLinhaMpc;
                 aoMudar(
-                  constraints.map((item) => (item.id !== co.id ? item : { ...item, kind })),
+                  constraints.map((item) =>
+                    item.id !== co.id
+                      ? item
+                      : // Mesma regra da CV: integradora não tem objetivo econômico — zera no
+                        // mesmo gesto (servidor rejeita com "Objetivo econômico exige linha
+                        // autorregulável (selfreg)").
+                        { ...item, kind, objective: kind === "integrating" ? "none" : item.objective },
+                  ),
                 );
               }}
             >
               <option value="selfreg">Autorregulável (SOPDT)</option>
               <option value="integrating">Integrador (IOPDT)</option>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`${co.id}-objective`}>Função objetivo</Label>
+            <Select
+              id={`${co.id}-objective`}
+              data-testid={`mpc-objective-${co.id}`}
+              value={co.objective}
+              disabled={co.kind === "integrating"}
+              title={
+                co.kind === "integrating"
+                  ? "Linha integradora não tem função objetivo (o SSTO decide taxa, não nível)"
+                  : undefined
+              }
+              onChange={(evento) => {
+                const objective = evento.target.value as ObjetivoRestricao;
+                aoMudar(
+                  constraints.map((item) => (item.id !== co.id ? item : { ...item, objective })),
+                );
+              }}
+            >
+              {(Object.keys(ROTULO_OBJETIVO_RESTRICAO) as ObjetivoRestricao[]).map((valor) => (
+                <option key={valor} value={valor}>
+                  {ROTULO_OBJETIVO_RESTRICAO[valor]}
+                </option>
+              ))}
             </Select>
           </div>
           {/* TSS mora só na aba Horizontes (tarefa 4.3) — mesma nota da ListaCv acima. */}

@@ -68,7 +68,7 @@ import casadi.tools as castools
 from do_mpc.simulator import Simulator
 
 from ottima_core.bus import SstoRun
-from ottima_core.flowgraph import CvVar, MpcConfig, gain_model_hash
+from ottima_core.flowgraph import CvVar, MpcConfig, gain_model_hash, optimization_enabled
 
 from .builder import BuiltMpc, build_mpc
 from .bumpless import init_bumpless
@@ -188,9 +188,8 @@ def _build_runtime(config: MpcConfig, ts_flow: float) -> _Runtime:
     built.mpc.x0 = model.x(0.0)
     built.mpc.set_initial_guess()
 
-    economics = config.economics
     ssto = None
-    if economics is not None and economics.enabled:
+    if optimization_enabled(config):
         from ..target_calculation.ssto import SteadyStateOptimizer
 
         ssto = SteadyStateOptimizer(config, built.horizons.ts_mpc)
@@ -243,12 +242,20 @@ def _write_bias(
         runtime.built.tvp_template["_tvp", :, bias_name] = bias
 
 
-def _apply_tvp(runtime: _Runtime, request: SolveRequest, sp: dict[str, float]) -> None:
-    """SP, DV e `dumax` por MV — escritos em TODO pedido, mesmo em `reinit`
+def _apply_tvp(
+    runtime: _Runtime,
+    request: SolveRequest,
+    sp: dict[str, float],
+    mv_target: dict[str, float] | None = None,
+) -> None:
+    """SP, DV, `dumax` e `utarget` por MV — escritos em TODO pedido, mesmo em `reinit`
     (`init_bumpless` só escreve `bias`, nunca SP/DV/`dumax`).
 
     `sp` é o SP EFETIVO do ciclo: o alvo do SSTO quando a camada rodou, o SP do operador no
-    fallback (ADR-027 §10). Único ponto do worker que a camada econômica toca.
+    fallback (ADR-027 §10). `mv_target` é o alvo de MV do `SstoRun` do ciclo: escrito nos
+    TVPs `utarget_*` das MVs com `objective != "none"`; ausente (SSTO desligado, falha
+    isolada, ou ciclo sem execução) o fallback é o `u_applied` — âncora neutra exatamente
+    onde a MV já está, equivalente a desligar o termo naquele ciclo.
 
     SP e DV são constantes no horizonte (spec §3.2/§3.4). O `dumax` é horizonte-variante por
     construção do builder (`du_max` até `Nc`, `0` depois — a MV não se move além do horizonte
@@ -269,6 +276,9 @@ def _apply_tvp(runtime: _Runtime, request: SolveRequest, sp: dict[str, float]) -
         built.tvp_template["_tvp", :, tvp_name] = sp[cv_id]
     for dv_id, tvp_name in built.dv_tvp_name.items():
         built.tvp_template["_tvp", :, tvp_name] = request.d[dv_id]
+    for mv_id, tvp_name in built.utarget_tvp_name.items():
+        alvo = request.u_applied[mv_id] if mv_target is None else mv_target.get(mv_id, request.u_applied[mv_id])
+        built.tvp_template["_tvp", :, tvp_name] = alvo
     n_c = built.horizons.nc
     for mv_id in built.mv_order:
         congelada = mv_id in request.frozen_mvs
@@ -387,6 +397,7 @@ def _run_ssto(runtime: _Runtime, request: SolveRequest) -> tuple[dict[str, float
                 bias=bias,
                 delta_mv_prev=runtime.ssto_delta_prev,
                 frozen_mvs=request.frozen_mvs,
+                sp=request.sp,
             )
         )
     except Exception:  # noqa: BLE001 - fronteira entre camadas: SSTO nunca derruba o MPC
@@ -489,7 +500,7 @@ def _solve(runtime: _Runtime, request: SolveRequest) -> SolveResult:
     # Ordem obrigatória (ADR-027 §1): bias atualizado -> SSTO -> `tvp` -> `make_step`. O
     # LP parte da predição já corrigida pela medida deste ciclo, nunca da anterior.
     sp, ssto_run = _run_ssto(runtime, request)
-    _apply_tvp(runtime, request, sp)
+    _apply_tvp(runtime, request, sp, ssto_run.mv_target if ssto_run is not None else None)
 
     t0 = time.perf_counter()
     built.mpc.make_step(runtime.x_current)

@@ -121,6 +121,17 @@ export type PidMv = {
   mode_values: ValoresModoPid;
 };
 
+/** `kind` da linha (CV ou Restrição) define a forma dos `params` do par na matriz `models`
+ *  (spec F4 §2.1-2): `selfreg` → SOPDT, `integrating` → IOPDT. */
+export type TipoLinhaMpc = "selfreg" | "integrating";
+
+/** Função objetivo da variável no SSTO (ADR-027 §9 estendido) — espelho de
+ *  `MvObjective`/`CvObjective`/`ConstraintObjective` do `mpc_config.py`. `none` (default)
+ *  = comportamento anterior; config salvo antes da feature carrega com ele. */
+export type ObjetivoMv = "none" | "maximize" | "minimize" | "psv" | "equalize";
+export type ObjetivoCv = "none" | "maximize" | "minimize" | "observe_limit" | "target" | "psv";
+export type ObjetivoRestricao = "none" | "maximize" | "minimize";
+
 /** `operating_point`/`readback_tag_id` (TD-003): o modelo do MPC é incremental — o builder
  *  alimenta cada par com `coluna - operating_point`, então `operating_point` é o ponto de
  *  linearização. Por isso a porta do bloco fica na coordenada ABSOLUTA da planta (`limits`,
@@ -131,7 +142,7 @@ export type PidMv = {
  *  `du_min` (TD-007): banda morta do atuador, mesma EU de `du_max` — quem quantiza é o
  *  worker, não o editor; aqui é só o valor de config. `move_weight`: peso multiplicativo do
  *  custo de movimento desta MV no solve. `0`/`1` reproduzem o comportamento anterior a esta
- *  tarefa (config salva antes dela carrega com os mesmos defaults do servidor). */
+ *  tarefa (config salvo antes dela carrega com os mesmos defaults do servidor). */
 export type VariavelMv = {
   id: string;
   name: string;
@@ -144,11 +155,11 @@ export type VariavelMv = {
   operating_point: number;
   readback_tag_id: number | null;
   pid: PidMv | null;
+  objective: ObjetivoMv;
+  /** Valor preferido da MV quando `objective === "psv"` (coordenada absoluta, mesma de
+   *  `limits`); `null` fora do PSV — o servidor valida as duas direções. */
+  psv: number | null;
 };
-
-/** `kind` da linha (CV ou Restrição) define a forma dos `params` do par na matriz `models`
- *  (spec F4 §2.1-2): `selfreg` → SOPDT, `integrating` → IOPDT. */
-export type TipoLinhaMpc = "selfreg" | "integrating";
 
 export type VariavelCv = {
   id: string;
@@ -158,6 +169,7 @@ export type VariavelCv = {
   tss: number;
   weight: number;
   sp_limits: LimitesMpc;
+  objective: ObjetivoCv;
 };
 
 export type VariavelRestricao = {
@@ -168,6 +180,7 @@ export type VariavelRestricao = {
   tss: number;
   range: FaixaMpc;
   priority: number;
+  objective: ObjetivoRestricao;
 };
 
 /** `operating_point` da DV (TD-003): mesmo ponto de linearização das MVs — o builder alimenta

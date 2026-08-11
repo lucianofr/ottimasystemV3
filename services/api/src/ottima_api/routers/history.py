@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_api.deps import get_db, require_operator
 from ottima_api.messages import MSG_FLOW_NAO_ENCONTRADO
+from ottima_core.bus import SstoRun
 from ottima_core.flowgraph import parse_graph
 from ottima_core.models import Flow, mpc_samples_table, samples_table
 from ottima_core.schemas.flows import MAX_BIGINT
@@ -21,6 +22,7 @@ from ottima_core.schemas.history import (
     HistorySeries,
     MpcHistoryResponse,
     MpcHistorySeries,
+    SstoLastOut,
 )
 
 # O CAgg é view materializada criada em SQL cru na migration 0002 e não tem handle no core:
@@ -48,6 +50,32 @@ mpc_samples_1m = table(
     column("v_max"),
     column("sp"),
     column("auto"),
+)
+
+# Hypertable `ssto_runs` (migration 0004, ADR-027 §11) — mesmo construto leve: só SELECT.
+ssto_runs = table(
+    "ssto_runs",
+    column("ts"),
+    column("flow_id"),
+    column("block_id"),
+    column("run_id"),
+    column("config_hash"),
+    column("model_hash"),
+    column("status"),
+    column("solver"),
+    column("solve_ms"),
+    column("objective"),
+    column("mv"),
+    column("cv_ss"),
+    column("bias"),
+    column("dv"),
+    column("costs"),
+    column("delta_mv"),
+    column("mv_target"),
+    column("cv_target"),
+    column("given_up"),
+    column("active_constraints"),
+    column("duals"),
 )
 
 FlowIdFilter = Annotated[int, Query(ge=1, le=MAX_BIGINT)]
@@ -291,4 +319,65 @@ async def get_history_mpc(
             )
             for var_id, linhas in por_var.items()
         ],
+    )
+
+
+@router.get(
+    "/ssto/last",
+    response_model=SstoLastOut | None,
+    dependencies=[Depends(require_operator)],
+)
+async def get_history_ssto_last(
+    flow_id: FlowIdFilter,
+    block_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> SstoLastOut | None:
+    """Última execução do SSTO do bloco (ADR-027 §11) — cold-start do sumário do otimizador
+    na Operação: sem ela o card ficaria vazio até o próximo ciclo do MPC (Ts_mpc pode ser
+    minutos). 200 com `null` quando o bloco nunca executou o SSTO — mesmo contrato dos
+    campos opcionais existentes, não 404 (o recurso é a última execução, não o bloco)."""
+    flow = await db.get(Flow, flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail=MSG_FLOW_NAO_ENCONTRADO)
+    graph = parse_graph(flow.graph_json)
+    try:
+        node = graph.node(block_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=422, detail=f"Bloco '{block_id}' não encontrado no flow"
+        ) from None
+    if node.type != "mpc":
+        raise HTTPException(status_code=422, detail=f"Bloco '{block_id}' não é um bloco MPC")
+
+    stmt = (
+        select(ssto_runs)
+        .where(ssto_runs.c.flow_id == flow_id, ssto_runs.c.block_id == block_id)
+        .order_by(ssto_runs.c.ts.desc())
+        .limit(1)
+    )
+    linha = (await db.execute(stmt)).first()
+    if linha is None:
+        return None
+    return SstoLastOut(
+        ts=linha.ts,
+        run=SstoRun(
+            run_id=linha.run_id,
+            config_hash=linha.config_hash,
+            model_hash=linha.model_hash,
+            status=linha.status,
+            solver=linha.solver,
+            solve_ms=linha.solve_ms,
+            objective=linha.objective,
+            mv=linha.mv,
+            cv_ss=linha.cv_ss,
+            bias=linha.bias,
+            dv=linha.dv,
+            costs=linha.costs,
+            delta_mv=linha.delta_mv,
+            mv_target=linha.mv_target,
+            cv_target=linha.cv_target,
+            given_up=linha.given_up,
+            active_constraints=linha.active_constraints,
+            duals=linha.duals,
+        ),
     )

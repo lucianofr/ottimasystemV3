@@ -17,7 +17,9 @@ todo consumidor; ninguém fora deste pacote deve importar `ottima_core.flowgraph
 """
 
 from ottima_core.flowgraph.mpc_config import (
+    ConstraintObjective,
     ConstraintVar,
+    CvObjective,
     CvVar,
     DvVar,
     EconomicsConfig,
@@ -26,6 +28,7 @@ from ottima_core.flowgraph.mpc_config import (
     ModeValues,
     MpcConfig,
     MpcVariables,
+    MvObjective,
     MvVar,
     PairModel,
     PidBinding,
@@ -37,6 +40,7 @@ from ottima_core.flowgraph.mpc_config import (
     economics_config_hash,
     gain_model_hash,
     mpc_state_dimension,
+    optimization_enabled,
 )
 from ottima_core.flowgraph.parse import (
     MAX_SCRIPT_PORTS,
@@ -71,7 +75,9 @@ __all__ = [
     "MAX_DELAY_SAMPLES",
     "MAX_SCRIPT_PORTS",
     "NODE_TYPES",
+    "ConstraintObjective",
     "ConstraintVar",
+    "CvObjective",
     "CvVar",
     "DvVar",
     "EconomicsConfig",
@@ -88,6 +94,7 @@ __all__ = [
     "MpcConfig",
     "MpcRawConfig",
     "MpcVariables",
+    "MvObjective",
     "MvVar",
     "NodeConfig",
     "NodeType",
@@ -110,6 +117,7 @@ __all__ = [
     "economics_config_hash",
     "gain_model_hash",
     "mpc_state_dimension",
+    "optimization_enabled",
     "parse_graph",
     "validate_graph",
 ]

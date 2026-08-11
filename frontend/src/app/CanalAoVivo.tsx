@@ -278,7 +278,15 @@ function reduzir(atual: EstadoDoCanal, mensagem: MensagemCanal): EstadoDoCanal {
     }
     case "mpc_state": {
       const mpcStates = new Map(atual.mpcStates);
-      mpcStates.set(mensagem.chave, mensagem.state);
+      // O runtime publica `ssto` UMA vez por execução e depois `null` (consumo único do
+      // `_ssto_pending` em `blocks/mpc.py`): sem o carry-forward o sumário do otimizador
+      // piscaria — aparece num quadro e some no seguinte. O quadro novo sem `ssto` herda o
+      // último executado; o primeiro continua `null` (estado "aguardando").
+      const anterior = atual.mpcStates.get(mensagem.chave);
+      mpcStates.set(mensagem.chave, {
+        ...mensagem.state,
+        ssto: mensagem.state.ssto ?? anterior?.ssto ?? null,
+      });
       return { ...atual, mpcStates };
     }
     case "events": {

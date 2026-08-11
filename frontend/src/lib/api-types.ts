@@ -563,6 +563,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/history/ssto/last": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get History Ssto Last
+         * @description Última execução do SSTO do bloco (ADR-027 §11) — cold-start do sumário do otimizador
+         *     na Operação: sem ela o card ficaria vazio até o próximo ciclo do MPC (Ts_mpc pode ser
+         *     minutos). 200 com `null` quando o bloco nunca executou o SSTO — mesmo contrato dos
+         *     campos opcionais existentes, não 404 (o recurso é a última execução, não o bloco).
+         */
+        get: operations["get_history_ssto_last_api_history_ssto_last_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/history-retention": {
         parameters: {
             query?: never;
@@ -801,6 +824,11 @@ export interface components {
             /** Eu */
             eu: string;
             range: components["schemas"]["Range"];
+            /**
+             * Objective
+             * @enum {string}
+             */
+            objective: "none" | "maximize" | "minimize";
         };
         /**
          * CvOut
@@ -814,6 +842,11 @@ export interface components {
             /** Eu */
             eu: string;
             sp_limits: components["schemas"]["Limits"];
+            /**
+             * Objective
+             * @enum {string}
+             */
+            objective: "none" | "maximize" | "minimize" | "observe_limit" | "target" | "psv";
         };
         /**
          * DvOut
@@ -1189,7 +1222,7 @@ export interface components {
         };
         /**
          * MvOut
-         * @description Projeção de uma MV do bloco (spec §4.1-1) — sem `pid`/`initial_value` (§4.1-3).
+         * @description Projeção de uma MV do bloco (spec §4.1-1) — sem `pid`/`initial_value`/`psv` (§4.1-3).
          */
         MvOut: {
             /** Id */
@@ -1201,6 +1234,11 @@ export interface components {
             limits: components["schemas"]["Limits"];
             /** Du Max */
             du_max: number;
+            /**
+             * Objective
+             * @enum {string}
+             */
+            objective: "none" | "maximize" | "minimize" | "psv" | "equalize";
         };
         /**
          * PendingSecretOut
@@ -1285,6 +1323,91 @@ export interface components {
             var_id: string;
             /** Value */
             value: number;
+        };
+        /**
+         * SstoLastOut
+         * @description Última execução do SSTO de um bloco (`GET /api/history/ssto/last`) — cold-start do
+         *     sumário do otimizador na Operação, sem esperar o próximo ciclo do MPC.
+         */
+        SstoLastOut: {
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            run: components["schemas"]["SstoRun"];
+        };
+        /**
+         * SstoRun
+         * @description Registro imutável de uma execução do SSTO (ADR-027 §11, RF-903).
+         *
+         *     Viaja como campo opcional de `MpcState` — **sem canal novo** (ADR-002): o recorder, que
+         *     já assina `mpc.state.*` e é o único escritor de hypertable, o materializa em
+         *     `ssto_runs`. Quadro sem SSTO omite o campo e continua idêntico ao da F5.
+         *
+         *     Carrega os dois hashes que amarram o registro ao que produziu aquele alvo:
+         *     `config_hash` (custos, limites, ranks) e `model_hash` (a matriz de ganho usada).
+         *
+         *     `cv_target` de linha `integrating` é uma TAXA [EU/s], não um nível (ADR-027 §4).
+         */
+        SstoRun: {
+            /** Run Id */
+            run_id: string;
+            /** Config Hash */
+            config_hash: string;
+            /** Model Hash */
+            model_hash: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "optimal" | "relaxed" | "infeasible" | "unbounded" | "error";
+            /** Solver */
+            solver: string;
+            /** Solve Ms */
+            solve_ms: number;
+            /** Objective */
+            objective: number;
+            /** Mv */
+            mv: {
+                [key: string]: number;
+            };
+            /** Cv Ss */
+            cv_ss: {
+                [key: string]: number;
+            };
+            /** Bias */
+            bias: {
+                [key: string]: number;
+            };
+            /** Dv */
+            dv: {
+                [key: string]: number;
+            };
+            /** Costs */
+            costs: {
+                [key: string]: number;
+            };
+            /** Delta Mv */
+            delta_mv: {
+                [key: string]: number;
+            };
+            /** Mv Target */
+            mv_target: {
+                [key: string]: number;
+            };
+            /** Cv Target */
+            cv_target: {
+                [key: string]: number;
+            };
+            /** Given Up */
+            given_up: string[];
+            /** Active Constraints */
+            active_constraints: string[];
+            /** Duals */
+            duals: {
+                [key: string]: number;
+            };
         };
         /** TagCreate */
         TagCreate: {
@@ -2743,6 +2866,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MpcHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_history_ssto_last_api_history_ssto_last_get: {
+        parameters: {
+            query: {
+                flow_id: number;
+                block_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SstoLastOut"] | null;
                 };
             };
             /** @description Validation Error */

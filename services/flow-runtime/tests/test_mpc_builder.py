@@ -463,3 +463,60 @@ def test_move_weight_maior_encarece_o_movimento_e_reduz_o_primeiro_passo():
     passo_pesada = abs(_mv_plan(built_pesada, "mv_1")[1] - _mv_plan(built_pesada, "mv_1")[0])
 
     assert passo_pesada < passo_leve
+
+
+# --------------------------------------------------------------------------------------
+# utarget_* (ADR-027 §9 estendido) — TVP de alvo econômico da MV no custo dinâmico
+# --------------------------------------------------------------------------------------
+
+
+def _utarget_config(*, objective: str = "none", psv: float | None = None) -> MpcConfig:
+    """1 MV/1 CV mínimos; `objective`/`psv` da MV parametrizáveis."""
+    mv = _mv("mv_1", limits=(0.0, 100.0), du_max=50.0)
+    if objective != "none":
+        mv["objective"] = objective
+    if psv is not None:
+        mv["psv"] = psv
+    return MpcConfig.model_validate(
+        {
+            "name": "utarget",
+            "multiplier": 1,
+            "variables": {
+                "mvs": [mv],
+                "cvs": [_cv("cv_1", sp_limits=(0.0, 100.0))],
+                "constraints": [],
+                "dvs": [],
+            },
+            "models": {"cv_1": {"mv_1": _par(1.0, 5.0, 2.0, 0.0)}},
+        }
+    )
+
+
+def test_config_sem_objetivo_nao_cria_tvp_utarget():
+    """Retrocompat estrutural: sem `objective` nenhum TVP novo aparece e o custo dinâmico
+    fica bit a bit o de antes (nenhum termo a mais no grafo)."""
+    built = build_mpc(_utarget_config(), ts_flow=1.0)
+
+    assert built.utarget_tvp_name == {}
+
+
+def test_mv_com_objetivo_psv_constroi_com_tvp_utarget():
+    built = build_mpc(_utarget_config(objective="psv", psv=42.0), ts_flow=1.0)
+
+    assert built.utarget_tvp_name == {"mv_1": "utarget_mv_1"}
+    # Âncora neutra até o primeiro SSTO: o valor inicial da MV, em TODO o horizonte.
+    for k in range(built.horizons.np + 1):
+        assert float(built.tvp_template["_tvp", k, "utarget_mv_1"]) == 0.0
+
+
+def test_utarget_no_custo_puxa_a_mv_para_o_alvo_escrito():
+    """Com SP de CV neutro (cv = mv, SP = 10) e `utarget` escrito em 80, o solve afasta a
+    MV de 10 em direção a 80 — a âncora econômica de fato entra no custo."""
+    built = build_mpc(_utarget_config(objective="psv", psv=80.0), ts_flow=1.0)
+    built.tvp_template["_tvp", :, "utarget_mv_1"] = 80.0
+
+    _solve(built, sp={"cv_1": 10.0})
+
+    plano = _mv_plan(built, "mv_1")
+    # Sem a âncora a MV ficaria em 10 (SP da CV, ganho 1); com ela, move para cima.
+    assert plano[1] > 10.0 + 1e-3

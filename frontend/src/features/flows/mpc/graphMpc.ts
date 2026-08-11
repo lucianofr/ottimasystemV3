@@ -2,6 +2,9 @@ import { inteiroSimples, numero, objeto, texto } from "../graph";
 import type {
   FaixaMpc,
   LimitesMpc,
+  ObjetivoCv,
+  ObjetivoMv,
+  ObjetivoRestricao,
   ParModeloMpc,
   PidMv,
   TipoLinhaMpc,
@@ -72,6 +75,36 @@ function lerTipoLinhaMpc(bruto: unknown): TipoLinhaMpc {
   return bruto === "integrating" ? "integrating" : "selfreg";
 }
 
+/** Whitelist + default `"none"` (mesmo padrão de `lerTipoLinhaMpc`): config salvo antes da
+ *  feature não tem a chave, e um valor fora do vocabulário nunca deve atravessar para o
+ *  formulário — `"none"` reproduz exatamente o comportamento de antes. */
+function lerObjetivoMv(bruto: unknown): ObjetivoMv {
+  return bruto === "maximize" || bruto === "minimize" || bruto === "psv" || bruto === "equalize"
+    ? bruto
+    : "none";
+}
+
+function lerObjetivoCv(bruto: unknown): ObjetivoCv {
+  return bruto === "maximize" ||
+    bruto === "minimize" ||
+    bruto === "observe_limit" ||
+    bruto === "target" ||
+    bruto === "psv"
+    ? bruto
+    : "none";
+}
+
+function lerObjetivoRestricao(bruto: unknown): ObjetivoRestricao {
+  return bruto === "maximize" || bruto === "minimize" ? bruto : "none";
+}
+
+/** `psv` é opcional (`number | null`), mesmo padrão de `lerFaixaMpcOuNull`: ausente, `null`
+ *  explícito, ou não-número finito viram `null` — config salvo antes da feature carrega sem
+ *  valor preferido. */
+function lerPsvMv(bruto: unknown): number | null {
+  return typeof bruto === "number" && Number.isFinite(bruto) ? bruto : null;
+}
+
 function lerVariavelMv(bruto: unknown): VariavelMv | null {
   const cru = objeto(bruto);
   if (cru === null) return null;
@@ -91,6 +124,8 @@ function lerVariavelMv(bruto: unknown): VariavelMv | null {
     operating_point: numero(cru.operating_point, 0),
     readback_tag_id: lerReadbackTagIdMv(cru.readback_tag_id),
     pid: lerPidMv(cru.pid),
+    objective: lerObjetivoMv(cru.objective),
+    psv: lerPsvMv(cru.psv),
   };
 }
 
@@ -107,6 +142,7 @@ function lerVariavelCv(bruto: unknown): VariavelCv | null {
     tss: numero(cru.tss, 0),
     weight: numero(cru.weight, 0),
     sp_limits: lerLimitesMpc(cru.sp_limits),
+    objective: lerObjetivoCv(cru.objective),
   };
 }
 
@@ -123,6 +159,7 @@ function lerVariavelRestricao(bruto: unknown): VariavelRestricao | null {
     tss: numero(cru.tss, 0),
     range: lerFaixaMpc(cru.range),
     priority: inteiroSimples(cru.priority, 1),
+    objective: lerObjetivoRestricao(cru.objective),
   };
 }
 

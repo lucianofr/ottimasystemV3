@@ -588,6 +588,7 @@ async def test_mpcs_projecao_verbatim_sem_pid_nem_models(client, admin_headers, 
                         "eu": "m3/h",
                         "limits": {"min": 0.0, "max": 100.0},
                         "du_max": 5.0,
+                        "objective": "none",
                     },
                     {
                         "id": "mv_b",
@@ -595,6 +596,7 @@ async def test_mpcs_projecao_verbatim_sem_pid_nem_models(client, admin_headers, 
                         "eu": "m3/h",
                         "limits": {"min": 0.0, "max": 100.0},
                         "du_max": 5.0,
+                        "objective": "none",
                     },
                 ],
                 "cvs": [
@@ -603,6 +605,7 @@ async def test_mpcs_projecao_verbatim_sem_pid_nem_models(client, admin_headers, 
                         "name": "CV a",
                         "eu": "C",
                         "sp_limits": {"min": 80.0, "max": 120.0},
+                        "objective": "none",
                     }
                 ],
                 "constraints": [
@@ -611,6 +614,7 @@ async def test_mpcs_projecao_verbatim_sem_pid_nem_models(client, admin_headers, 
                         "name": "Restrição A",
                         "eu": "kPa",
                         "range": {"low": 0.0, "high": 10.0},
+                        "objective": "none",
                     }
                 ],
                 "dvs": [{"id": "dv_a", "name": "DV A", "eu": "C", "range": None}],
@@ -714,6 +718,63 @@ async def test_mpcs_graph_invalido_pulado_com_log(
         record.levelno == logging.WARNING and str(flow_corrompido.id) in record.getMessage()
         for record in caplog.records
     )
+
+
+async def test_mpcs_projeta_objective_das_variaveis(client, admin_headers, operator_headers):
+    """`objective` configurado viaja na projeção (MV `maximize`, CV `target`, Restrição
+    `minimize`); variável sem o campo (config antigo) projeta o default `"none"`."""
+    project_id = await _projeto(client, admin_headers, "MpcsObjetivo")
+    conn_id = await _conexao(client, admin_headers, project_id, "plc-objetivo")
+    flow = await _flow(client, admin_headers, project_id, "MpcsObjetivo")
+
+    tag_in_cv = await _tag(client, admin_headers, conn_id, "IN-CV", "r")
+    tag_in_co = await _tag(client, admin_headers, conn_id, "IN-CO", "r")
+
+    mv_a = _mv("a", objective="maximize")
+    cv_a = _cv("a", objective="target")
+    co_a = {
+        "id": "co_a",
+        "name": "Restrição A",
+        "eu": "kPa",
+        "kind": "selfreg",
+        "tss": 20.0,
+        "range": {"low": 0.0, "high": 10.0},
+        "priority": 1,
+        "objective": "minimize",
+    }
+    params = _selfreg_params()
+    data = {
+        "name": "MPC Objetivo",
+        "multiplier": 1,
+        "variables": {"mvs": [mv_a], "cvs": [cv_a], "constraints": [co_a], "dvs": []},
+        "models": {
+            "cv_a": {"mv_a": {"enabled": True, "params": params}},
+            "co_a": {"mv_a": {"enabled": True, "params": params}},
+        },
+    }
+    graph = {
+        "nodes": [
+            _no("r1", "opc_read", 1, tag_id=tag_in_cv),
+            _no("r2", "opc_read", 2, tag_id=tag_in_co),
+            _no("m1", "mpc", 3, **data),
+        ],
+        "edges": [
+            _aresta("r1", "out", "m1", "cv_a", id_="e1"),
+            _aresta("r2", "out", "m1", "co_a", id_="e2"),
+        ],
+    }
+    await _salvar(client, admin_headers, flow["id"], graph)
+    r = await client.post(f"/api/projects/{project_id}/activate", headers=admin_headers)
+    assert r.status_code == 200, r.text
+
+    r = await client.get("/api/operate/mpcs", headers=operator_headers)
+
+    assert r.status_code == 200, r.text
+    variables = r.json()[0]["variables"]
+    assert variables["mvs"][0]["objective"] == "maximize"
+    assert variables["cvs"][0]["objective"] == "target"
+    assert variables["constraints"][0]["objective"] == "minimize"
+    assert "psv" not in variables["mvs"][0]  # §4.1-3: campo de config não projeta
 
 
 async def test_mpcs_bloco_mpc_invalido_pulado_com_log(
