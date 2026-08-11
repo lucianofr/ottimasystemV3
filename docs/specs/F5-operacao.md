@@ -1,7 +1,7 @@
 # Spec F5 — Tela de operação (faceplates, trend com predição, eventos e banner)
 
 **Fase:** F5 (PRD §8) · **Status:** aprovado em blocos em sessão de brainstorm (2026-08-06); revisado por agente RFC e emendado no mesmo dia — achados F5R-01..27 aplicados (Anexo B)
-**Fontes normativas:** `docs/PRD.md` v1.2→v1.3 (RF/RNF, contratos §7, fases §8) · `docs/adr/ADR-001…024` (prevalecem em conflito) · `docs/GLOSSARY.md` · `PRODUCT.md`/`DESIGN.md` (frontend) · specs F1/F2/F3/F4 (vinculantes) · relatório de gate F4 §8.2 (dívidas herdadas) · revisão `.claude/reports/review/review-spec-f5-operacao-20260806.md`
+**Fontes normativas:** `docs/PRD.md` v1.2→v1.3 (RF/RNF, contratos §7, fases §8) · `docs/adr/ADR-001…024` (prevalecem em conflito) · `docs/GLOSSARY.md` · `PRODUCT.md`/`DESIGN.md` (frontend) · specs F1/F2/F3/F4 (vinculantes) · relatório de gate F4 §8.2 (dívidas herdadas) · revisão `docs/reports/review/review-spec-f5-operacao-20260806.md`
 **Execução:** 1 spec (esta) + 2 planos — F5a (dados & serviços) e F5b (tela de operação), decisão A-12.
 
 Convenções herdadas: itens **[NOVA — implementação]** são decisões de implementação desta spec, sem lastro literal em RF/ADR; o Anexo A registra as decisões do brainstorm; testes citam itens numerados (ex.: §2.2-3).
@@ -333,7 +333,7 @@ Herdam o protocolo F3/F4 (CLAUDE.md §Comandos): L2 e Playwright serializados; c
 
 ## Anexo B — Revisão aplicada (2026-08-06)
 
-Revisão por agente RFC (modo review): `.claude/reports/review/review-spec-f5-operacao-20260806.md` — veredito **APPROVE WITH CHANGES**, 27 achados, todos aplicados nesta versão. Verificações positivas registradas no apêndice do relatório (F5R-A: `mpc_samples` × ADR-016 sustentado; F5R-B: emendas com rito; ~25 claims de código conferidos).
+Revisão por agente RFC (modo review): `docs/reports/review/review-spec-f5-operacao-20260806.md` — veredito **APPROVE WITH CHANGES**, 27 achados, todos aplicados nesta versão. Verificações positivas registradas no apêndice do relatório (F5R-A: `mpc_samples` × ADR-016 sustentado; F5R-B: emendas com rito; ~25 claims de código conferidos).
 
 | Achados | Aplicação |
 |---|---|

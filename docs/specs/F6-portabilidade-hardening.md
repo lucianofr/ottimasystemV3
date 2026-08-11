@@ -1,7 +1,7 @@
 # Spec F6 — Portabilidade & hardening (export/import, certificados, suíte RNF-09)
 
 **Fase:** F6 (PRD §8) — **última fase da v1** · **Status:** aprovado em blocos em sessão de brainstorm (2026-08-07); revisado por 7 agentes em paralelo no mesmo dia — achados `F6R-01..14` e os 54 de Bloco 3/4 aplicados (Anexo B)
-**Fontes normativas:** `docs/PRD.md` v1.3→v1.4 (RF/RNF, contratos §7, fases §8, riscos §9) · `docs/adr/ADR-001…024` (prevalecem em conflito) · `docs/GLOSSARY.md` · `PRODUCT.md`/`DESIGN.md` (frontend) · specs F1/F2/F3/F4/F5 (vinculantes) · revisão consolidada `.claude/reports/review/review-spec-f6-consolidado-20260807.md`
+**Fontes normativas:** `docs/PRD.md` v1.3→v1.4 (RF/RNF, contratos §7, fases §8, riscos §9) · `docs/adr/ADR-001…024` (prevalecem em conflito) · `docs/GLOSSARY.md` · `PRODUCT.md`/`DESIGN.md` (frontend) · specs F1/F2/F3/F4/F5 (vinculantes) · revisão consolidada `docs/reports/review/review-spec-f6-consolidado-20260807.md`
 **Execução:** 1 spec (esta) + 3 planos — F6a (portabilidade & dados), F6b (superfícies), F6c (suíte RNF-09 & guia), decisão A-1. Mapa de seções por plano em §12.
 
 Convenções herdadas: itens **[NOVA — implementação]** são decisões de implementação desta spec, sem lastro literal em RF/ADR; o Anexo A registra as decisões do brainstorm; testes citam itens numerados (ex.: §3.2-4).
@@ -524,7 +524,7 @@ Herdam o protocolo F3/F4/F5 (CLAUDE.md §Comandos): L2 e Playwright serializados
 
 ## Anexo B — Revisão aplicada (2026-08-07)
 
-Sete agentes em paralelo, um por facet. Consolidado em `.claude/reports/review/review-spec-f6-consolidado-20260807.md`; relatórios por facet no mesmo diretório. **74 achados brutos (15 Critical), 68 após deduplicação — todos aplicados nesta versão.**
+Sete agentes em paralelo, um por facet. Consolidado em `docs/reports/review/review-spec-f6-consolidado-20260807.md`; relatórios por facet no mesmo diretório. **74 achados brutos (15 Critical), 68 após deduplicação — todos aplicados nesta versão.**
 
 | Facet | Agente | Veredito | C/I/m |
 |---|---|---|---|
