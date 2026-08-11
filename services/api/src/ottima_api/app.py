@@ -81,6 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         flows,
         health,
         history,
+        history_retention,
         operate,
         projects,
         tags,
@@ -97,6 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(operate.router, prefix="/api/operate", tags=["operate"])
     app.include_router(events.router, prefix="/api/events", tags=["events"])
     app.include_router(history.router, prefix="/api/history", tags=["history"])
+    app.include_router(history_retention.router, prefix="/api", tags=["history-retention"])
     app.include_router(certificates.router, prefix="/api/certificates", tags=["certificates"])
     app.include_router(ws_router, tags=["ws"])  # /ws sem prefixo /api (plano e spec §5.3)
     return app

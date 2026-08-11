@@ -563,6 +563,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/history-retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get History Retention */
+        get: operations["get_history_retention_api_history_retention_get"];
+        /** Update History Retention */
+        put: operations["update_history_retention_api_history_retention_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/certificates/app/generate": {
         parameters: {
             query?: never;
@@ -981,6 +999,21 @@ export interface components {
             end: string;
             /** Series */
             series: components["schemas"]["HistorySeries"][];
+        };
+        /** HistoryRetentionOut */
+        HistoryRetentionOut: {
+            /** Retention Days */
+            retention_days: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** HistoryRetentionUpdate */
+        HistoryRetentionUpdate: {
+            /** Retention Days */
+            retention_days: number;
         };
         /** HistorySeries */
         HistorySeries: {
@@ -2692,6 +2725,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MpcHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_history_retention_api_history_retention_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryRetentionOut"];
+                };
+            };
+        };
+    };
+    update_history_retention_api_history_retention_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HistoryRetentionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryRetentionOut"];
                 };
             };
             /** @description Validation Error */

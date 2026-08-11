@@ -44,6 +44,26 @@ async def test_ativacao_de_projeto_emite_project_activated(client, admin_headers
     assert ev["payload"] == {"kind": "project_activated", "project_id": pid, "name": "Forno"}
 
 
+async def test_alteracao_de_retencao_emite_history_retention_changed(
+    client, admin_headers, eventos
+):
+    uid = await _admin_id(client, admin_headers)
+
+    r = await client.put(
+        "/api/history-retention", json={"retention_days": 45}, headers=admin_headers
+    )
+    assert r.status_code == 200
+
+    (ev,) = await eventos()
+    assert ev["severity"] == "info"
+    assert ev["origin"] == f"user:{uid}"
+    assert ev["payload"] == {
+        "kind": "history_retention_changed",
+        "retention_days_old": 30,
+        "retention_days_new": 45,
+    }
+
+
 async def test_ciclo_de_conexao_emite_created_updated_deleted(client, admin_headers, eventos):
     uid = await _admin_id(client, admin_headers)
     pid = await _projeto(client, admin_headers, "ProjConn")

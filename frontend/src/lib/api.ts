@@ -19,6 +19,8 @@ export type HistoryResponse = components["schemas"]["HistoryResponse"];
 export type HistorySeries = components["schemas"]["HistorySeries"];
 export type MpcHistoryResponse = components["schemas"]["MpcHistoryResponse"];
 export type MpcHistorySeries = components["schemas"]["MpcHistorySeries"];
+export type HistoryRetentionOut = components["schemas"]["HistoryRetentionOut"];
+export type HistoryRetentionUpdate = components["schemas"]["HistoryRetentionUpdate"];
 
 const TOKEN_KEY = "ottima.token";
 

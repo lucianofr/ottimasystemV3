@@ -8,6 +8,7 @@ import { useConnections } from "../connections/useConnections";
 import { useActiveProject } from "../projects/useProjects";
 import { EditorEscala } from "./EditorEscala";
 import { ESCALA_AUTO, gravarEscalas, lerEscalas, type EscalaVar } from "./escalas";
+import { RetencaoHistorico } from "./RetencaoHistorico";
 import { TrendChart, type TrendChartHandle } from "./TrendChart";
 import { CLASSES_PENA, FORMATO_VALOR, LIMITE_PENAS } from "./trendTheme";
 import { montarMatriz, resumirSeries, useHistory, useTags } from "./useHistory";
@@ -112,6 +113,7 @@ export function TrendPage() {
               {ROTULO_MODO[historico.data.mode]}
             </span>
           )}
+          <RetencaoHistorico />
           <label className="flex items-center gap-2">
             <span className="plaqueta text-xs text-fg-muted">Janela</span>
             <Select

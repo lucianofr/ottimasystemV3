@@ -229,6 +229,9 @@ KIND_PROJECT_IMPORTED = "project_imported"  # severity "info"
 # Retomada automática após `comm_restored` (TD-005, ADR-025).
 KIND_FLOW_RESUMED = "flow_resumed"  # severity "info"
 
+# Retenção de histórico configurável (ADR-003 revisado).
+KIND_HISTORY_RETENTION_CHANGED = "history_retention_changed"  # severity "info"
+
 
 async def publish_event(
     redis_client: Redis,

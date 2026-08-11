@@ -282,10 +282,13 @@ leitura.
 
 ## 6. Operação contínua e limites conhecidos
 
-**Retenção (ADR-003):** um mês de histórico, sempre — `add_retention_policy(...,
-INTERVAL '1 month')` sobre as hypertables `samples`, `events` e `mpc_samples` (mais os
-continuous aggregates `samples_1m`/`mpc_samples_1m`), aplicada automaticamente pelo
-TimescaleDB, sem código de manutenção. Não há como estender essa janela na v1 (PRD §1).
+**Retenção (ADR-003):** configurável pelo admin na tela **Trends**, 1 a 120 dias (default
+30 — mesmo comportamento de antes até alguém mexer). Vale só para as estruturas de
+**variável de processo**: `samples`, `samples_1m`, `mpc_samples`, `mpc_samples_1m`.
+`events` (log de alarmes, ADR-020) continua fixo em 1 mês. Reprograma as
+`add_retention_policy(...)` do TimescaleDB e já libera espaço na hora do salvamento
+(`drop_chunks`), sem esperar o próximo ciclo agendado do job. `GET /api/history-retention`
+é visível a qualquer operador; `PUT` exige admin.
 
 **Backup do Postgres — procedimento manual, sem automação embutida.** O sistema não
 agenda nem promete backup; é responsabilidade operacional da planta. Exemplo de rotina

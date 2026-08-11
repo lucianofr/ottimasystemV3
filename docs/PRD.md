@@ -161,7 +161,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 - **RF-705** **Banner de alarmes ativos** (condições vigentes: watchdog, overrun, script em falha, conexão caída), sem ACK. (ADR-020)
 
 ### 5.13 Histórico e eventos
-- **RF-801** recorder grava toda leitura publicada na hypertable `samples`; retenção **1 mês** via `add_retention_policy`; continuous aggregate de 1 min para trends longos. (ADR-003)
+- **RF-801** recorder grava toda leitura publicada na hypertable `samples`; retenção **configurável pelo admin, 1–120 dias (default 30)** via `add_retention_policy`, aplicada a `samples`/`samples_1m`/`mpc_samples`/`mpc_samples_1m` (não a `events`, ADR-020); continuous aggregate de 1 min para trends longos. (ADR-003)
 - **RF-802** API de histórico: consulta por tags + janela, com downsampling automático (bruto ≤ ~2 h; agregado acima).
 - **RF-803** Log de eventos consultável e filtrável (severidade, origem, período) na UI; retenção 1 mês. (ADR-020)
 
