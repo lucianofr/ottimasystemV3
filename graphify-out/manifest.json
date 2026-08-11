@@ -30,8 +30,8 @@
     "semantic_hash": "f453cbfefb1b697a270c6ad5d1ff28cf"
   },
   "frontend/package.json": {
-    "mtime": 1786398876.8481464,
-    "ast_hash": "a480366db6f44836b102cf9c809b87e4",
+    "mtime": 1786449057.1455805,
+    "ast_hash": "7e61507c8ec4274904570c194a4101e8",
     "semantic_hash": ""
   },
   "frontend/playwright.config.ts": {
@@ -125,8 +125,8 @@
     "semantic_hash": "1d4e9037f59cc34a03a8e875105de5a4"
   },
   "frontend/src/features/flows/FlowEditorPage.tsx": {
-    "mtime": 1786398876.8921454,
-    "ast_hash": "906237cd3f1bb31cba71e8ca734954dc",
+    "mtime": 1786449717.6551723,
+    "ast_hash": "d9f63f2931700eeec57909acd9c2add0",
     "semantic_hash": ""
   },
   "frontend/src/features/flows/FlowPalette.tsx": {
@@ -165,8 +165,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/flows/graph.ts": {
-    "mtime": 1786410914.9626892,
-    "ast_hash": "87bff93810713afb5308b80feeb2d10c",
+    "mtime": 1786449259.1559298,
+    "ast_hash": "44c9fa2c5ddec9925db6898a4f9afa02",
     "semantic_hash": ""
   },
   "frontend/src/features/flows/nodes/BlocoChapa.tsx": {
@@ -175,13 +175,13 @@
     "semantic_hash": ""
   },
   "frontend/src/features/flows/nodes/contexto.ts": {
-    "mtime": 1785874485.0924082,
-    "ast_hash": "466a5b39b9afed63526f70e49e035b26",
-    "semantic_hash": "466a5b39b9afed63526f70e49e035b26"
+    "mtime": 1786449163.4986024,
+    "ast_hash": "8858de2e88f230c4661f4a93bb404ea2",
+    "semantic_hash": ""
   },
   "frontend/src/features/flows/nodes/index.tsx": {
-    "mtime": 1786410915.082686,
-    "ast_hash": "974e44c6db6a8aefbe38997c5625bceb",
+    "mtime": 1786449276.5714438,
+    "ast_hash": "f9db38825022680f8e18977deee8e3f0",
     "semantic_hash": ""
   },
   "frontend/src/features/flows/useFlowStatus.check.ts": {
@@ -1000,8 +1000,8 @@
     "semantic_hash": ""
   },
   "docs/PRD.md": {
-    "mtime": 1786447907.5230536,
-    "ast_hash": "132dd6be52ab1e94b91169697ef0e281",
+    "mtime": 1786449701.7516139,
+    "ast_hash": "d2b3fecad3d229a77451f5511505455e",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -1630,8 +1630,8 @@
     "semantic_hash": ""
   },
   "services/flow-runtime/src/ottima_flow_runtime/mpc/worker.py": {
-    "mtime": 1786447907.583052,
-    "ast_hash": "9b920dfcee10e1794e7b467a1688aa11",
+    "mtime": 1786450917.970126,
+    "ast_hash": "fe34150b1512af897ab96bcd49720418",
     "semantic_hash": ""
   },
   "services/flow-runtime/src/ottima_flow_runtime/mpc_arming.py": {
@@ -1765,8 +1765,8 @@
     "semantic_hash": ""
   },
   "frontend/src/app/HomePage.check.ts": {
-    "mtime": 1786113385.7057984,
-    "ast_hash": "a30ab08ad932299ac5a94f673a0b56e6",
+    "mtime": 1786449027.4304142,
+    "ast_hash": "cebf78b190c88a69ed38c4d6486617a8",
     "semantic_hash": ""
   },
   "frontend/src/app/alarmes.check.ts": {
@@ -1810,8 +1810,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/events/eventos.check.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "fa4f2cc28eb66bf8e2251ed40ef2303c",
+    "mtime": 1786449027.5264115,
+    "ast_hash": "cb5ff00dfd9053d6d9acb72eeab1043d",
     "semantic_hash": ""
   },
   "frontend/src/features/events/eventos.ts": {
@@ -1850,8 +1850,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/operate/TrendOperacao.tsx": {
-    "mtime": 1786398876.9961424,
-    "ast_hash": "d22ee2ae8b0774281b72a2936af6fa49",
+    "mtime": 1786450386.4035327,
+    "ast_hash": "d79312d1d15fcaa368f362edbf6c1150",
     "semantic_hash": ""
   },
   "frontend/src/features/operate/clamp.check.ts": {
@@ -1865,8 +1865,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/operate/pendencia.check.ts": {
-    "mtime": 1786440994.5007293,
-    "ast_hash": "749444fa1d3a12eba6803dc52e6154a4",
+    "mtime": 1786449027.650408,
+    "ast_hash": "844e7a85b40eba3aaf6523e88f8eca50",
     "semantic_hash": ""
   },
   "frontend/src/features/operate/pendencia.ts": {
@@ -1875,8 +1875,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/operate/trendOperacao.check.ts": {
-    "mtime": 1786398876.9961424,
-    "ast_hash": "d64ed57c5452c823af7d86a26b1e802f",
+    "mtime": 1786449027.6904068,
+    "ast_hash": "4388b264f2fcd492b9ec9c87122342af",
     "semantic_hash": ""
   },
   "frontend/src/features/operate/trendOperacao.ts": {
@@ -2035,8 +2035,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/operate/faceplateVariavel.check.ts": {
-    "mtime": 1786276127.9145987,
-    "ast_hash": "b7163543c9e218440b042d4e05115d63",
+    "mtime": 1786449027.5944095,
+    "ast_hash": "945b29b5d23b4b1a60cb64a8ae34f081",
     "semantic_hash": ""
   },
   "frontend/src/features/operate/gradeVariaveis.ts": {
@@ -2220,8 +2220,8 @@
     "semantic_hash": ""
   },
   "frontend/e2e/operate-trend.spec.ts": {
-    "mtime": 1786384273.0703807,
-    "ast_hash": "ea70461d97a88683d42d8a441c3ef63e",
+    "mtime": 1786450224.7674289,
+    "ast_hash": "41e7492ac0e027c49d1c11381ab655c0",
     "semantic_hash": ""
   },
   "frontend/e2e/trend-eng.spec.ts": {
@@ -2245,8 +2245,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/operate/LegendaOperacao.tsx": {
-    "mtime": 1786398876.9761431,
-    "ast_hash": "24fcd0eba944e03ae2a494abced94d47",
+    "mtime": 1786450386.355534,
+    "ast_hash": "ca226d9883874c69cd69aa420c3a5aae",
     "semantic_hash": ""
   },
   "frontend/src/features/operate/RelogioAgora.tsx": {
@@ -2380,8 +2380,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/flows/filtros.check.ts": {
-    "mtime": 1786410914.9586892,
-    "ast_hash": "dbb1ecd9b11bf63b5d704a39a6cb2843",
+    "mtime": 1786449290.9110436,
+    "ast_hash": "418d3501e0bfa97627495ac6ad59f170",
     "semantic_hash": ""
   },
   "frontend/src/lib/theme.ts": {
@@ -2450,8 +2450,8 @@
     "semantic_hash": ""
   },
   "services/flow-runtime/src/ottima_flow_runtime/target_calculation/ssto.py": {
-    "mtime": 1786441305.832114,
-    "ast_hash": "526cf9923335086cde97be47cede805c",
+    "mtime": 1786450917.970126,
+    "ast_hash": "b133177f97ad8f5116242508e8136d8c",
     "semantic_hash": ""
   },
   "services/flow-runtime/tests/test_definition_filtros.py": {
@@ -2470,8 +2470,8 @@
     "semantic_hash": ""
   },
   "services/flow-runtime/tests/test_ssto.py": {
-    "mtime": 1786441305.832114,
-    "ast_hash": "1c86bd9cd2fe370c53d43dbcb5959869",
+    "mtime": 1786452058.1874378,
+    "ast_hash": "2e9bf15a7ff7b324814611e379a406d4",
     "semantic_hash": ""
   },
   "services/flow-runtime/tests/test_ssto_block.py": {
@@ -2485,8 +2485,8 @@
     "semantic_hash": ""
   },
   "services/flow-runtime/tests/test_ssto_integration.py": {
-    "mtime": 1786441305.836114,
-    "ast_hash": "5e664a980f30f9b6410f9d0e0ce6ff56",
+    "mtime": 1786449578.6830323,
+    "ast_hash": "4afea661774ee312885db73ff81d3b96",
     "semantic_hash": ""
   },
   "services/flow-runtime/tests/test_ssto_model.py": {
@@ -2555,8 +2555,8 @@
     "semantic_hash": ""
   },
   "docs/reports/_tech-debt.md": {
-    "mtime": 1786448109.0728672,
-    "ast_hash": "94975ece7606bd6938f4859e59a966bc",
+    "mtime": 1786452978.1694124,
+    "ast_hash": "ad2999c3a6ca0534fd99f1b74de429f2",
     "semantic_hash": ""
   },
   "docs/reports/archive/README.md": {
@@ -2612,6 +2612,16 @@
   "docs/reports/review/review-spec-f6-ux-20260807.md": {
     "mtime": 1786143004.377178,
     "ast_hash": "115dfaa60f072cae6c55af1bf9005b71",
+    "semantic_hash": ""
+  },
+  "tests/e2e/test_td_filtros.py": {
+    "mtime": 1786452271.017207,
+    "ast_hash": "bcd77a31a112a195f6d349ebbab0e20d",
+    "semantic_hash": ""
+  },
+  "frontend/e2e/filtros.spec.ts": {
+    "mtime": 1786452614.8874636,
+    "ast_hash": "903f46d2cbbecb8e5f047d34afbe183f",
     "semantic_hash": ""
   }
 }

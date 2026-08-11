@@ -30,8 +30,8 @@
     "semantic_hash": "f453cbfefb1b697a270c6ad5d1ff28cf"
   },
   "frontend/package.json": {
-    "mtime": 1786398876.8481464,
-    "ast_hash": "a480366db6f44836b102cf9c809b87e4",
+    "mtime": 1786449057.1455805,
+    "ast_hash": "7e61507c8ec4274904570c194a4101e8",
     "semantic_hash": ""
   },
   "frontend/playwright.config.ts": {
@@ -125,8 +125,8 @@
     "semantic_hash": "1d4e9037f59cc34a03a8e875105de5a4"
   },
   "frontend/src/features/flows/FlowEditorPage.tsx": {
-    "mtime": 1786398876.8921454,
-    "ast_hash": "906237cd3f1bb31cba71e8ca734954dc",
+    "mtime": 1786449717.6551723,
+    "ast_hash": "d9f63f2931700eeec57909acd9c2add0",
     "semantic_hash": ""
   },
   "frontend/src/features/flows/FlowPalette.tsx": {
@@ -165,8 +165,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/flows/graph.ts": {
-    "mtime": 1786410914.9626892,
-    "ast_hash": "87bff93810713afb5308b80feeb2d10c",
+    "mtime": 1786449259.1559298,
+    "ast_hash": "44c9fa2c5ddec9925db6898a4f9afa02",
     "semantic_hash": ""
   },
   "frontend/src/features/flows/nodes/BlocoChapa.tsx": {
@@ -175,13 +175,13 @@
     "semantic_hash": ""
   },
   "frontend/src/features/flows/nodes/contexto.ts": {
-    "mtime": 1785874485.0924082,
-    "ast_hash": "466a5b39b9afed63526f70e49e035b26",
-    "semantic_hash": "466a5b39b9afed63526f70e49e035b26"
+    "mtime": 1786449163.4986024,
+    "ast_hash": "8858de2e88f230c4661f4a93bb404ea2",
+    "semantic_hash": ""
   },
   "frontend/src/features/flows/nodes/index.tsx": {
-    "mtime": 1786410915.082686,
-    "ast_hash": "974e44c6db6a8aefbe38997c5625bceb",
+    "mtime": 1786449276.5714438,
+    "ast_hash": "f9db38825022680f8e18977deee8e3f0",
     "semantic_hash": ""
   },
   "frontend/src/features/flows/useFlowStatus.check.ts": {
@@ -305,8 +305,8 @@
     "semantic_hash": "07772b7f51b56de751985d12811565aa"
   },
   "packages/ottima-core/src/ottima_core/bus.py": {
-    "mtime": 1786441305.8241143,
-    "ast_hash": "b55d2424114cf6e69e707577f677d1f3",
+    "mtime": 1786447907.5510528,
+    "ast_hash": "fe12dbc48e32404fa2ee07ded548fce1",
     "semantic_hash": ""
   },
   "packages/ottima-core/src/ottima_core/certs.py": {
@@ -430,8 +430,8 @@
     "semantic_hash": "fa0edccd8a030dbdfe52efd3b20e8e15"
   },
   "packages/ottima-core/tests/test_bus_events.py": {
-    "mtime": 1786441305.8281143,
-    "ast_hash": "a682ab0c8d3e9323f66269814792ddbb",
+    "mtime": 1786447907.5670524,
+    "ast_hash": "390f20d48ddaa231dc124c1178f5645d",
     "semantic_hash": ""
   },
   "packages/ottima-core/tests/test_certs.py": {
@@ -970,8 +970,8 @@
     "semantic_hash": "d3e4c6e88ec43c3ff804335dcf63ed98"
   },
   "CLAUDE.md": {
-    "mtime": 1786441376.078175,
-    "ast_hash": "9043bd1173de16461881045b57eff3cb",
+    "mtime": 1786447907.5230536,
+    "ast_hash": "29901792e1beea8ad9f6987112583d70",
     "semantic_hash": ""
   },
   "DESIGN.md": {
@@ -1000,8 +1000,8 @@
     "semantic_hash": ""
   },
   "docs/PRD.md": {
-    "mtime": 1786441343.003088,
-    "ast_hash": "61291dad73b08343d64debcac50da0e3",
+    "mtime": 1786449701.7516139,
+    "ast_hash": "d2b3fecad3d229a77451f5511505455e",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -1510,8 +1510,8 @@
     "semantic_hash": ""
   },
   "frontend/src/lib/contracts.gen.ts": {
-    "mtime": 1786440994.5007293,
-    "ast_hash": "e9d43118a1148517ddd427eaa25f644c",
+    "mtime": 1786447907.5390532,
+    "ast_hash": "2066fedd42c04a32ff3b445692bb81f1",
     "semantic_hash": ""
   },
   "packages/ottima-core/src/ottima_core/contracts_export.py": {
@@ -1595,8 +1595,8 @@
     "semantic_hash": ""
   },
   "services/flow-runtime/src/ottima_flow_runtime/blocks/mpc.py": {
-    "mtime": 1786441305.8281143,
-    "ast_hash": "0feb12c470f667c939d47a85d36cbeed",
+    "mtime": 1786447907.5670524,
+    "ast_hash": "c9d2ea5b5e34d3ac2ec6835d07518422",
     "semantic_hash": ""
   },
   "services/flow-runtime/src/ottima_flow_runtime/definition.py": {
@@ -1630,18 +1630,18 @@
     "semantic_hash": ""
   },
   "services/flow-runtime/src/ottima_flow_runtime/mpc/worker.py": {
-    "mtime": 1786441305.8281143,
-    "ast_hash": "78d6d886ebb35e9a25741d96a0c672bc",
+    "mtime": 1786450917.970126,
+    "ast_hash": "fe34150b1512af897ab96bcd49720418",
     "semantic_hash": ""
   },
   "services/flow-runtime/src/ottima_flow_runtime/mpc_arming.py": {
-    "mtime": 1785974809.78527,
-    "ast_hash": "76d56d359b9f08247b3dad8549aba8cb",
-    "semantic_hash": "76d56d359b9f08247b3dad8549aba8cb"
+    "mtime": 1786447907.6150508,
+    "ast_hash": "a2bc42922df4f9e905b8b71f8c1a6ed5",
+    "semantic_hash": ""
   },
   "services/flow-runtime/src/ottima_flow_runtime/supervisor_mpc.py": {
-    "mtime": 1786376870.0855303,
-    "ast_hash": "49726efa9d312ab13d30bc29d32b2b3e",
+    "mtime": 1786447907.6630495,
+    "ast_hash": "781e0c88e2bdd4e4165cfa039daf99dd",
     "semantic_hash": ""
   },
   "services/flow-runtime/tests/runtime_test_helpers.py": {
@@ -1660,13 +1660,13 @@
     "semantic_hash": "15cc7f0495ca37cac0ed157ff9b751b0"
   },
   "services/flow-runtime/tests/test_mpc_arming.py": {
-    "mtime": 1785974809.78527,
-    "ast_hash": "c7c6b204ae4473157a9abf20d388998d",
-    "semantic_hash": "c7c6b204ae4473157a9abf20d388998d"
+    "mtime": 1786447907.6870487,
+    "ast_hash": "f852424cce48b25dc301ab90f87d7996",
+    "semantic_hash": ""
   },
   "services/flow-runtime/tests/test_mpc_block.py": {
-    "mtime": 1786375863.6068552,
-    "ast_hash": "e579b00f89daa7d9f3b5ed1b8213acda",
+    "mtime": 1786447907.711048,
+    "ast_hash": "4e8f4ceba716efa32a4199c4d5deba68",
     "semantic_hash": ""
   },
   "services/flow-runtime/tests/test_mpc_builder.py": {
@@ -1735,8 +1735,8 @@
     "semantic_hash": "877cf65e9857eefaff3ac79776dcdaef"
   },
   "docs/specs/F5-operacao.md": {
-    "mtime": 1786276127.8706,
-    "ast_hash": "c8b5cd61eed7948f7685294df34563ad",
+    "mtime": 1786448421.551646,
+    "ast_hash": "c1d30672b3a149267599b7e9427b5547",
     "semantic_hash": ""
   },
   "docs/plans/F5a-operacao-dados.md": {
@@ -1765,8 +1765,8 @@
     "semantic_hash": ""
   },
   "frontend/src/app/HomePage.check.ts": {
-    "mtime": 1786113385.7057984,
-    "ast_hash": "a30ab08ad932299ac5a94f673a0b56e6",
+    "mtime": 1786449027.4304142,
+    "ast_hash": "cebf78b190c88a69ed38c4d6486617a8",
     "semantic_hash": ""
   },
   "frontend/src/app/alarmes.check.ts": {
@@ -1810,8 +1810,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/events/eventos.check.ts": {
-    "mtime": 1786113385.709798,
-    "ast_hash": "fa4f2cc28eb66bf8e2251ed40ef2303c",
+    "mtime": 1786449027.5264115,
+    "ast_hash": "cb5ff00dfd9053d6d9acb72eeab1043d",
     "semantic_hash": ""
   },
   "frontend/src/features/events/eventos.ts": {
@@ -1850,8 +1850,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/operate/TrendOperacao.tsx": {
-    "mtime": 1786398876.9961424,
-    "ast_hash": "d22ee2ae8b0774281b72a2936af6fa49",
+    "mtime": 1786450386.4035327,
+    "ast_hash": "d79312d1d15fcaa368f362edbf6c1150",
     "semantic_hash": ""
   },
   "frontend/src/features/operate/clamp.check.ts": {
@@ -1865,8 +1865,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/operate/pendencia.check.ts": {
-    "mtime": 1786440994.5007293,
-    "ast_hash": "749444fa1d3a12eba6803dc52e6154a4",
+    "mtime": 1786449027.650408,
+    "ast_hash": "844e7a85b40eba3aaf6523e88f8eca50",
     "semantic_hash": ""
   },
   "frontend/src/features/operate/pendencia.ts": {
@@ -1875,8 +1875,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/operate/trendOperacao.check.ts": {
-    "mtime": 1786398876.9961424,
-    "ast_hash": "d64ed57c5452c823af7d86a26b1e802f",
+    "mtime": 1786449027.6904068,
+    "ast_hash": "4388b264f2fcd492b9ec9c87122342af",
     "semantic_hash": ""
   },
   "frontend/src/features/operate/trendOperacao.ts": {
@@ -1955,8 +1955,8 @@
     "semantic_hash": ""
   },
   "docs/specs/F6-portabilidade-hardening.md": {
-    "mtime": 1786145028.1102612,
-    "ast_hash": "1f8d0fc76a589af29f7c46c8b6442b29",
+    "mtime": 1786448421.551646,
+    "ast_hash": "588bead4e948185dbcc7308796a3b0c1",
     "semantic_hash": ""
   },
   "docs/plans/F6a-portabilidade-dados.md": {
@@ -1970,8 +1970,8 @@
     "semantic_hash": ""
   },
   "docs/plans/F6c-suite-e-guia.md": {
-    "mtime": 1786148981.5221963,
-    "ast_hash": "bd7cc41bdd7bc7d1fc2c2e0be053b92c",
+    "mtime": 1786448421.551646,
+    "ast_hash": "714ec6b0717cccbe04ecd91b81e7ef3b",
     "semantic_hash": ""
   },
   "docs/plans/tests-e2e-f6.md": {
@@ -2035,8 +2035,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/operate/faceplateVariavel.check.ts": {
-    "mtime": 1786276127.9145987,
-    "ast_hash": "b7163543c9e218440b042d4e05115d63",
+    "mtime": 1786449027.5944095,
+    "ast_hash": "945b29b5d23b4b1a60cb64a8ae34f081",
     "semantic_hash": ""
   },
   "frontend/src/features/operate/gradeVariaveis.ts": {
@@ -2220,8 +2220,8 @@
     "semantic_hash": ""
   },
   "frontend/e2e/operate-trend.spec.ts": {
-    "mtime": 1786384273.0703807,
-    "ast_hash": "ea70461d97a88683d42d8a441c3ef63e",
+    "mtime": 1786450224.7674289,
+    "ast_hash": "41e7492ac0e027c49d1c11381ab655c0",
     "semantic_hash": ""
   },
   "frontend/e2e/trend-eng.spec.ts": {
@@ -2245,8 +2245,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/operate/LegendaOperacao.tsx": {
-    "mtime": 1786398876.9761431,
-    "ast_hash": "24fcd0eba944e03ae2a494abced94d47",
+    "mtime": 1786450386.355534,
+    "ast_hash": "ca226d9883874c69cd69aa420c3a5aae",
     "semantic_hash": ""
   },
   "frontend/src/features/operate/RelogioAgora.tsx": {
@@ -2380,8 +2380,8 @@
     "semantic_hash": ""
   },
   "frontend/src/features/flows/filtros.check.ts": {
-    "mtime": 1786410914.9586892,
-    "ast_hash": "dbb1ecd9b11bf63b5d704a39a6cb2843",
+    "mtime": 1786449290.9110436,
+    "ast_hash": "418d3501e0bfa97627495ac6ad59f170",
     "semantic_hash": ""
   },
   "frontend/src/lib/theme.ts": {
@@ -2450,8 +2450,8 @@
     "semantic_hash": ""
   },
   "services/flow-runtime/src/ottima_flow_runtime/target_calculation/ssto.py": {
-    "mtime": 1786441305.832114,
-    "ast_hash": "526cf9923335086cde97be47cede805c",
+    "mtime": 1786450917.970126,
+    "ast_hash": "b133177f97ad8f5116242508e8136d8c",
     "semantic_hash": ""
   },
   "services/flow-runtime/tests/test_definition_filtros.py": {
@@ -2470,8 +2470,8 @@
     "semantic_hash": ""
   },
   "services/flow-runtime/tests/test_ssto.py": {
-    "mtime": 1786441305.832114,
-    "ast_hash": "1c86bd9cd2fe370c53d43dbcb5959869",
+    "mtime": 1786452058.1874378,
+    "ast_hash": "2e9bf15a7ff7b324814611e379a406d4",
     "semantic_hash": ""
   },
   "services/flow-runtime/tests/test_ssto_block.py": {
@@ -2485,8 +2485,8 @@
     "semantic_hash": ""
   },
   "services/flow-runtime/tests/test_ssto_integration.py": {
-    "mtime": 1786441305.836114,
-    "ast_hash": "5e664a980f30f9b6410f9d0e0ce6ff56",
+    "mtime": 1786449578.6830323,
+    "ast_hash": "4afea661774ee312885db73ff81d3b96",
     "semantic_hash": ""
   },
   "services/flow-runtime/tests/test_ssto_model.py": {
@@ -2512,6 +2512,116 @@
   "docs/adr/ADR-027-ssto-alvos-regime-permanente-lp.md": {
     "mtime": 1786441305.8241143,
     "ast_hash": "9cf5e07c32dbf7c8199b676e506cb4d7",
+    "semantic_hash": ""
+  },
+  "services/flow-runtime/src/ottima_flow_runtime/mpc/availability.py": {
+    "mtime": 1786447907.583052,
+    "ast_hash": "fbe82b9127516fc195986e009d6475a6",
+    "semantic_hash": ""
+  },
+  "services/flow-runtime/tests/test_mpc_availability.py": {
+    "mtime": 1786447907.711048,
+    "ast_hash": "dd69eb32b341743816af4f8a156452d2",
+    "semantic_hash": ""
+  },
+  "services/flow-runtime/tests/test_mpc_frozen_mv.py": {
+    "mtime": 1786447907.7430468,
+    "ast_hash": "91f2e6f79737222bb363c5d3cf26053a",
+    "semantic_hash": ""
+  },
+  "services/flow-runtime/tests/test_mpc_mv_status.py": {
+    "mtime": 1786447907.7670462,
+    "ast_hash": "96aaf3888e7ee1b55c0832ad31597e06",
+    "semantic_hash": ""
+  },
+  "services/flow-runtime/tests/test_mpc_shed_degradado.py": {
+    "mtime": 1786447907.771046,
+    "ast_hash": "985dbb1bf61b559bf9d51132b135dda4",
+    "semantic_hash": ""
+  },
+  "docs/adr/ADR-028-disponibilidade-de-mv-por-ciclo.md": {
+    "mtime": 1786447907.5390532,
+    "ast_hash": "c22f5aa16096411586d353f9418f6b76",
+    "semantic_hash": ""
+  },
+  "docs/reports/_registry-template.md": {
+    "mtime": 1786448439.087138,
+    "ast_hash": "87b95bb8f59c2dbb7b21ce65f93ff2f6",
+    "semantic_hash": ""
+  },
+  "docs/reports/_registry.md": {
+    "mtime": 1786144100.933555,
+    "ast_hash": "d2abcfe5bd2840d030a31bf6fe5c26d4",
+    "semantic_hash": ""
+  },
+  "docs/reports/_tech-debt.md": {
+    "mtime": 1786452978.1694124,
+    "ast_hash": "ad2999c3a6ca0534fd99f1b74de429f2",
+    "semantic_hash": ""
+  },
+  "docs/reports/archive/README.md": {
+    "mtime": 1776697182.0,
+    "ast_hash": "c1ccc473485f3767afe46f24e7666566",
+    "semantic_hash": ""
+  },
+  "docs/reports/archive/_registry-archive-20251216.md": {
+    "mtime": 1776697182.0,
+    "ast_hash": "4862a6a3c1ecc641699a5003f3f27e26",
+    "semantic_hash": ""
+  },
+  "docs/reports/review/review-spec-f5-operacao-20260806.md": {
+    "mtime": 1786021524.9261088,
+    "ast_hash": "09825c83ddbf815255c1d62f6c116df3",
+    "semantic_hash": ""
+  },
+  "docs/reports/review/review-spec-f6-api-20260807.md": {
+    "mtime": 1786143281.6368902,
+    "ast_hash": "bf5a964704c8cd85f52822c4406539fa",
+    "semantic_hash": ""
+  },
+  "docs/reports/review/review-spec-f6-consolidado-20260807.md": {
+    "mtime": 1786144063.198611,
+    "ast_hash": "f29dbb0867d3aae07d5f2758cfc30bb6",
+    "semantic_hash": ""
+  },
+  "docs/reports/review/review-spec-f6-fatos-20260807.md": {
+    "mtime": 1786143945.9658995,
+    "ast_hash": "fbed343e5d0ede7a2a95e3ed0aae69a7",
+    "semantic_hash": ""
+  },
+  "docs/reports/review/review-spec-f6-frontend-20260807.md": {
+    "mtime": 1786143037.4761696,
+    "ast_hash": "f39ae9e216b46e62a3b1fccc6369bd04",
+    "semantic_hash": ""
+  },
+  "docs/reports/review/review-spec-f6-normativa-20260807.md": {
+    "mtime": 1786143377.3740962,
+    "ast_hash": "878a3143e062d6b63824f5c7793356da",
+    "semantic_hash": ""
+  },
+  "docs/reports/review/review-spec-f6-seguranca-20260807.md": {
+    "mtime": 1786143374.0941913,
+    "ast_hash": "9fa14adb389f37be282d1f82356dfe6a",
+    "semantic_hash": ""
+  },
+  "docs/reports/review/review-spec-f6-testes-20260807.md": {
+    "mtime": 1786143807.7497926,
+    "ast_hash": "ad23489e577d60ef13a930ba1c33365c",
+    "semantic_hash": ""
+  },
+  "docs/reports/review/review-spec-f6-ux-20260807.md": {
+    "mtime": 1786143004.377178,
+    "ast_hash": "115dfaa60f072cae6c55af1bf9005b71",
+    "semantic_hash": ""
+  },
+  "tests/e2e/test_td_filtros.py": {
+    "mtime": 1786452271.017207,
+    "ast_hash": "bcd77a31a112a195f6d349ebbab0e20d",
+    "semantic_hash": ""
+  },
+  "frontend/e2e/filtros.spec.ts": {
+    "mtime": 1786452614.8874636,
+    "ast_hash": "903f46d2cbbecb8e5f047d34afbe183f",
     "semantic_hash": ""
   }
 }
