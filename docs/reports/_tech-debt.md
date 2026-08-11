@@ -28,24 +28,6 @@ _Debt that causes recurring problems or bugs._
   - **Created:** 2025-01-01
 -->
 
-- [ ] **TD-009**: `uv run pytest` do workspace sem veredito — 13 failed + 24 errors na última execução, atribuídos a contenção de recurso e não confirmados
-  - **Impact:** High - o gate de qualidade do backend está sem resultado válido; qualquer merge seguinte herda a dúvida
-  - **Detalhe:** os 24 errors são `redis.exceptions.ConnectionError: Connection closed by server` no *setup* das fixtures (`test_script.py`, `test_snapshot.py`, `test_supervisor.py`); as 13 falhas são `await_until` estourando 10 s em `test_mpc_host.py` (5), `test_mpc_worker.py` (3), `test_supervisor_mpc.py` (2), `test_mpc_retomada.py`, `test_mpc_transplante.py` e `recorder/test_backpressure.py`. Durante a execução havia outra suíte concorrente rodando no worktree `otimizador-linear` (180% de CPU), 54 containers no ar e 24 de 31 GB de RAM ocupados. Nenhum dos testes que falharam toca o diff dos blocos de filtro, e o que ele toca passou (core flowgraph, blocos de runtime, `definition`, contratos, TFS e `mpc_discretize`)
-  - **Ação:** rodar `uv run pytest` numa máquina ociosa, sem suíte concorrente e sem containers órfãos de testcontainers. Se algum dos 13 falhar sozinho, é regressão real e não contenção
-  - **Source:** sessão ADR-026 (blocos de filtro) — execução pós-merge do commit `197dfa1`
-  - **Effort:** 1 h (execução) + investigação se reproduzir
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-10
-
-- [ ] **TD-014**: SSTO otimiza alvos para MVs que o ADR-028 congela — alvo de regime inalcançável no ciclo degradado
-  - **Impact:** High - o SP entregue ao MPC dinâmico pressupõe movimento de uma MV que não vai se mover; as MVs saudáveis são empurradas para compensar um alvo impossível
-  - **Detalhe:** as duas camadas nasceram em branches paralelas e se encontraram no merge do ADR-028 (`a696616`). O ADR-028 classifica cada MV por ciclo e **congela** (`dumax = 0` no horizonte) a que estiver `local_override`/`bad_quality`/`out_of_service`, além de suprimir a escrita no PID dela. O SSTO (ADR-027, `target_calculation/`) roda antes do `make_step` e resolve o LP com **todas** as MVs como variáveis de decisão: `SstoInput` (`u`, `d`, `d_prev`, `bias`, `delta_mv_prev`) não tem noção de disponibilidade. Resultado: `delta_mv` pode conter movimento para uma MV congelada, e o `cv_target` derivado dele vira um SP que o controlador dinâmico não alcança. Não é inseguro — o limite de MV é duro em todo caminho de código e a congelada de fato não se move — mas é subótimo e pode oscilar (o LP recalcula o mesmo alvo impossível a cada ciclo, e o detuning anti-flipping do ADR-027 §8 compara contra um `delta_mv_prev` que nunca se realizou)
-  - **Ação:** passar o conjunto congelado ao `SstoInput` e fixar `ΔMV = 0` para essas MVs no LP (é "excluir MV elegível", não mudar a formulação). Decidir também se o `ssto_delta_prev` do detuning deve ignorar as congeladas. Provável emenda ao ADR-027 ou ao ADR-028 registrando a precedência entre as camadas
-  - **Source:** sessão ADR-028 (disponibilidade de MV por ciclo) — achado durante a resolução do merge de `mpc/worker.py`; deliberadamente NÃO corrigido ali por estar fora do escopo aprovado
-  - **Effort:** 4 h (implementação + testes) + revisão do ADR
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-11
-
 ## Medium (Slows Development)
 
 _Debt that makes development harder but doesn't block._
@@ -58,15 +40,6 @@ _Debt that makes development harder but doesn't block._
   - **Created:** 2025-01-01
 -->
 
-- [ ] **TD-010**: Checks unitários do frontend (`*.check.ts`) ficam fora do typecheck do build e acumularam 5 erros de TS reais
-  - **Impact:** Medium - `tsconfig.build.json` exclui `src/**/*.check.ts`, então `npm run build` fica verde com os checks quebrados no tipo; o Playwright transpila sem checar e também não acusa
-  - **Detalhe:** `npx tsc --noEmit -p tsconfig.json` acusa 5 erros de `horizons` ausente em `HomePage.check.ts` (3), `eventos.check.ts` (1) e `faceplateVariavel.check.ts` (1) — as fixtures de MPC desses arquivos não acompanharam o campo novo do tipo gerado do OpenAPI. Pré-existente à F6; confirmado por `git stash` contra a árvore limpa
-  - **Ação:** corrigir as fixtures e decidir se o typecheck dos `*.check.ts` entra no comando de build ou em passo próprio
-  - **Source:** sessão ADR-026 (blocos de filtro) — verificação de build
-  - **Effort:** 2 h
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-10
-
 ## Low (Track for Later)
 
 _Known issues not currently prioritized._
@@ -78,31 +51,6 @@ _Known issues not currently prioritized._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
-
-- [ ] **TD-011**: Nó do Filtro 1ª ordem no canvas só rotula "passagem direta" com `tau = 0`, mas o runtime degrada em `tau < Ts/10`
-  - **Impact:** Low - só rótulo; o filtro se comporta corretamente. Com `Ts = 1 s` e `tau = 0,05`, o bloco roda como passagem direta e o nó exibe "0,05 s" sem dizer que o filtro está desligado. O texto de apoio do modal já avisa do limiar
-  - **Ação:** injetar o `Ts` do flow no contexto dos nós (`nodes/contexto.ts`, como já se faz com as tags) e comparar contra `Ts/DIRECT_PASS_RATIO` em `NoFiltroPrimeiraOrdem`
-  - **Source:** sessão ADR-026 — `code-reviewer`, achado LOW
-  - **Effort:** 2 h
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-10
-
-- [ ] **TD-012**: Blocos de filtro sem cenário no gate E2E (camadas L2 e L3)
-  - **Impact:** Low - cobertos por unidade e integração (39 casos de contrato/validação, 28 de runtime, 6 de instanciação/hot-swap, 17 checks de frontend); falta a prova ponta a ponta contra o stack
-  - **Detalhe:** escopo declarado como fora no plano da feature — os 41 cenários da L2 não conhecem os blocos novos, e o roteiro de browser da L3 também não
-  - **Ação:** um cenário de L2 com flow `opc_read → kalman → opc_write` deployado, e um passo de L3 configurando os dois filtros pelo modal
-  - **Source:** sessão ADR-026 — escopo declarado no plano
-  - **Effort:** 4 h
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-10
-
-- [ ] **TD-013**: §5.13 do PRD (blocos de filtro) fica fora do agrupamento temático dos blocos
-  - **Impact:** Low - cosmético. As seções §5.6 a §5.10 descrevem blocos; a §5.13 caiu depois de "Histórico e eventos" porque mover exigiria renumerar §5.9–§5.12, que as specs de fase podem citar. A numeração dos requisitos (RF-53x) já posiciona os filtros entre TFS (RF-52x) e MPC (RF-60x)
-  - **Ação:** ao renumerar, varrer `docs/specs/` e `docs/plans/` atrás de citações de "§5.9".."§5.12" antes de mexer
-  - **Source:** sessão ADR-026 — decisão consciente de evitar renumeração
-  - **Effort:** 1 h
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-10
 
 ---
 
@@ -149,6 +97,31 @@ _Completed tech debt items. Keep for 90 days then archive._
   - **Resolved:** 2026-08-10
   - **Resolution:** Gate por CAUSA, não por efeito. O E2E foi reescrito: acompanha `mpc.state.status.overruns` durante a rodada, dá `pytest.skip` explícito se `overruns == 0` ("o solve coube no orçamento nesta máquina") e, quando houve estouro, assevera o CONTRATO (evento `mpc_overrun` presente; `mv_pid` sem avanço nos quadros de estouro) — nunca mais "MV congelada a rodada inteira". Junto entrou um teste determinístico no workspace (`services/flow-runtime/tests/test_td_overrun_gate.py`) que FORÇA o overrun com o worker `mpc_host_slow_solve_worker` (solve de 0,6 s contra orçamento de 0,5 s).
   - **Prova:** o teste determinístico assevera quatro coisas sobre valores observados: o contador incrementa e nunca regride; o evento `mpc_overrun` sai; a MV publica um único valor em toda a janela em AUTO (sem `SolveResult` "ok", `_plan` nunca é aplicado e a saída segura `_mv_last`); e o número de EVENTOS é menor que o número de estouros — que é exatamente o rearme de `_overrun_reported`, que só volta a armar quando um resultado não-overrun chega.
+- [x] **TD-009**: `uv run pytest` do workspace sem veredito — 13 failed + 24 errors atribuídos a contenção de recurso, não confirmados
+  - **Resolved:** 2026-08-11
+  - **Resolution:** Confirmado: era contenção, não regressão real. `uv run pytest` do workspace inteiro, isolado (sem suíte concorrente rodando em paralelo), terminou limpo.
+  - **Prova:** `1269 passed, 0 failed, 0 errors, 67 deselected in 1200.48s (0:20:00)` — nenhum dos 13 testes antes falhos, nem os 24 com erro de fixture do Redis, falhou sozinho numa máquina sem contenção.
+- [x] **TD-010**: Checks unitários do frontend (`*.check.ts`) ficam fora do typecheck do build e acumularam erros de TS reais
+  - **Resolved:** 2026-08-11
+  - **Resolution:** Drift real: entre o registro do débito e agora, `MpcVarState` ganhou `status` (ADR-028), abrindo mais 3 erros (8 no total, não os 5 originais) em `pendencia.check.ts` (2) e `trendOperacao.check.ts` (1), além dos 5 já conhecidos em `HomePage.check.ts` (3), `eventos.check.ts` (1) e `faceplateVariavel.check.ts` (1) — todos por `horizons`/`status` ausente nas fixtures. Corrigidas as 6 fixtures. Decisão do "corrigir e decidir": `*.check.ts` ganha comando PRÓPRIO — `npm run typecheck` (`tsc --noEmit -p tsconfig.json`, cobre todo `src/`) — em vez de entrar no `build`, que continua excluindo `*.check.ts` de propósito (algumas fixtures usam `node:fs`; a imagem de produção roda sem `@types/node`).
+  - **Prova:** `npx tsc --noEmit -p tsconfig.json` limpo (0 erros); `npm run build` verde; suíte de unidade completa (`npm run test:unit`): 458 passed.
+- [x] **TD-011**: Nó do Filtro 1ª ordem no canvas só rotulava "passagem direta" com `tau = 0`, mas o runtime degrada em `tau < Ts/10`
+  - **Resolved:** 2026-08-11
+  - **Resolution:** `Ts` do flow entra em contexto (`ContextoTsFlow`/`useTsFlowDoEditor` em `nodes/contexto.ts`, mesmo padrão de `ContextoTags`), provido por `FlowEditorPage.tsx::ContextosDoEditor` a partir de `flow.data.ts_seconds`. Função pura `passagemDireta(tau, tsFlowSegundos)` em `graph.ts` (mesmo limiar `DIRECT_PASS_RATIO = 10` do runtime, `services/flow-runtime/.../blocks/lag.py`), consumida por `NoFiltroPrimeiraOrdem`: `tau === 0` continua "passagem direta" puro; `0 < tau < Ts/10` agora mostra `"<tau> s (passagem direta)"` em vez de esconder o desligamento atrás só do número.
+  - **Prova:** 4 testes novos de `passagemDireta` em `filtros.check.ts` (tau=0; abaixo do limiar; exatamente no limiar — continua dinâmico, mesma fronteira do runtime; bem acima). `tsc --noEmit` limpo; suíte de unidade completa: 458 passed.
+- [x] **TD-013**: §5.13 do PRD (blocos de filtro) ficava fora do agrupamento temático dos blocos
+  - **Resolved:** 2026-08-11
+  - **Resolution:** Varredura de `docs/specs/`/`docs/plans/` por citações de §5.9-§5.12: uma só, em `docs/plans/tests-e2e-f5.md`, version-pinned a "PRD.md v1.3" (já defasada da v1.7 então corrente) — deixada intocada por descrever o PRD NAQUELA versão, não um ponteiro vivo. Reordenado: §5.13 (Blocos de filtro) vira **§5.11**, logo após os demais blocos de canvas (§5.6-§5.10); Tela de operação avança para §5.12, Histórico e eventos para §5.13; §5.14 (SSTO) inalterado. Nenhum RF renumerado (RF-53x já ficava certo entre TFS/RF-52x e MPC/RF-60x). PRD avança para v1.8 com Changelog 1.8 documentando a reorganização.
+  - **Prova:** `grep '^### 5\.' docs/PRD.md` confirma numeração sequencial 5.1-5.14 sem furo nem duplicata.
+- [x] **TD-014**: SSTO otimizava alvos para MVs que o ADR-028 congela — alvo de regime inalcançável no ciclo degradado
+  - **Resolved:** 2026-08-11
+  - **Resolution:** `SstoInput` ganhou `frozen_mvs: frozenset[str] = frozenset()` (default vazio preserva bit a bit quem monta sem o campo). `SteadyStateOptimizer.solve()` clampa os limites de ΔMV da MV congelada em `(0.0, 0.0)` — mesmo mecanismo do `dumax = 0` do MPC dinâmico (`worker.py::_apply_tvp`), sem excluir a coluna nem mudar a montagem estrutural do LP. `worker.py::_run_ssto` (o hop que faltava — `SolveRequest.frozen_mvs` já vinha certo de `blocks/mpc.py::frozen_mv_ids`, só não chegava ao `SstoInput`) agora encaminha `frozen_mvs=request.frozen_mvs`. Detuning anti-flipping (`ρ‖ΔMV−ΔMV_anterior‖²`) não precisou de tratamento à parte: o limite duro já força `ΔMV≡0` da MV congelada independente do que o termo quadrático pediria.
+  - **Prova:** RED genuíno confirmado por `git stash` do fix mantendo os testes: `TypeError` (campo inexistente) + `mv_target["mv_1"] == 100.0` quando deveria ficar em `10.0` (a MV "congelada" se movia até o limite). GREEN após o fix: teste de LP com 2 MVs (a congelada fica em `delta_mv=0`, a saudável compensa sozinha até o próprio limite) + não-regressão (sem congelamento, as duas se movem) + teste de integração no worker provando o hop `SolveRequest.frozen_mvs → SstoInput.frozen_mvs`. Suíte alvo: 52 passed (`test_ssto.py`, `test_ssto_integration.py`, `test_ssto_detuning.py`, `test_mpc_frozen_mv.py`); suíte completa de `services/flow-runtime/tests/`: 438 passed.
+
+- [x] **TD-012**: Blocos de filtro sem cenário no gate E2E (camadas L2 e L3)
+  - **Resolved:** 2026-08-11
+  - **Resolution:** Um cenário L2 (`tests/e2e/test_td_filtros.py::test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta`, E2E-TD-10) deploya `opc_read -> kalman -> opc_write` contra o stack real e prova, por 8 amostras consecutivas pós-partida, que a saída do Kalman diverge da leitura bruta na MESMA varredura (filtra de verdade, não repassa) e que o valor filtrado chega à planta simulada via o mirror do opcsim, com variação ao longo do tempo (entrega viva, não escrita parada). `first_order` não ganha cenário próprio — mesmo contrato de porta única/config escalar (RF-531) e mesmo caminho de execução do motor; o Kalman é o mais rico dos dois para provar filtragem de verdade. L3 (`frontend/e2e/filtros.spec.ts`, PW-FT-01, arquivo próprio pelo mesmo critério de `filtros.check.ts`) configura os dois blocos pelo modal (`tau`/`measurement_noise`/`process_noise`) e prova round-trip via reload + `GET /api/flows/{id}.graph_json` como fonte de verdade; `tau` novo fica bem acima de `Ts/DIRECT_PASS_RATIO` (TD-011) para o cenário ficar sobre o round-trip, não sobre o rótulo de borda.
+  - **Prova:** L2: `uv run pytest -q -m e2e tests/e2e/test_td_filtros.py` → 1 passed; confirmado excluído do run default (`uv run pytest -q tests/e2e/test_td_filtros.py` → 1 deselected). L3: `npx playwright test filtros.spec.ts` → 1 passed; confirmado fora de `playwright.unit.config.ts` (`--list` não lista o arquivo).
 
 ---
 
@@ -157,10 +130,10 @@ _Completed tech debt items. Keep for 90 days then archive._
 | Category | Count | Oldest |
 |----------|-------|--------|
 | Critical | 0 | - |
-| High | 2 | 2026-08-10 |
-| Medium | 1 | 2026-08-10 |
-| Low | 3 | 2026-08-10 |
-| **Total Open** | **6** | 2026-08-10 |
+| High | 0 | - |
+| Medium | 0 | - |
+| Low | 0 | - |
+| **Total Open** | **0** | - |
 
 _Last updated: 2026-08-11_
 
