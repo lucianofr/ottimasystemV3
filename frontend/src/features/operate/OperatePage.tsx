@@ -1,12 +1,13 @@
-import { Navigate, useParams } from "react-router";
+import { Navigate, useNavigate, useParams } from "react-router";
 
 import { useAssinatura, useCanalAoVivo } from "../../app/CanalAoVivo";
 import { Card } from "../../components/ui/card";
+import { Select } from "../../components/ui/select";
 import { FaceplatePrincipal } from "./FaceplatePrincipal";
 import FaceplateVariavel from "./FaceplateVariavel";
 import { gradeDeVariaveis } from "./gradeVariaveis";
 import { TrendOperacao } from "./TrendOperacao";
-import { useMpcs } from "./useMpcs";
+import { rotuloMpc, useMpcs } from "./useMpcs";
 
 /**
  * Casca real da tela de operação (spec §7.4-1/2/3/5; RF-701/702): resolve o MPC de
@@ -21,6 +22,7 @@ import { useMpcs } from "./useMpcs";
 
 function OperacaoDoMpc({ flowId, blockId }: { flowId: number; blockId: string }) {
   const mpcs = useMpcs();
+  const navigate = useNavigate();
   useAssinatura({ flow_status: [flowId], mpc_state: [`${String(flowId)}/${blockId}`] });
   const canal = useCanalAoVivo();
 
@@ -45,6 +47,7 @@ function OperacaoDoMpc({ flowId, blockId }: { flowId: number; blockId: string })
   // MPC ausente na revalidação (flow excluído / projeto trocado, §7.4-2): volta ao seletor
   // com aviso — nunca fica preso numa tela de operação sem bloco nenhum atrás dela.
   const mpc = mpcs.data.find((m) => m.flow_id === flowId && m.block_id === blockId);
+  const indiceAtual = mpcs.data.findIndex((m) => m.flow_id === flowId && m.block_id === blockId);
   if (mpc === undefined) {
     return (
       <Navigate
@@ -58,6 +61,26 @@ function OperacaoDoMpc({ flowId, blockId }: { flowId: number; blockId: string })
 
   return (
     <div data-testid="operate-page">
+      {mpcs.data.length > 1 && (
+        <label className="mb-4 flex items-center gap-2">
+          <span className="plaqueta text-xs text-fg-muted">MPC</span>
+          <Select
+            data-testid="operate-mpc-select"
+            className="w-72"
+            value={String(indiceAtual)}
+            onChange={(evento) => {
+              const escolhido = mpcs.data[Number(evento.target.value)];
+              navigate(`/operacao/${String(escolhido.flow_id)}/${escolhido.block_id}`);
+            }}
+          >
+            {mpcs.data.map((item, indice) => (
+              <option key={`${String(item.flow_id)}/${item.block_id}`} value={indice}>
+                {rotuloMpc(item)}
+              </option>
+            ))}
+          </Select>
+        </label>
+      )}
       <FaceplatePrincipal
         mpc={mpc}
         flowStatus={canal.flowStatus.get(flowId)}
