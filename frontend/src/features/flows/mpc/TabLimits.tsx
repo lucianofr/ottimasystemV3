@@ -10,7 +10,7 @@ function LinhaResumo({ id, rotulo, colunas }: { id: string; rotulo: string; colu
   return (
     <div
       data-var-id={id}
-      className="grid grid-cols-[1fr_repeat(4,auto)] items-center gap-3 rounded-panel border border-hairline bg-well p-2"
+      className="grid grid-cols-[1fr_repeat(4,auto)] items-center gap-3 rounded-sm border border-border bg-well p-2"
     >
       <span className="text-xs text-fg">{rotulo}</span>
       {colunas.map(([campo, valor]) => (

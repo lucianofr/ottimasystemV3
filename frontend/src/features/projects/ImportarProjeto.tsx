@@ -238,7 +238,7 @@ export function ImportarProjeto({ onFechar }: Props) {
                     <li
                       key={i}
                       data-testid="import-script-item"
-                      className="rounded-panel border border-hairline bg-well p-2"
+                      className="rounded-sm border border-border bg-well p-2"
                     >
                       <p className="plaqueta text-xs text-fg-muted">
                         {bloco.flow} · {bloco.label}

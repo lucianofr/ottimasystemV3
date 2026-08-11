@@ -65,12 +65,12 @@ function OperacaoDoMpc({ flowId, blockId }: { flowId: number; blockId: string })
         flowId={flowId}
         blockId={blockId}
       />
-      <div data-testid="operate-variaveis" className="mt-4 flex flex-wrap gap-3">
+      <div data-testid="operate-variaveis" className="mt-6 flex flex-wrap gap-4">
         {gradeDeVariaveis(mpc, mpcState, flowId, blockId).map(({ key, ...props }) => (
           <FaceplateVariavel key={key} {...props} />
         ))}
       </div>
-      <div className="mt-4">
+      <div className="mt-6">
         <TrendOperacao flowId={flowId} blockId={blockId} mpc={mpc} mpcState={mpcState} />
       </div>
     </div>

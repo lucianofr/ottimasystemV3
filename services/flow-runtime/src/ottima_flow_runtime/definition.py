@@ -31,6 +31,8 @@ from ottima_core.bus import CHANNEL_OPC_WRITES, MpcState, OpcWrite, channel_mpc_
 from ottima_core.flowgraph import FlowGraph, FlowNode, MpcConfig, TagRef
 
 from .blocks.base import Block
+from .blocks.first_order import FirstOrderBlock
+from .blocks.kalman import KalmanBlock
 from .blocks.mpc import MpcBlock
 from .blocks.opc_read import OpcReadBlock
 from .blocks.opc_write import OpcWriteBlock
@@ -219,6 +221,14 @@ def _instantiate(
             write_opc=write_opc,
             worker_target=mpc_worker_target,
             escreve_sem_watchdog=_mpc_escreve_sem_watchdog(node, graph, tags, conns_sem_watchdog),
+        )
+    if node.type == "first_order":
+        return FirstOrderBlock(node.id, tau=config.tau, ts_seconds=ts_seconds)
+    if node.type == "kalman":
+        return KalmanBlock(
+            node.id,
+            measurement_noise=config.measurement_noise,
+            process_noise=config.process_noise,
         )
     return TfsBlock(node.id, matrix=config.matrix, ts_seconds=ts_seconds)
 

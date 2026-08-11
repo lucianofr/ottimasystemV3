@@ -31,7 +31,7 @@ export interface ContratoPortaDinamica {
 
 export type ContratoPorta = ContratoPortaFixa | ContratoPortaDinamica;
 
-export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "tfs" | "mpc", ContratoPorta> = {
+export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "tfs" | "first_order" | "kalman" | "mpc", ContratoPorta> = {
   "opc_read": {
     "dynamic": false,
     "ports": [
@@ -92,6 +92,36 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "tfs" 
       },
       {
         "name": "y2",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
+  },
+  "first_order": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
+  },
+  "kalman": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
         "direction": "output",
         "type": "num"
       }
@@ -158,6 +188,27 @@ export interface MpcVarState {
   status: string | null;
 }
 
+export interface SstoRun {
+  run_id: string;
+  config_hash: string;
+  model_hash: string;
+  status: "optimal" | "relaxed" | "infeasible" | "unbounded" | "error";
+  solver: string;
+  solve_ms: number;
+  objective: number;
+  mv: Record<string, number>;
+  cv_ss: Record<string, number>;
+  bias: Record<string, number>;
+  dv: Record<string, number>;
+  costs: Record<string, number>;
+  delta_mv: Record<string, number>;
+  mv_target: Record<string, number>;
+  cv_target: Record<string, number>;
+  given_up: string[];
+  active_constraints: string[];
+  duals: Record<string, number>;
+}
+
 export interface MpcState {
   ts: string;
   modes: MpcModes;
@@ -165,4 +216,5 @@ export interface MpcState {
   vars: Record<string, MpcVarState>;
   cost: number;
   prediction: MpcPrediction;
+  ssto: SstoRun | null;
 }

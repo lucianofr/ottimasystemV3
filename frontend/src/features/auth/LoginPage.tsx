@@ -36,12 +36,17 @@ export function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center">
-      <Card className="w-full max-w-sm p-8">
-        {/* Display raro (DESIGN.md §Typography); wordmark — logo ainda não existe (PRODUCT.md) */}
-        <h1 className="text-2xl font-semibold">OttimaSystem</h1>
-        <p className="plaqueta mt-1 text-xs text-fg-muted">Console de operação APC</p>
-        <form onSubmit={onSubmit} className="mt-8 space-y-4" noValidate>
+    <main className="flex min-h-screen items-center justify-center bg-bg bg-[image:var(--gradient-mesh)] bg-fixed p-6">
+      <Card className="glass w-full max-w-md rounded-lg p-10 shadow-lg">
+        <span
+          aria-hidden="true"
+          className="mb-6 block h-1 w-14 rounded-pill bg-[image:var(--gradient-accent)]"
+        />
+        <h1 className="font-display text-3xl font-bold tracking-tight">
+          Ottima<span className="text-accent">System</span>
+        </h1>
+        <p className="plaqueta mt-2 text-xs text-fg-muted">Console de operação APC</p>
+        <form onSubmit={onSubmit} className="mt-8 space-y-5" noValidate>
           <div className="space-y-1.5">
             <Label htmlFor="username">Usuário</Label>
             <Input
@@ -70,7 +75,7 @@ export function LoginPage() {
             <p
               role="alert"
               data-testid="login-error"
-              className="flex items-center gap-2 text-sm text-alarm"
+              className="flex items-center gap-2 rounded-md bg-alarm-soft px-3 py-2 text-sm text-alarm"
             >
               <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 1 15 14H1L8 1Zm-.75 5v4h1.5V6h-1.5Zm0 5.5V13h1.5v-1.5h-1.5Z" />

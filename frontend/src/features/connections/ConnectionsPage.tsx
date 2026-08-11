@@ -64,7 +64,7 @@ function CelulaWatchdog({ conexao }: { conexao: ConnectionOut }) {
     return (
       <span
         data-testid="conn-somente-leitura"
-        className="plaqueta inline-flex items-center rounded-[2px] border border-hairline bg-field px-1.5 py-0.5 text-[10px] text-fg-muted"
+        className="plaqueta inline-flex items-center rounded-[2px] border border-border bg-bg px-1.5 py-0.5 text-[10px] text-fg-muted"
       >
         Somente leitura (sem watchdog)
       </span>
@@ -317,18 +317,18 @@ export function ConnectionsPage() {
         </p>
       )}
 
-      {/* Tabela em chapa: bg-panel, hairline, cabeçalho em plaqueta (DESIGN.md §Elevation) */}
+      {/* Tabela em chapa: bg-surface, hairline, cabeçalho em plaqueta (DESIGN.md §Elevation) */}
       <Card className="overflow-hidden">
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-hairline">
+            <tr className="border-b border-border bg-surface-2">
               {COLUNAS.map((coluna) => (
-                <th key={coluna} className="plaqueta px-3 py-2 text-left text-xs text-fg-muted">
+                <th key={coluna} className="plaqueta px-4 py-3 text-left text-xs text-fg-muted">
                   {coluna}
                 </th>
               ))}
               {podeMutar && (
-                <th className="plaqueta px-3 py-2 text-left text-xs text-fg-muted">
+                <th className="plaqueta px-4 py-3 text-left text-xs text-fg-muted">
                   Certificado do servidor
                 </th>
               )}
@@ -373,7 +373,7 @@ export function ConnectionsPage() {
               </tr>
             )}
             {linhas.map((conexao) => (
-              <tr key={conexao.id} data-testid="conn-row" className="border-b border-hairline">
+              <tr key={conexao.id} data-testid="conn-row" className="border-b border-border transition-colors duration-[var(--duration-fast)] hover:bg-surface-2">
                 <td className="px-3 py-2">{conexao.name}</td>
                 <td className="process-value px-3 py-2">{conexao.endpoint}</td>
                 <td className="px-3 py-2">{rotuloSeguranca(conexao)}</td>

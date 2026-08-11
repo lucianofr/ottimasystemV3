@@ -19,9 +19,12 @@ from ottima_core.flowgraph.mpc_config import (
     derive_horizons,
     mpc_state_dimension,
 )
-from ottima_core.flowgraph.parse import _TAG_DIRECTION, FlowEdge, FlowGraph, FlowNode
+from ottima_core.flowgraph.parse import _FILTER_KEYS, _TAG_DIRECTION, FlowEdge, FlowGraph, FlowNode
 
 MAX_DELAY_SAMPLES = 7200  # teto da fila de tempo morto do TFS (spec §3.4)
+
+# Blocos de filtro (ADR-026): portas fixas `in`/`out`, numéricas, entrada obrigatória.
+_FILTER_TYPES = frozenset(_FILTER_KEYS)
 
 # "bivalent" é a porta do bloco Script, que aceita numérico e booleano (decisão A-5).
 PortKind = Literal["num", "bool", "bivalent"]
@@ -110,6 +113,8 @@ def _output_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[
         # desconectadas (a malha real usa as tags do `pid`).
         config = mpc_configs.get(node.id)
         return tuple(mv.id for mv in config.variables.mvs) if config else ()
+    if node.type in _FILTER_TYPES:
+        return ("out",)
     return ()
 
 
@@ -133,6 +138,8 @@ def _input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[s
                 *config.variables.dvs,
             )
         )
+    if node.type in _FILTER_TYPES:
+        return ("in",)
     return ()
 
 
@@ -321,7 +328,8 @@ def _port_kind(node: FlowNode, tags: Mapping[int, TagRef]) -> PortKind | None:
         if tag is None:
             return None
         return "bool" if tag.data_type == "bool" else "num"
-    return "num"  # portas do TFS e do MPC (spec §2.1-5: todas numéricas)
+    # Portas do TFS, do MPC (spec §2.1-5) e dos blocos de filtro (ADR-026): todas numéricas.
+    return "num"
 
 
 def _check_port_types(

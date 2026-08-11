@@ -708,7 +708,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
       )}
 
       {!colunas && !historico.isError && (
-        <div className="rounded-panel border border-hairline bg-well p-6">
+        <div className="rounded-sm border border-border bg-well p-6">
           <p className="text-sm text-fg-muted">Carregando…</p>
         </div>
       )}
@@ -716,7 +716,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
       {colunas && (
         <div
           data-testid="operate-trend-chart"
-          className="rounded-panel border border-hairline bg-well p-2"
+          className="rounded-sm border border-border bg-well p-2"
         >
           <div className="flex justify-between px-1 text-xs text-fg-muted">
             <span>Histórico</span>
@@ -748,7 +748,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
       />
 
       {aviso && (
-        <p role="alert" data-testid="operate-trend-aviso" className="text-xs text-warn">
+        <p role="alert" data-testid="operate-trend-aviso" className="text-xs text-warn-fg">
           {aviso}
         </p>
       )}

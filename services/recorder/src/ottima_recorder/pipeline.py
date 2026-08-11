@@ -25,7 +25,7 @@ from ottima_core.bus import (
     publish_event,
 )
 from ottima_core.config import get_settings
-from ottima_core.models import events_table, mpc_samples_table, samples_table
+from ottima_core.models import events_table, mpc_samples_table, samples_table, ssto_runs_table
 from ottima_core.pubsub import ChannelListener, PatternListener
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,9 @@ EVENTS_FLUSH_ROWS = 1000
 # Teto dos buffers (drop-oldest, spec §6.4) — papel diferente dos gatilhos acima.
 SAMPLES_QUEUE_MAX = 100_000
 EVENTS_QUEUE_MAX = 10_000
+# Uma linha por EXECUÇÃO do SSTO (ADR-027 §11), não por variável: no pior caso (Ts_mpc de
+# 0,5 s) são ~7 mil linhas por hora de banco fora do ar, então o teto de eventos serve.
+SSTO_QUEUE_MAX = 10_000
 RETRY_INITIAL_S = 1.0
 RETRY_MAX_S = 30.0
 MAX_BIND_PARAMS = 32_000  # asyncpg aceita no máximo 32767 parâmetros por statement
@@ -92,6 +95,7 @@ class RecorderPipeline:
         samples_queue_max: int = SAMPLES_QUEUE_MAX,
         events_queue_max: int = EVENTS_QUEUE_MAX,
         mpc_queue_max: int | None = None,
+        ssto_queue_max: int = SSTO_QUEUE_MAX,
     ) -> None:
         self._redis = redis_client
         self._session_factory = session_factory
@@ -103,6 +107,7 @@ class RecorderPipeline:
         self._mpc = _DropOldestBuffer(
             mpc_queue_max if mpc_queue_max is not None else get_settings().mpc_queue_max
         )
+        self._ssto = _DropOldestBuffer(ssto_queue_max)
         self._malformed_total = 0
         self._dropped_reported = 0
         self._flush_failures = 0
@@ -133,9 +138,13 @@ class RecorderPipeline:
         return len(self._mpc)
 
     @property
+    def buffered_ssto_runs(self) -> int:
+        return len(self._ssto)
+
+    @property
     def dropped_total(self) -> int:
-        """Samples + eventos + mpc_samples descartados por overflow; nunca zera."""
-        return self._samples.dropped + self._events.dropped + self._mpc.dropped
+        """Samples + eventos + mpc_samples + ssto_runs descartados por overflow; nunca zera."""
+        return self._samples.dropped + self._events.dropped + self._mpc.dropped + self._ssto.dropped
 
     @property
     def malformed_total(self) -> int:
@@ -197,15 +206,23 @@ class RecorderPipeline:
             logger.exception("Desmonte do recorder: flush final falhou; lote perdido")
 
     async def flush(self) -> None:
-        """Um ciclo de gravação: eventos, depois samples, depois mpc_samples.
+        """Um ciclo de gravação: eventos, ssto_runs, samples, mpc_samples.
 
-        Auditoria tem prioridade (spec §6.3). Buffer vazio é no-op: nenhuma transação.
-        As linhas só saem do buffer depois do commit: INSERT que falha não perde o lote.
+        Auditoria tem prioridade (spec §6.3) — e o registro do SSTO (ADR-027 §11) é
+        auditoria, não telemetria: vai logo depois dos eventos, à frente do dado cíclico.
+        Buffer vazio é no-op: nenhuma transação. As linhas só saem do buffer depois do
+        commit: INSERT que falha não perde o lote.
         """
-        if not len(self._events) and not len(self._samples) and not len(self._mpc):
+        if (
+            not len(self._events)
+            and not len(self._samples)
+            and not len(self._mpc)
+            and not len(self._ssto)
+        ):
             return
         try:
             await self._write_buffer(events_table, self._events)
+            await self._write_buffer(ssto_runs_table, self._ssto)
             await self._write_buffer(samples_table, self._samples)
             await self._write_buffer(mpc_samples_table, self._mpc)
         except Exception:
@@ -276,6 +293,7 @@ class RecorderPipeline:
             return
         flow_id_raw, block_id = channel.removeprefix("mpc.state.").split(".", 1)
         auto = state.modes.local_remote == "remote" and state.modes.man_auto == "auto"
+        self._ingest_ssto_run(int(flow_id_raw), block_id, state)
         for var_id, var in state.vars.items():
             overflow = self._mpc.append(
                 {
@@ -294,6 +312,25 @@ class RecorderPipeline:
                     "Buffer de mpc_samples cheio: amostra mais antiga descartada (total %d)",
                     self._mpc.dropped,
                 )
+
+    def _ingest_ssto_run(self, flow_id: int, block_id: str, state: MpcState) -> None:
+        """Enfileira o registro de auditoria do SSTO, quando o quadro traz um (ADR-027 §11).
+
+        UMA linha por execução — granularidade diferente de `mpc_samples` (uma por
+        variável). Quadro sem `ssto` (SSTO desligado, fora de AUTO) não gera linha.
+        """
+        run = state.ssto
+        if run is None:
+            return
+        overflow = self._ssto.append(
+            {"ts": state.ts, "flow_id": flow_id, "block_id": block_id, **run.model_dump()}
+        )
+        if overflow:
+            # Mesma gravidade de perder evento: é registro de auditoria, não dado cíclico.
+            logger.critical(
+                "Buffer de ssto_runs cheio: registro mais antigo descartado (total %d)",
+                self._ssto.dropped,
+            )
 
     async def _on_sample(self, channel: str, raw: str) -> None:
         self.ingest_sample(raw)

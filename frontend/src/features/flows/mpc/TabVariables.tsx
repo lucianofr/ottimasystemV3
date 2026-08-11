@@ -85,7 +85,7 @@ function LinhaVariavel({
       data-testid={testid}
       data-var-id={varId}
       title={varId}
-      className="space-y-2 rounded-panel border border-hairline bg-well p-3"
+      className="space-y-2 rounded-sm border border-border bg-well p-3"
     >
       <legend className="plaqueta flex w-full items-center justify-between px-1 text-[10px] text-fg-muted">
         <span className="process-value">{varId}</span>

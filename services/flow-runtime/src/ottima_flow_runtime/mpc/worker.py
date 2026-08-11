@@ -55,20 +55,31 @@ Custo: `mpc.nlp['f']` é a MESMA expressão simbólica passada ao `nlpsol` inter
 
 from __future__ import annotations
 
+import logging
 import time
 import traceback
+import uuid
 from dataclasses import dataclass, replace
 from multiprocessing.connection import Connection
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import casadi as ca
 import casadi.tools as castools
 from do_mpc.simulator import Simulator
 
-from ottima_core.flowgraph import MpcConfig
+from ottima_core.bus import SstoRun
+from ottima_core.flowgraph import CvVar, MpcConfig, gain_model_hash
 
 from .builder import BuiltMpc, build_mpc
 from .bumpless import init_bumpless
+
+if TYPE_CHECKING:
+    # Import só de tipo: `target_calculation` puxa `scipy.optimize`, e o boot do worker é
+    # caminho crítico do arme (spec §3.6). Bloco com `economics` desligado — a maioria —
+    # não paga esse import; quem paga é `_build_runtime`, sob demanda.
+    from ..target_calculation.ssto import SstoResult, SteadyStateOptimizer
+
+logger = logging.getLogger(__name__)
 
 _READY: Final[str] = "ready"
 
@@ -103,6 +114,9 @@ class SolveResult:
     status: str
     wall_ms: float
     detail: str = ""
+    ssto: SstoRun | None = None
+    """Registro da execução do SSTO deste ciclo (ADR-027 §11), quando a camada rodou.
+    `None` = SSTO desligado neste bloco ou falha isolada antes de produzir registro."""
 
 
 @dataclass(slots=True)
@@ -131,6 +145,16 @@ class _Runtime:
     du_min: dict[str, float]
     du_max: dict[str, float]
     limits: dict[str, tuple[float, float]]
+    ssto: SteadyStateOptimizer | None = None
+    """Camada de alvos (ADR-027). `None` = `economics` ausente/desligado ⇒ caminho da F4."""
+    cvs: tuple[CvVar, ...] = ()
+    """CVs do config — o SSTO só entrega alvo de NÍVEL para as `selfreg` (ADR-027 §4), e o
+    clamp final usa `sp_limits`."""
+    model_hash: str = ""
+    ssto_dv_prev: dict[str, float] | None = None
+    """DV da execução anterior do SSTO: âncora do `ΔDV` do ciclo (ADR-027 §2)."""
+    ssto_delta_prev: dict[str, float] | None = None
+    """ΔMV da execução anterior: referência do detuning anti-flipping (ADR-027 §8)."""
 
 
 def _build_runtime(config: MpcConfig, ts_flow: float) -> _Runtime:
@@ -164,6 +188,13 @@ def _build_runtime(config: MpcConfig, ts_flow: float) -> _Runtime:
     built.mpc.x0 = model.x(0.0)
     built.mpc.set_initial_guess()
 
+    economics = config.economics
+    ssto = None
+    if economics is not None and economics.enabled:
+        from ..target_calculation.ssto import SteadyStateOptimizer
+
+        ssto = SteadyStateOptimizer(config, built.horizons.ts_mpc)
+
     return _Runtime(
         built=built,
         simulator=simulator,
@@ -174,6 +205,9 @@ def _build_runtime(config: MpcConfig, ts_flow: float) -> _Runtime:
         du_min={mv.id: mv.du_min for mv in config.variables.mvs},
         du_max={mv.id: mv.du_max for mv in config.variables.mvs},
         limits={mv.id: (mv.limits.min, mv.limits.max) for mv in config.variables.mvs},
+        ssto=ssto,
+        cvs=tuple(config.variables.cvs),
+        model_hash=gain_model_hash(config),
     )
 
 
@@ -209,9 +243,12 @@ def _write_bias(
         runtime.built.tvp_template["_tvp", :, bias_name] = bias
 
 
-def _apply_tvp(runtime: _Runtime, request: SolveRequest) -> None:
+def _apply_tvp(runtime: _Runtime, request: SolveRequest, sp: dict[str, float]) -> None:
     """SP, DV e `dumax` por MV — escritos em TODO pedido, mesmo em `reinit`
     (`init_bumpless` só escreve `bias`, nunca SP/DV/`dumax`).
+
+    `sp` é o SP EFETIVO do ciclo: o alvo do SSTO quando a camada rodou, o SP do operador no
+    fallback (ADR-027 §10). Único ponto do worker que a camada econômica toca.
 
     SP e DV são constantes no horizonte (spec §3.2/§3.4). O `dumax` é horizonte-variante por
     construção do builder (`du_max` até `Nc`, `0` depois — a MV não se move além do horizonte
@@ -229,7 +266,7 @@ def _apply_tvp(runtime: _Runtime, request: SolveRequest) -> None:
     """
     built = runtime.built
     for cv_id, tvp_name in built.sp_tvp_name.items():
-        built.tvp_template["_tvp", :, tvp_name] = request.sp[cv_id]
+        built.tvp_template["_tvp", :, tvp_name] = sp[cv_id]
     for dv_id, tvp_name in built.dv_tvp_name.items():
         built.tvp_template["_tvp", :, tvp_name] = request.d[dv_id]
     n_c = built.horizons.nc
@@ -261,6 +298,103 @@ def _clamp_frozen(runtime: _Runtime, request: SolveRequest) -> SolveRequest:
         lo, hi = runtime.limits[mv_id]
         u_applied[mv_id] = max(lo, min(hi, u_applied[mv_id]))
     return replace(request, u_applied=u_applied)
+
+
+def _current_bias(runtime: _Runtime) -> dict[str, float]:
+    """Bias vigente por linha, lido do `tvp_template` DEPOIS do passo de realimentação.
+
+    Serve tanto ao caminho normal (`_write_bias`) quanto ao `reinit` (`init_bumpless`
+    escreve o bias por dentro): ler do template é o único jeito de o SSTO enxergar o mesmo
+    número que o controlador vai usar, sem duplicar o cálculo.
+    """
+    return {
+        row_id: float(runtime.built.tvp_template["_tvp", 0, bias_name])
+        for row_id, bias_name in runtime.built.bias_tvp_name.items()
+    }
+
+
+def _effective_sp(runtime: _Runtime, request: SolveRequest, result: SstoResult) -> dict[str, float]:
+    """SP por CV: alvo do SSTO quando utilizável, SP do operador no resto (ADR-027 §10).
+
+    Fica com o SP do operador quando:
+    - o SSTO não fechou (`infeasible`/`error`) — fallback, o dinâmico não para por isso;
+    - a CV é `integrating` — ali o LP decide TAXA, não nível (ADR-027 §4); usar a taxa como
+      SP seria erro de unidade.
+
+    O clamp em `sp_limits` é defesa em profundidade: o LP já respeita a faixa, mas um alvo
+    fora dela nunca pode chegar ao controlador (é a mesma faixa que `_command_sp` aplica ao
+    SP manual).
+    """
+    if result.status not in ("optimal", "relaxed"):
+        return dict(request.sp)
+    sp: dict[str, float] = {}
+    for cv in runtime.cvs:
+        alvo = result.cv_target.get(cv.id)
+        if cv.kind != "selfreg" or alvo is None:
+            sp[cv.id] = request.sp[cv.id]
+            continue
+        sp[cv.id] = min(max(alvo, cv.sp_limits.min), cv.sp_limits.max)
+    return sp
+
+
+def _audit_record(
+    runtime: _Runtime, request: SolveRequest, result: SstoResult, bias: dict[str, float]
+) -> SstoRun:
+    """Registro imutável da execução (ADR-027 §11) — viaja no `SolveResult` e sobe no
+    `MpcState`, sem canal novo."""
+    return SstoRun(
+        run_id=str(uuid.uuid4()),
+        config_hash=result.config_hash,
+        model_hash=runtime.model_hash,
+        status=result.status,
+        solver=result.solver,
+        solve_ms=result.solve_ms,
+        objective=result.objective,
+        mv=dict(request.u_applied),
+        cv_ss=result.cv_ss_free,
+        bias=bias,
+        dv=dict(request.d),
+        costs=result.costs,
+        delta_mv=result.delta_mv,
+        mv_target=result.mv_target,
+        cv_target=result.cv_target,
+        given_up=list(result.given_up),
+        active_constraints=list(result.active_constraints),
+        duals=result.duals,
+    )
+
+
+def _run_ssto(runtime: _Runtime, request: SolveRequest) -> tuple[dict[str, float], SstoRun | None]:
+    """Camada de alvos do ciclo (ADR-027 §1): roda no MESMO ciclo, antes do `make_step`.
+
+    Fronteira dura: qualquer falha inesperada do otimizador cai no SP do operador e o MPC
+    dinâmico segue — a camada econômica nunca pode derrubar o controle.
+    """
+    if runtime.ssto is None:
+        return dict(request.sp), None
+
+    # Local: o módulo já está carregado (o otimizador existe), mas o import de topo é só de
+    # tipo — ver a nota em `TYPE_CHECKING`.
+    from ..target_calculation.ssto import SstoInput
+
+    bias = _current_bias(runtime)
+    try:
+        result = runtime.ssto.solve(
+            SstoInput(
+                u=request.u_applied,
+                d=request.d,
+                d_prev=runtime.ssto_dv_prev,
+                bias=bias,
+                delta_mv_prev=runtime.ssto_delta_prev,
+            )
+        )
+    except Exception:  # noqa: BLE001 - fronteira entre camadas: SSTO nunca derruba o MPC
+        logger.exception("SSTO falhou; ciclo cai no SP do operador")
+        return dict(request.sp), None
+
+    runtime.ssto_dv_prev = dict(request.d)
+    runtime.ssto_delta_prev = dict(result.delta_mv)
+    return _effective_sp(runtime, request, result), _audit_record(runtime, request, result, bias)
 
 
 def _extract_prediction(
@@ -351,7 +485,10 @@ def _solve(runtime: _Runtime, request: SolveRequest) -> SolveResult:
         _write_bias(runtime, request, x_new, u0)
         runtime.x_current = x_new
 
-    _apply_tvp(runtime, request)
+    # Ordem obrigatória (ADR-027 §1): bias atualizado -> SSTO -> `tvp` -> `make_step`. O
+    # LP parte da predição já corrigida pela medida deste ciclo, nunca da anterior.
+    sp, ssto_run = _run_ssto(runtime, request)
+    _apply_tvp(runtime, request, sp)
 
     t0 = time.perf_counter()
     built.mpc.make_step(runtime.x_current)
@@ -375,6 +512,7 @@ def _solve(runtime: _Runtime, request: SolveRequest) -> SolveResult:
         status=status,
         wall_ms=wall_ms,
         detail=detail,
+        ssto=ssto_run,
     )
 
 

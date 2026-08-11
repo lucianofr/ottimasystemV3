@@ -9,6 +9,8 @@ const DESCRICAO: Record<TipoBloco, string> = {
   opc_read: "Lê o valor corrente de uma tag do projeto",
   opc_write: "Escreve o valor da entrada em uma tag do projeto",
   script: "Código Python com IN1..INn e OUT1..OUTn",
+  first_order: "Suaviza o sinal por constante de tempo (τ)",
+  kalman: "Estima o valor verdadeiro de um sinal ruidoso",
   tfs: "Matriz 2x2 de funções de transferência (SOPDT/IOPDT)",
   mpc: "Controle preditivo multivariável — portas dinâmicas conforme o config",
 };
@@ -32,7 +34,7 @@ function ItemPaleta({ tipo, onAdicionar }: { tipo: TipoBloco; onAdicionar: Props
         onAdicionar(tipo);
       }}
       className={cn(
-        "w-full cursor-grab rounded-panel border border-hairline bg-well px-2 py-2 text-left",
+        "w-full cursor-grab rounded-sm border border-border bg-well px-2 py-2 text-left",
         "hover:border-accent focus-visible:outline-2 focus-visible:outline-accent active:cursor-grabbing",
       )}
     >
@@ -44,7 +46,7 @@ function ItemPaleta({ tipo, onAdicionar }: { tipo: TipoBloco; onAdicionar: Props
   );
 }
 
-/** Paleta de 5 blocos (RF-301): o MPC entra em operação na F4 (decisão A-1) igual aos
+/** Paleta de 7 blocos (RF-301): o MPC entra em operação na F4 (decisão A-1) igual aos
  *  demais — arrastável, sem badge de fase pendente (spec F4 §7.1). */
 export function FlowPalette({ onAdicionar }: Props) {
   return (

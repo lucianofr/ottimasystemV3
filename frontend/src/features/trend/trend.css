@@ -8,12 +8,12 @@
 
 .u-hz .u-cursor-x,
 .u-vt .u-cursor-y {
-  border-right-color: var(--color-hairline);
+  border-right-color: var(--color-border);
 }
 
 .u-hz .u-cursor-y,
 .u-vt .u-cursor-x {
-  border-bottom-color: var(--color-hairline);
+  border-bottom-color: var(--color-border);
 }
 
 /* Seleção de zoom: azul único de interação, translúcido (DESIGN.md §Colors). */

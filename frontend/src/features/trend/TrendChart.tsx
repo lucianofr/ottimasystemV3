@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
+import { useTema } from "../../lib/theme";
 import { ESCALA_AUTO, construirEscalasUplot, type EscalaVar } from "./escalas";
 import { construirOpcoes, lerTemaTrend } from "./trendTheme";
 import "./trend.css";
@@ -50,7 +51,10 @@ export const TrendChart = forwardRef<TrendChartHandle, TrendChartProps>(function
       return `${id}:${escala.auto ? "a" : "m"}:${String(escala.min)}:${String(escala.max)}`;
     })
     .join(",");
-  const estrutura = `${String(janelaSegundos)}|${idsTexto.join(",")}|${assinaturaEscalas}`;
+  // O tema entra na estrutura: o uPlot pinta no canvas com as cores lidas na montagem, então
+  // alternar claro/escuro só reflete no gráfico recriando a instância.
+  const tema = useTema();
+  const estrutura = `${tema}|${String(janelaSegundos)}|${idsTexto.join(",")}|${assinaturaEscalas}`;
 
   useImperativeHandle(
     handleRef,
@@ -106,7 +110,10 @@ export const TrendChart = forwardRef<TrendChartHandle, TrendChartProps>(function
   }, [dados]);
 
   return (
-    <div data-testid="trend-chart" className="rounded-panel border border-hairline bg-well p-2">
+    <div
+      data-testid="trend-chart"
+      className="rounded-lg border border-border bg-surface p-3 shadow-sm"
+    >
       <div ref={container} className="w-full" />
     </div>
   );

@@ -18,7 +18,8 @@ import {
   type NoMpc,
   type NoScript,
 } from "../graph";
-import { inteiroDoCampo, matrizDoFormulario } from "./campos";
+import { inteiroDoCampo, matrizDoFormulario, numeroDoCampo } from "./campos";
+import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
 import { CamposTfs } from "./CamposTfs";
 
 const OPCOES_PORTAS = Array.from({ length: MAX_PORTAS_SCRIPT + 1 }, (_, i) => i);
@@ -47,7 +48,7 @@ function CamposTag({
         ))}
       </Select>
       {disponiveis.length === 0 && (
-        <p className="text-xs text-warn">
+        <p className="text-xs text-warn-fg">
           Nenhuma tag de {direcao === "r" ? "leitura" : "escrita"} cadastrada no projeto ativo.
         </p>
       )}
@@ -144,7 +145,7 @@ function CamposScript({
           spellCheck={false}
           defaultValue={dados.code}
           onKeyDown={indentarComTab}
-          className="w-full rounded-panel border border-hairline bg-well p-2 font-mono text-xs leading-relaxed text-fg focus-visible:outline-2 focus-visible:outline-accent"
+          className="w-full rounded-sm border border-border bg-well p-2 font-mono text-xs leading-relaxed text-fg focus-visible:outline-2 focus-visible:outline-accent"
         />
         <p className="text-[10px] text-fg-muted">
           Escopo disponível: IN1..INn, state, math, numpy (np). Tab insere quatro espaços; Esc
@@ -245,6 +246,29 @@ export function ModalConfigBloco({
           execOrder,
         );
         break;
+      case "first_order":
+        onAplicar(
+          { ...no, data: { ...no.data, label, tau: numeroDoCampo(campos.get("tau"), no.data.tau) } },
+          execOrder,
+        );
+        break;
+      case "kalman":
+        onAplicar(
+          {
+            ...no,
+            data: {
+              ...no.data,
+              label,
+              measurement_noise: numeroDoCampo(
+                campos.get("measurement_noise"),
+                no.data.measurement_noise,
+              ),
+              process_noise: numeroDoCampo(campos.get("process_noise"), no.data.process_noise),
+            },
+          },
+          execOrder,
+        );
+        break;
     }
     // `onClose` (linha do <dialog>) chama `onFechar`; fechar via `close()` explícito em vez
     // de chamar `onFechar()` direto evita que o desmonte (estado -> null) derrube o <dialog>
@@ -257,10 +281,10 @@ export function ModalConfigBloco({
       ref={dialogo}
       onClose={onFechar}
       data-testid="config-modal"
-      className="modal-bloco max-h-[85vh] w-[min(760px,92vw)] overflow-auto rounded-panel border border-hairline bg-panel p-0 text-fg"
+      className="modal-bloco max-h-[85vh] w-[min(760px,92vw)] overflow-auto rounded-sm border border-border bg-surface p-0 text-fg"
     >
       <form onSubmit={aplicar}>
-        <header className="flex items-center justify-between border-b border-hairline bg-well px-4 py-3">
+        <header className="flex items-center justify-between border-b border-border bg-well px-4 py-3">
           <h2 className="plaqueta text-sm text-fg">Configurar {ROTULO_BLOCO[no.type]}</h2>
           <span className="process-value text-xs text-fg-muted">{no.id}</span>
         </header>
@@ -310,9 +334,11 @@ export function ModalConfigBloco({
           {no.type === "tfs" && matrizTfs !== null && (
             <CamposTfs dados={matrizTfs} aoMudar={setMatrizTfs} />
           )}
+          {no.type === "first_order" && <CamposFiltroPrimeiraOrdem dados={no.data} />}
+          {no.type === "kalman" && <CamposFiltroKalman dados={no.data} />}
         </fieldset>
 
-        <footer className="flex justify-end gap-2 border-t border-hairline px-4 py-3">
+        <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">
           <Button
             type="button"
             variant="outline"

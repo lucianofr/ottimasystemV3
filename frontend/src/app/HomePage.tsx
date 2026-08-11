@@ -40,10 +40,14 @@ function IconeLampada({ ativo }: { ativo: boolean }) {
  *  Anormal), o texto ao lado nunca herda a cor de severidade. */
 function Lampada({ lampada }: { lampada: LampadaWorker }) {
   return (
-    <div data-testid="home-worker-lamp" data-worker={lampada.id} className="flex items-center gap-2">
+    <div
+      data-testid="home-worker-lamp"
+      data-worker={lampada.id}
+      className="flex items-center gap-2.5 rounded-md bg-surface-2 px-3 py-2"
+    >
       <span
-        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-field ${
-          lampada.ativo ? "bg-running" : "bg-alarm"
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-pill text-white ${
+          lampada.ativo ? "bg-success" : "bg-alarm"
         }`}
       >
         <IconeLampada ativo={lampada.ativo} />
@@ -136,8 +140,10 @@ export function HomePage() {
   const lampadas = derivarLampadas(workers.data);
 
   return (
-    <section className="space-y-4">
-      <Card className="max-w-lg p-6">
+    <section className="space-y-5">
+      <Card className="max-w-lg overflow-hidden p-0">
+        <span aria-hidden="true" className="block h-1 w-full bg-[image:var(--gradient-accent)]" />
+        <div className="p-7">
         <h2 className="plaqueta text-xs text-fg-muted">Projeto ativo</h2>
         {projeto.isPending && <p className="mt-2 text-sm text-fg-muted">Carregando…</p>}
         {projeto.isError && (
@@ -146,27 +152,31 @@ export function HomePage() {
           </p>
         )}
         {!projeto.isPending && !projeto.isError && (
-          <p data-testid="active-project" className="mt-2 text-lg">
+          <p
+            data-testid="active-project"
+            className="mt-2 font-display text-2xl font-semibold tracking-tight"
+          >
             {projeto.data ? projeto.data.name : "Nenhum projeto ativo"}
           </p>
         )}
+        </div>
       </Card>
 
-      <Card className="p-6" data-testid="home-workers">
+      <Card className="p-7" data-testid="home-workers">
         <h2 className="plaqueta text-xs text-fg-muted">Workers</h2>
         {workers.isError && (
           <p role="alert" data-testid="home-workers-error" className="mt-2 text-sm text-alarm">
             Falha ao consultar saúde dos workers
           </p>
         )}
-        <div className="mt-3 flex flex-wrap gap-6">
+        <div className="mt-4 flex flex-wrap gap-3">
           {lampadas.map((lampada) => (
             <Lampada key={lampada.id} lampada={lampada} />
           ))}
         </div>
       </Card>
 
-      <Card className="p-6" data-testid="home-flows">
+      <Card className="p-7" data-testid="home-flows">
         <h2 className="plaqueta text-xs text-fg-muted">Flows do projeto ativo</h2>
         {mpcs.isError && (
           <p role="alert" data-testid="home-mpcs-error" className="mt-2 text-sm text-alarm">
@@ -188,7 +198,7 @@ export function HomePage() {
           <p className="mt-2 text-sm text-fg-muted">Nenhum flow cadastrado.</p>
         )}
         {linhas.length > 0 && (
-          <ul className="mt-2 divide-y divide-hairline">
+          <ul className="mt-4 divide-y divide-border">
             {linhas.map((flow) => (
               <LinhaFlow
                 key={flow.id}

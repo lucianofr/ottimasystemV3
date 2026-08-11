@@ -34,12 +34,16 @@ const ROTULO_SOLVER: Record<Solver, string> = {
  *  qualidade degradada, estados pendentes de atenção" ⇒ advertência (cobre também
  *  `building`, a partida esperada do deploy — §6.2). */
 const COR_SOLVER: Record<Solver, string> = {
-  ok: "text-running",
-  building: "text-warn",
-  overrun: "text-warn",
-  error: "text-alarm",
-  idle: "text-fg-muted",
+  ok: "bg-success-soft text-success-fg",
+  building: "bg-warn-soft text-warn-fg",
+  overrun: "bg-warn-soft text-warn-fg",
+  error: "bg-alarm-soft text-alarm",
+  idle: "bg-surface-2 text-fg-muted",
 };
+
+/** Chip de lâmpada: pílula de fundo suave por severidade — a forma do glifo e o rótulo
+ *  textual seguem sendo os canais redundantes (Regra do Canal Redundante). */
+const CHIP_LAMPADA = "inline-flex items-center gap-1.5 rounded-pill px-2.5 py-1";
 
 /** Lâmpada do solver: cor + forma + rótulo (Regra do Canal Redundante). Vocabulário de forma
  *  por severidade — mesmo critério de `LampadaSeveridade` (`EventsPage.tsx`): círculo =
@@ -48,7 +52,7 @@ function LampadaSolver({ solver }: { solver: Solver }) {
   return (
     <span
       data-testid="faceplate-lampada-solver"
-      className={cn("inline-flex items-center gap-1.5", COR_SOLVER[solver])}
+      className={cn(CHIP_LAMPADA, COR_SOLVER[solver])}
     >
       <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
         {(solver === "ok" || solver === "idle") && <circle cx="5" cy="5" r="4" />}
@@ -64,9 +68,14 @@ function LampadaSolver({ solver }: { solver: Solver }) {
  *  (`FlowEditorPage.tsx`) — círculo verde rodando, quadrado vazado parado, triângulo alarme
  *  falha — reaproveitando o rótulo já traduzido (`ROTULO_ESTADO`, `useFlowStatus.ts`). */
 function LampadaFlow({ estado }: { estado: EstadoFlow }) {
-  const cor = estado === "running" ? "text-running" : estado === "failed" ? "text-alarm" : "text-fg-muted";
+  const cor =
+    estado === "running"
+      ? "bg-success-soft text-success-fg"
+      : estado === "failed"
+        ? "bg-alarm-soft text-alarm"
+        : "bg-surface-2 text-fg-muted";
   return (
-    <span data-testid="faceplate-lampada-flow" className={cn("inline-flex items-center gap-1.5", cor)}>
+    <span data-testid="faceplate-lampada-flow" className={cn(CHIP_LAMPADA, cor)}>
       <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
         {estado === "running" && <circle cx="5" cy="5" r="4" />}
         {estado === "stopped" && <rect x="1" y="1" width="8" height="8" fill="none" stroke="currentColor" />}
@@ -83,7 +92,7 @@ function LampadaInputValido({ valido }: { valido: boolean }) {
   return (
     <span
       data-testid="faceplate-lampada-input-valido"
-      className={cn("inline-flex items-center gap-1.5", valido ? "text-running" : "text-warn")}
+      className={cn(CHIP_LAMPADA, valido ? "bg-success-soft text-success-fg" : "bg-warn-soft text-warn-fg")}
     >
       <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
         {valido ? <circle cx="5" cy="5" r="4" /> : <path d="M5 0 10 9H0L5 0Z" />}
@@ -116,7 +125,7 @@ function Comutador<T extends string>({
   const exibido = pendente ?? atual;
   return (
     <div data-testid={testid} className="inline-flex flex-col items-start gap-1">
-      <div className="inline-flex overflow-hidden rounded-panel border border-hairline">
+      <div className="inline-flex gap-1 rounded-pill border border-border bg-surface-2 p-1">
         {posicoes.map((posicao) => {
           const ativo = posicao.valor === exibido;
           const emFantasma = ativo && pendente !== null;
@@ -129,8 +138,10 @@ function Comutador<T extends string>({
               aria-pressed={ativo}
               onClick={() => onSelecionar(posicao.valor)}
               className={cn(
-                "plaqueta px-3 py-1.5 text-[11px] transition-colors",
-                ativo ? "bg-accent text-field" : "bg-panel text-fg-muted hover:text-fg",
+                "plaqueta rounded-pill px-4 py-1.5 text-[11px] transition-all duration-[var(--duration-fast)]",
+                ativo
+                  ? "bg-accent text-white shadow-sm"
+                  : "text-fg-muted hover:bg-surface hover:text-fg",
                 emFantasma && "opacity-70 outline outline-2 -outline-offset-2 outline-accent",
                 desabilitado && "cursor-not-allowed opacity-40",
               )}
@@ -141,7 +152,7 @@ function Comutador<T extends string>({
         })}
       </div>
       {desabilitado && motivoDesabilitado !== null && (
-        <p className="text-[11px] text-warn">{motivoDesabilitado}</p>
+        <p className="text-[11px] text-warn-fg">{motivoDesabilitado}</p>
       )}
     </div>
   );
@@ -223,11 +234,16 @@ export function FaceplatePrincipal({ mpc, flowStatus, mpcState, flowId, blockId 
   const modosDesabilitados = semDados || building;
 
   return (
-    <Card className="p-6" data-testid="faceplate-principal">
+    <Card className="overflow-hidden p-0" data-testid="faceplate-principal">
+      <span aria-hidden="true" className="block h-1 w-full bg-[image:var(--gradient-accent)]" />
+      <div className="p-7">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="plaqueta text-xs text-fg-muted">{mpc.flow_name}</h2>
-          <p className="mt-1 text-lg" data-testid="faceplate-plaqueta">
+          <p
+            className="mt-1 font-display text-2xl font-semibold tracking-tight"
+            data-testid="faceplate-plaqueta"
+          >
             {mpc.name} <span className="text-fg-muted">·</span> {mpc.flow_name}
           </p>
         </div>
@@ -238,7 +254,7 @@ export function FaceplatePrincipal({ mpc, flowStatus, mpcState, flowId, blockId 
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-start gap-6">
+      <div className="mt-6 flex flex-wrap items-start gap-6">
         <Comutador
           testid="faceplate-modo-local-remoto"
           posicoes={POSICOES_LOCAL_REMOTO}
@@ -262,12 +278,16 @@ export function FaceplatePrincipal({ mpc, flowStatus, mpcState, flowId, blockId 
       </div>
 
       {erroComando !== null && (
-        <p role="alert" data-testid="faceplate-erro-comando" className="mt-3 text-sm text-alarm">
+        <p
+          role="alert"
+          data-testid="faceplate-erro-comando"
+          className="mt-4 rounded-md bg-alarm-soft px-3 py-2 text-sm text-alarm"
+        >
           {erroComando}
         </p>
       )}
 
-      <p className="mt-4 flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+      <p className="mt-6 flex flex-wrap items-center gap-2 border-t border-border pt-5 text-sm text-fg-muted">
         <span data-testid="faceplate-ts-mpc">
           Ts MPC{" "}
           <span className="process-value text-fg">{formatarNumero(mpc.horizons.ts_mpc)}</span> s
@@ -299,6 +319,7 @@ export function FaceplatePrincipal({ mpc, flowStatus, mpcState, flowId, blockId 
           </span>{" "}
           ms
         </span>
+      </div>
       </div>
     </Card>
   );

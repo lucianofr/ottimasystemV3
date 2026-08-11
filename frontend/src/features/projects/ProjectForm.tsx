@@ -89,7 +89,7 @@ export function ProjectForm({ projeto, onClose }: Props) {
             rows={2}
             value={v.description}
             onChange={(e) => mudar("description", e.target.value)}
-            className="w-full rounded-panel border border-hairline bg-well px-3 py-2 text-sm text-fg placeholder:text-fg-muted focus-visible:outline-2 focus-visible:outline-accent"
+            className="w-full rounded-sm border border-border bg-well px-3 py-2 text-sm text-fg placeholder:text-fg-muted focus-visible:outline-2 focus-visible:outline-accent"
           />
         </div>
 

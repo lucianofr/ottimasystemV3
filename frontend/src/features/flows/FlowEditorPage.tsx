@@ -91,7 +91,7 @@ function erroLegivel(err: unknown): string {
 
 function Aviso({ texto, tom }: { texto: string; tom: "warn" | "alarm" }) {
   return (
-    <li className={tom === "alarm" ? "text-alarm" : "text-warn"}>
+    <li className={tom === "alarm" ? "text-alarm" : "text-warn-fg"}>
       <span className="plaqueta mr-2 text-[10px]">{tom === "alarm" ? "Erro" : "Aviso"}</span>
       {texto}
     </li>
@@ -99,7 +99,7 @@ function Aviso({ texto, tom }: { texto: string; tom: "warn" | "alarm" }) {
 }
 
 const COR_LAMPADA: Record<EstadoFlow, string> = {
-  running: "text-running",
+  running: "text-success",
   stopped: "text-fg-muted",
   failed: "text-alarm",
 };
@@ -161,7 +161,7 @@ function CabecalhoAoVivo({ aoVivo }: { aoVivo: CanvasAoVivo }) {
         Overruns <span className="process-value text-fg">{aoVivo.status.overruns}</span>
       </span>
       {aoVivo.conexao !== "aberta" && (
-        <span className="text-warn">{AGUARDO[aoVivo.conexao]}</span>
+        <span className="text-warn-fg">{AGUARDO[aoVivo.conexao]}</span>
       )}
     </div>
   );
@@ -235,7 +235,7 @@ const ROTULO_EFEITO: Record<ImpactoMpc["efeito"], string> = {
 
 const TOM_EFEITO: Record<ImpactoMpc["efeito"], string> = {
   preservado: "text-fg-muted",
-  rearme_bumpless: "text-warn",
+  rearme_bumpless: "text-warn-fg",
   reset_local: "text-alarm",
 };
 
@@ -268,9 +268,9 @@ function DialogoImpacto({
       ref={dialogo}
       onClose={onCancelar}
       data-testid="flow-impacto-dialog"
-      className="modal-bloco w-[min(520px,92vw)] overflow-auto rounded-panel border border-hairline bg-panel p-0 text-fg"
+      className="modal-bloco w-[min(520px,92vw)] overflow-auto rounded-sm border border-border bg-surface p-0 text-fg"
     >
-      <header className="flex items-center justify-between border-b border-hairline bg-well px-4 py-3">
+      <header className="flex items-center justify-between border-b border-border bg-well px-4 py-3">
         <h2 className="plaqueta text-sm text-fg">Impacto no MPC</h2>
       </header>
       <div className="p-4">
@@ -283,7 +283,7 @@ function DialogoImpacto({
           ))}
         </ul>
       </div>
-      <footer className="flex justify-end gap-2 border-t border-hairline px-4 py-3">
+      <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">
         <Button variant="outline" data-testid="flow-impacto-cancelar" onClick={onCancelar}>
           Cancelar
         </Button>
@@ -644,7 +644,7 @@ function Editor({ flowId }: { flowId: number }) {
           {podeMutar && modoEfetivo === "edit" && <FlowPalette onAdicionar={adicionarNoCentro} />}
           <div
             ref={areaRef}
-            className="min-h-0 flex-1 overflow-hidden rounded-panel border border-hairline"
+            className="min-h-0 flex-1 overflow-hidden rounded-sm border border-border"
             onDrop={aoSoltar}
             onDragOver={(evento) => {
               evento.preventDefault();

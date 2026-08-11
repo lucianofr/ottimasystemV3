@@ -106,15 +106,15 @@ export function BlocoChapa({
   return (
     <div
       className={cn(
-        "w-[212px] rounded-panel border bg-panel text-fg",
-        selecionado ? "border-accent" : "border-hairline",
+        "w-[212px] overflow-hidden rounded-md border bg-surface text-fg shadow-sm transition-shadow duration-[var(--duration-fast)]",
+        selecionado ? "border-accent shadow-[var(--shadow-glow-accent)]" : "border-border hover:shadow-md",
       )}
     >
       {/* Plaqueta de título: badge de exec_order em mono tabular + nome gravado */}
-      <div className="flex items-center gap-2 border-b border-hairline bg-well px-2 py-1.5">
+      <div className="flex items-center gap-2 border-b border-border bg-surface-2 px-2.5 py-2">
         <span
           title="Ordem de execução na varredura"
-          className="process-value flex h-5 min-w-5 items-center justify-center rounded-[2px] border border-hairline bg-field px-1 text-[11px] leading-none text-fg"
+          className="process-value flex h-5 min-w-5 items-center justify-center rounded-pill bg-accent-soft px-1.5 text-[11px] leading-none text-accent-strong"
         >
           {execOrder}
         </span>
@@ -124,7 +124,7 @@ export function BlocoChapa({
       <div className="px-3 py-2 text-[11px] leading-tight text-fg-muted">{children}</div>
 
       {(entradas.length > 0 || saidas.length > 0) && (
-        <div className="flex border-t border-hairline py-1">
+        <div className="flex border-t border-border py-1">
           <div className="flex-1">
             {entradas.map((porta) => (
               <LinhaPorta key={porta.id} porta={porta} lado="entrada" valores={valores} eu={eu} />

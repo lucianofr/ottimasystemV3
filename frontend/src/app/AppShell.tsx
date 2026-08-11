@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router";
 
 import { Button } from "../components/ui/button";
+import { ThemeToggle } from "../components/ui/theme-toggle";
 import { useAuth } from "../features/auth/useAuth";
 import { AnnunciatorBar } from "./AnnunciatorBar";
 import { CanalAoVivoProvider } from "./CanalAoVivo";
@@ -27,8 +28,10 @@ function ItemNav({ rotulo, para, testid }: { rotulo: string; para: string; testi
       to={para}
       data-testid={testid}
       className={({ isActive }) =>
-        `plaqueta border-b-2 py-1 text-xs ${
-          isActive ? "border-accent text-fg" : "border-transparent text-fg-muted"
+        `plaqueta rounded-pill px-3 py-1.5 text-xs transition-colors duration-[var(--duration-fast)] ${
+          isActive
+            ? "bg-accent-soft text-accent-strong"
+            : "text-fg-muted hover:bg-surface-2 hover:text-fg"
         }`
       }
     >
@@ -42,18 +45,20 @@ export function AppShell() {
   const navigate = useNavigate();
   return (
     <CanalAoVivoProvider>
-      <div className="flex min-h-screen flex-col">
+      <div className="flex min-h-screen flex-col bg-bg bg-[image:var(--gradient-mesh)] bg-fixed">
         <AnnunciatorBar />
-        <header className="flex h-12 items-center justify-between border-b border-hairline bg-panel px-4">
-          <span className="plaqueta text-sm">OttimaSystem</span>
-          <div className="flex items-center gap-5">
-            <nav aria-label="Operação" className="flex items-center gap-5">
+        <header className="glass sticky top-0 z-20 flex h-14 items-center justify-between border-x-0 border-t-0 px-5">
+          <span className="font-display text-base font-bold tracking-tight text-fg">
+            Ottima<span className="text-accent">System</span>
+          </span>
+          <div className="flex items-center gap-3">
+            <nav aria-label="Operação" className="flex items-center gap-1">
               {NAV_OPERACAO.map((item) => (
                 <ItemNav key={item.para} {...item} />
               ))}
             </nav>
-            <span aria-hidden="true" className="h-4 w-px bg-hairline" />
-            <nav aria-label="Engenharia" className="flex items-center gap-5">
+            <span aria-hidden="true" className="h-4 w-px bg-border" />
+            <nav aria-label="Engenharia" className="flex items-center gap-1">
               {NAV_ENGENHARIA.map((item) => (
                 <ItemNav key={item.para} {...item} />
               ))}
@@ -63,6 +68,7 @@ export function AppShell() {
             <span data-testid="current-user" className="text-xs text-fg-muted">
               {user?.name} · {user?.role === "admin" ? "admin" : "operador"}
             </span>
+            <ThemeToggle />
             <Button
               variant="outline"
               size="sm"
@@ -76,7 +82,7 @@ export function AppShell() {
             </Button>
           </div>
         </header>
-        <main className="flex-1 p-6">
+        <main className="mx-auto w-full max-w-[1400px] flex-1 px-6 py-8">
           <Outlet />
         </main>
       </div>

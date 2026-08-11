@@ -78,7 +78,7 @@ export function TabModels({ variaveis, modelos, aoMudar }: Props) {
         </thead>
         <tbody>
           {linhas.map((linha) => (
-            <tr key={linha.id} className="border-t border-hairline align-top">
+            <tr key={linha.id} className="border-t border-border align-top">
               <th className="plaqueta px-2 py-2 text-left text-fg-muted">
                 {linha.nome}
                 <span className="ml-1 text-[10px] normal-case text-fg-muted">

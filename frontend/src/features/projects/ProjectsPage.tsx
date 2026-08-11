@@ -144,13 +144,13 @@ export function ProjectsPage() {
         </p>
       )}
 
-      {/* Tabela em chapa: bg-panel, hairline, cabeçalho em plaqueta (DESIGN.md §Elevation) */}
+      {/* Tabela em chapa: bg-surface, hairline, cabeçalho em plaqueta (DESIGN.md §Elevation) */}
       <Card className="overflow-hidden">
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-hairline">
+            <tr className="border-b border-border bg-surface-2">
               {COLUNAS.map((coluna) => (
-                <th key={coluna} className="plaqueta px-3 py-2 text-left text-xs text-fg-muted">
+                <th key={coluna} className="plaqueta px-4 py-3 text-left text-xs text-fg-muted">
                   {coluna}
                 </th>
               ))}
@@ -210,7 +210,7 @@ export function ProjectsPage() {
                 key={projeto.id}
                 data-testid="proj-row"
                 data-proj-id={projeto.id}
-                className="border-b border-hairline"
+                className="border-b border-border"
               >
                 <td className="px-3 py-2">{projeto.name}</td>
                 <td className="px-3 py-2">

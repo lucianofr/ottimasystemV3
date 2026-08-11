@@ -240,7 +240,9 @@ def test_mpc_state_round_trip_payload_verbatim_spec_51_vars_com_e_sem_sp():
         },
     }
     state = MpcState.model_validate_json(json.dumps(payload))
-    assert state.model_dump(mode="json") == payload
+    # `ssto` (ADR-027 §11) é aditivo e nulo por default: o payload da spec F4 §5.1 continua
+    # sendo aceito verbatim, e o quadro sem SSTO só ganha o campo nulo na serialização.
+    assert state.model_dump(mode="json") == {**payload, "ssto": None}
     assert state.vars["cv_a1b2"].sp == 12.5
     assert state.vars["mv_x7k2"].sp is None
     assert state.vars["cv_a1b2"].status is None  # `status` é campo de MV (ADR-028)
@@ -266,7 +268,7 @@ def test_mpc_state_prediction_vazia_fora_de_auto_round_trip():
         "prediction": {"ts": "2026-08-06T12:00:00Z", "t": [], "cv": [], "mv": []},
     }
     state = MpcState.model_validate_json(json.dumps(payload))
-    assert state.model_dump(mode="json") == payload
+    assert state.model_dump(mode="json") == {**payload, "ssto": None}
     assert state.status.armed == (state.modes.local_remote == "remote")
     assert state.prediction.ts == state.ts
     assert state.prediction.t == []
