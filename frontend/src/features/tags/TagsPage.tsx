@@ -166,13 +166,13 @@ export function TagsPage() {
         </p>
       )}
 
-      {/* Tabela em chapa: bg-panel, hairline, cabeçalho em plaqueta (DESIGN.md §Elevation) */}
+      {/* Tabela em chapa: bg-surface, hairline, cabeçalho em plaqueta (DESIGN.md §Elevation) */}
       <Card className="overflow-hidden">
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-hairline">
+            <tr className="border-b border-border bg-surface-2">
               {COLUNAS.map((coluna) => (
-                <th key={coluna} className="plaqueta px-3 py-2 text-left text-xs text-fg-muted">
+                <th key={coluna} className="plaqueta px-4 py-3 text-left text-xs text-fg-muted">
                   {coluna}
                 </th>
               ))}
@@ -210,7 +210,7 @@ export function TagsPage() {
               </tr>
             )}
             {linhas.map((tag) => (
-              <tr key={tag.id} data-testid="tag-row" className="border-b border-hairline">
+              <tr key={tag.id} data-testid="tag-row" className="border-b border-border transition-colors duration-[var(--duration-fast)] hover:bg-surface-2">
                 <td className="px-3 py-2">{tag.name}</td>
                 <td className="px-3 py-2">
                   {nomePorConexao.get(tag.connection_id) ?? (

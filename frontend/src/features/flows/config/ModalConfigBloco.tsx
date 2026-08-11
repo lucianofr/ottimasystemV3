@@ -48,7 +48,7 @@ function CamposTag({
         ))}
       </Select>
       {disponiveis.length === 0 && (
-        <p className="text-xs text-warn">
+        <p className="text-xs text-warn-fg">
           Nenhuma tag de {direcao === "r" ? "leitura" : "escrita"} cadastrada no projeto ativo.
         </p>
       )}
@@ -145,7 +145,7 @@ function CamposScript({
           spellCheck={false}
           defaultValue={dados.code}
           onKeyDown={indentarComTab}
-          className="w-full rounded-panel border border-hairline bg-well p-2 font-mono text-xs leading-relaxed text-fg focus-visible:outline-2 focus-visible:outline-accent"
+          className="w-full rounded-sm border border-border bg-well p-2 font-mono text-xs leading-relaxed text-fg focus-visible:outline-2 focus-visible:outline-accent"
         />
         <p className="text-[10px] text-fg-muted">
           Escopo disponível: IN1..INn, state, math, numpy (np). Tab insere quatro espaços; Esc
@@ -281,10 +281,10 @@ export function ModalConfigBloco({
       ref={dialogo}
       onClose={onFechar}
       data-testid="config-modal"
-      className="modal-bloco max-h-[85vh] w-[min(760px,92vw)] overflow-auto rounded-panel border border-hairline bg-panel p-0 text-fg"
+      className="modal-bloco max-h-[85vh] w-[min(760px,92vw)] overflow-auto rounded-sm border border-border bg-surface p-0 text-fg"
     >
       <form onSubmit={aplicar}>
-        <header className="flex items-center justify-between border-b border-hairline bg-well px-4 py-3">
+        <header className="flex items-center justify-between border-b border-border bg-well px-4 py-3">
           <h2 className="plaqueta text-sm text-fg">Configurar {ROTULO_BLOCO[no.type]}</h2>
           <span className="process-value text-xs text-fg-muted">{no.id}</span>
         </header>
@@ -338,7 +338,7 @@ export function ModalConfigBloco({
           {no.type === "kalman" && <CamposFiltroKalman dados={no.data} />}
         </fieldset>
 
-        <footer className="flex justify-end gap-2 border-t border-hairline px-4 py-3">
+        <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">
           <Button
             type="button"
             variant="outline"

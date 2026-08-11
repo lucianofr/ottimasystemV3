@@ -46,7 +46,7 @@ export function TabSummary({ variaveis, modelos, multiplier, tsFlowSegundos }: P
         ) : (
           <ul data-testid="mpc-resumo-avisos" className="space-y-1 text-xs">
             {avisos.map((aviso) => (
-              <li key={aviso} className="text-warn">
+              <li key={aviso} className="text-warn-fg">
                 <span className="plaqueta mr-2 text-[10px]">Aviso</span>
                 {aviso}
               </li>

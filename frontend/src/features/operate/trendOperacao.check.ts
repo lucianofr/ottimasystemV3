@@ -219,7 +219,7 @@ test("as 8 cores de pena são distintas entre si — comparação por conjunto, 
 
 test("nenhuma cor de pena colide com cor reservada de severidade nem com o Azul Único (§6.6-5, DESIGN §Colors)", () => {
   const coresPenas = new Set(TOKENS_PENA_OPERACAO.map(valorToken));
-  const coresReservadas = ["--color-alarm", "--color-warn", "--color-running", "--color-accent"].map(
+  const coresReservadas = ["--color-alarm", "--color-warn", "--color-success", "--color-accent"].map(
     valorToken,
   );
 

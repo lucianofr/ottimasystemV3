@@ -43,7 +43,7 @@ interface Props {
  *
  * Separada da tabela de conexões por um degrau tonal (não só posição, UX-04/SEC-06): o
  * invólucro externo usa `bg-well` (o mesmo tom rebaixado de inputs/áreas de destaque), a
- * chapa em si continua `bg-panel` — dois tons de distância do fundo `bg-field` da página,
+ * chapa em si continua `bg-surface` — dois tons de distância do fundo `bg-bg` da página,
  * contra um só tom da tabela abaixo.
  */
 export function ChapaCertificadoApp({ conexoes }: Props) {
@@ -80,7 +80,7 @@ export function ChapaCertificadoApp({ conexoes }: Props) {
   }
 
   return (
-    <div className="rounded-panel border border-hairline bg-well p-3">
+    <div className="rounded-sm border border-border bg-well p-3">
       <Card data-testid="cert-app-chapa" className="space-y-3 p-4">
         <div>
           <h2 className="plaqueta text-sm">Certificado da aplicação</h2>
@@ -179,7 +179,7 @@ export function ChapaCertificadoApp({ conexoes }: Props) {
           <p
             role="status"
             data-testid="cert-app-retrust-aviso"
-            className="flex items-center gap-1.5 text-xs text-warn"
+            className="flex items-center gap-1.5 text-xs text-warn-fg"
           >
             <IconeAlerta />
             {avisoRetrust}
@@ -189,7 +189,7 @@ export function ChapaCertificadoApp({ conexoes }: Props) {
         {confirmando && (
           <div
             data-testid="cert-app-regerar-dialog"
-            className="space-y-2 rounded-panel border border-hairline bg-well p-3"
+            className="space-y-2 rounded-sm border border-border bg-well p-3"
           >
             <p className="text-xs text-fg-muted">
               Regerar substitui o certificado atual. As conexões abaixo exigirão novo trust

@@ -10,7 +10,7 @@ function LinhaPeso({ id, rotulo, campo, valor }: { id: string; rotulo: string; c
   return (
     <div
       data-var-id={id}
-      className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-panel border border-hairline bg-well p-2"
+      className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-sm border border-border bg-well p-2"
     >
       <span className="text-xs text-fg">{rotulo}</span>
       <span className="process-value text-xs text-fg-muted">

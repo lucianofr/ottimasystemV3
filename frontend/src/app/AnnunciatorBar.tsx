@@ -6,7 +6,7 @@ import { useCanalAoVivo } from "./CanalAoVivo";
 import { useRelogioAlarmes } from "./useRelogioAlarmes";
 
 /** Triângulo de alerta reaproveitado dos demais estados de falha da UI (mesmo path de
- *  `ConnectionsPage.tsx`/`FlowsPage.tsx`) — cor muda por severidade (`text-alarm`/`text-warn`),
+ *  `ConnectionsPage.tsx`/`FlowsPage.tsx`) — cor muda por severidade (`text-alarm`/`text-warn-fg`),
  *  a forma e o rótulo textual ao lado permanecem os canais redundantes (DESIGN §Colors,
  *  "A Regra do Canal Redundante": nunca só cor). */
 function IconeAlerta() {
@@ -24,7 +24,12 @@ const ROTULO_SEVERIDADE: Record<CondicaoAtiva["severity"], string> = {
 
 const COR_SEVERIDADE: Record<CondicaoAtiva["severity"], string> = {
   alarm: "text-alarm",
-  warning: "text-warn",
+  warning: "text-warn-fg",
+};
+
+const CHIP_SEVERIDADE: Record<CondicaoAtiva["severity"], string> = {
+  alarm: "bg-alarm-soft text-alarm",
+  warning: "bg-warn-soft text-warn-fg",
 };
 
 /** Contagem por severidade (§7.2-4) — só as duas severidades que `resolverAlarmes` produz. */
@@ -49,7 +54,7 @@ function BadgeContagem({ severidade, total }: { severidade: CondicaoAtiva["sever
   return (
     <span
       data-testid={`annunciator-contagem-${severidade}`}
-      className={`flex items-center gap-1.5 ${COR_SEVERIDADE[severidade]}`}
+      className={`flex items-center gap-1.5 rounded-pill px-2.5 py-0.5 font-medium ${CHIP_SEVERIDADE[severidade]}`}
     >
       <IconeAlerta />
       {textoContagem(severidade, total)}
@@ -83,8 +88,9 @@ export function AnnunciatorBar() {
       <div
         data-testid="annunciator"
         role="status"
-        className="flex h-7 items-center border-b border-hairline bg-panel px-4"
+        className="flex h-8 items-center gap-2 border-b border-border bg-surface-2 px-5"
       >
+        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-pill bg-success" />
         <span data-testid="annunciator-vazio" className="plaqueta text-xs text-fg-muted">
           Sem alarmes ativos
         </span>
@@ -101,8 +107,8 @@ export function AnnunciatorBar() {
     .join(", ");
 
   return (
-    <div data-testid="annunciator" className="border-b border-hairline bg-panel">
-      <div className="flex h-7 items-center gap-4 px-4">
+    <div data-testid="annunciator" className="border-b border-border bg-surface-2">
+      <div className="flex h-8 items-center gap-4 px-5">
         {/* Live region isolada do botão de expandir/recolher: só a contagem de severidade deve
             ser anunciada por leitor de tela quando muda — não o rótulo do toggle. */}
         <div role="status" className="flex items-center gap-4">
@@ -131,7 +137,7 @@ export function AnnunciatorBar() {
         <ul
           id="annunciator-lista"
           data-testid="annunciator-lista"
-          className="space-y-1 border-t border-hairline px-4 py-2"
+          className="space-y-1 border-t border-border px-5 py-2"
         >
           {condicoes.map((condicao, indice) => (
             <li key={`${condicao.origin}-${condicao.kind}-${indice}`} data-testid="annunciator-item">

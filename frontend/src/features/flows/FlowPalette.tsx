@@ -34,7 +34,7 @@ function ItemPaleta({ tipo, onAdicionar }: { tipo: TipoBloco; onAdicionar: Props
         onAdicionar(tipo);
       }}
       className={cn(
-        "w-full cursor-grab rounded-panel border border-hairline bg-well px-2 py-2 text-left",
+        "w-full cursor-grab rounded-sm border border-border bg-well px-2 py-2 text-left",
         "hover:border-accent focus-visible:outline-2 focus-visible:outline-accent active:cursor-grabbing",
       )}
     >

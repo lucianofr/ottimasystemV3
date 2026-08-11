@@ -33,7 +33,7 @@ const ROTULO_SEVERIDADE: Record<EventOut["severity"], string> = {
 
 const COR_SEVERIDADE: Record<EventOut["severity"], string> = {
   info: "text-fg-muted",
-  warning: "text-warn",
+  warning: "text-warn-fg",
   alarm: "text-alarm",
 };
 
@@ -168,9 +168,9 @@ export function EventsPage() {
       <Card className="overflow-hidden">
         <table className="w-full border-collapse text-sm" data-testid="eventos-tabela">
           <thead>
-            <tr className="border-b border-hairline">
+            <tr className="border-b border-border bg-surface-2">
               {COLUNAS.map((coluna) => (
-                <th key={coluna} className="plaqueta px-3 py-2 text-left text-xs text-fg-muted">
+                <th key={coluna} className="plaqueta px-4 py-3 text-left text-xs text-fg-muted">
                   {coluna}
                 </th>
               ))}
@@ -201,7 +201,7 @@ export function EventsPage() {
             {visiveis.eventos.map((evento) => {
               const chave = chaveEvento(evento);
               return (
-                <tr key={chave} data-testid="eventos-linha" className="border-b border-hairline align-top">
+                <tr key={chave} data-testid="eventos-linha" className="border-b border-border align-top">
                   <td className="process-value px-3 py-2 text-xs text-fg-muted">
                     {new Date(evento.ts).toLocaleString("pt-BR")}
                   </td>
@@ -211,7 +211,7 @@ export function EventsPage() {
                       {visiveis.recentes.has(chave) && (
                         <span
                           data-testid="eventos-novo"
-                          className="plaqueta rounded-panel border border-accent px-1.5 py-0.5 text-[10px] text-accent"
+                          className="plaqueta rounded-sm border border-accent px-1.5 py-0.5 text-[10px] text-accent"
                         >
                           Novo
                         </span>

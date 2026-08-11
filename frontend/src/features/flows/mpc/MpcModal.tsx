@@ -209,10 +209,10 @@ export function MpcModal({
       ref={dialogo}
       onClose={onFechar}
       data-testid="mpc-modal"
-      className="modal-bloco max-h-[90vh] w-[min(960px,96vw)] overflow-auto rounded-panel border border-hairline bg-panel p-0 text-fg"
+      className="modal-bloco max-h-[90vh] w-[min(960px,96vw)] overflow-auto rounded-sm border border-border bg-surface p-0 text-fg"
     >
       <form ref={formulario} onSubmit={aplicar}>
-        <header className="flex items-center justify-between border-b border-hairline bg-well px-4 py-3">
+        <header className="flex items-center justify-between border-b border-border bg-well px-4 py-3">
           <h2 className="plaqueta text-sm text-fg">Configurar MPC</h2>
           <span className="process-value text-xs text-fg-muted">{no.id}</span>
         </header>
@@ -258,7 +258,7 @@ export function MpcModal({
               (WAI-ARIA APG tabs pattern). */}
           <nav
             role="tablist"
-            className="flex flex-wrap gap-1 border-b border-hairline pb-2"
+            className="flex flex-wrap gap-1 border-b border-border pb-2"
             aria-label="Abas MPC"
           >
             {ABAS.map((item, indice) => (
@@ -280,10 +280,10 @@ export function MpcModal({
                 onKeyDown={(evento) => {
                   aoNavegarAbas(evento, indice);
                 }}
-                className={`plaqueta rounded-panel border px-3 py-1.5 text-[11px] transition-colors ${
+                className={`plaqueta rounded-sm border px-3 py-1.5 text-[11px] transition-colors ${
                   aba === item.slug
                     ? "border-accent bg-well text-fg"
-                    : "border-hairline bg-panel text-fg-muted hover:border-accent"
+                    : "border-border bg-surface text-fg-muted hover:border-accent"
                 }`}
               >
                 {item.rotulo}
@@ -333,7 +333,7 @@ export function MpcModal({
           </div>
         </fieldset>
 
-        <footer className="flex justify-end gap-2 border-t border-hairline px-4 py-3">
+        <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">
           <Button
             type="button"
             variant="outline"
