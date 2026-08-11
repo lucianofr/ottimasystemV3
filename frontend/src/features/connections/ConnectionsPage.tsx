@@ -46,37 +46,10 @@ const COLUNAS = [
   "Endpoint",
   "Segurança",
   "Autenticação",
-  "Watchdog",
   "Senha",
   "Pendências",
   "Último estado",
 ] as const;
-
-/** Watchdog só existe com o par de node_ids; sem ele a conexão é somente leitura (§3.5).
- *  Badge em Texto Secundário (A Regra da Cor Anormal, DESIGN.md §Colors): é config estática
- *  da conexão, não alarme de processo — a coluna "Último estado" é o canal certo pra falha
- *  real (mesma régua de `CelulaPendencias`). TD-004: aviso explícito de que `writes.py`
- *  (opc-worker) recusa TODA escrita nesta conexão. */
-function CelulaWatchdog({ conexao }: { conexao: ConnectionOut }) {
-  const configurado =
-    conexao.watchdog_read_node_id !== null && conexao.watchdog_write_node_id !== null;
-  if (!configurado) {
-    return (
-      <span
-        data-testid="conn-somente-leitura"
-        className="plaqueta inline-flex items-center rounded-[2px] border border-border bg-bg px-1.5 py-0.5 text-[10px] text-fg-muted"
-      >
-        Somente leitura (sem watchdog)
-      </span>
-    );
-  }
-  return (
-    <span>
-      <span className="process-value">{conexao.watchdog_period_ms}</span>{" "}
-      <span className="text-xs text-fg-muted">ms</span>
-    </span>
-  );
-}
 
 /**
  * Pendência de segredo derivável (spec §6.3, decisão A-4, UX-01, plano F6b tarefa 4.1): ícone +
@@ -378,9 +351,6 @@ export function ConnectionsPage() {
                 <td className="process-value px-3 py-2">{conexao.endpoint}</td>
                 <td className="px-3 py-2">{rotuloSeguranca(conexao)}</td>
                 <td className="px-3 py-2">{AUTH[conexao.auth_mode]}</td>
-                <td className="px-3 py-2">
-                  <CelulaWatchdog conexao={conexao} />
-                </td>
                 <td className="px-3 py-2">
                   {conexao.has_password ? "definida" : <span className="text-fg-muted">—</span>}
                 </td>

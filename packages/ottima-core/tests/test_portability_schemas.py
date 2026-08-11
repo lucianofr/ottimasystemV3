@@ -25,9 +25,6 @@ CONEXAO_NORMATIVA = {
     "security_mode": "sign_and_encrypt",
     "auth_mode": "user_password",
     "auth_username": "ottima",
-    "watchdog_read_node_id": "ns=2;s=WD_R",
-    "watchdog_write_node_id": "ns=2;s=WD_W",
-    "watchdog_period_ms": 1500,
 }
 
 
@@ -86,12 +83,6 @@ def test_bundle_connection_user_password_sem_usuario_reprova():
         BundleConnection(**dados)
 
 
-def test_bundle_connection_watchdog_com_um_so_node_id_reprova():
-    dados = {**CONEXAO_NORMATIVA, "watchdog_write_node_id": None}
-    with pytest.raises(ValidationError):
-        BundleConnection(**dados)
-
-
 def test_bundle_flow_desired_state_invalido_reprova_na_forma():
     with pytest.raises(ValidationError):
         BundleFlow(
@@ -122,6 +113,46 @@ def test_bundle_flow_rejeita_campo_fora_da_fronteira():
             id=1,
         )
     assert any(e["type"] == "extra_forbidden" for e in exc_info.value.errors())
+
+
+def test_bundle_flow_watchdog_valido_e_aceito():
+    flow = BundleFlow(
+        name="Coluna C-101",
+        ts_seconds=1.0,
+        graph={"nodes": [], "edges": []},
+        watchdog_enabled=True,
+        watchdog_connection="gateway-1",
+        watchdog_read_node_id="ns=2;s=WD_R",
+        watchdog_write_node_id="ns=2;s=WD_W",
+        watchdog_period_ms=2000,
+    )
+    assert flow.watchdog_connection == "gateway-1"
+    assert flow.watchdog_period_ms == 2000
+
+
+def test_bundle_flow_watchdog_habilitado_sem_conexao_reprova():
+    with pytest.raises(ValidationError):
+        BundleFlow(
+            name="Coluna C-101",
+            ts_seconds=1.0,
+            graph={"nodes": [], "edges": []},
+            watchdog_enabled=True,
+            watchdog_read_node_id="ns=2;s=WD_R",
+            watchdog_write_node_id="ns=2;s=WD_W",
+        )
+
+
+def test_bundle_flow_watchdog_com_node_ids_iguais_reprova():
+    with pytest.raises(ValidationError):
+        BundleFlow(
+            name="Coluna C-101",
+            ts_seconds=1.0,
+            graph={"nodes": [], "edges": []},
+            watchdog_enabled=True,
+            watchdog_connection="gateway-1",
+            watchdog_read_node_id="ns=2;s=WD",
+            watchdog_write_node_id="ns=2;s=WD",
+        )
 
 
 def test_bundle_tag_ref_e_objeto_com_connection_e_tag():

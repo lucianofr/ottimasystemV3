@@ -137,7 +137,9 @@ async def test_reload_com_peso_de_cv_mudado_preserva_remoto_auto_sem_salto_na_mv
     project_id = await create_project(session_factory)
     connection_id = await create_connection(session_factory, project_id)
     tag_id = await create_tag(session_factory, connection_id, direction="r")
-    flow_id = await create_flow(session_factory, project_id, graph=mpc_graph_valido(tag_id))
+    flow_id = await create_flow(
+        session_factory, project_id, graph=mpc_graph_valido(tag_id), watchdog_enabled=True
+    )
     events = await collect(CHANNEL_EVENTS)
     mpc_states = await collect(channel_mpc_state(flow_id, "m1"))
     harness = await harness_factory(mpc_worker_target=mpc_host_echo_plan_worker)
@@ -180,7 +182,9 @@ async def test_reload_com_mv_adicionada_reseta_para_local(
     project_id = await create_project(session_factory)
     connection_id = await create_connection(session_factory, project_id)
     tag_id = await create_tag(session_factory, connection_id, direction="r")
-    flow_id = await create_flow(session_factory, project_id, graph=mpc_graph_valido(tag_id))
+    flow_id = await create_flow(
+        session_factory, project_id, graph=mpc_graph_valido(tag_id), watchdog_enabled=True
+    )
     events = await collect(CHANNEL_EVENTS)
     mpc_states = await collect(channel_mpc_state(flow_id, "m1"))
     harness = await harness_factory(mpc_worker_target=mpc_host_echo_plan_worker)

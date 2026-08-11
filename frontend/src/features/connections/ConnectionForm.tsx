@@ -25,12 +25,7 @@ interface Valores {
   auth_mode: AuthMode;
   auth_username: string;
   auth_password: string;
-  watchdog_read_node_id: string;
-  watchdog_write_node_id: string;
-  watchdog_period_ms: string;
 }
-
-const PERIODO_PADRAO_MS = 1500; // ADR-009
 
 function valoresIniciais(conexao: ConnectionOut | null): Valores {
   return {
@@ -41,9 +36,6 @@ function valoresIniciais(conexao: ConnectionOut | null): Valores {
     auth_mode: conexao?.auth_mode ?? "anonymous",
     auth_username: conexao?.auth_username ?? "",
     auth_password: "",
-    watchdog_read_node_id: conexao?.watchdog_read_node_id ?? "",
-    watchdog_write_node_id: conexao?.watchdog_write_node_id ?? "",
-    watchdog_period_ms: String(conexao?.watchdog_period_ms ?? PERIODO_PADRAO_MS),
   };
 }
 
@@ -62,15 +54,6 @@ function validar(v: Valores, senhaJaDefinida: boolean): string[] {
       erros.push("Autenticação usuário/senha exige usuário e senha");
     }
   }
-  const leitura = v.watchdog_read_node_id.trim();
-  const escrita = v.watchdog_write_node_id.trim();
-  if (Boolean(leitura) !== Boolean(escrita)) {
-    erros.push("Watchdog exige os dois node_ids (leitura e escrita) ou nenhum");
-  }
-  const periodo = Number(v.watchdog_period_ms);
-  if (!Number.isInteger(periodo) || periodo < 500 || periodo > 5000) {
-    erros.push("Período do watchdog deve ser um número inteiro entre 500 e 5000 ms");
-  }
   return erros;
 }
 
@@ -83,9 +66,6 @@ function corpoComum(v: Valores) {
     security_mode: v.security_mode,
     auth_mode: v.auth_mode,
     auth_username: v.auth_mode === "user_password" ? v.auth_username.trim() : null,
-    watchdog_read_node_id: v.watchdog_read_node_id.trim() || null,
-    watchdog_write_node_id: v.watchdog_write_node_id.trim() || null,
-    watchdog_period_ms: Number(v.watchdog_period_ms),
   };
 }
 
@@ -258,52 +238,6 @@ export function ConnectionForm({ conexao, projectId, onClose }: Props) {
               OttimaSystem; nada a informar aqui.
             </p>
           )}
-        </fieldset>
-
-        <fieldset className="space-y-4 border-t border-border pt-4">
-          <legend className="plaqueta text-xs text-fg-muted">Watchdog</legend>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="conn-wd-read">Node de leitura</Label>
-              <Input
-                id="conn-wd-read"
-                data-testid="conn-wd-read"
-                className="process-value"
-                placeholder="ns=2;s=..."
-                value={v.watchdog_read_node_id}
-                onChange={(e) => mudar("watchdog_read_node_id", e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="conn-wd-write">Node de escrita</Label>
-              <Input
-                id="conn-wd-write"
-                data-testid="conn-wd-write"
-                className="process-value"
-                placeholder="ns=2;s=..."
-                value={v.watchdog_write_node_id}
-                onChange={(e) => mudar("watchdog_write_node_id", e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="conn-wd-period">Período (ms)</Label>
-              <Input
-                id="conn-wd-period"
-                data-testid="conn-wd-period"
-                className="process-value"
-                type="number"
-                min={500}
-                max={5000}
-                step={100}
-                value={v.watchdog_period_ms}
-                onChange={(e) => mudar("watchdog_period_ms", e.target.value)}
-              />
-            </div>
-          </div>
-          {/* Aviso fixo, sempre visível (spec F2 §3.5) */}
-          <p data-testid="conn-wd-aviso" className="text-xs text-warn-fg">
-            Sem watchdog, a conexão fica somente leitura: nenhuma escrita será executada.
-          </p>
         </fieldset>
 
         {erros.length > 0 && (

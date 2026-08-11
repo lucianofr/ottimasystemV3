@@ -40,7 +40,7 @@ v1 é uma reescrita completa do zero do sistema legado (Django), sem compatibili
 - Capacidades v1: auth local + RBAC; CRUD de projetos (1 ativo), conexões OPC-UA com 3 modos de segurança e certificados X.509, tags; editor de flows com 5 blocos e hot-swap; motor scan-cycle asyncio; MPC (SOPDT/IOPDT, TSS→Np/Nc derivados, restrições com precedência sobre CVs, multiplicador de execução, orçamento de solver 70%); tela de operação (faceplates + tendência uPlot com overlay de predição); eventos/auditoria com banner de alarmes sem ACK; export/import JSON sem segredos.
 - Não-objetivos v1 (não inventar): versionamento de flows, ACK de alarmes, ideal resting values, identificação de modelos, AD/LDAP, HTTPS, i18n, multi-projeto ativo, histórico > 1 mês, app mobile, relatórios.
 - **UI 100% pt-BR** (ADR-023). Terminologia fixada pelo `docs/GLOSSARY.md` (MV/CV/SP/DV, LOCAL/REMOTO, MAN/AUTO, deploy, faceplate, predição…) — não renomear conceitos.
-- Invariantes de segurança: nenhuma escrita em planta sem flow em deploy + watchdog vivo + REMOTO; falha de comunicação cessa escritas e para flows da conexão; retomada exige deploy manual.
+- Invariantes de segurança: nenhuma escrita em planta sem flow em deploy + watchdog vivo + REMOTO; falha de comunicação cessa escritas e para o flow (watchdog é por flow, não por conexão); retomada exige deploy manual.
 - UI orientada a estado publicado: reflete o barramento, nunca eco de comando.
 
 ## Brand Commitments

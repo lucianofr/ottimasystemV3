@@ -32,9 +32,12 @@ def test_payloads_verbatim_prd_71():
         "value",
         "quality",
     }
-    assert set(OpcWrite(conn_id=1, tag_id=2, value=3.0, source="user:1", ts=ts).model_dump()) == {
+    assert set(
+        OpcWrite(conn_id=1, tag_id=2, flow_id=7, value=3.0, source="user:1", ts=ts).model_dump()
+    ) == {
         "conn_id",
         "tag_id",
+        "flow_id",
         "value",
         "source",
         "ts",

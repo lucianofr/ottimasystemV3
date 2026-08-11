@@ -5,7 +5,6 @@ from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
     Identity,
-    Integer,
     Text,
     UniqueConstraint,
     text,
@@ -34,11 +33,6 @@ class OpcConnection(TimestampMixin, Base):
     auth_username: Mapped[str | None] = mapped_column(Text)
     auth_password_enc: Mapped[str | None] = mapped_column(Text)  # token Fernet — nunca em response
     server_cert_file: Mapped[str | None] = mapped_column(Text)  # arquivo no volume certs
-    watchdog_read_node_id: Mapped[str | None] = mapped_column(Text)
-    watchdog_write_node_id: Mapped[str | None] = mapped_column(Text)
-    watchdog_period_ms: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("1500")
-    )
 
     __table_args__ = (
         UniqueConstraint("project_id", "name", name="uq_opc_connections_project_name"),
@@ -51,9 +45,6 @@ class OpcConnection(TimestampMixin, Base):
         CheckConstraint(
             "auth_mode IN ('anonymous','user_password','certificate')",
             name="ck_opc_connections_auth",
-        ),
-        CheckConstraint(
-            "watchdog_period_ms BETWEEN 500 AND 5000", name="ck_opc_connections_wd_period"
         ),
         CheckConstraint(
             "(security_policy = 'none' AND security_mode = 'none')"

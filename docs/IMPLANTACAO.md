@@ -199,7 +199,7 @@ PLC e são preenchidos na aba **Variáveis** do modal do bloco MPC, por MV.
 - **No boot, não reassume malha nenhuma sozinho** — todo flow sobe **parado**,
   aguardando deploy manual (RF-104); mesmo depois de deploy, o MPC nasce em LOCAL.
 - **Em falha de comunicação/OPC** (watchdog > 10 s parado, ou sessão caída), o sistema
-  **cessa as escritas** naquela conexão e **para o flow** — o PLC, pelo watchdog dele,
+  **cessa as escritas** daquele flow e **para o flow** — o PLC, pelo watchdog dele,
   retoma o controle convencional sozinho.
 
 ## 4. Comissionamento passo a passo até AUTO
@@ -211,15 +211,15 @@ MAN/AUTO), que é operador ou admin (ADR-015).
    é a ação de maior consequência da tela: para todos os flows do projeto anterior; a
    confirmação nomeia o projeto atual e quantos flows param.
 2. **Conexão** (`/engenharia/conexoes`) — endpoint, `security_policy`/`security_mode`,
-   `auth_mode`, watchdog (`watchdog_read_node_id`/`watchdog_write_node_id`, período —
-   ADR-009 recomenda ciclo de 1-2 s). Resolver certificados/senha conforme §2 antes de
-   seguir; a coluna **Pendências** sinaliza o que falta sem cor de severidade (é
-   configuração, não falha de operação).
-3. **Tags** (`/engenharia/tags`) — node_id manual por tag; inclui as tags de watchdog e
-   todas as do §3 (write/mode_cmd/readback/mode_read por MV, mais as de leitura de
-   processo).
+   `auth_mode`. Resolver certificados/senha conforme §2 antes de seguir; a coluna
+   **Pendências** sinaliza o que falta sem cor de severidade (é configuração, não
+   falha de operação).
+3. **Tags** (`/engenharia/tags`) — node_id manual por tag; inclui todas as do §3
+   (write/mode_cmd/readback/mode_read por MV, mais as de leitura de processo).
 4. **Flow** (`/engenharia/flows`) — criar, escolher **Ts** ({0.5, 1, 2, 5, 10, 30, 60 s},
-   spec/ADR-007).
+   spec/ADR-007); habilitar watchdog (`watchdog_enabled`, apontando a `watchdog_connection_id`
+   e os nós `watchdog_read_node_id`/`watchdog_write_node_id` — distintos entre si — e o
+   período, ADR-009 recomenda ciclo de 1-2 s).
 5. **Blocos** — montar o canvas: OPC-Read/OPC-Write para as tags, bloco MPC com as abas
    Geral/Variáveis/Modelos/Horizontes/Restrições & Limites/Pesos (RF-607). Conferir
    **`exec_order`**: leituras antes do MPC, MPC antes das escritas — o editor

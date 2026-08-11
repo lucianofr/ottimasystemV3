@@ -92,13 +92,7 @@ async def create_connection(
     project_id: int,
     *,
     name: str = "Forno 1",
-    watchdog_read_node_id: str | None = "ns=2;s=WD_R",
-    watchdog_write_node_id: str | None = "ns=2;s=WD_W",
 ) -> int:
-    """Watchdog configurado por padrão (TD-004): cenários de MPC com `pid` escrevem por
-    tags desta conexão de verdade, e o gate de arme (`auto_arm_blocked_reason`) bloqueia
-    REMOTO sem watchdog — passe `watchdog_read_node_id=None` para simular a conexão sem
-    watchdog nos testes que exercitam esse gate."""
     async with factory() as session:
         connection = OpcConnection(
             project_id=project_id,
@@ -107,9 +101,6 @@ async def create_connection(
             security_policy="none",
             security_mode="none",
             auth_mode="anonymous",
-            watchdog_read_node_id=watchdog_read_node_id,
-            watchdog_write_node_id=watchdog_write_node_id,
-            watchdog_period_ms=1000,
         )
         session.add(connection)
         await session.commit()
@@ -145,6 +136,7 @@ async def create_flow(
     name: str = "Flow",
     ts_seconds: float = TS_SECONDS,
     desired_state: str = "stopped",
+    watchdog_enabled: bool = False,
 ) -> int:
     async with factory() as session:
         flow = Flow(
@@ -153,6 +145,7 @@ async def create_flow(
             ts_seconds=ts_seconds,
             desired_state=desired_state,
             graph_json=graph,
+            watchdog_enabled=watchdog_enabled,
         )
         session.add(flow)
         await session.commit()

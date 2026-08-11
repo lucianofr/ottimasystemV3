@@ -47,7 +47,6 @@ from ottima_core.bus import (
     KIND_RELOAD_REJECTED,
     FlowCommand,
 )
-from ottima_core.connections import conexoes_sem_watchdog
 from ottima_core.flowgraph import FlowGraph, GraphParseError, TagRef, parse_graph, validate_graph
 from ottima_core.models import Flow, Project
 from ottima_core.tags import project_tags
@@ -499,11 +498,6 @@ class Supervisor:
     ) -> StagedDefinition:
         """`graph_json` + tags do projeto -> definição da 1.4. Levanta `_Rejected` se recusado."""
         tags = await project_tags(session, flow.project_id)
-        # TD-004: config estática da conexão — decide no deploy se algum bloco MPC deste
-        # flow vai tentar escrever numa conexão sem watchdog (o opc-worker recusaria a
-        # escrita de qualquer jeito). Mesma consulta que `ottima_api.routers.flows` usa
-        # para o aviso do salvar — uma regra só (`ottima_core.connections`).
-        conns_sem_watchdog = frozenset(await conexoes_sem_watchdog(session, flow.project_id))
         # `Flow.ts_seconds` é Numeric(4,1) e chega como Decimal: `Decimal * float` levanta
         # TypeError na aritmética de fronteira (armadilha herdada da F1).
         ts_seconds = float(flow.ts_seconds)
@@ -527,7 +521,7 @@ class Supervisor:
             redis_client=self._redis,
             pool=self._pool,
             snapshot=self._snapshot,
-            conns_sem_watchdog=conns_sem_watchdog,
+            watchdog_enabled=flow.watchdog_enabled,
             mpc_worker_target=self._mpc_worker_target,
         )
 
@@ -535,49 +529,71 @@ class Supervisor:
     # Contrato F2 §3.7 (spec §2.2-8)
     # ----------------------------------------------------------------------------------
 
-    async def on_comm_failure(self, conn_id: int) -> None:
-        """Derruba os flows cujo grafo referencia tag da conexão caída (RF-207).
+    async def on_comm_failure(self, conn_id: int, flow_id: int | None = None) -> None:
+        """Derruba o(s) flow(s) afetados pela falha (RF-207 revisado, ADR-009).
 
-        Os demais seguem intactos, e descongelar não retoma nada: retomada é só por deploy
-        manual (ADR-017). Quem emite `flow_failed` é a própria `FlowTask` (tarefa 1.4).
+        Dois caminhos, conforme `flow_id`:
+        - `None` (falha de SESSÃO — `session_lost`/`connect_failed`/`cert_*`): derruba
+          TODOS os flows cujo grafo referencia tag da conexão caída (comportamento
+          herdado, `_conn_ids`).
+        - Dado (falha do WATCHDOG de UM flow — `watchdog_timeout`, ADR-009 revisado):
+          derruba SÓ esse flow. Os demais flows da mesma conexão, com watchdog próprio
+          ainda vivo, seguem intactos — é exatamente o isolamento que motivou mover o
+          watchdog da conexão para o flow (uma conexão pode ser um gateway com vários
+          PLCs atrás dela).
 
-        MPC (ADR-009): watchdog de armar/shed cancelado — sem conexão não há como confirmar
-        nem shedar de verdade, e não há como escrever `mode_cmd=auto` (a conexão está
-        caída); o watchdog do lado do PLC devolve o controle sozinho. O `MpcHost` (processo)
-        fica vivo até o próximo `deploy`/`stop`/desligamento — matar processo não é reação a
+        Descongelar não retoma nada: retomada é só por deploy manual (ADR-017) ou pelo
+        `ResumeOrchestrator` (TD-005/ADR-025). Quem emite `flow_failed` é a própria
+        `FlowTask` (tarefa 1.4).
+
+        MPC (ADR-009): watchdog de armar/shed cancelado — sem conexão/flow não há como
+        confirmar nem shedar de verdade, e não há como escrever `mode_cmd=auto`; o
+        watchdog do lado do PLC devolve o controle sozinho. O `MpcHost` (processo) fica
+        vivo até o próximo `deploy`/`stop`/desligamento — matar processo não é reação a
         `comm_failure`.
         """
         async with self._lock:
-            for flow_id, runtime in list(self._runtimes.items()):
+            if flow_id is not None:
+                runtime = self._runtimes.get(flow_id)
+                if runtime is not None and runtime.task.state == "running":
+                    await self._fail_flow(flow_id, runtime, conn_id)
+                return
+            for fid, runtime in list(self._runtimes.items()):
                 if runtime.task.state != "running" or conn_id not in runtime.conn_ids:
                     continue
-                for block_id in list(runtime.mpc_watchdogs):
-                    await self._mpc.cancel_watchdog(runtime, block_id)
-                # Snapshot ANTES de `fail()` (TD-005/ADR-025): a retomada automática pós
-                # `comm_restored` precisa dos modos/últimos valores/SPs de cada bloco MPC de
-                # antes da queda — depois de `fail()` eles já foram zerados por
-                # `_reset_blocks()` (`FlowTask.fail`). Vazio quando o flow não tem bloco
-                # `mpc` nenhum: o redeploy automático roda igual, só não há modo/SP nenhum
-                # para restaurar depois.
-                estados = {
-                    block_id: block.snapshot_estado()
-                    for block_id, (_, block) in runtime.blocks.items()
-                    if isinstance(block, MpcBlock)
-                }
-                self._resume.pendentes[flow_id] = RetomadaPendente(conn_id=conn_id, estados=estados)
-                try:
-                    await runtime.task.fail(reason=REASON_COMM_FAILURE)
-                except Exception:
-                    # Isolado por flow: um que falhe ao cair não pode poupar os seguintes.
-                    logger.exception(
-                        "Falha ao derrubar o flow %s por queda da conexão %s", flow_id, conn_id
-                    )
+                await self._fail_flow(fid, runtime, conn_id)
 
-    async def on_comm_restored(self, conn_id: int) -> None:
+    async def _fail_flow(self, flow_id: int, runtime: _FlowRuntime, conn_id: int) -> None:
+        """Corpo isolado de `on_comm_failure` para um flow — reusado pelos dois caminhos
+        (sessão inteira ou watchdog de um flow só)."""
+        for block_id in list(runtime.mpc_watchdogs):
+            await self._mpc.cancel_watchdog(runtime, block_id)
+        # Snapshot ANTES de `fail()` (TD-005/ADR-025): a retomada automática pós
+        # `comm_restored` precisa dos modos/últimos valores/SPs de cada bloco MPC de
+        # antes da queda — depois de `fail()` eles já foram zerados por
+        # `_reset_blocks()` (`FlowTask.fail`). Vazio quando o flow não tem bloco `mpc`
+        # nenhum: o redeploy automático roda igual, só não há modo/SP nenhum para
+        # restaurar depois.
+        estados = {
+            block_id: block.snapshot_estado()
+            for block_id, (_, block) in runtime.blocks.items()
+            if isinstance(block, MpcBlock)
+        }
+        self._resume.pendentes[flow_id] = RetomadaPendente(conn_id=conn_id, estados=estados)
+        try:
+            await runtime.task.fail(reason=REASON_COMM_FAILURE)
+        except Exception:
+            # Isolado por flow: um que falhe ao cair não pode poupar os seguintes.
+            logger.exception(
+                "Falha ao derrubar o flow %s por queda da conexão %s", flow_id, conn_id
+            )
+
+    async def on_comm_restored(self, conn_id: int, flow_id: int | None = None) -> None:
         """Retomada automática completa pós `comm_restored` (TD-005, ADR-025) — delega a
         `ResumeOrchestrator`, que guarda o próprio estado de pendências (`self._resume.
-        pendentes`, populado por `on_comm_failure` acima)."""
-        await self._resume.on_comm_restored(conn_id)
+        pendentes`, populado por `on_comm_failure` acima). `flow_id` (ADR-009 revisado)
+        restringe a retomada a ESSE flow; ausente, retoma todos pendentes na conexão."""
+        await self._resume.on_comm_restored(conn_id, flow_id)
 
     async def on_project_activated(self, project_id: int) -> None:
         """Para **todos** os flows rodando: pertencem ao projeto anterior (§4.3, gancho RF-101)."""

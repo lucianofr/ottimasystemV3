@@ -57,9 +57,6 @@ def _to_out(conn: OpcConnection) -> ConnectionOut:
         auth_mode=conn.auth_mode,
         auth_username=conn.auth_username,
         server_cert_file=conn.server_cert_file,
-        watchdog_read_node_id=conn.watchdog_read_node_id,
-        watchdog_write_node_id=conn.watchdog_write_node_id,
-        watchdog_period_ms=conn.watchdog_period_ms,
         has_password=conn.auth_password_enc is not None,
         created_at=conn.created_at,
         updated_at=conn.updated_at,
@@ -168,9 +165,6 @@ async def create_connection(
             else None
         ),
         server_cert_file=body.server_cert_file,
-        watchdog_read_node_id=body.watchdog_read_node_id,
-        watchdog_write_node_id=body.watchdog_write_node_id,
-        watchdog_period_ms=body.watchdog_period_ms,
     )
     db.add(conn)
     try:
@@ -210,10 +204,6 @@ async def update_connection(
         conn.auth_password_enc = encrypt_secret(body.auth_password, key=settings.fernet_key)
     if (conn.security_policy == "none") != (conn.security_mode == "none"):
         raise HTTPException(status_code=422, detail=_MSG_POLICY_MODE)
-    if (conn.watchdog_read_node_id is None) != (conn.watchdog_write_node_id is None):
-        raise HTTPException(
-            status_code=422, detail="Watchdog exige os dois node_ids (leitura e escrita) ou nenhum"
-        )
     try:
         await db.commit()
     except IntegrityError:

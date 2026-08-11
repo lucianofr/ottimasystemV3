@@ -20,7 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from worker_test_helpers import await_until, collecting
 
-from opcsim import NODE_SINE, NODE_STATIC, OpcSimServer
+from opcsim import NODE_SINE, NODE_STATIC, NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM, OpcSimServer
 from ottima_core.bus import (
     CHANNEL_EVENTS,
     KIND_COMM_RESTORED,
@@ -29,7 +29,7 @@ from ottima_core.bus import (
     channel_opc_values,
     publish_event,
 )
-from ottima_core.models import OpcConnection, Project, Tag
+from ottima_core.models import Flow, OpcConnection, Project, Tag
 from ottima_opc_worker import supervisor as supervisor_module
 from ottima_opc_worker.state import (
     ConnectionConfig,
@@ -76,7 +76,7 @@ async def session_factory(
 
 async def _truncate(factory: async_sessionmaker[AsyncSession]) -> None:
     async with factory() as session:
-        await session.execute(text("TRUNCATE tags, opc_connections, projects CASCADE"))
+        await session.execute(text("TRUNCATE tags, flows, opc_connections, projects CASCADE"))
         await session.commit()
 
 
@@ -96,7 +96,6 @@ async def create_connection(
     endpoint: str,
     *,
     name: str = "Forno 1",
-    watchdog_period_ms: int = 1000,
 ) -> int:
     async with factory() as session:
         connection = OpcConnection(
@@ -106,7 +105,6 @@ async def create_connection(
             security_policy="none",
             security_mode="none",
             auth_mode="anonymous",
-            watchdog_period_ms=watchdog_period_ms,
         )
         session.add(connection)
         await session.commit()
@@ -135,6 +133,44 @@ async def create_tag(
         session.add(tag)
         await session.commit()
         return tag.id
+
+
+async def create_flow(
+    factory: async_sessionmaker[AsyncSession],
+    project_id: int,
+    *,
+    name: str = "Flow 1",
+    watchdog_enabled: bool = False,
+    watchdog_connection_id: int | None = None,
+    watchdog_read_node_id: str | None = None,
+    watchdog_write_node_id: str | None = None,
+    watchdog_period_ms: int = 1500,
+) -> int:
+    async with factory() as session:
+        flow = Flow(
+            project_id=project_id,
+            name=name,
+            ts_seconds=1,
+            watchdog_enabled=watchdog_enabled,
+            watchdog_connection_id=watchdog_connection_id,
+            watchdog_read_node_id=watchdog_read_node_id,
+            watchdog_write_node_id=watchdog_write_node_id,
+            watchdog_period_ms=watchdog_period_ms,
+        )
+        session.add(flow)
+        await session.commit()
+        return flow.id
+
+
+async def update_flow(
+    factory: async_sessionmaker[AsyncSession], flow_id: int, **changes: object
+) -> None:
+    async with factory() as session:
+        flow = await session.get(Flow, flow_id)
+        assert flow is not None
+        for field, value in changes.items():
+            setattr(flow, field, value)
+        await session.commit()
 
 
 async def update_connection(
@@ -358,7 +394,7 @@ async def test_watermark_sem_projeto_ativo_e_vazio(
 
     async with session_factory() as session:
         watermark = await read_watermark(session)
-        configs = await load_active_configuration(session)
+        configs, flow_watchdogs = await load_active_configuration(session)
 
     assert watermark.project_id is None
     assert watermark.connections_count == 0
@@ -366,6 +402,7 @@ async def test_watermark_sem_projeto_ativo_e_vazio(
     assert watermark.connections_max_updated_at is None
     assert watermark.tags_max_updated_at is None
     assert configs == ()
+    assert flow_watchdogs == {}
 
 
 async def test_watermark_conta_somente_o_projeto_ativo(
@@ -491,12 +528,12 @@ async def test_campo_da_conexao_recria_a_sessao(
         antigo = supervisor.runtimes[conn_id]
         subiu_em = antigo.snapshot.session_up_since
 
-        await update_connection(session_factory, conn_id, watchdog_period_ms=2000)
+        await update_connection(session_factory, conn_id, name="Forno 2")
         await await_until(lambda: supervisor.runtimes.get(conn_id) is not antigo)
         await wait_up(supervisor, conn_id)
 
         novo = supervisor.runtimes[conn_id]
-        assert novo.config.watchdog_period_ms == 2000
+        assert novo.config.name == "Forno 2"
         assert novo.snapshot.session_up_since != subiu_em
         assert state.connections[conn_id] is novo.snapshot
         assert antigo.state is not ConnectionState.UP or antigo.client is None
@@ -523,7 +560,7 @@ async def test_falha_pendente_atravessa_a_troca_de_sessao(
             await antigo.fail("cert_missing", "falha forjada pelo teste")
             assert antigo.failure_pending is True
 
-            await update_connection(session_factory, conn_id, watchdog_period_ms=2000)
+            await update_connection(session_factory, conn_id, name="Forno 2")
             await await_until(lambda: supervisor.runtimes.get(conn_id) is not antigo)
             novo = supervisor.runtimes[conn_id]
             assert novo is not antigo
@@ -536,6 +573,96 @@ async def test_falha_pendente_atravessa_a_troca_de_sessao(
                 )
             )
         assert novo.failure_pending is False
+
+
+# --- watchdog de flow (ADR-009 revisado) --------------------------------------------
+
+
+async def test_flow_com_watchdog_habilita_a_task_na_conexao(
+    session_factory: async_sessionmaker[AsyncSession], redis_client: Redis, sim: OpcSimServer
+) -> None:
+    """Flow com watchdog habilitado ⇒ a conexão dele ganha a task (ADR-009 revisado)."""
+    project_id = await create_project(session_factory)
+    conn_id = await create_connection(session_factory, project_id, sim.endpoint)
+    flow_id = await create_flow(
+        session_factory,
+        project_id,
+        watchdog_enabled=True,
+        watchdog_connection_id=conn_id,
+        watchdog_read_node_id=NODE_WD_TO_SYSTEM,
+        watchdog_write_node_id=NODE_WD_FROM_SYSTEM,
+    )
+    state = WorkerState()
+    supervisor = make_supervisor(session_factory, redis_client, state)
+
+    async with started(supervisor):
+        await wait_up(supervisor, conn_id)
+        runtime = supervisor.runtimes[conn_id]
+        await await_until(lambda: flow_id in runtime.flow_watchdogs)
+        assert runtime.flow_watchdogs[flow_id].config.read_node_id == NODE_WD_TO_SYSTEM
+
+
+async def test_editar_watchdog_do_flow_nao_recria_a_sessao(
+    session_factory: async_sessionmaker[AsyncSession], redis_client: Redis, sim: OpcSimServer
+) -> None:
+    """Watchdog de flow é independente de `session_key`: reconfigura sem derrubar a
+    sessão (a reconciliação de `_apply` chama `set_flow_watchdogs` sempre, mesmo quando
+    nem `session_key` nem `tags_key` mudaram)."""
+    project_id = await create_project(session_factory)
+    conn_id = await create_connection(session_factory, project_id, sim.endpoint)
+    flow_id = await create_flow(
+        session_factory,
+        project_id,
+        watchdog_enabled=True,
+        watchdog_connection_id=conn_id,
+        watchdog_read_node_id=NODE_WD_TO_SYSTEM,
+        watchdog_write_node_id=NODE_WD_FROM_SYSTEM,
+        watchdog_period_ms=1000,
+    )
+    state = WorkerState()
+    supervisor = make_supervisor(session_factory, redis_client, state)
+
+    async with started(supervisor):
+        await wait_up(supervisor, conn_id)
+        runtime = supervisor.runtimes[conn_id]
+        await await_until(lambda: flow_id in runtime.flow_watchdogs)
+        subiu_em = runtime.snapshot.session_up_since
+
+        await update_flow(session_factory, flow_id, watchdog_period_ms=2000)
+        await await_until(
+            lambda: (task := runtime.flow_watchdogs.get(flow_id)) is not None
+            and task.config.period_ms == 2000
+        )
+
+        assert supervisor.runtimes[conn_id] is runtime, "editar watchdog não recria o runtime"
+        assert runtime.snapshot.session_up_since == subiu_em
+
+
+async def test_desabilitar_watchdog_do_flow_remove_a_task(
+    session_factory: async_sessionmaker[AsyncSession], redis_client: Redis, sim: OpcSimServer
+) -> None:
+    """Desligar o watchdog do flow ⇒ a task some e a escrita dele volta a `no_watchdog`."""
+    project_id = await create_project(session_factory)
+    conn_id = await create_connection(session_factory, project_id, sim.endpoint)
+    flow_id = await create_flow(
+        session_factory,
+        project_id,
+        watchdog_enabled=True,
+        watchdog_connection_id=conn_id,
+        watchdog_read_node_id=NODE_WD_TO_SYSTEM,
+        watchdog_write_node_id=NODE_WD_FROM_SYSTEM,
+    )
+    state = WorkerState()
+    supervisor = make_supervisor(session_factory, redis_client, state)
+
+    async with started(supervisor):
+        await wait_up(supervisor, conn_id)
+        runtime = supervisor.runtimes[conn_id]
+        await await_until(lambda: flow_id in runtime.flow_watchdogs)
+
+        await update_flow(session_factory, flow_id, watchdog_enabled=False)
+        await await_until(lambda: flow_id not in runtime.flow_watchdogs)
+        assert flow_id not in runtime.snapshot.flow_watchdog_alive
 
 
 async def test_projeto_desativado_derruba_tudo(

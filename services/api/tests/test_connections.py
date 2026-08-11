@@ -69,16 +69,6 @@ async def test_coerencia_policy_mode_422(client, admin_headers):
     assert r.status_code == 422
 
 
-async def test_watchdog_exige_par_de_node_ids(client, admin_headers):
-    pid = await _projeto(client, admin_headers, "Watchdog")
-    r = await client.post(
-        "/api/connections",
-        json={**BASE, "project_id": pid, "watchdog_read_node_id": "ns=2;i=100"},
-        headers=admin_headers,
-    )
-    assert r.status_code == 422
-
-
 async def test_patch_sem_auth_password_mantem_senha(client, admin_headers):
     pid = await _projeto(client, admin_headers, "Manter")
     created = (

@@ -18,7 +18,7 @@ CHAVES_DE_TOPO = {"status", "service", "version", "connections"}
 CHAVES_DA_CONEXAO = {
     "name",
     "state",
-    "watchdog_alive",
+    "flow_watchdog_alive",
     "session_up_since",
     "last_publish_ts",
     "tags_subscribed",
@@ -89,7 +89,7 @@ def state_com_duas_conexoes() -> WorkerState:
             1: ConnectionSnapshot(
                 name="Forno 1",
                 state=ConnectionState.UP,
-                watchdog_alive=True,
+                flow_watchdog_alive={101: True},
                 session_up_since=SESSAO_DESDE,
                 last_publish_ts=ULTIMA_PUBLICACAO,
                 tags_subscribed=4,
@@ -97,7 +97,7 @@ def state_com_duas_conexoes() -> WorkerState:
             2: ConnectionSnapshot(
                 name="Forno 2",
                 state=ConnectionState.FAILED,
-                watchdog_alive=False,
+                flow_watchdog_alive={202: False},
                 tags_subscribed=0,
                 monitored_errors=3,
                 write_errors=1,
@@ -164,7 +164,7 @@ async def test_conexao_opc_caida_nao_degrada_o_status():
     assert r.status_code == 200
     body = r.json()
     assert body["connections"]["2"]["state"] == "failed"
-    assert body["connections"]["2"]["watchdog_alive"] is False
+    assert body["connections"]["2"]["flow_watchdog_alive"] == {"202": False}
     assert body["status"] == "ok", "PLC desligado é alarme, não unhealth do serviço"
 
 

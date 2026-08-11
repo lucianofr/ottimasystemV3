@@ -712,6 +712,7 @@ class MpcBlock(Block):
                 OpcWrite(
                     conn_id=0,
                     tag_id=mv.pid.write_tag_id,
+                    flow_id=0,
                     value=float(outputs[mv.id].v),  # type: ignore[arg-type]
                     source=self._source,
                     ts=datetime.now(UTC),

@@ -157,14 +157,10 @@ async def _scenario(
 ) -> dict:
     """Projeto + conexão + as tags do `pid` + flow com `mpc_graph_com_pid`. Devolve os ids
     que os testes precisam — evita repetir a mesma sequência de `create_*` uma dúzia de
-    vezes."""
+    vezes. `with_watchdog` liga `Flow.watchdog_enabled` (TD-004 revisado, ADR-009: o
+    watchdog é config do FLOW, não da conexão — `flow-runtime` só lê esse booleano)."""
     project_id = await create_project(session_factory)
-    connection_id = await create_connection(
-        session_factory,
-        project_id,
-        watchdog_read_node_id="ns=2;s=WD_R" if with_watchdog else None,
-        watchdog_write_node_id="ns=2;s=WD_W" if with_watchdog else None,
-    )
+    connection_id = await create_connection(session_factory, project_id)
     cv_tag_id = await create_tag(session_factory, connection_id, name="cv", direction="r")
     write_tag_id = await create_tag(session_factory, connection_id, name="write", direction="w")
     mode_cmd_tag_id = await create_tag(
@@ -189,6 +185,7 @@ async def _scenario(
             mode_read_tag_id=mode_read_tag_id,
         ),
         ts_seconds=TS_SECONDS,
+        watchdog_enabled=with_watchdog,
     )
     return {
         "project_id": project_id,
@@ -1366,18 +1363,19 @@ async def test_force_stop_libera_o_lock_antes_do_kill_do_host_mpc(
 
 
 # --------------------------------------------------------------------------------------
-# 24: TD-004 — conexão sem watchdog bloqueia o arme REMOTO (config estática, gate no
-#     deploy: `definition.py` computa `escreve_sem_watchdog` e injeta no `MpcBlock`)
+# 24: TD-004 revisado (ADR-009) — `Flow.watchdog_enabled=False` bloqueia o arme REMOTO
+#     (config estática, gate no deploy: `_instantiate` passa `escreve_sem_watchdog=
+#     not watchdog_enabled` ao `MpcBlock`)
 # --------------------------------------------------------------------------------------
 
 
-async def test_local_para_remoto_com_conexao_sem_watchdog_falha_write_target_sem_watchdog(
+async def test_local_para_remoto_sem_watchdog_do_flow_falha_write_target_sem_watchdog(
     harness_factory: Factory, collect: Collect, session_factory: Sessions
 ) -> None:
-    """A MV com `pid` deste cenário escreve em `write_tag_id`/`mode_cmd_tag_id` da MESMA
-    conexão sem watchdog. Mesmo com host pronto e entrada quente e válida — o cenário de
-    sucesso normal de `_deploy_and_warm` — o gate de `auto_arm_blocked_reason` barra ANTES
-    de materializar o comando: `escreve_sem_watchdog` é o NOVO PRIMEIRO check."""
+    """`Flow.watchdog_enabled=False` deste cenário. Mesmo com host pronto e entrada quente
+    e válida — o cenário de sucesso normal de `_deploy_and_warm` — o gate de
+    `auto_arm_blocked_reason` barra ANTES de materializar o comando: `escreve_sem_watchdog`
+    é o NOVO PRIMEIRO check."""
     scenario = await _scenario(session_factory, with_watchdog=False)
     events = await collect(CHANNEL_EVENTS)
     harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)

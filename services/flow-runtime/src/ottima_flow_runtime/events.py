@@ -40,15 +40,16 @@ logger = logging.getLogger(__name__)
 def build_event_listener(
     redis_client: Redis,
     *,
-    on_comm_failure: Callable[[int], Awaitable[None]],
-    on_comm_restored: Callable[[int], Awaitable[None]],
+    on_comm_failure: Callable[[int, int | None], Awaitable[None]],
+    on_comm_restored: Callable[[int, int | None], Awaitable[None]],
     on_project_activated: Callable[[int], Awaitable[None]],
 ) -> ChannelListener:
     """Assinante do canal `events` com os `kind` que o runtime consome (§2.2-8; TD-005
     ADR-025 acrescenta `comm_restored`).
 
-    Payloads verificados no código da F2: `comm_failure`/`comm_restored` trazem `conn_id`
-    e `project_activated` traz `project_id`/`name`.
+    Payloads verificados no código da F2: `comm_failure`/`comm_restored` sempre trazem
+    `conn_id`; `flow_id` é opcional (ADR-009 revisado) — presente só quando a causa é o
+    watchdog de UM flow (não a sessão inteira da conexão).
     """
 
     async def handle(data: str) -> None:
@@ -60,12 +61,14 @@ def build_event_listener(
         kind = event.payload.get("kind")
         if kind == KIND_COMM_FAILURE:
             conn_id = event.payload.get("conn_id")
+            flow_id = event.payload.get("flow_id")
             if isinstance(conn_id, int):
-                await on_comm_failure(conn_id)
+                await on_comm_failure(conn_id, flow_id if isinstance(flow_id, int) else None)
         elif kind == KIND_COMM_RESTORED:
             conn_id = event.payload.get("conn_id")
+            flow_id = event.payload.get("flow_id")
             if isinstance(conn_id, int):
-                await on_comm_restored(conn_id)
+                await on_comm_restored(conn_id, flow_id if isinstance(flow_id, int) else None)
         elif kind == KIND_PROJECT_ACTIVATED:
             project_id = event.payload.get("project_id")
             if isinstance(project_id, int):

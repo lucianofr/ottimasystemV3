@@ -360,9 +360,6 @@ async def import_project(
             security_mode=bc.security_mode,
             auth_mode=bc.auth_mode,
             auth_username=bc.auth_username,
-            watchdog_read_node_id=bc.watchdog_read_node_id,
-            watchdog_write_node_id=bc.watchdog_write_node_id,
-            watchdog_period_ms=bc.watchdog_period_ms,
         )
         db.add(conn)
         conexoes_por_nome[bc.name] = conn
@@ -420,6 +417,13 @@ async def import_project(
             ts_seconds=bf.ts_seconds,
             desired_state=bf.desired_state,
             graph_json=graph_banco,
+            watchdog_enabled=bf.watchdog_enabled,
+            watchdog_connection_id=(
+                conexoes_por_nome[bf.watchdog_connection].id if bf.watchdog_connection else None
+            ),
+            watchdog_read_node_id=bf.watchdog_read_node_id,
+            watchdog_write_node_id=bf.watchdog_write_node_id,
+            watchdog_period_ms=bf.watchdog_period_ms,
         )
         db.add(flow)
         flows_novos.append(flow)

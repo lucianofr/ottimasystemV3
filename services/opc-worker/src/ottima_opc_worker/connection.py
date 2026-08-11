@@ -7,6 +7,7 @@ O worker é o supervisor da sessão: o auto-reconnect do asyncua fica desligado 
 import asyncio
 import logging
 import random
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -25,7 +26,13 @@ from .security import (
     describe_exception,
     map_connect_exception,
 )
-from .state import ConnectionConfig, ConnectionSnapshot, ConnectionState, TagConfig
+from .state import (
+    ConnectionConfig,
+    ConnectionSnapshot,
+    ConnectionState,
+    FlowWatchdogConfig,
+    TagConfig,
+)
 from .subscriptions import ValueSubscription
 from .watchdog import FREEZE_THRESHOLD_S, WatchdogTask
 
@@ -43,7 +50,6 @@ _MAX_BACKOFF_EXPONENT = 32
 _REASON_TEXT: dict[str, str] = {
     "connect_failed": "falha ao conectar",
     "session_lost": "sessão perdida",
-    "watchdog_timeout": "watchdog sem alternância",
     "cert_mismatch": "certificado do servidor não confere",
     "cert_missing": "certificado ausente (aplicação ou servidor)",
 }
@@ -104,7 +110,10 @@ class ConnectionRuntime:
         # rode uma vez só, mesmo com stop() repetido.
         self._session_open = False
         self._subscription: ValueSubscription | None = None
-        self._watchdog: WatchdogTask | None = None
+        self._flow_watchdogs: dict[int, WatchdogTask] = {}
+        self._desired_flow_watchdogs: dict[int, FlowWatchdogConfig] = {}
+        self._flow_failure_pending: dict[int, bool] = {}
+        self._flow_gate_generation: dict[int, int] = {}
         # Cache de codificação das tags `w`, preenchido 1× por sessão (spec §4.3).
         self._write_types: dict[int, ua.VariantType] = {}
         # Avança a cada reabertura do gate de escrita (ver `mark_restored`). O consumidor
@@ -161,9 +170,15 @@ class ConnectionRuntime:
         return self._subscription
 
     @property
-    def watchdog(self) -> WatchdogTask | None:
-        """Task de watchdog viva; None fora de `up` ou em conexão sem o par de node_ids."""
-        return self._watchdog
+    def flow_watchdogs(self) -> Mapping[int, WatchdogTask]:
+        """Tasks de watchdog vivas por `flow_id`; vazio fora de `up` ou sem flow com
+        watchdog habilitado nesta conexão (ADR-009 revisado)."""
+        return self._flow_watchdogs
+
+    def flow_gate_generation(self, flow_id: int) -> int:
+        """Conta as reaberturas do gate de escrita DESTE flow; muda ⇒ período de
+        bloqueio novo (`watchdog_dead`). Distinto de `gate_generation` (sessão)."""
+        return self._flow_gate_generation.get(flow_id, 0)
 
     @property
     def heartbeat(self) -> ValueHeartbeat:
@@ -207,16 +222,22 @@ class ConnectionRuntime:
             await self.fail("session_lost", describe_exception(exc))
             raise
         await self.load_write_types()
-        await self._start_watchdog(client)
+        await self._reconcile_flow_watchdogs(client)
 
     async def on_session_down(self) -> None:
-        """Gancho simétrico, ao sair de `up`: derruba watchdog e subscription.
+        """Gancho simétrico, ao sair de `up`: derruba watchdogs de flow e subscription.
 
-        Quem zera `snapshot.watchdog_alive` é `_close_session`, único caminho até aqui.
+        Preserva as chaves de `flow_watchdog_alive` (só zera o valor): a config ainda é
+        desejada, e um flow com watchdog configurado que perde a sessão deve virar
+        `watchdog_dead` (bloqueio transiente), nunca `no_watchdog` (recusa permanente) —
+        `_stop_flow_watchdog` (remoção de verdade, flow desabilitado) é quem apaga a
+        chave. Quem escreve isso é este método; `fail()` só antecipa sincronamente.
         """
-        watchdog, self._watchdog = self._watchdog, None
-        if watchdog is not None:
+        for watchdog in self._flow_watchdogs.values():
             await watchdog.stop()
+        self._flow_watchdogs.clear()
+        for flow_id in self._snapshot.flow_watchdog_alive:
+            self._snapshot.flow_watchdog_alive[flow_id] = False
         subscription, self._subscription = self._subscription, None
         if subscription is not None:
             await subscription.stop()
@@ -272,25 +293,109 @@ class ConnectionRuntime:
         tag = next((t for t in self._config.tags if t.id == tag_id), None)
         return _FALLBACK_VARIANT_TYPES[tag.data_type] if tag is not None else ua.VariantType.Double
 
-    async def _start_watchdog(self, client: Client) -> None:
-        """Sobe o watchdog da sessão, se a conexão tiver o par de node_ids (spec §3.1).
+    async def set_flow_watchdogs(self, configs: Mapping[int, FlowWatchdogConfig]) -> None:
+        """Atualiza os watchdogs de flow desta conexão (ADR-009 revisado: chamado pelo
+        supervisor a cada mudança na tabela `flows`, independente de `session_key`).
 
-        Sem watchdog a conexão é read-only de fato (spec §3.5): nenhuma task é criada e
-        `watchdog_alive` fica `False` para sempre.
+        Nunca derruba a sessão nem as subscriptions: um flow ligando/desligando o próprio
+        watchdog não pode arrastar os outros flows que também usam esta conexão — é
+        exatamente o isolamento que motivou mover o watchdog da conexão para o flow.
         """
-        if not self._config.has_watchdog:
+        self._desired_flow_watchdogs = dict(configs)
+        client = self._client
+        if self._state is not ConnectionState.UP or client is None:
             return
+        await self._reconcile_flow_watchdogs(client)
+
+    async def _reconcile_flow_watchdogs(self, client: Client) -> None:
+        """Cria, para ou reconfigura tasks de watchdog para bater com o desejado."""
+        desired = self._desired_flow_watchdogs
+        for flow_id in [fid for fid in self._flow_watchdogs if fid not in desired]:
+            await self._stop_flow_watchdog(flow_id)
+        for flow_id, config in desired.items():
+            existing = self._flow_watchdogs.get(flow_id)
+            if existing is None:
+                await self._start_flow_watchdog(client, config)
+            elif existing.config != config:
+                await self._stop_flow_watchdog(flow_id)
+                await self._start_flow_watchdog(client, config)
+
+    async def _start_flow_watchdog(self, client: Client, config: FlowWatchdogConfig) -> None:
         watchdog = WatchdogTask(
-            self._config,
+            config,
             client,
             self._snapshot,
-            on_freeze=lambda detail: self.fail("watchdog_timeout", detail),
-            on_alive=self.mark_restored,
+            on_freeze=lambda detail, fid=config.flow_id: self._flow_watchdog_freeze(fid, detail),
+            on_alive=lambda fid=config.flow_id: self._flow_watchdog_alive(fid),
             on_hard_failure=lambda detail: self.fail("session_lost", detail),
             freeze_threshold_s=self._watchdog_freeze_threshold_s,
         )
-        self._watchdog = watchdog
+        self._flow_watchdogs[config.flow_id] = watchdog
         await watchdog.start()
+
+    async def _stop_flow_watchdog(self, flow_id: int) -> None:
+        """Remoção DE VERDADE (flow desabilitou o watchdog ou foi excluído): apaga todo o
+        estado, inclusive a chave de `flow_watchdog_alive` — daqui pra frente a escrita
+        deste flow volta a ser recusada por `no_watchdog`, não bloqueada por
+        `watchdog_dead` (§ ver `on_session_down`, que preserva a chave por ser transiente)."""
+        watchdog = self._flow_watchdogs.pop(flow_id, None)
+        if watchdog is not None:
+            await watchdog.stop()
+        self._snapshot.flow_watchdog_alive.pop(flow_id, None)
+        self._flow_failure_pending.pop(flow_id, None)
+        self._flow_gate_generation.pop(flow_id, None)
+
+    async def _flow_watchdog_freeze(self, flow_id: int, detail: str) -> None:
+        """Callback do `WatchdogTask` na falha do bit (>10s sem alternância).
+
+        Isolado por flow (ADR-009 revisado): NÃO deriva a sessão nem os demais flows
+        desta conexão — só marca este flow `watchdog_dead`. Quem reage derrubando o flow
+        (LOCAL) é o flow-runtime, ao consumir `comm_failure` com `flow_id` no payload.
+        """
+        self._snapshot.flow_watchdog_alive[flow_id] = False
+        self._flow_failure_pending[flow_id] = True
+        logger.warning(
+            "Watchdog do flow %s (conexão %s) sem alternância: %s",
+            flow_id,
+            self._config.id,
+            detail,
+        )
+        await publish_event(
+            self._redis,
+            severity="alarm",
+            origin=self._origin,
+            message=(
+                f"Falha de watchdog no flow {flow_id} (conexão '{self._config.name}'): {detail}"
+            ),
+            kind=KIND_COMM_FAILURE,
+            payload={
+                "conn_id": self._config.id,
+                "flow_id": flow_id,
+                "reason": "watchdog_timeout",
+                "detail": detail,
+            },
+        )
+
+    async def _flow_watchdog_alive(self, flow_id: int) -> None:
+        """Callback do `WatchdogTask` na 1ª alternância (ou recuperação) do flow.
+
+        Análogo por flow do `mark_restored` da sessão, mas nunca mexe em `state`/sessão —
+        o watchdog de um flow não pode reviver nem derrubar a conexão inteira.
+        """
+        self._flow_gate_generation[flow_id] = self._flow_gate_generation.get(flow_id, 0) + 1
+        if not self._flow_failure_pending.get(flow_id):
+            return
+        self._flow_failure_pending[flow_id] = False
+        await publish_event(
+            self._redis,
+            severity="info",
+            origin=self._origin,
+            message=(
+                f"Watchdog restabelecido no flow {flow_id} (conexão '{self._config.name}')"
+            ),
+            kind=KIND_COMM_RESTORED,
+            payload={"conn_id": self._config.id, "flow_id": flow_id},
+        )
 
     async def apply_tags(self, tags: tuple[TagConfig, ...]) -> None:
         """Troca o conjunto de tags SEM derrubar a sessão (reconciliação, tarefa 1.4).
@@ -331,7 +436,7 @@ class ConnectionRuntime:
         Idempotente em `failed` — tentativa de reconexão em backoff não re-emite alarme
         (spec §3.6). A ordem é normativa (spec §2.2-6/§3.8):
 
-        1. o bloqueio de escrita é simultâneo à detecção, então `state`/`watchdog_alive`
+        1. o bloqueio de escrita é simultâneo à detecção, então `state`/`flow_watchdog_alive`
            caem antes de qualquer `await`;
         2. a rajada de `quality=2` vai ao barramento ANTES do alarme, para que quem
            reage ao alarme já leia dado coerente;
@@ -343,7 +448,8 @@ class ConnectionRuntime:
             return
         self._state = ConnectionState.FAILED
         self._snapshot.state = ConnectionState.FAILED
-        self._snapshot.watchdog_alive = False
+        for flow_id in self._snapshot.flow_watchdog_alive:
+            self._snapshot.flow_watchdog_alive[flow_id] = False
         self._snapshot.session_up_since = None
         self._failure_pending = True
         # Invalida connect em voo: não pode ressuscitar a conexão depois do alarme.
@@ -368,12 +474,12 @@ class ConnectionRuntime:
     async def mark_restored(self) -> None:
         """Emite `comm_restored` uma única vez, se havia falha pendente (spec §3.6).
 
-        Exige sessão `up`: uma alternância tardia do watchdog — a que ainda chega enquanto
-        `fail()` derruba a sessão — não pode "restaurar" uma conexão caída.
+        Chamado sempre que a sessão sobe (ADR-009 revisado: restauração da CONEXÃO não
+        depende mais de nenhum watchdog — cada flow tem o `comm_restored` dele, separado,
+        emitido por `_flow_watchdog_alive`).
 
-        Também é a aresta REAL de reabertura do gate de escrita: o watchdog chama isto
-        exatamente na transição `False -> True` de `watchdog_alive`, com a sessão `up`.
-        Por isso `gate_generation` avança AQUI, antes de qualquer guarda — o consumidor de
+        Também é a aresta de reabertura do gate de sessão (`session_down`): por isso
+        `gate_generation` avança AQUI, antes de qualquer guarda — o consumidor de
         `opc.writes` precisa saber que um período de bloqueio acabou mesmo quando nenhuma
         escrita chegou na janela em que o gate esteve aberto, e mesmo na primeira subida,
         quando não há `comm_restored` a emitir (spec §3.4/§4.2-c).
@@ -452,15 +558,17 @@ class ConnectionRuntime:
         self._snapshot.state = ConnectionState.UP
         self._snapshot.session_up_since = datetime.now(UTC)
         logger.info("Conexão %s (%s) estabelecida", self._config.id, self._config.name)
-        if not self._config.has_watchdog:
-            # Com watchdog quem restabelece é a alternância do bit (tarefa 2.1, spec §3.6).
-            await self.mark_restored()
+        # Watchdog agora é por flow, desacoplado da sessão (ADR-009 revisado): a sessão
+        # subir É a restauração, do ponto de vista da conexão. Cada flow tem seu próprio
+        # `comm_restored` (com `flow_id`), emitido por `_flow_watchdog_alive` quando (e
+        # se) o bit dele armar — não depende deste `mark_restored`.
+        await self.mark_restored()
 
     def _raise_if_superseded(self, generation: int) -> None:
         """Aborta a tentativa se um fail() ocorreu enquanto o connect estava em voo.
 
         Sem isso, um connect que termina depois do alarme levaria a conexão de volta a
-        `up` — e, sem watchdog, ainda emitiria `comm_restored` sem nada ter se recuperado.
+        `up` — e ainda emitiria `comm_restored` sem nada ter se recuperado de verdade.
         """
         if generation != self._generation:
             raise _SupersededAttemptError("tentativa de conexão invalidada por falha concorrente")
@@ -482,7 +590,6 @@ class ConnectionRuntime:
         """Desfaz a sessão: gancho de saída, disconnect e limpeza do snapshot."""
         client, self._client = self._client, None
         self._snapshot.session_up_since = None
-        self._snapshot.watchdog_alive = False
         if self._session_open:
             self._session_open = False
             await self.on_session_down()

@@ -27,16 +27,19 @@ from ottima_core.bus import (
     KIND_CONNECTION_CREATED,
     KIND_CONNECTION_DELETED,
     KIND_CONNECTION_UPDATED,
+    KIND_FLOW_CREATED,
+    KIND_FLOW_DELETED,
+    KIND_FLOW_UPDATED,
     KIND_PROJECT_ACTIVATED,
     KIND_TAG_CREATED,
     KIND_TAG_DELETED,
     KIND_TAG_UPDATED,
     EventMessage,
 )
-from ottima_core.models import OpcConnection, Project, Tag
+from ottima_core.models import Flow, OpcConnection, Project, Tag
 
 from .connection import ConnectionRuntime
-from .state import ConnectionConfig, ConnectionSnapshot, TagConfig, WorkerState
+from .state import ConnectionConfig, ConnectionSnapshot, FlowWatchdogConfig, TagConfig, WorkerState
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,12 @@ HINT_KINDS: frozenset[str] = frozenset(
         KIND_TAG_CREATED,
         KIND_TAG_UPDATED,
         KIND_TAG_DELETED,
+        # ADR-009 revisado: watchdog mora no flow agora — editar/criar/excluir um flow
+        # pode mudar a config de watchdog de uma conexão sem tocar em `opc_connections`
+        # nem `tags`, então precisa antecipar a reconciliação como as dicas acima.
+        KIND_FLOW_CREATED,
+        KIND_FLOW_UPDATED,
+        KIND_FLOW_DELETED,
     }
 )
 
@@ -69,6 +78,8 @@ class Watermark:
     connections_max_updated_at: datetime | None
     tags_count: int
     tags_max_updated_at: datetime | None
+    flows_count: int
+    flows_max_updated_at: datetime | None
 
 
 _NO_PROJECT = Watermark(
@@ -78,6 +89,8 @@ _NO_PROJECT = Watermark(
     connections_max_updated_at=None,
     tags_count=0,
     tags_max_updated_at=None,
+    flows_count=0,
+    flows_max_updated_at=None,
 )
 
 
@@ -106,6 +119,14 @@ async def read_watermark(session: AsyncSession) -> Watermark:
             .where(OpcConnection.project_id == project_id)
         )
     ).one()
+    # Watermark do flow inteiro, não só das colunas de watchdog: mais barato que uma
+    # segunda contagem restrita, e qualquer save de flow já é raro o bastante (RF-306/307)
+    # para não valer a pena refinar (over-trigger inofensivo, o poll de 10s já tolerava).
+    flows_count, flows_max = (
+        await session.execute(
+            select(func.count(), func.max(Flow.updated_at)).where(Flow.project_id == project_id)
+        )
+    ).one()
     return Watermark(
         project_id=project_id,
         projects_max_updated_at=projects_max,
@@ -113,10 +134,17 @@ async def read_watermark(session: AsyncSession) -> Watermark:
         connections_max_updated_at=connections_max,
         tags_count=tags_count,
         tags_max_updated_at=tags_max,
+        flows_count=flows_count,
+        flows_max_updated_at=flows_max,
     )
 
 
-async def load_active_configuration(session: AsyncSession) -> tuple[ConnectionConfig, ...]:
+FlowWatchdogsByConnection = dict[int, dict[int, FlowWatchdogConfig]]
+
+
+async def load_active_configuration(
+    session: AsyncSession,
+) -> tuple[tuple[ConnectionConfig, ...], FlowWatchdogsByConnection]:
     """Configuração completa do projeto ativo, em uma única transação de leitura.
 
     Conexões vêm ordenadas por `id` (o teto de conexões corta as últimas) e as tags de
@@ -125,7 +153,7 @@ async def load_active_configuration(session: AsyncSession) -> tuple[ConnectionCo
     """
     project_id = await session.scalar(select(Project.id).where(Project.is_active))
     if project_id is None:
-        return ()
+        return (), {}
     connections = (
         await session.scalars(
             select(OpcConnection)
@@ -134,7 +162,7 @@ async def load_active_configuration(session: AsyncSession) -> tuple[ConnectionCo
         )
     ).all()
     if not connections:
-        return ()
+        return (), {}
 
     tags: dict[int, list[TagConfig]] = {connection.id: [] for connection in connections}
     rows = await session.scalars(
@@ -150,7 +178,34 @@ async def load_active_configuration(session: AsyncSession) -> tuple[ConnectionCo
                 data_type=tag.data_type,
             )
         )
-    return tuple(_to_config(connection, tuple(tags[connection.id])) for connection in connections)
+    connection_configs = tuple(
+        _to_config(connection, tuple(tags[connection.id])) for connection in connections
+    )
+
+    flow_watchdogs: FlowWatchdogsByConnection = {}
+    flow_rows = await session.execute(
+        select(
+            Flow.id,
+            Flow.watchdog_connection_id,
+            Flow.watchdog_read_node_id,
+            Flow.watchdog_write_node_id,
+            Flow.watchdog_period_ms,
+        ).where(Flow.project_id == project_id, Flow.watchdog_enabled.is_(True))
+    )
+    for flow_id, conn_id, read_node_id, write_node_id, period_ms in flow_rows:
+        # Coerência já garantida no schema (`erro_watchdog_flow`): habilitado implica os
+        # três campos presentes e distintos. Defesa em profundidade — uma linha
+        # incoerente (ex.: conexão de watchdog apagada por fora da API) é ignorada em vez
+        # de derrubar a reconciliação inteira; o flow volta a ser `no_watchdog`.
+        if conn_id is None or not read_node_id or not write_node_id:
+            continue
+        flow_watchdogs.setdefault(conn_id, {})[flow_id] = FlowWatchdogConfig(
+            flow_id=flow_id,
+            read_node_id=read_node_id,
+            write_node_id=write_node_id,
+            period_ms=period_ms,
+        )
+    return connection_configs, flow_watchdogs
 
 
 def _to_config(connection: OpcConnection, tags: tuple[TagConfig, ...]) -> ConnectionConfig:
@@ -165,9 +220,6 @@ def _to_config(connection: OpcConnection, tags: tuple[TagConfig, ...]) -> Connec
         auth_username=connection.auth_username,
         auth_password_enc=connection.auth_password_enc,
         server_cert_file=connection.server_cert_file,
-        watchdog_read_node_id=connection.watchdog_read_node_id,
-        watchdog_write_node_id=connection.watchdog_write_node_id,
-        watchdog_period_ms=connection.watchdog_period_ms,
         tags=tags,
     )
 
@@ -256,33 +308,46 @@ class Supervisor:
                     watermark = await read_watermark(session)
                     if not force and watermark == self._watermark:
                         return
-                    configs = await load_active_configuration(session)
-                await self._apply(configs)
+                    configs, flow_watchdogs = await load_active_configuration(session)
+                await self._apply(configs, flow_watchdogs)
             except Exception:
                 # Watermark não avança: a próxima passada tenta de novo.
                 logger.exception("Falha na reconciliação do supervisor; watermark preservado")
                 return
             self._watermark = watermark
 
-    async def _apply(self, configs: tuple[ConnectionConfig, ...]) -> None:
+    async def _apply(
+        self,
+        configs: tuple[ConnectionConfig, ...],
+        flow_watchdogs: FlowWatchdogsByConnection,
+    ) -> None:
         wanted = {config.id: config for config in self._within_limit(configs)}
         for conn_id in [conn_id for conn_id in self._runtimes if conn_id not in wanted]:
             await self._teardown(conn_id)
         for conn_id, config in wanted.items():
+            desired_watchdogs = flow_watchdogs.get(conn_id, {})
             runtime = self._runtimes.get(conn_id)
             if runtime is None:
-                await self._spawn(config)
-            elif runtime.config.session_key != config.session_key:
+                await self._spawn(config, flow_watchdogs=desired_watchdogs)
+                continue
+            if runtime.config.session_key != config.session_key:
                 # Campo da conexão mudou: a sessão asyncua não é reconfigurável. A falha
                 # pendente atravessa a troca — quem resolve a causa editando a conexão
                 # (confiar no certificado, reinformar a senha) precisa ver o `comm_restored`
                 # quando a sessão nova sobe, senão a tela fica presa no alarme antigo.
                 pendente = runtime.failure_pending
                 await self._teardown(conn_id)
-                await self._spawn(config, failure_pending=pendente)
-            elif runtime.config.tags_key != config.tags_key:
+                await self._spawn(
+                    config, failure_pending=pendente, flow_watchdogs=desired_watchdogs
+                )
+                continue
+            if runtime.config.tags_key != config.tags_key:
                 # Só o conjunto de tags mudou: troca a subscription sem derrubar a sessão.
                 await runtime.apply_tags(config.tags)
+            # Watchdog de flow é independente de session_key/tags_key (ADR-009 revisado:
+            # um flow liga/desliga o próprio watchdog sem que nada mude na conexão) —
+            # reconcilia sempre, mesmo quando os dois ramos acima não dispararam.
+            await runtime.set_flow_watchdogs(desired_watchdogs)
 
     def _within_limit(self, configs: tuple[ConnectionConfig, ...]) -> tuple[ConnectionConfig, ...]:
         """Corta o excedente do teto de conexões (RF-201) com um log por passada."""
@@ -296,7 +361,13 @@ class Supervisor:
         )
         return configs[:MAX_CONNECTIONS]
 
-    async def _spawn(self, config: ConnectionConfig, *, failure_pending: bool = False) -> None:
+    async def _spawn(
+        self,
+        config: ConnectionConfig,
+        *,
+        failure_pending: bool = False,
+        flow_watchdogs: Mapping[int, FlowWatchdogConfig] | None = None,
+    ) -> None:
         snapshot = ConnectionSnapshot(name=config.name)
         runtime = ConnectionRuntime(
             config,
@@ -308,6 +379,7 @@ class Supervisor:
         )
         self._runtimes[config.id] = runtime
         self._state.connections[config.id] = snapshot
+        await runtime.set_flow_watchdogs(flow_watchdogs or {})
         await runtime.start()
         logger.info("Conexão %s (%s) supervisionada", config.id, config.name)
 

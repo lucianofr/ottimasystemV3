@@ -73,6 +73,7 @@ async def test_comm_restored_restaura_modos_e_sp_do_bloco_mpc(
         project_id,
         graph=mpc_graph_valido(tag_id),
         desired_state="running",
+        watchdog_enabled=True,
     )
     events = await collect(CHANNEL_EVENTS)
     mpc_states = await collect(channel_mpc_state(flow_id, "m1"))

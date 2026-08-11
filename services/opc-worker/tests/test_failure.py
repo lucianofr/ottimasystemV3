@@ -4,6 +4,9 @@ Tudo roda contra o opcsim in-process (nunca contra PLC real) e contra o Redis re
 fixture da raiz. O assinante é UM só para os dois canais (`events` e
 `opc.values.<conn_id>`): a ordem relativa entre a rajada de `quality=2` e o alarme é
 contrato da spec e só se prova observando os dois no mesmo fluxo de entrega.
+
+Watchdog é por FLOW (ADR-009 revisado): `ConnectionConfig` não carrega node_ids, quem
+descreve um watchdog é o `FlowWatchdogConfig`, aplicado via `set_flow_watchdogs`.
 """
 
 from __future__ import annotations
@@ -41,13 +44,16 @@ from ottima_opc_worker.state import (
     ConnectionConfig,
     ConnectionSnapshot,
     ConnectionState,
+    FlowWatchdogConfig,
     TagConfig,
 )
 from ottima_opc_worker.subscriptions import QUALITY_BAD
 
 CONN_ID = 11
+FLOW_ID = 601
 
-# O rung do opcsim reage a cada 50 ms; abaixo de 100 ms o handshake não fecha.
+# O rung do opcsim espelha `NOT(from_system)` incondicionalmente a cada 50 ms: qualquer
+# período do watchdog funciona (não há mais reação a mudança para sincronizar).
 WATCHDOG_PERIOD_MS = 200
 # 1,1 s com período de 200 ms cai no 6º ciclo (1,2 s) depois da última alternância: longe
 # das duas bordas da janela medida. Um limiar de 1,0 s seria múltiplo exato do período e
@@ -86,9 +92,7 @@ READ_TAG_IDS = frozenset({TAG_SINE.id, TAG_COUNTER.id, TAG_STATIC.id})
 BusTrail = list[tuple[str, dict]]
 
 
-def make_config(
-    endpoint: str, *, with_watchdog: bool = False, watchdog_period_ms: int = WATCHDOG_PERIOD_MS
-) -> ConnectionConfig:
+def make_config(endpoint: str) -> ConnectionConfig:
     return ConnectionConfig(
         id=CONN_ID,
         project_id=1,
@@ -100,10 +104,18 @@ def make_config(
         auth_username=None,
         auth_password_enc=None,
         server_cert_file=None,
-        watchdog_read_node_id=NODE_WD_TO_SYSTEM if with_watchdog else None,
-        watchdog_write_node_id=NODE_WD_FROM_SYSTEM if with_watchdog else None,
-        watchdog_period_ms=watchdog_period_ms,
         tags=TAGS,
+    )
+
+
+def make_watchdog(
+    *, flow_id: int = FLOW_ID, period_ms: int = WATCHDOG_PERIOD_MS
+) -> FlowWatchdogConfig:
+    return FlowWatchdogConfig(
+        flow_id=flow_id,
+        read_node_id=NODE_WD_TO_SYSTEM,
+        write_node_id=NODE_WD_FROM_SYSTEM,
+        period_ms=period_ms,
     )
 
 
@@ -186,9 +198,9 @@ def bad_tag_ids_before(trail: BusTrail, position: int) -> set[int]:
     return {message["tag_id"] for message in bad_values(list(trail)[:position])}
 
 
-def watchdog_tasks(conn_id: int) -> list[asyncio.Task]:
+def watchdog_tasks(flow_id: int) -> list[asyncio.Task]:
     """Tasks de watchdog vivas, achadas pelo nome que `WatchdogTask.start()` dá a elas."""
-    nome = f"opc-watchdog-{conn_id}"
+    nome = f"opc-watchdog-flow-{flow_id}"
     return [task for task in asyncio.all_tasks() if task.get_name() == nome and not task.done()]
 
 
@@ -203,7 +215,11 @@ async def assert_bit_estavel(sim: OpcSimServer, node_id: str, janela_s: float) -
 
 
 @asynccontextmanager
-async def running(runtime: ConnectionRuntime) -> AsyncIterator[ConnectionRuntime]:
+async def running(
+    runtime: ConnectionRuntime, *, watchdog: FlowWatchdogConfig | None = None
+) -> AsyncIterator[ConnectionRuntime]:
+    if watchdog is not None:
+        await runtime.set_flow_watchdogs({watchdog.flow_id: watchdog})
     await runtime.start()
     try:
         yield runtime
@@ -214,44 +230,48 @@ async def running(runtime: ConnectionRuntime) -> AsyncIterator[ConnectionRuntime
 # --- transição de falha: alarme e rajada bad ---------------------------------------
 
 
-async def test_congelamento_alarma_uma_vez_com_a_rajada_bad_antes(
+async def test_congelamento_de_flow_alarma_sem_afetar_sessao_ou_tags(
     sim: OpcSimServer, redis_client: Redis
 ) -> None:
-    """Rung congelado ⇒ 1 alarme `watchdog_timeout` e todas as tags `r` em quality=2 antes dele."""
-    config = make_config(sim.endpoint, with_watchdog=True)
+    """Rung congelado ⇒ 1 alarme `watchdog_timeout` (payload com `flow_id`), isolado do
+    flow: a sessão continua `up` e as tags `r` continuam publicando bem (ADR-009
+    revisado — quem deriva a sessão é falha de sessão, não de watchdog de um flow)."""
+    config = make_config(sim.endpoint)
     snapshot = ConnectionSnapshot(name=config.name)
+    watchdog = make_watchdog()
     async with collect_bus(redis_client, config.id) as trail:
-        async with running(make_runtime(config, redis_client, snapshot)) as runtime:
-            await await_until(lambda: snapshot.watchdog_alive)
+        async with running(make_runtime(config, redis_client, snapshot), watchdog=watchdog) as runtime:
+            await await_until(lambda: snapshot.flow_watchdog_alive.get(FLOW_ID))
             await sim.set_freeze_watchdog(True)
             await await_until(lambda: len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1)
 
-            posicao = index_of_first(trail, KIND_COMM_FAILURE)
-            alarme = list(trail)[posicao][1]
+            alarme = events_of_kind(trail, KIND_COMM_FAILURE)[0]
             assert alarme["severity"] == "alarm"
             assert alarme["origin"] == f"conn:{config.id}"
             assert alarme["payload"]["kind"] == KIND_COMM_FAILURE
             assert alarme["payload"]["conn_id"] == config.id
+            assert alarme["payload"]["flow_id"] == FLOW_ID
             assert alarme["payload"]["reason"] == "watchdog_timeout"
             assert alarme["payload"]["detail"]
-            # A rajada precede o alarme: quem reage ao alarme já lê dado coerente.
-            assert bad_tag_ids_before(trail, posicao) == set(READ_TAG_IDS)
-            # Bloqueio de escrita simultâneo à detecção (spec §3.8).
-            assert runtime.state is ConnectionState.FAILED
-            assert snapshot.watchdog_alive is False
-            assert snapshot.session_up_since is None
+            # Isolado por flow: nem a sessão cai, nem as tags de leitura viram bad.
+            assert runtime.state is ConnectionState.UP
+            assert snapshot.flow_watchdog_alive[FLOW_ID] is False
+            assert snapshot.session_up_since is not None
+            await asyncio.sleep(QUIET_WINDOW_S)
+            assert bad_values(trail) == [], "watchdog de flow não é falha de sessão"
 
 
 async def test_delta_da_deteccao_ao_alarme_e_proporcional_ao_limiar(
     sim: OpcSimServer, redis_client: Redis
 ) -> None:
     """Detecção → evento sem espera intermediária: prova em escala do aceite <12 s (§3.8)."""
-    config = make_config(sim.endpoint, with_watchdog=True)
+    config = make_config(sim.endpoint)
     snapshot = ConnectionSnapshot(name=config.name)
+    watchdog = make_watchdog()
     periodo_s = WATCHDOG_PERIOD_MS / 1000
     async with collect_bus(redis_client, config.id) as trail:
-        async with running(make_runtime(config, redis_client, snapshot)):
-            await await_until(lambda: snapshot.watchdog_alive)
+        async with running(make_runtime(config, redis_client, snapshot), watchdog=watchdog):
+            await await_until(lambda: snapshot.flow_watchdog_alive.get(FLOW_ID))
             await sim.set_freeze_watchdog(True)
             congelado_em = time.monotonic()
             await await_until(
@@ -266,11 +286,12 @@ async def test_falha_dura_alarma_quase_imediatamente(
     sim: OpcSimServer, redis_client: Redis
 ) -> None:
     """Servidor sumindo com a sessão `up`: `session_lost` em ~0 s, com a rajada bad junto."""
-    config = make_config(sim.endpoint, with_watchdog=True)
+    config = make_config(sim.endpoint)
     snapshot = ConnectionSnapshot(name=config.name)
+    watchdog = make_watchdog()
     async with collect_bus(redis_client, config.id) as trail:
-        async with running(make_runtime(config, redis_client, snapshot)):
-            await await_until(lambda: snapshot.watchdog_alive)
+        async with running(make_runtime(config, redis_client, snapshot), watchdog=watchdog):
+            await await_until(lambda: snapshot.flow_watchdog_alive.get(FLOW_ID))
             await sim.stop()
             caiu_em = time.monotonic()
             await await_until(
@@ -369,24 +390,24 @@ async def test_tentativa_superada_nao_deixa_watchdog_orfao(
     watchdog nascer, o `_close_session()` dele já correu e a limpeza só pode vir da saída
     de `_open_session`; DEPOIS, a sessão nunca chegou a `up`, e a guarda de `_session_open`
     impede o gancho de saída de rodar. Nos dois, a próxima tentativa sobrescreveria
-    `_watchdog` sem parar o anterior.
+    `_flow_watchdogs` sem parar o anterior.
     """
-    start_watchdog_real = ConnectionRuntime._start_watchdog
+    start_flow_watchdog_real = ConnectionRuntime._start_flow_watchdog
     open_session_real = ConnectionRuntime._open_session
     forcado = False
     tentativas_encerradas = 0
 
-    async def start_watchdog_com_fail(runtime_self, client):
+    async def start_flow_watchdog_com_fail(runtime_self, client, config):
         nonlocal forcado
         if forcado:
-            await start_watchdog_real(runtime_self, client)
+            await start_flow_watchdog_real(runtime_self, client, config)
             return
         forcado = True
         if falha_antes_do_watchdog:
             await runtime_self.fail("session_lost", "corrida forçada no teste")
-            await start_watchdog_real(runtime_self, client)
+            await start_flow_watchdog_real(runtime_self, client, config)
         else:
-            await start_watchdog_real(runtime_self, client)
+            await start_flow_watchdog_real(runtime_self, client, config)
             await runtime_self.fail("session_lost", "corrida forçada no teste")
 
     async def open_session_contado(runtime_self):
@@ -396,65 +417,95 @@ async def test_tentativa_superada_nao_deixa_watchdog_orfao(
         finally:
             tentativas_encerradas += 1
 
-    monkeypatch.setattr(ConnectionRuntime, "_start_watchdog", start_watchdog_com_fail)
+    monkeypatch.setattr(ConnectionRuntime, "_start_flow_watchdog", start_flow_watchdog_com_fail)
     monkeypatch.setattr(ConnectionRuntime, "_open_session", open_session_contado)
     # Sem reconexão dentro do ensaio: um watchdog novo e legítimo confundiria a contagem.
     monkeypatch.setattr(connection_module, "backoff_delay", lambda *args, **kwargs: 60.0)
 
-    config = make_config(sim.endpoint, with_watchdog=True, watchdog_period_ms=SLOW_PERIOD_MS)
+    config = make_config(sim.endpoint)
     snapshot = ConnectionSnapshot(name=config.name)
+    watchdog = make_watchdog(period_ms=SLOW_PERIOD_MS)
     async with collect_bus(redis_client, config.id) as trail:
-        async with running(make_runtime(config, redis_client, snapshot)) as runtime:
+        async with running(make_runtime(config, redis_client, snapshot), watchdog=watchdog) as runtime:
             await await_until(lambda: len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1)
             # Marcador determinístico: a tentativa superada já desenrolou por completo.
             await await_until(lambda: tentativas_encerradas >= 1)
 
             assert forcado, "a corrida não foi forçada: o ensaio não provaria nada"
             assert runtime.state is ConnectionState.FAILED
-            assert watchdog_tasks(config.id) == [], "sobrou task de watchdog órfã"
-            assert runtime.watchdog is None
+            assert watchdog_tasks(FLOW_ID) == [], "sobrou task de watchdog órfã"
+            assert runtime.flow_watchdogs == {}
             assert runtime.subscription is None
             # Sem ninguém escrevendo em `from_system`, o rung do opcsim para de alternar.
-            await assert_bit_estavel(sim, NODE_WD_TO_SYSTEM, SLOW_PERIOD_MS / 1000 * 1.5)
+            await assert_bit_estavel(sim, NODE_WD_FROM_SYSTEM, SLOW_PERIOD_MS / 1000 * 1.5)
 
 
 # --- restauração ---------------------------------------------------------------------
 
 
-async def test_descongelar_restaura_so_depois_da_alternancia(
-    sim: OpcSimServer, redis_client: Redis
+async def test_flow_so_restaura_depois_de_alternar_apos_a_sessao_voltar(
+    redis_client: Redis,
 ) -> None:
-    """Com watchdog, a volta da sessão não basta: `comm_restored` espera o bit alternar."""
-    config = make_config(sim.endpoint, with_watchdog=True)
+    """Um flow que já congelou o watchdog e teve a task encerrada (isolado da sessão,
+    ADR-009 revisado) só ganha uma task nova quando a SESSÃO reconecta — `on_session_down`
+    seguido de `on_session_up` reconcilia do zero, preservando a falha pendente do flow —
+    e o `comm_restored` dele (payload com `flow_id`) só sai depois do bit voltar a
+    alternar de fato, não no instante em que a sessão sobe."""
+    port = free_port()
+    sim = OpcSimServer(port=port)
+    await sim.start()
+    config = make_config(sim.endpoint)
     snapshot = ConnectionSnapshot(name=config.name)
+    watchdog = make_watchdog()
     async with collect_bus(redis_client, config.id) as trail:
-        async with running(make_runtime(config, redis_client, snapshot)) as runtime:
-            await await_until(lambda: snapshot.watchdog_alive)
+        async with running(make_runtime(config, redis_client, snapshot), watchdog=watchdog) as runtime:
+            await await_until(lambda: snapshot.flow_watchdog_alive.get(FLOW_ID))
             await sim.set_freeze_watchdog(True)
-            await await_until(lambda: events_of_kind(trail, KIND_COMM_FAILURE) != [])
-            await sim.set_freeze_watchdog(False)
+            await await_until(
+                lambda: any(
+                    "flow_id" in e["payload"] for e in events_of_kind(trail, KIND_COMM_FAILURE)
+                )
+            )
+            assert snapshot.flow_watchdog_alive[FLOW_ID] is False
 
-            await await_until(lambda: runtime.state is ConnectionState.UP)
-            # Sessão de volta e ainda sem alternância: nada de restored neste instante.
-            assert snapshot.watchdog_alive is False
-            assert events_of_kind(trail, KIND_COMM_RESTORED) == []
+            await sim.stop()
+            await await_until(lambda: runtime.state is ConnectionState.FAILED)
 
-            await await_until(lambda: len(events_of_kind(trail, KIND_COMM_RESTORED)) == 1)
-            assert snapshot.watchdog_alive is True
-            restaurado = events_of_kind(trail, KIND_COMM_RESTORED)[0]
-            assert restaurado["severity"] == "info"
-            assert restaurado["origin"] == f"conn:{config.id}"
-            assert restaurado["payload"] == {
-                "kind": KIND_COMM_RESTORED,
-                "conn_id": config.id,
-            }
+            sim = OpcSimServer(port=port)
+            await sim.start()
+            try:
+                await await_until(lambda: runtime.state is ConnectionState.UP)
+                assert snapshot.flow_watchdog_alive.get(FLOW_ID) is False, (
+                    "sessão voltou, mas o flow ainda não alternou"
+                )
 
-            await asyncio.sleep(QUIET_WINDOW_S)
-            assert len(events_of_kind(trail, KIND_COMM_RESTORED)) == 1
+                await await_until(
+                    lambda: any(
+                        "flow_id" in e["payload"] for e in events_of_kind(trail, KIND_COMM_RESTORED)
+                    )
+                )
+                restaurado = next(
+                    e for e in events_of_kind(trail, KIND_COMM_RESTORED) if "flow_id" in e["payload"]
+                )
+                assert restaurado["severity"] == "info"
+                assert restaurado["origin"] == f"conn:{config.id}"
+                assert restaurado["payload"] == {
+                    "kind": KIND_COMM_RESTORED,
+                    "conn_id": config.id,
+                    "flow_id": FLOW_ID,
+                }
+                assert snapshot.flow_watchdog_alive[FLOW_ID] is True
+
+                await asyncio.sleep(QUIET_WINDOW_S)
+                assert len(
+                    [e for e in events_of_kind(trail, KIND_COMM_RESTORED) if "flow_id" in e["payload"]]
+                ) == 1
+            finally:
+                await sim.stop()
 
 
 async def test_sem_watchdog_a_volta_da_sessao_restaura(redis_client: Redis) -> None:
-    """Sem o par de node_ids não há alternância a esperar: sessão `up` restabelece."""
+    """Sem nenhum flow com watchdog nesta conexão, sessão `up` restabelece na hora."""
     porta = free_port()
     sim = OpcSimServer(port=porta)
     await sim.start()

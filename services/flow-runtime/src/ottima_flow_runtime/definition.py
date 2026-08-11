@@ -74,7 +74,7 @@ def build_definition(
     redis_client: Redis,
     pool: ScriptPool,
     snapshot: ValueSnapshot,
-    conns_sem_watchdog: frozenset[int] = frozenset(),
+    watchdog_enabled: bool = False,
     mpc_worker_target: Callable[[Connection, str, float], None] = worker_main,
 ) -> StagedDefinition:
     """Instancia os blocos do grafo (reaproveitando os que não mudaram) e monta a fiação.
@@ -86,7 +86,7 @@ def build_definition(
     blocks: dict[str, tuple[dict[str, Any], Block]] = {}
     hosts: dict[str, MpcHost] = {}
     instances: list[Block] = []
-    write_opc = _make_write_opc(redis_client, tags)
+    write_opc = _make_write_opc(redis_client, tags, flow_id=flow_id)
     for node in sorted(graph.nodes, key=lambda item: item.exec_order):
         functional = node.functional_config()
         kept = reuse.get(node.id)
@@ -103,8 +103,7 @@ def build_definition(
                 snapshot=snapshot,
                 write_opc=write_opc,
                 mpc_worker_target=mpc_worker_target,
-                graph=graph,
-                conns_sem_watchdog=conns_sem_watchdog,
+                watchdog_enabled=watchdog_enabled,
             )
             # TD-006: config mudou (ou o bloco é novo) — quando o bloco velho é um
             # `MpcBlock` e o conjunto de MVs é IDÊNTICO, o novo transplanta o estado do
@@ -157,16 +156,20 @@ def _mv_ids_de_functional(functional: dict[str, Any]) -> frozenset[str] | None:
 
 
 def _make_write_opc(
-    redis_client: Redis, tags: Mapping[int, TagRef]
+    redis_client: Redis, tags: Mapping[int, TagRef], *, flow_id: int
 ) -> Callable[[OpcWrite], Awaitable[None]]:
     """`OpcWrite` chega com `conn_id=0` (o `pid` não carrega conexão, só `tag_id`) — este
     fecho é quem resolve o `conn_id` de verdade a partir de `tags` antes de publicar
-    (débito #3 da spec F4 §8). Único fechamento — usado tanto pelas escritas de MV do
-    próprio `MpcBlock` (`_write_pid`) quanto pelas de `mode_cmd` que o supervisor faz por
-    fora dele (`mpc_arming.write_mode_cmd`)."""
+    (débito #3 da spec F4 §8). Também resolve `flow_id` (ADR-009 revisado: watchdog é por
+    flow — o gate de escrita do opc-worker precisa saber de qual flow a escrita veio).
+    Único fechamento — usado tanto pelas escritas de MV do próprio `MpcBlock`
+    (`_write_pid`) quanto pelas de `mode_cmd` que o supervisor faz por fora dele
+    (`mpc_arming.write_mode_cmd`)."""
 
     async def write_opc(write: OpcWrite) -> None:
-        resolved = write.model_copy(update={"conn_id": tags[write.tag_id].conn_id})
+        resolved = write.model_copy(
+            update={"conn_id": tags[write.tag_id].conn_id, "flow_id": flow_id}
+        )
         await redis_client.publish(CHANNEL_OPC_WRITES, resolved.model_dump_json())
 
     return write_opc
@@ -183,8 +186,7 @@ def _instantiate(
     snapshot: ValueSnapshot,
     write_opc: Callable[[OpcWrite], Awaitable[None]],
     mpc_worker_target: Callable[[Connection, str, float], None],
-    graph: FlowGraph,
-    conns_sem_watchdog: frozenset[int],
+    watchdog_enabled: bool,
 ) -> Block:
     """Instancia o bloco com os serviços do runtime. Bloco novo nasce zerado (§4.1-3)."""
     config: Any = node.config
@@ -220,7 +222,7 @@ def _instantiate(
             redis_client=redis_client,
             write_opc=write_opc,
             worker_target=mpc_worker_target,
-            escreve_sem_watchdog=_mpc_escreve_sem_watchdog(node, graph, tags, conns_sem_watchdog),
+            escreve_sem_watchdog=not watchdog_enabled,
         )
     if node.type == "first_order":
         return FirstOrderBlock(node.id, tau=config.tau, ts_seconds=ts_seconds)
@@ -313,70 +315,3 @@ def _mpc_pid_tag_ids(node: FlowNode) -> Iterator[int]:
         if mv.pid.mode_read_tag_id is not None:
             yield mv.pid.mode_read_tag_id
 
-
-def _mpc_escreve_sem_watchdog(
-    node: FlowNode,
-    graph: FlowGraph,
-    tags: Mapping[int, TagRef],
-    conns_sem_watchdog: frozenset[int],
-) -> bool:
-    """TD-004: alguma MV deste bloco escreve numa conexão sem watchdog completo — o
-    `writes.py` do opc-worker recusa TODA escrita nesse caso (somente leitura de fato), e
-    a causa é 100% estática (config da conexão), então previne-se aqui, no deploy, em vez
-    de esperar a recusa dinâmica.
-
-    MV com `pid` escreve pelas próprias tags do binding (`write_tag_id`/`mode_cmd_tag_id`),
-    sem depender de aresta nenhuma; MV "direta" (decisão A-8) escreve por onde as arestas
-    da sua porta de saída levarem, até um `opc_write`.
-    """
-    if not conns_sem_watchdog:
-        return False
-    config = MpcConfig.model_validate(node.config.model_dump())
-    for mv in config.variables.mvs:
-        if mv.pid is not None:
-            escreve = any(
-                tags[tag_id].conn_id in conns_sem_watchdog
-                for tag_id in (mv.pid.write_tag_id, mv.pid.mode_cmd_tag_id)
-                if tag_id in tags
-            )
-        else:
-            escreve = _mv_direta_escreve_sem_watchdog(
-                node.id, mv.id, graph, tags, conns_sem_watchdog
-            )
-        if escreve:
-            return True
-    return False
-
-
-def _mv_direta_escreve_sem_watchdog(
-    origem_id: str,
-    handle: str,
-    graph: FlowGraph,
-    tags: Mapping[int, TagRef],
-    conns_sem_watchdog: frozenset[int],
-) -> bool:
-    """Segue as arestas a partir da porta de saída de uma MV direta até um `opc_write`
-    (TD-004). Blocos intermediários (TFS/Script) repassam por QUALQUER saída deles — o
-    grafo não deixa saber qual handle carrega o sinal desta MV especificamente depois do
-    primeiro salto, e um falso positivo aqui é só um aviso/gate extra, nunca uma escrita
-    sem watchdog despercebida (o custo de errar para o lado cauteloso é aceitável)."""
-    visitados: set[str] = set()
-    fronteira: list[tuple[str, str | None]] = [(origem_id, handle)]
-    while fronteira:
-        source_id, source_handle = fronteira.pop()
-        for aresta in graph.edges:
-            if aresta.source != source_id:
-                continue
-            if source_handle is not None and aresta.source_handle != source_handle:
-                continue
-            if aresta.target in visitados:
-                continue
-            visitados.add(aresta.target)
-            alvo = graph.node(aresta.target)
-            if alvo.type == "opc_write":
-                tag = tags.get(alvo.config.tag_id)
-                if tag is not None and tag.conn_id in conns_sem_watchdog:
-                    return True
-            else:
-                fronteira.append((alvo.id, None))
-    return False

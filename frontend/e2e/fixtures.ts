@@ -135,7 +135,7 @@ async function garantirSentinela(api: APIRequestContext): Promise<Projeto> {
  */
 export async function criarAmbiente(
   baseURL: string,
-  opts: { readonly sufixo: string; readonly tags: readonly TagDesejada[]; readonly watchdog?: boolean },
+  opts: { readonly sufixo: string; readonly tags: readonly TagDesejada[] },
 ): Promise<AmbienteE2E> {
   const api = await adminApi(baseURL);
   const anterior = (await listarProjetos(api)).find((p) => p.is_active) ?? null;
@@ -147,7 +147,6 @@ export async function criarAmbiente(
   const ativou = await api.post(`/api/projects/${projeto.id}/activate`);
   if (!ativou.ok()) throw new Error(`ativação do projeto: HTTP ${ativou.status()}`);
 
-  const comWatchdog = opts.watchdog ?? true;
   const conexao = await api.post("/api/connections", {
     data: {
       project_id: projeto.id,
@@ -156,13 +155,6 @@ export async function criarAmbiente(
       security_policy: "none",
       security_mode: "none",
       auth_mode: "anonymous",
-      ...(comWatchdog
-        ? {
-            watchdog_read_node_id: NODES.wdTo,
-            watchdog_write_node_id: NODES.wdFrom,
-            watchdog_period_ms: 1000,
-          }
-        : {}),
     },
   });
   if (!conexao.ok()) throw new Error(`criação da conexão: HTTP ${conexao.status()}`);

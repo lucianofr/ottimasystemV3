@@ -6,7 +6,19 @@ import json
 from ottima_core.models import Flow
 
 GRAFO_VAZIO = {"nodes": [], "edges": []}
-CAMPOS_LEVES = {"id", "project_id", "name", "ts_seconds", "desired_state", "updated_at"}
+CAMPOS_LEVES = {
+    "id",
+    "project_id",
+    "name",
+    "ts_seconds",
+    "desired_state",
+    "updated_at",
+    "watchdog_enabled",
+    "watchdog_connection_id",
+    "watchdog_read_node_id",
+    "watchdog_write_node_id",
+    "watchdog_period_ms",
+}
 INF = float("inf")  # `json.dumps` emite `Infinity`, que o parser do corpo aceita
 
 
@@ -16,23 +28,13 @@ async def _projeto(client, headers, nome: str) -> int:
     return r.json()["id"]
 
 
-async def _conexao(
-    client,
-    headers,
-    project_id: int,
-    nome: str = "plc",
-    *,
-    watchdog_read_node_id: str | None = "ns=2;s=WD_R",
-    watchdog_write_node_id: str | None = "ns=2;s=WD_W",
-) -> int:
+async def _conexao(client, headers, project_id: int, nome: str = "plc") -> int:
     r = await client.post(
         "/api/connections",
         json={
             "project_id": project_id,
             "name": nome,
             "endpoint": "opc.tcp://x:4840",
-            "watchdog_read_node_id": watchdog_read_node_id,
-            "watchdog_write_node_id": watchdog_write_node_id,
         },
         headers=headers,
     )
@@ -247,10 +249,25 @@ async def test_papeis_por_rota(client, admin_headers, operator_headers):
 
 
 async def test_put_grafo_valido_grava_e_nao_avisa(client, admin_headers):
-    flow, leitura, escrita = await _cenario(client, admin_headers, "Valido")
+    pid = await _projeto(client, admin_headers, "Valido")
+    cid = await _conexao(client, admin_headers, pid)
+    leitura = await _tag(client, admin_headers, cid, "FT-Valido", "r")
+    escrita = await _tag(client, admin_headers, cid, "FV-Valido", "w")
+    flow = await _flow(client, admin_headers, pid)
     graph = _grafo_read_write(leitura, escrita)
 
-    r = await _salvar(client, admin_headers, flow["id"], graph, nome="Renomeada")
+    r = await client.put(
+        f"/api/flows/{flow['id']}",
+        json={
+            "graph_json": graph,
+            "name": "Renomeada",
+            "watchdog_enabled": True,
+            "watchdog_connection_id": cid,
+            "watchdog_read_node_id": "ns=2;s=WD_R",
+            "watchdog_write_node_id": "ns=2;s=WD_W",
+        },
+        headers=admin_headers,
+    )
     assert r.status_code == 200, r.text
     corpo = r.json()
     assert corpo["warnings"] == []
@@ -261,13 +278,12 @@ async def test_put_grafo_valido_grava_e_nao_avisa(client, admin_headers):
     assert relido.json()["graph_json"] == graph
 
 
-async def test_put_opc_write_em_conexao_sem_watchdog_avisa_e_grava(client, admin_headers):
-    """TD-004: `writes.py` (opc-worker) recusa TODA escrita numa conexão sem watchdog — o
-    PUT precisa avisar, não bloquear (a mesma conexão segue valendo para leitura)."""
+async def test_put_escrita_com_watchdog_desabilitado_avisa_e_grava(client, admin_headers):
+    """TD-004 (revisado, ADR-009): o watchdog agora é por flow, não por conexão — o
+    opc-worker (`writes.py`) recusa TODA escrita de um flow com watchdog desabilitado, e o
+    PUT precisa avisar, não bloquear (o flow segue gravando o grafo)."""
     projeto = await _projeto(client, admin_headers, "SemWatchdog")
-    conexao = await _conexao(
-        client, admin_headers, projeto, watchdog_read_node_id=None, watchdog_write_node_id=None
-    )
+    conexao = await _conexao(client, admin_headers, projeto)
     leitura = await _tag(client, admin_headers, conexao, "FT-SemWatchdog", "r")
     escrita = await _tag(client, admin_headers, conexao, "FV-SemWatchdog", "w")
     flow = await _flow(client, admin_headers, projeto)
@@ -277,10 +293,41 @@ async def test_put_opc_write_em_conexao_sem_watchdog_avisa_e_grava(client, admin
     assert r.status_code == 200, r.text
     corpo = r.json()
     assert corpo["warnings"] == [
-        "O bloco 'w1' escreve na conexão 'plc' sem watchdog: as escritas serão recusadas "
-        "(somente leitura de fato)."
+        "Este flow escreve em planta mas o watchdog está desabilitado: as escritas serão "
+        "recusadas (somente leitura de fato)."
     ]
     assert corpo["flow"]["graph_json"] == graph
+
+
+async def test_put_watchdog_habilitado_sem_dados_completos_422(client, admin_headers):
+    pid = await _projeto(client, admin_headers, "WatchdogIncompleto")
+    flow = await _flow(client, admin_headers, pid)
+    r = await client.put(
+        f"/api/flows/{flow['id']}",
+        json={"watchdog_enabled": True},
+        headers=admin_headers,
+    )
+    assert r.status_code == 422
+    assert "Watchdog habilitado exige conexão e os dois node_ids" in _mensagens(r)
+
+
+async def test_put_watchdog_connection_id_de_outro_projeto_422(client, admin_headers):
+    pid = await _projeto(client, admin_headers, "WatchdogProjA")
+    outro_pid = await _projeto(client, admin_headers, "WatchdogProjB")
+    conexao_vizinha = await _conexao(client, admin_headers, outro_pid)
+    flow = await _flow(client, admin_headers, pid)
+    r = await client.put(
+        f"/api/flows/{flow['id']}",
+        json={
+            "watchdog_enabled": True,
+            "watchdog_connection_id": conexao_vizinha,
+            "watchdog_read_node_id": "ns=2;s=WD_R",
+            "watchdog_write_node_id": "ns=2;s=WD_W",
+        },
+        headers=admin_headers,
+    )
+    assert r.status_code == 422
+    assert "Conexão de watchdog não pertence a este projeto" in _mensagens(r)
 
 
 async def test_put_ciclo_422(client, admin_headers):

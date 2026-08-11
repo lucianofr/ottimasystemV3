@@ -20,7 +20,17 @@ import redis
 
 from ottima_core.bus import channel_flow_status
 
-from .conftest import RUN_ID, SENTINELA, Ambiente, EventStream, compose, esperar_ate
+from .conftest import (
+    NODE_WD_FROM_SYSTEM,
+    NODE_WD_TO_SYSTEM,
+    RUN_ID,
+    SENTINELA,
+    Ambiente,
+    EventStream,
+    compose,
+    esperar_ate,
+    esperar_flow_watchdog,
+)
 
 # Ts do aceite (PRD §8-F3): o menor do ADR-007 e o mais exigente para a grade de varredura.
 TS = 0.5
@@ -375,6 +385,19 @@ def fabrica_de_flows(admin: httpx.Client, ambiente: Ambiente) -> Any:
         criados.append(flow_id)
         if grafo is not None:
             salvar(admin, flow_id, grafo)
+        # ADR-009 revisado: watchdog é por flow. Todo flow que escreve em OPC precisa do
+        # seu próprio watchdog armado — sem ele, o gate recusa como `no_watchdog`.
+        admin.put(
+            f"/api/flows/{flow_id}",
+            json={
+                "watchdog_enabled": True,
+                "watchdog_connection_id": ambiente.conn_id,
+                "watchdog_read_node_id": NODE_WD_TO_SYSTEM,
+                "watchdog_write_node_id": NODE_WD_FROM_SYSTEM,
+                "watchdog_period_ms": 1000,
+            },
+        )
+        esperar_flow_watchdog(flow_id, ambiente.conn_id)
         return flow_id
 
     try:

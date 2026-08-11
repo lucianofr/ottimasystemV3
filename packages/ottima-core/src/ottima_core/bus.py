@@ -39,6 +39,7 @@ class OpcValue(BaseModel):
 class OpcWrite(BaseModel):
     conn_id: int
     tag_id: int
+    flow_id: int
     value: float
     source: str
     ts: datetime

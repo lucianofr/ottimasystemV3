@@ -17,13 +17,6 @@ def erro_policy_mode(security_policy: str, security_mode: str) -> str | None:
     return None
 
 
-def erro_watchdog(read_node_id: str | None, write_node_id: str | None) -> str | None:
-    """Regra de coerência do watchdog; vale para ConnectionCreate e para o bundle (spec §2.1-2)."""
-    if (read_node_id is None) != (write_node_id is None):
-        return "Watchdog exige os dois node_ids (leitura e escrita) ou nenhum"
-    return None
-
-
 def erro_auth_username(auth_mode: str, auth_username: str | None) -> str | None:
     """Regra de coerência de autenticação só do bundle: exige usuário, nunca senha (spec §2.1-2)."""
     if auth_mode == "user_password" and not auth_username:
@@ -39,9 +32,6 @@ class _ConnectionFields(BaseModel):
     auth_mode: AuthMode = "anonymous"
     auth_username: str | None = None
     server_cert_file: str | None = None
-    watchdog_read_node_id: str | None = None
-    watchdog_write_node_id: str | None = None
-    watchdog_period_ms: int = Field(default=1500, ge=500, le=5000)  # ADR-009
 
 
 class ConnectionCreate(_ConnectionFields):
@@ -56,9 +46,6 @@ class ConnectionCreate(_ConnectionFields):
             raise ValueError(erro)
         if self.auth_mode == "user_password" and (not self.auth_username or not self.auth_password):
             raise ValueError("Autenticação usuário/senha exige usuário e senha")
-        erro = erro_watchdog(self.watchdog_read_node_id, self.watchdog_write_node_id)
-        if erro:
-            raise ValueError(erro)
         return self
 
 
@@ -73,9 +60,6 @@ class ConnectionUpdate(BaseModel):
     auth_username: str | None = None
     auth_password: str | None = None  # None = manter a senha atual
     server_cert_file: str | None = None
-    watchdog_read_node_id: str | None = None
-    watchdog_write_node_id: str | None = None
-    watchdog_period_ms: int | None = Field(default=None, ge=500, le=5000)
 
 
 class ConnectionOut(_ConnectionFields):

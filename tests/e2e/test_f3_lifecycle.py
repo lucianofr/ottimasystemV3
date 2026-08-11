@@ -20,6 +20,7 @@ import redis
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import connect
 
+from opcsim import NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM
 from ottima_core.bus import (
     KIND_FLOW_FAILED,
     KIND_FLOW_RESUMED,
@@ -27,7 +28,16 @@ from ottima_core.bus import (
     channel_flow_status,
 )
 
-from .conftest import BASE, RUN_ID, Ambiente, EventStream, compose, esperar_conexao
+from .conftest import (
+    BASE,
+    RUN_ID,
+    Ambiente,
+    EventStream,
+    compose,
+    esperar_conexao,
+    esperar_flow_watchdog,
+    revivar_watchdog_de_flow,
+)
 from .f3_support import (
     aresta,
     assinantes_de_status,
@@ -70,11 +80,28 @@ def test_e2e_f3_07_comm_failure_derruba_so_os_flows_da_conexao(
     eventos: EventStream,
     assinar_status: Any,
     congelar_watchdog: Callable[[bool], None],
+    parar_opcsim: Callable[[], None],
 ) -> None:
-    """RF-207/ADR-009: flow com tag vai a `failed`; flow puro segue; a comunicação voltando
-    retoma o flow sozinho (ADR-025/TD-005)."""
+    """RF-207/ADR-009: flow com watchdog PRÓPRIO no par 1 vai a `failed`; flow puro (sem
+    watchdog) segue; a comunicação voltando retoma o flow sozinho (ADR-025/TD-005).
+
+    ADR-009 revisado: watchdog é por flow — `comm_failure` com `flow_id` derruba SÓ o flow
+    dono daquele watchdog (`flow-runtime` `Supervisor.on_comm_failure`), não qualquer flow
+    que referencia a conexão. Por isso é o próprio `flow_tag` — não o flow interno do
+    `projeto_com_conexao` — que precisa do watchdog habilitado no par 1 do opcsim. O flow
+    interno cede o par: duas tasks de watchdog lendo/escrevendo o MESMO par de nodes correm
+    de verdade (`watchdog.py` não faz *locking* nenhum entre flows) e nenhuma converge.
+    """
     ambiente = projeto_com_conexao
     esperar_conexao(ambiente.conn_id, timeout=120.0)
+
+    r = admin.put(
+        f"/api/flows/{ambiente.flow_id}",
+        json={"watchdog_enabled": False},
+    )
+    assert r.status_code == 200, (
+        f"desabilitar watchdog do flow interno: HTTP {r.status_code} {r.text}"
+    )
 
     grafo_com_tag = montar_grafo(
         [
@@ -85,6 +112,22 @@ def test_e2e_f3_07_comm_failure_derruba_so_os_flows_da_conexao(
     )
     flow_tag = criar_flow("f3-07-com-tag", grafo=grafo_com_tag)
     flow_puro = criar_flow("f3-07-sem-tag", grafo=grafo_script_tfs(1.0))
+
+    r = admin.put(
+        f"/api/flows/{flow_tag}",
+        json={
+            "watchdog_enabled": True,
+            "watchdog_connection_id": ambiente.conn_id,
+            "watchdog_read_node_id": NODE_WD_TO_SYSTEM,
+            "watchdog_write_node_id": NODE_WD_FROM_SYSTEM,
+            "watchdog_period_ms": 1000,
+        },
+    )
+    assert r.status_code == 200, (
+        f"habilitar watchdog do flow com tag: HTTP {r.status_code} {r.text}"
+    )
+    esperar_flow_watchdog(flow_tag, ambiente.conn_id, timeout=120.0)
+
     status_tag = assinar_status(flow_tag)
     status_puro = assinar_status(flow_puro)
 
@@ -118,7 +161,12 @@ def test_e2e_f3_07_comm_failure_derruba_so_os_flows_da_conexao(
     )
 
     congelar_watchdog(False)
-    esperar_conexao(ambiente.conn_id, timeout=180.0)
+    # A task de watchdog do flow se encerra sozinha na 1ª detecção de congelamento
+    # (opc-worker `watchdog.py`) — só uma sessão nova volta a observar o bit (ADR-009
+    # revisado); descongelar o rung sozinho não bastaria para revivê-la.
+    revivar_watchdog_de_flow(
+        ambiente.conn_id, flow_tag, eventos=eventos, parar_opcsim=parar_opcsim
+    )
 
     # ADR-025 (TD-005): `comm_restored` com `desired_state == "running"` retoma o flow SEM
     # comando manual. Antes desta decisão o assert aqui era o oposto (`silencio() == []`,

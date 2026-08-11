@@ -75,7 +75,11 @@ async def _cenario(session_factory: Sessions) -> dict[str, Any]:
     connection_id = await create_connection(session_factory, project_id)
     cv_tag_id = await create_tag(session_factory, connection_id, name="cv", direction="r")
     flow_id = await create_flow(
-        session_factory, project_id, graph=mpc_graph_valido(cv_tag_id), ts_seconds=TS_SECONDS
+        session_factory,
+        project_id,
+        graph=mpc_graph_valido(cv_tag_id),
+        ts_seconds=TS_SECONDS,
+        watchdog_enabled=True,
     )
     return {"connection_id": connection_id, "cv_tag_id": cv_tag_id, "flow_id": flow_id}
 

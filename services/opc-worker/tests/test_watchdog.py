@@ -1,8 +1,10 @@
-"""Testes da task de watchdog do opc-worker (spec F2 §3.1-3.4, RF-206, ADR-009).
+"""Testes da task de watchdog do opc-worker (spec F2 §3.1-3.4, RF-206, ADR-009 revisado).
 
-Tudo contra o opcsim in-process: o rung do simulador é o espelho do PLC (inverte
-`to_system` a cada mudança observada em `from_system`), de modo que o handshake completo
-do life-bit é exercitado, e não apenas metade dele.
+Tudo contra o opcsim in-process: o rung do simulador é o espelho do PLC (escreve
+`NOT(from_system)` em `to_system` a cada scan), de modo que o handshake completo do
+life-bit é exercitado, e não apenas metade dele. Watchdog é por FLOW (não mais por
+conexão): o `ConnectionConfig` não carrega node_ids nenhum, quem descreve um watchdog é o
+`FlowWatchdogConfig`, aplicado via `ConnectionRuntime.set_flow_watchdogs`.
 """
 
 from __future__ import annotations
@@ -16,12 +18,24 @@ from asyncua import Client
 from redis.asyncio import Redis
 from worker_test_helpers import AWAIT_TIMEOUT_S, await_until
 
-from opcsim import NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM, OpcSimServer
+from opcsim import (
+    NODE_WD_FROM_SYSTEM,
+    NODE_WD_FROM_SYSTEM_2,
+    NODE_WD_TO_SYSTEM,
+    NODE_WD_TO_SYSTEM_2,
+    OpcSimServer,
+)
 from ottima_opc_worker.connection import ConnectionRuntime
-from ottima_opc_worker.state import ConnectionConfig, ConnectionSnapshot, ConnectionState
+from ottima_opc_worker.state import (
+    ConnectionConfig,
+    ConnectionSnapshot,
+    ConnectionState,
+    FlowWatchdogConfig,
+)
 from ottima_opc_worker.watchdog import FREEZE_THRESHOLD_S, WatchdogTask
 
 CONN_ID = 9
+FLOW_ID = 501
 POLL_INTERVAL_S = 0.01
 MISSING_NODE = "ns=2;s=nao.existe"
 # NodeId sintaticamente torto: nem chega a virar requisição, quebra no parse do client.
@@ -79,13 +93,8 @@ async def assert_bit_stable(sim: OpcSimServer, node_id: str, window_s: float) ->
         assert await sim.read(node_id) == baseline, f"{node_id} mudou dentro da janela quieta"
 
 
-def make_config(
-    endpoint: str,
-    *,
-    read_node: str | None = NODE_WD_TO_SYSTEM,
-    write_node: str | None = NODE_WD_FROM_SYSTEM,
-    period_ms: int = FAST_PERIOD_MS,
-) -> ConnectionConfig:
+def make_connection_config(endpoint: str) -> ConnectionConfig:
+    """Conexão sem watchdog nenhum: o par de node_ids não mora mais aqui (ADR-009 revisado)."""
     return ConnectionConfig(
         id=CONN_ID,
         project_id=1,
@@ -97,10 +106,19 @@ def make_config(
         auth_username=None,
         auth_password_enc=None,
         server_cert_file=None,
-        watchdog_read_node_id=read_node,
-        watchdog_write_node_id=write_node,
-        watchdog_period_ms=period_ms,
         tags=(),
+    )
+
+
+def make_watchdog_config(
+    *,
+    flow_id: int = FLOW_ID,
+    read_node: str = NODE_WD_TO_SYSTEM,
+    write_node: str = NODE_WD_FROM_SYSTEM,
+    period_ms: int = FAST_PERIOD_MS,
+) -> FlowWatchdogConfig:
+    return FlowWatchdogConfig(
+        flow_id=flow_id, read_node_id=read_node, write_node_id=write_node, period_ms=period_ms
     )
 
 
@@ -136,7 +154,7 @@ async def connected(sim: OpcSimServer) -> AsyncIterator[Client]:
 
 
 def make_watchdog(
-    config: ConnectionConfig,
+    config: FlowWatchdogConfig,
     client: Client,
     snapshot: ConnectionSnapshot,
     recorder: Recorder,
@@ -160,15 +178,16 @@ async def watchdog_running(
     recorder: Recorder,
     *,
     period_ms: int = FAST_PERIOD_MS,
-    read_node: str | None = NODE_WD_TO_SYSTEM,
-    write_node: str | None = NODE_WD_FROM_SYSTEM,
+    read_node: str = NODE_WD_TO_SYSTEM,
+    write_node: str = NODE_WD_FROM_SYSTEM,
+    flow_id: int = FLOW_ID,
     freeze_threshold_s: float = TEST_FREEZE_THRESHOLD_S,
 ) -> AsyncIterator[ConnectionSnapshot]:
     """Watchdog vivo contra o opcsim, com o snapshot da conexão à disposição do teste."""
-    config = make_config(
-        sim.endpoint, read_node=read_node, write_node=write_node, period_ms=period_ms
+    config = make_watchdog_config(
+        flow_id=flow_id, read_node=read_node, write_node=write_node, period_ms=period_ms
     )
-    snapshot = ConnectionSnapshot(name=config.name)
+    snapshot = ConnectionSnapshot(name="Forno 1")
     async with connected(sim) as client:
         task = make_watchdog(
             config, client, snapshot, recorder, freeze_threshold_s=freeze_threshold_s
@@ -191,32 +210,33 @@ def test_limiar_de_congelamento_e_fixo_em_dez_segundos() -> None:
 # --- ciclo do watchdog contra o rung do opcsim -------------------------------------
 
 
-async def test_alternancia_do_rung_arma_watchdog_alive(sim: OpcSimServer) -> None:
-    """Rung alternando ⇒ `watchdog_alive` vira True e `on_alive` é chamado uma única vez."""
+async def test_alternancia_do_rung_arma_flow_watchdog_alive(sim: OpcSimServer) -> None:
+    """Rung alternando ⇒ `flow_watchdog_alive[flow_id]` vira True e `on_alive` roda 1x."""
     recorder = Recorder()
     async with watchdog_running(sim, recorder) as snapshot:
-        await await_until(lambda: snapshot.watchdog_alive)
+        await await_until(lambda: snapshot.flow_watchdog_alive.get(FLOW_ID))
         # Muitas alternâncias depois, o gancho continua com uma chamada só: é edge-trigger
         # da (re)conexão, não pulso por ciclo.
         await await_flips(sim, NODE_WD_TO_SYSTEM, 6)
-        assert snapshot.watchdog_alive is True
+        assert snapshot.flow_watchdog_alive[FLOW_ID] is True
 
     assert len(recorder.alives) == 1
     assert recorder.freezes == []
     assert recorder.hard_failures == []
 
 
-async def test_escreve_a_negacao_do_valor_lido(sim: OpcSimServer) -> None:
-    """O bit escrito é sempre NOT do último bit lido (handshake da spec §3.1)."""
+async def test_escreve_o_mesmo_valor_lido_copia_pura(sim: OpcSimServer) -> None:
+    """O bit escrito é sempre uma CÓPIA do último bit lido: quem inverte é o PLC do outro
+    lado, o ottima não (ADR-009 revisado, handshake da spec §3.1)."""
     # Com o rung congelado o teste governa `to_system` sozinho: a escrita do watchdog fica
     # determinística, sem corrida com a inversão do simulador.
     await sim.set_freeze_watchdog(True)
     await sim.write(NODE_WD_TO_SYSTEM, True)
     recorder = Recorder()
     async with watchdog_running(sim, recorder, freeze_threshold_s=AWAIT_TIMEOUT_S):
-        await await_bit(sim, NODE_WD_FROM_SYSTEM, False)
-        await sim.write(NODE_WD_TO_SYSTEM, False)
         await await_bit(sim, NODE_WD_FROM_SYSTEM, True)
+        await sim.write(NODE_WD_TO_SYSTEM, False)
+        await await_bit(sim, NODE_WD_FROM_SYSTEM, False)
 
     assert recorder.freezes == []
     assert recorder.hard_failures == []
@@ -227,7 +247,7 @@ async def test_congelamento_dispara_on_freeze_na_janela_do_limiar(sim: OpcSimSer
     period_s = FREEZE_PERIOD_MS / 1000
     recorder = Recorder()
     async with watchdog_running(sim, recorder, period_ms=FREEZE_PERIOD_MS) as snapshot:
-        await await_until(lambda: snapshot.watchdog_alive)
+        await await_until(lambda: snapshot.flow_watchdog_alive.get(FLOW_ID))
         # Congelar logo depois de uma inversão alinha o instante de referência do Δt com a
         # última transição que o watchdog ainda consegue observar.
         await await_flips(sim, NODE_WD_TO_SYSTEM, 1)
@@ -251,7 +271,7 @@ async def test_nao_falha_antes_do_limiar(sim: OpcSimServer) -> None:
     """Congelamento mais curto que o limiar não alarma: o watchdog não é um gatilho nervoso."""
     recorder = Recorder()
     async with watchdog_running(sim, recorder) as snapshot:
-        await await_until(lambda: snapshot.watchdog_alive)
+        await await_until(lambda: snapshot.flow_watchdog_alive.get(FLOW_ID))
         await sim.set_freeze_watchdog(True)
         await asyncio.sleep(0.3)
 
@@ -290,8 +310,8 @@ async def test_read_com_node_id_malformado_avisa_em_vez_de_matar_a_task(
 ) -> None:
     """NodeId inválido falha já no parse: tem de virar `on_hard_failure`, não task morta.
 
-    Watchdog que morre calado deixa `watchdog_alive` congelado e o gate de escrita (2.3)
-    decidindo por um valor que nunca mais muda (ADR-009).
+    Watchdog que morre calado deixa `flow_watchdog_alive` congelado e o gate de escrita
+    (2.3) decidindo por um valor que nunca mais muda (ADR-009).
     """
     recorder = Recorder()
     async with watchdog_running(sim, recorder, read_node=MALFORMED_NODE):
@@ -322,13 +342,13 @@ async def test_write_com_node_id_malformado_avisa_em_vez_de_matar_a_task(
 
 async def test_stop_e_idempotente_e_cala_o_ciclo(sim: OpcSimServer) -> None:
     """Depois de `stop()` não há mais escrita nem callback; chamar de novo é no-op."""
-    config = make_config(sim.endpoint)
-    snapshot = ConnectionSnapshot(name=config.name)
+    watchdog_config = make_watchdog_config()
+    snapshot = ConnectionSnapshot(name="Forno 1")
     recorder = Recorder()
     async with connected(sim) as client:
-        task = make_watchdog(config, client, snapshot, recorder)
+        task = make_watchdog(watchdog_config, client, snapshot, recorder)
         await task.start()
-        await await_until(lambda: snapshot.watchdog_alive)
+        await await_until(lambda: snapshot.flow_watchdog_alive.get(FLOW_ID))
         await task.stop()
         await task.stop()
 
@@ -346,9 +366,11 @@ async def test_stop_e_idempotente_e_cala_o_ciclo(sim: OpcSimServer) -> None:
 # --- integração com o runtime da conexão -------------------------------------------
 
 
-async def test_conexao_sem_watchdog_nao_cria_task(sim: OpcSimServer, redis_client: Redis) -> None:
-    """Sem o par de node_ids não há task nem `watchdog_alive` (read-only da spec §3.5)."""
-    config = make_config(sim.endpoint, read_node=None, write_node=None)
+async def test_conexao_sem_flow_watchdog_nao_cria_task(
+    sim: OpcSimServer, redis_client: Redis
+) -> None:
+    """Sem nenhum `set_flow_watchdogs`, a conexão sobe read-only de fato (spec §3.5)."""
+    config = make_connection_config(sim.endpoint)
     snapshot = ConnectionSnapshot(name=config.name)
     runtime = ConnectionRuntime(config, redis_client, snapshot)
     await runtime.start()
@@ -356,15 +378,21 @@ async def test_conexao_sem_watchdog_nao_cria_task(sim: OpcSimServer, redis_clien
         await await_until(lambda: runtime.state is ConnectionState.UP)
         await asyncio.sleep(QUIET_WINDOW_S)
 
-        assert runtime.watchdog is None
-        assert snapshot.watchdog_alive is False
+        assert runtime.flow_watchdogs == {}
+        assert snapshot.flow_watchdog_alive == {}
     finally:
         await runtime.stop()
 
 
-async def test_runtime_falha_e_rearma_o_watchdog(sim: OpcSimServer, redis_client: Redis) -> None:
-    """Ciclo completo: alive ⇒ congelou ⇒ `failed` ⇒ descongelou ⇒ `up` com alive de novo."""
-    config = make_config(sim.endpoint)
+async def test_runtime_falha_e_so_rearma_com_reconfiguracao(
+    sim: OpcSimServer, redis_client: Redis
+) -> None:
+    """Ciclo completo do flow: alive ⇒ congelou ⇒ `watchdog_dead`. A task encerra sozinha
+    na 1ª detecção (comentário de `watchdog.py`) e NÃO se autocura só porque o bit voltou
+    a alternar — isolada por flow (ADR-009 revisado), congelar não derruba a sessão nem
+    reinicia a task sozinha; só uma reconfiguração de verdade via `set_flow_watchdogs`
+    (o que o supervisor faz quando o flow é reeditado) a traz de volta."""
+    config = make_connection_config(sim.endpoint)
     snapshot = ConnectionSnapshot(name=config.name)
     runtime = ConnectionRuntime(
         config,
@@ -374,18 +402,66 @@ async def test_runtime_falha_e_rearma_o_watchdog(sim: OpcSimServer, redis_client
         backoff_max_s=0.2,
         watchdog_freeze_threshold_s=TEST_FREEZE_THRESHOLD_S,
     )
+    await runtime.set_flow_watchdogs({FLOW_ID: make_watchdog_config()})
     await runtime.start()
     try:
-        await await_until(lambda: snapshot.watchdog_alive)
-        assert runtime.watchdog is not None
+        await await_until(lambda: snapshot.flow_watchdog_alive.get(FLOW_ID))
+        assert FLOW_ID in runtime.flow_watchdogs
 
         await sim.set_freeze_watchdog(True)
         await await_until(
-            lambda: runtime.state is ConnectionState.FAILED, timeout_s=TEST_FREEZE_THRESHOLD_S + 5
+            lambda: snapshot.flow_watchdog_alive.get(FLOW_ID) is False,
+            timeout_s=TEST_FREEZE_THRESHOLD_S + 5,
         )
-        assert snapshot.watchdog_alive is False
+        assert runtime.state is ConnectionState.UP, "watchdog de flow não derruba a sessão"
 
         await sim.set_freeze_watchdog(False)
-        await await_until(lambda: runtime.state is ConnectionState.UP and snapshot.watchdog_alive)
+        await asyncio.sleep(QUIET_WINDOW_S)
+        assert snapshot.flow_watchdog_alive.get(FLOW_ID) is False, (
+            "o bit voltou a alternar sozinho, mas a task já tinha encerrado"
+        )
+
+        # Reconfiguração de verdade: reconcilia como o supervisor faria num flow reeditado.
+        await runtime.set_flow_watchdogs(
+            {FLOW_ID: make_watchdog_config(period_ms=FAST_PERIOD_MS + 1)}
+        )
+        await await_until(lambda: snapshot.flow_watchdog_alive.get(FLOW_ID) is True)
+    finally:
+        await runtime.stop()
+
+
+async def test_dois_flow_watchdogs_na_mesma_conexao_sao_isolados(
+    sim: OpcSimServer, redis_client: Redis
+) -> None:
+    """Dois flows com watchdog na MESMA conexão: um congela, o outro segue vivo.
+
+    Impossível de expressar no modelo antigo (watchdog por conexão): o isolamento por
+    flow (ADR-009 revisado) é exatamente o que viabiliza este caso — uma conexão-gateway
+    com vários PLCs atrás dela não pode arrastar todos os flows quando só um deles trava.
+    """
+    config = make_connection_config(sim.endpoint)
+    snapshot = ConnectionSnapshot(name=config.name)
+    runtime = ConnectionRuntime(
+        config, redis_client, snapshot, watchdog_freeze_threshold_s=TEST_FREEZE_THRESHOLD_S
+    )
+    flow_a = make_watchdog_config(flow_id=1, read_node=NODE_WD_TO_SYSTEM, write_node=NODE_WD_FROM_SYSTEM)
+    flow_b = make_watchdog_config(
+        flow_id=2, read_node=NODE_WD_TO_SYSTEM_2, write_node=NODE_WD_FROM_SYSTEM_2
+    )
+    await runtime.set_flow_watchdogs({1: flow_a, 2: flow_b})
+    await runtime.start()
+    try:
+        await await_until(
+            lambda: snapshot.flow_watchdog_alive.get(1) and snapshot.flow_watchdog_alive.get(2)
+        )
+
+        await sim.set_freeze_watchdog(True, pair=1)
+        await await_until(lambda: snapshot.flow_watchdog_alive.get(1) is False)
+
+        # O flow 2 nunca para: nem a alternância dele, nem a sessão, nem os dois flows.
+        await await_flips(sim, NODE_WD_TO_SYSTEM_2, 3)
+        assert snapshot.flow_watchdog_alive.get(2) is True
+        assert runtime.state is ConnectionState.UP
+        assert set(runtime.flow_watchdogs) == {1, 2}
     finally:
         await runtime.stop()

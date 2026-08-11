@@ -1,7 +1,7 @@
 # PRD — OttimaSystem (reescrita, v1)
 
 **Produto:** OttimaSystem — plataforma on-premise de Controle Avançado de Processos (APC) com MPC
-**Versão do documento:** 1.8 · 2026-08-11 · **Status:** aprovado para implementação (F1-F6 concluídas)
+**Versão do documento:** 1.9 · 2026-08-11 · **Status:** aprovado para implementação (F1-F6 concluídas)
 **Changelog 1.1:** adicionado o requisito de **ordem de execução explícita por bloco** (`exec_order`) — RF-307 e RF-401 revisados, ADR-024 criado (altera ADR-007). Sem impacto retroativo em F1/F2; efetivo a partir da F3.
 **Changelog 1.2:** payload do canal `flow.status.<flow_id>` estendido com `ports` (valores de porta por varredura, para o canvas ao vivo) — resolve a lacuna do RF-404, que exigia publicar valores de portas sem definir onde. Decisão aprovada no brainstorm da F3 (2026-08-04, `docs/specs/F3-motor-canvas.md` Anexo A-3).
 **Changelog 1.3:** payload do canal `mpc.state.<flow_id>.<block_id>` ganha `ts` e `prediction.ts`; consumidor `recorder` adicionado (§7.1); nova hypertable `MpcSample` (§4, retenção 1 mês, CAgg `mpc_samples_1m`); RF-703 passa a citar a fonte concreta (`mpc_samples`/`mpc_samples_1m`). PRD avança de 1.2 para v1.3 — decisão A-2 · F5R-01/11/26 (spec F5 §1.3-1, `docs/specs/F5-operacao.md`, 2026-08-06).
@@ -10,6 +10,7 @@
 **Changelog 1.6:** nova camada **SSTO** (otimização econômica de regime permanente por LP acima do MPC) — §5.14 com **RF-901..RF-906**, fase **F7** no §8, hypertable `SstoRun` no §4 e o campo opcional `ssto` no payload de `mpc.state.<flow_id>.<block_id>` (§7.1). Nenhum canal novo. PRD avança de 1.5 para v1.6 — ADR-027 (2026-08-10).
 **Changelog 1.7:** **disponibilidade de MV por ciclo** (ADR-028): `mpc.state.<flow_id>.<block_id>` ganha `vars.<mv_id>.status` (§7.1, campo opcional, só MV); **RF-604** ganha a semântica de status das tags de leitura de modo/readback; novos **RF-626/627/628** (classificação por ciclo, modo degradado e shed por perda total); **RF-625** passa a citar `status` por MV; novo evento `mpc_mv_status_changed` (§5.12/RF-803, sem mudança de schema). PRD avança de 1.6 para v1.7 — ADR-028 (`docs/adr/ADR-028-disponibilidade-de-mv-por-ciclo.md`, 2026-08-11).
 **Changelog 1.8:** reorganização cosmética — **§5.13 (Blocos de filtro)** passa a **§5.11**, logo após os demais blocos de canvas (§5.6-§5.10, TFS termina em RF-52x e MPC começa em RF-60x, com os filtros RF-53x já entre os dois); Tela de operação avança de §5.11 para **§5.12** e Histórico e eventos, de §5.12 para **§5.13**. §5.14 (SSTO) inalterado. Nenhum RF renumerado, nenhum conteúdo ou contrato alterado — só a posição das seções. PRD avança de 1.7 para v1.8 — TD-013 (`docs/reports/_tech-debt.md`).
+**Changelog 1.9:** watchdog de comunicação deixa de ser configurado **por conexão OPC** e passa a ser **por flow** — uma conexão pode ser um gateway na frente de vários PLCs independentes, e o watchdog precisa monitorar especificamente por onde cada flow escreve seu controle. `OpcConnection` perde `watchdog_read_node_id`/`watchdog_write_node_id`/`watchdog_period_ms`; `Flow` ganha esses três campos mais `watchdog_enabled` e `watchdog_connection_id` (§4); RF-206/207 e §7.2 (bundle) atualizados. Também corrigido: o sistema copia o bit lido sem inverter (o PLC aplica o NOT), não o contrário como documentado antes. PRD avança de 1.8 para v1.9 — ADR-009 revisado (2026-08-11).
 **Autor:** Luciano França Rocha (LFR Automação), consolidado em sessão de grilling
 **Documentos-irmãos (normativos):** `adr/ADR-001 … ADR-028` · `GLOSSARY.md`
 
@@ -67,9 +68,9 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 
 - **User** (id, nome, username, hash, role[admin|operador], ativo)
 - **Project** (id, nome, descrição, ativo:boolean — no máx. 1 ativo; ADR-017)
-- **OpcConnection** (id, project_id, nome, endpoint, security_policy, security_mode, auth[anon|userpass|cert], credenciais/refs de certificado, tags de watchdog {read_bit, write_bit}, período de toggle) (ADR-009, 021)
+- **OpcConnection** (id, project_id, nome, endpoint, security_policy, security_mode, auth[anon|userpass|cert], credenciais/refs de certificado) (ADR-021)
 - **Tag** (id, connection_id, nome lógico, node_id OPC, direção[R|W], tipo de dado, EU, descrição)
-- **Flow** (id, project_id, nome, Ts∈{0.5,1,2,5,10,30,60}, estado_desejado[rodando|parado], graph_json) (ADR-007, 011, 017)
+- **Flow** (id, project_id, nome, Ts∈{0.5,1,2,5,10,30,60}, estado_desejado[rodando|parado], graph_json, watchdog_enabled:boolean, watchdog_connection_id, watchdog_read_node_id, watchdog_write_node_id, watchdog_period_ms) (ADR-007, 009, 011, 017)
 - **Block/Edge** — dentro de `graph_json` (React Flow): nós tipados {opc_read, opc_write, mpc, script, tfs, first_order, kalman} com `config` própria — incluindo **`exec_order`** (int, 1..N, único no flow; ADR-024); arestas ligam portas tipadas (ADR-005)
 - **Event** — hypertable (ts, severidade, origem, mensagem, payload JSON), retenção 1 mês (ADR-020)
 - **Sample** — hypertable (ts, tag_id, valor, qualidade), retenção 1 mês + continuous aggregate 1 min (ADR-003)
@@ -95,8 +96,8 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 - **RF-203** CRUD de tags (~100 R+W no total) com nome lógico, node_id, direção, tipo, EU e descrição; browse do address space é desejável, entrada manual de node_id é obrigatória.
 - **RF-204** opc-worker mantém sessões persistentes com reconexão automática e publica cada leitura no canal `opc.values.<conn_id>` (payload: tag_id, ts, valor, qualidade). (ADR-002, 006)
 - **RF-205** opc-worker consome `opc.writes` e executa escritas; toda escrita gera evento de auditoria com origem (bloco/usuário). (ADR-020)
-- **RF-206** **Watchdog por conexão**: par de bits (leitura/escrita), sistema escreve NOT(bit lido) em ciclo fixo de 1–2 s; bit congelado por **> 10 s** ⇒ falha de comunicação. (ADR-009)
-- **RF-207** Em falha de comunicação/OPC de uma conexão: **cessam imediatamente as escritas** daquela conexão e **param os flows** que a utilizam; evento de alarme é gerado. Retomada exige deploy manual. (ADR-009, 017)
+- **RF-206** **Watchdog por flow**: um flow habilita o watchdog (`watchdog_enabled`) apontando uma conexão OPC-UA (`watchdog_connection_id`) e um par de nós distintos (leitura/escrita); o sistema copia o bit lido para a escrita (sem inverter) em ciclo fixo de 1–2 s; bit congelado por **> 10 s** ⇒ falha de comunicação daquele flow. (ADR-009)
+- **RF-207** Em falha de comunicação/OPC de um flow: **cessam imediatamente as escritas** daquele flow e **o flow para**; flows-irmãos que usam a mesma conexão, mas não o watchdog em falha, seguem rodando; evento de alarme é gerado. Retomada exige deploy manual. (ADR-009, 017)
 
 ### 5.4 Editor de flows (canvas)
 - **RF-301** Canvas React Flow com paleta de **7 blocos**: OPC-Read, OPC-Write, MPC, Python-Script, TFS, Filtro 1ª ordem, Filtro Kalman; arrastar, conectar, configurar por duplo-clique. (ADR-005, 022, 026)
@@ -208,13 +209,13 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
  "project": {"name": "Planta C-101", "description": "Coluna debutanizadora"},
  "connections": [{"name": "gateway-1", "endpoint": "opc.tcp://10.0.0.5:4840",
    "security_policy": "basic256sha256", "security_mode": "sign_and_encrypt",
-   "auth_mode": "user_password", "auth_username": "ottima",
-   "watchdog_read_node_id": "ns=2;s=WD_R", "watchdog_write_node_id": "ns=2;s=WD_W",
-   "watchdog_period_ms": 1500}],
+   "auth_mode": "user_password", "auth_username": "ottima"}],
  "tags": [{"connection": "gateway-1", "name": "TT-101", "node_id": "ns=2;s=TT101",
    "direction": "r", "data_type": "float", "eu": "C", "description": "Temperatura de topo"}],
  "flows": [{"name": "Coluna C-101", "ts_seconds": 1.0, "desired_state": "stopped",
-   "graph": {"nodes": [], "edges": []}}]}
+   "watchdog_enabled": true, "watchdog_connection": "gateway-1",
+   "watchdog_read_node_id": "ns=2;s=WD_R", "watchdog_write_node_id": "ns=2;s=WD_W",
+   "watchdog_period_ms": 1500, "graph": {"nodes": [], "edges": []}}]}
 ```
 Nós do `graph` que referenciam tags (blocos `opc_read`/`opc_write` e variáveis do MPC) usam o objeto `tag_ref: {"connection": "...", "tag": "..."}` em vez de id numérico interno — omitido no exemplo acima (`graph` vazio, por brevidade). Sem segredos; credenciais re-informadas no import (RF-102/103).
 

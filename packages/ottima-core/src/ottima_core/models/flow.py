@@ -2,9 +2,11 @@
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     Identity,
+    Integer,
     Numeric,
     Text,
     UniqueConstraint,
@@ -33,9 +35,23 @@ class Flow(TimestampMixin, Base):
     graph_json: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default=text('\'{"nodes": [], "edges": []}\'::jsonb')
     )
+    watchdog_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    watchdog_connection_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("opc_connections.id", ondelete="SET NULL")
+    )
+    watchdog_read_node_id: Mapped[str | None] = mapped_column(Text)
+    watchdog_write_node_id: Mapped[str | None] = mapped_column(Text)
+    watchdog_period_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1500")
+    )
 
     __table_args__ = (
         UniqueConstraint("project_id", "name", name="uq_flows_project_name"),
         CheckConstraint("ts_seconds IN (0.5,1,2,5,10,30,60)", name="ck_flows_ts"),
         CheckConstraint("desired_state IN ('running','stopped')", name="ck_flows_desired_state"),
+        CheckConstraint(
+            "watchdog_period_ms BETWEEN 500 AND 5000", name="ck_flows_wd_period"
+        ),
     )

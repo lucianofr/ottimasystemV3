@@ -82,7 +82,7 @@ export function AppShell() {
             </Button>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-[1400px] flex-1 px-6 py-8">
+        <main className="mx-auto w-full max-w-[1920px] flex-1 px-4 py-8">
           <Outlet />
         </main>
       </div>

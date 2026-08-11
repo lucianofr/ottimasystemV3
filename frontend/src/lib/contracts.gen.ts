@@ -31,7 +31,7 @@ export interface ContratoPortaDinamica {
 
 export type ContratoPorta = ContratoPortaFixa | ContratoPortaDinamica;
 
-export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "tfs" | "first_order" | "kalman" | "mpc", ContratoPorta> = {
+export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "first_order" | "kalman" | "tfs" | "mpc", ContratoPorta> = {
   "opc_read": {
     "dynamic": false,
     "ports": [
@@ -72,31 +72,6 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "tfs" 
       }
     ]
   },
-  "tfs": {
-    "dynamic": false,
-    "ports": [
-      {
-        "name": "u1",
-        "direction": "input",
-        "type": "num"
-      },
-      {
-        "name": "u2",
-        "direction": "input",
-        "type": "num"
-      },
-      {
-        "name": "y1",
-        "direction": "output",
-        "type": "num"
-      },
-      {
-        "name": "y2",
-        "direction": "output",
-        "type": "num"
-      }
-    ]
-  },
   "first_order": {
     "dynamic": false,
     "ports": [
@@ -122,6 +97,31 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "tfs" 
       },
       {
         "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
+  },
+  "tfs": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "u1",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "u2",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "y1",
+        "direction": "output",
+        "type": "num"
+      },
+      {
+        "name": "y2",
         "direction": "output",
         "type": "num"
       }

@@ -99,10 +99,23 @@ if [ "${E2E}" = "1" ]; then
       \"endpoint\": \"opc.tcp://opcsim:4840\",
       \"security_policy\": \"none\",
       \"security_mode\": \"none\",
-      \"auth_mode\": \"anonymous\",
-      \"watchdog_read_node_id\": \"ns=2;s=sim.watchdog.to_system\",
-      \"watchdog_write_node_id\": \"ns=2;s=sim.watchdog.from_system\"
+      \"auth_mode\": \"anonymous\"
     }" | python3 -c 'import sys, json; print(json.load(sys.stdin)["id"])')
+
+  # Watchdog agora e por FLOW (ADR-009 revisado), nao mais na conexao: sem flow com
+  # watchdog habilitado o opc-worker recusa toda escrita (`no_watchdog`).
+  FLOW_ID=$(curl -fsS -X POST "${BASE}/api/flows" "${AUTH[@]}" -d "{
+      \"project_id\": ${PROJ_ID},
+      \"name\": \"opcsim-flow-${RUN_ID}\",
+      \"ts_seconds\": 10
+    }" | python3 -c 'import sys, json; print(json.load(sys.stdin)["id"])')
+  curl -fsS -X PUT "${BASE}/api/flows/${FLOW_ID}" "${AUTH[@]}" -d "{
+      \"watchdog_enabled\": true,
+      \"watchdog_connection_id\": ${CONN_ID},
+      \"watchdog_read_node_id\": \"ns=2;s=sim.watchdog.to_system\",
+      \"watchdog_write_node_id\": \"ns=2;s=sim.watchdog.from_system\",
+      \"watchdog_period_ms\": 1200
+    }" >/dev/null
 
   curl -fsS -X POST "${BASE}/api/tags" "${AUTH[@]}" -d "{
       \"connection_id\": ${CONN_ID},
@@ -117,12 +130,13 @@ if [ "${E2E}" = "1" ]; then
     HEALTH=$("${COMPOSE[@]}" exec -T opc-worker python -c \
       "import urllib.request; print(urllib.request.urlopen('http://localhost:8001/health', timeout=3).read().decode())") \
       || HEALTH='{"connections": {}}'
-    if printf '%s' "${HEALTH}" | CONN_ID="${CONN_ID}" python3 -c '
+    if printf '%s' "${HEALTH}" | CONN_ID="${CONN_ID}" FLOW_ID="${FLOW_ID}" python3 -c '
 import json, os, sys
 conn = json.load(sys.stdin)["connections"].get(os.environ["CONN_ID"])
-sys.exit(0 if conn and conn["state"] == "up" and conn["watchdog_alive"] else 1)
+alive = bool(conn) and conn.get("flow_watchdog_alive", {}).get(os.environ["FLOW_ID"])
+sys.exit(0 if conn and conn["state"] == "up" and alive else 1)
 '; then
-      echo "  conexão ${CONN_ID}: state=up, watchdog_alive=true"
+      echo "  conexão ${CONN_ID}: state=up, flow ${FLOW_ID} watchdog_alive=true"
       break
     fi
     sleep 2

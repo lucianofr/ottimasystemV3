@@ -94,15 +94,17 @@ def coerce_value(value: float, variant_type: ua.VariantType) -> bool | int | flo
 
 @dataclass(slots=True)
 class _BlockedPeriod:
-    """Descartes de uma conexão dentro de um mesmo período de gate fechado."""
+    """Descartes de um flow dentro de um mesmo período de gate fechado."""
 
     first: OpcWrite
     reason: BlockReason
     conn_name: str
-    # `gate_generation` do runtime quando o período abriu: o gate reabrir e fechar de novo
-    # avança o contador e prova que o período seguinte é OUTRO, mesmo que nenhuma escrita
-    # tenha chegado na janela aberta (spec §4.2-c).
-    generation: int
+    # (gate_generation da sessão, flow_gate_generation do flow) no instante em que o
+    # período abriu: QUALQUER uma das duas reabrir e fechar de novo avança o par e prova
+    # que o período seguinte é OUTRO, mesmo que nenhuma escrita tenha chegado na janela
+    # aberta (spec §4.2-c). Duas fontes porque `session_down` é por conexão inteira e
+    # `watchdog_dead` é por flow (ADR-009 revisado) — uma só das duas não bastaria.
+    generation: tuple[int, int]
     dropped: int = 0
     emitted: bool = False
     task: asyncio.Task[None] | None = None
@@ -117,7 +119,7 @@ class _RejectMemory:
     # morto vivo; no pior caso de endereço reciclado com as mesmas tags, um aviso duplicado
     # deixa de ser emitido — inofensivo.
     fingerprint: tuple[int, tuple] | None
-    seen: set[tuple[int, str]] = field(default_factory=set)
+    seen: set[tuple[int, int, str]] = field(default_factory=set)
 
 
 class WriteConsumer:
@@ -191,41 +193,44 @@ class WriteConsumer:
             await self._reject(write, runtime, "tag_not_writable")
             return
 
-        # Conexão sem o par de node_ids do watchdog é read-only por configuração (§3.5):
-        # o gate nunca abriria, então recusar é mais honesto do que bloquear para sempre.
-        if not runtime.config.has_watchdog:
+        # ADR-009 revisado: watchdog é por flow, não por conexão. Chave ausente em
+        # `flow_watchdog_alive` = nenhum watchdog registrado para ESTE flow — o gate
+        # nunca abriria, então recusar é mais honesto do que bloquear para sempre.
+        if write.flow_id not in runtime.snapshot.flow_watchdog_alive:
             await self._reject(write, runtime, "no_watchdog")
             return
 
-        blocked = self._gate_reason(runtime)
+        blocked = self._gate_reason(runtime, write.flow_id)
         if blocked is not None:
             await self._block(write, runtime, blocked)
             return
 
-        # O rearme do dedupe NÃO acontece aqui: ele é dirigido por `runtime.gate_generation`,
-        # que avança na aresta real de recuperação. Rearmar na chegada de uma escrita
-        # silenciaria o alarme quando a conexão falhasse de novo sem que nenhuma escrita
-        # tivesse passado pela janela aberta.
+        # O rearme do dedupe NÃO acontece aqui: ele é dirigido pela geração do gate (sessão
+        # + flow), que avança na aresta real de recuperação. Rearmar na chegada de uma
+        # escrita silenciaria o alarme quando a conexão/flow falhasse de novo sem que
+        # nenhuma escrita tivesse passado pela janela aberta.
         await self._execute(write, runtime, tag)
 
     @staticmethod
-    def _gate_reason(runtime: ConnectionRuntime) -> BlockReason | None:
-        """Gate §3.4: sessão `up` ∧ `watchdog_alive`; devolve o motivo quando fechado."""
+    def _gate_reason(runtime: ConnectionRuntime, flow_id: int) -> BlockReason | None:
+        """Gate §3.4: sessão `up` ∧ watchdog do FLOW vivo; devolve o motivo quando fechado."""
         if runtime.state is not ConnectionState.UP or runtime.client is None:
             return "session_down"
-        if not runtime.snapshot.watchdog_alive:
+        if not runtime.snapshot.flow_watchdog_alive.get(flow_id, False):
             return "watchdog_dead"
         return None
 
     async def _execute(self, write: OpcWrite, runtime: ConnectionRuntime, tag: TagConfig) -> None:
         """Escreve no node e audita o resultado (RF-205: toda escrita gera evento)."""
-        # Reconferência COMPLETA do gate, não só da sessão: `watchdog_alive` e `state` são
-        # zerados juntos por `fail()` hoje, mas depender disso seria invariante implícita
-        # entre dois módulos. Aqui é o último ponto antes de o valor chegar ao PLC.
-        blocked = self._gate_reason(runtime)
+        # Reconferência COMPLETA do gate, não só da sessão: `flow_watchdog_alive` e
+        # `state` são zerados juntos por `fail()` hoje, mas depender disso seria
+        # invariante implícita entre dois módulos. Aqui é o último ponto antes de o valor
+        # chegar ao PLC.
+        blocked = self._gate_reason(runtime, write.flow_id)
         if blocked is not None:
             await self._block(write, runtime, blocked)
             return
+
         client = runtime.client
         if client is None:  # estreitado por `_gate_reason`; o type checker não sabe disso
             await self._block(write, runtime, "session_down")
@@ -278,13 +283,13 @@ class WriteConsumer:
     async def _reject(
         self, write: OpcWrite, runtime: ConnectionRuntime | None, reason: RejectReason
     ) -> None:
-        """Descarta com aviso deduplicado por `(conn_id, tag_id, reason)` (spec §4.2)."""
+        """Descarta com aviso deduplicado por `(conn_id, tag_id, flow_id, reason)` (spec §4.2)."""
         fingerprint = None if runtime is None else (id(runtime), runtime.config.tags_key)
         memory = self._rejected.get(write.conn_id)
         if memory is None or memory.fingerprint != fingerprint:
             memory = _RejectMemory(fingerprint)
             self._rejected[write.conn_id] = memory
-        key = (write.tag_id, reason)
+        key = (write.tag_id, write.flow_id, reason)
         if key in memory.seen:
             return
         memory.seen.add(key)
@@ -309,18 +314,18 @@ class WriteConsumer:
     async def _block(
         self, write: OpcWrite, runtime: ConnectionRuntime, reason: BlockReason
     ) -> None:
-        """Descarta pelo gate; um evento por conexão por período de falha (spec §4.2-c).
+        """Descarta pelo gate; um evento por flow por período de falha (spec §4.2-c).
 
-        O período é identificado pela `gate_generation` do runtime, que avança na aresta
-        real de recuperação. Assim, dois episódios de falha separados por uma janela de
-        gate aberto rendem dois eventos mesmo que nenhuma escrita tenha chegado no meio —
-        senão o alarme ficaria silenciado indefinidamente, refém do acaso de uma escrita
-        cair na janela certa.
+        O período é identificado por (`gate_generation` da sessão, `flow_gate_generation`
+        do flow), que avança na aresta real de recuperação de qualquer um dos dois. Assim,
+        dois episódios de falha separados por uma janela de gate aberto rendem dois
+        eventos mesmo que nenhuma escrita tenha chegado no meio — senão o alarme ficaria
+        silenciado indefinidamente, refém do acaso de uma escrita cair na janela certa.
         """
-        generation = runtime.gate_generation
-        period = self._blocked.get(write.conn_id)
+        generation = (runtime.gate_generation, runtime.flow_gate_generation(write.flow_id))
+        period = self._blocked.get(write.flow_id)
         if period is not None and period.generation != generation:
-            await self._close_period(write.conn_id)
+            await self._close_period(write.flow_id)
             period = None
         if period is None:
             period = _BlockedPeriod(
@@ -329,27 +334,27 @@ class WriteConsumer:
                 conn_name=runtime.config.name,
                 generation=generation,
             )
-            self._blocked[write.conn_id] = period
+            self._blocked[write.flow_id] = period
             period.task = asyncio.create_task(
-                self._emit_blocked_later(write.conn_id), name=f"opc-write-blocked-{write.conn_id}"
+                self._emit_blocked_later(write.flow_id), name=f"opc-write-blocked-{write.flow_id}"
             )
         period.dropped += 1
         logger.warning(
-            "Escrita bloqueada na conexão %s, tag %s: %s",
-            write.conn_id,
+            "Escrita bloqueada no flow %s, tag %s: %s",
+            write.flow_id,
             write.tag_id,
             _BLOCK_TEXT[reason],
         )
 
-    async def _emit_blocked_later(self, conn_id: int) -> None:
+    async def _emit_blocked_later(self, flow_id: int) -> None:
         await asyncio.sleep(self._blocked_window_s)
-        period = self._blocked.get(conn_id)
+        period = self._blocked.get(flow_id)
         if period is not None:
             await self._emit_blocked(period)
 
-    async def _close_period(self, conn_id: int) -> None:
-        """Encerra o período: publica o que ainda não foi avisado e esquece a conexão."""
-        period = self._blocked.pop(conn_id, None)
+    async def _close_period(self, flow_id: int) -> None:
+        """Encerra o período: publica o que ainda não foi avisado e esquece o flow."""
+        period = self._blocked.pop(flow_id, None)
         if period is None:
             return
         await _cancel(period.task)
@@ -371,6 +376,7 @@ class WriteConsumer:
             payload={
                 "conn_id": write.conn_id,
                 "tag_id": write.tag_id,
+                "flow_id": write.flow_id,
                 "value": write.value,
                 "reason": period.reason,
                 # Descartes além do que abriu o período: preserva a ordem de grandeza sem

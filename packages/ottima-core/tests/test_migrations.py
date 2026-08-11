@@ -1,6 +1,11 @@
+import asyncio
+
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 async def test_tabelas_relacionais_existem(db_engine):
@@ -56,3 +61,49 @@ async def test_username_unico_case_insensitive(db_session):
                 " VALUES ('admin', 'B', 'h', 'admin')"
             )
         )
+
+
+def test_downgrade_0005_restaura_watchdog_em_opc_connections(migrated_database_url):
+    """Downgrade simétrico da 0005: watchdog volta para `opc_connections` e sai de
+    `flows` — mesma disciplina de `test_downgrade_remove_ssto_runs` (síncrono, não
+    aninha o loop async de `env.py`)."""
+    cfg = Config("packages/ottima-core/alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", migrated_database_url)
+    try:
+        command.downgrade(cfg, "0004_ssto_runs")
+
+        async def checar_colunas() -> tuple[set[str], set[str]]:
+            engine = create_async_engine(migrated_database_url)
+            async with engine.connect() as conn:
+                conexoes = await conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns"
+                        " WHERE table_name = 'opc_connections'"
+                    )
+                )
+                flows = await conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns"
+                        " WHERE table_name = 'flows'"
+                    )
+                )
+                colunas_conexao = {r[0] for r in conexoes}
+                colunas_flow = {r[0] for r in flows}
+            await engine.dispose()
+            return colunas_conexao, colunas_flow
+
+        colunas_conexao, colunas_flow = asyncio.run(checar_colunas())
+        assert {
+            "watchdog_read_node_id",
+            "watchdog_write_node_id",
+            "watchdog_period_ms",
+        } <= colunas_conexao
+        assert not colunas_flow & {
+            "watchdog_enabled",
+            "watchdog_connection_id",
+            "watchdog_read_node_id",
+            "watchdog_write_node_id",
+            "watchdog_period_ms",
+        }
+    finally:
+        command.upgrade(cfg, "head")

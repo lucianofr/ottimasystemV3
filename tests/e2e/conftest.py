@@ -38,7 +38,14 @@ from opcsim import (
     NODE_WD_FROM_SYSTEM,
     NODE_WD_TO_SYSTEM,
 )
-from ottima_core.bus import CHANNEL_EVENTS, CHANNEL_OPC_WRITES, OpcWrite, channel_mpc_state
+from ottima_core.bus import (
+    CHANNEL_EVENTS,
+    CHANNEL_OPC_WRITES,
+    KIND_COMM_FAILURE,
+    KIND_COMM_RESTORED,
+    OpcWrite,
+    channel_mpc_state,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_DIR = REPO_ROOT / "deploy"
@@ -158,17 +165,18 @@ def esperar_conexao(
     conn_id: int,
     *,
     estado: str = "up",
-    watchdog_alive: bool | None = True,
     session_up_since_diferente_de: str | None = None,
     timeout: float = 90.0,
 ) -> dict[str, Any]:
-    """Espera o `/health` do worker refletir o estado pedido para a conexão."""
+    """Espera o `/health` do worker refletir o estado pedido para a conexão.
+
+    Watchdog não é mais checado aqui (ADR-009 revisado): virou conceito de flow, não de
+    conexão — quem espera o watchdog vivo é `esperar_flow_watchdog`.
+    """
 
     def checar() -> dict[str, Any] | None:
         conexao = conexao_health(conn_id)
         if conexao is None or conexao["state"] != estado:
-            return None
-        if watchdog_alive is not None and conexao["watchdog_alive"] is not watchdog_alive:
             return None
         if (
             session_up_since_diferente_de is not None
@@ -183,6 +191,29 @@ def esperar_conexao(
     return esperar_ate(checar, timeout=timeout, intervalo=1.0, descricao=alvo)
 
 
+def esperar_flow_watchdog(
+    flow_id: int,
+    conn_id: int,
+    *,
+    alive: bool = True,
+    timeout: float = 90.0,
+) -> dict[str, Any]:
+    """Espera o `/health` do worker refletir o watchdog do FLOW (ADR-009 revisado):
+    `flow_watchdog_alive` é um dict `{flow_id: vivo}` dentro do bloco da conexão onde o
+    watchdog do flow está configurado — chave string porque é JSON (`main.py` do worker)."""
+
+    def checar() -> dict[str, Any] | None:
+        conexao = conexao_health(conn_id)
+        if conexao is None:
+            return None
+        if conexao.get("flow_watchdog_alive", {}).get(str(flow_id)) is not alive:
+            return None
+        return conexao
+
+    alvo = f"watchdog do flow {flow_id} (conexão {conn_id}) em alive={alive!r}"
+    return esperar_ate(checar, timeout=timeout, intervalo=1.0, descricao=alvo)
+
+
 def valor_unico() -> float:
     """Double distinto a cada chamada e entre execuções.
 
@@ -193,11 +224,25 @@ def valor_unico() -> float:
 
 
 def publicar_escrita(
-    redis_bus: redis.Redis, *, conn_id: int, tag_id: int, value: float, source: str
+    redis_bus: redis.Redis,
+    *,
+    conn_id: int,
+    tag_id: int,
+    flow_id: int,
+    value: float,
+    source: str,
 ) -> None:
-    """Publica um `OpcWrite` verbatim em `opc.writes` (PRD §7.1)."""
+    """Publica um `OpcWrite` verbatim em `opc.writes` (PRD §7.1).
+
+    `flow_id` é obrigatório desde o ADR-009 revisado: o gate de escrita do opc-worker
+    decide por `flow_watchdog_alive[flow_id]`, não mais por `conn_id` isolado."""
     escrita = OpcWrite(
-        conn_id=conn_id, tag_id=tag_id, value=value, source=source, ts=datetime.now(UTC)
+        conn_id=conn_id,
+        tag_id=tag_id,
+        flow_id=flow_id,
+        value=value,
+        source=source,
+        ts=datetime.now(UTC),
     )
     redis_bus.publish(CHANNEL_OPC_WRITES, escrita.model_dump_json())
 
@@ -237,6 +282,33 @@ class EventStream:
         raise AssertionError(f"{descricao}: nenhum evento correspondente em {timeout:.0f}s")
 
 
+def revivar_watchdog_de_flow(
+    conn_id: int,
+    flow_id: int,
+    *,
+    eventos: EventStream,
+    parar_opcsim: Callable[[], None],
+) -> None:
+    """Derruba e religa a sessão real do opcsim para forçar uma task de watchdog NOVA no
+    flow (ADR-009 revisado): a task atual, se houver, pode já ter se encerrado sozinha na
+    1ª detecção de congelamento (opc-worker `watchdog.py`) — só uma sessão nova volta a
+    observar o bit; descongelar o rung sozinho não revive nada."""
+    parar_opcsim()
+    eventos.esperar(
+        evento_de(KIND_COMM_FAILURE, conn_id),
+        timeout=60.0,
+        descricao="comm_failure da queda de sessão que força um watchdog de flow novo",
+    )
+    compose("start", "opcsim")
+    eventos.esperar(
+        evento_de(KIND_COMM_RESTORED, conn_id),
+        timeout=180.0,
+        descricao="comm_restored da religada que força um watchdog de flow novo",
+    )
+    esperar_conexao(conn_id, timeout=60.0)
+    esperar_flow_watchdog(flow_id, conn_id, timeout=60.0)
+
+
 class OpcSim:
     """Cliente OPC-UA do host contra o opcsim: espelhos e nodes `sim/control/*`.
 
@@ -270,10 +342,13 @@ class OpcSim:
 
 @dataclass(frozen=True, slots=True)
 class Ambiente:
-    """Projeto ativo com uma conexão ao opcsim e as quatro tags que a suíte exercita."""
+    """Projeto ativo com uma conexão ao opcsim, as quatro tags que a suíte exercita e o
+    flow cujo watchdog mantém a conexão gravável (ADR-009 revisado: watchdog é por flow,
+    não por conexão)."""
 
     project_id: int
     conn_id: int
+    flow_id: int
     sine: int
     static: int
     mirror: int
@@ -367,10 +442,15 @@ def _criar_tag(admin: httpx.Client, conn_id: int, nome: str, node_id: str, direc
 
 @pytest.fixture(scope="module")
 def projeto_com_conexao(admin: httpx.Client, request: pytest.FixtureRequest) -> Iterator[Ambiente]:
-    """Projeto ativo + conexão ao opcsim + tags, com a conexão já `up` e watchdog vivo.
+    """Projeto ativo + conexão ao opcsim + tags + um flow com watchdog habilitado (ADR-009
+    revisado: watchdog é por flow, não por conexão) no par 1 do opcsim, tudo já `up` e com
+    o watchdog do flow vivo.
 
     Escopo de módulo: cada arquivo da suíte parte de um projeto limpo, e o teardown
-    devolve a ativação à sentinela antes de excluir (excluir o ativo é 409).
+    devolve a ativação à sentinela antes de excluir (excluir o ativo é 409). O flow do
+    watchdog nunca é implantado (`desired_state` fica `stopped`): o opc-worker descobre
+    watchdogs de flow pela tabela `flows` direto (`load_active_configuration`), não pelo
+    runtime dos blocos — não precisa de grafo nem de deploy para o par de nodes ficar vivo.
     """
     sufixo = f"{request.module.__name__.rsplit('.', 1)[-1]}-{RUN_ID}"
     r = admin.post("/api/projects", json={"name": f"f2-{sufixo}", "description": "L2 da F2"})
@@ -387,22 +467,42 @@ def projeto_com_conexao(admin: httpx.Client, request: pytest.FixtureRequest) -> 
                 "security_policy": "none",
                 "security_mode": "none",
                 "auth_mode": "anonymous",
+            },
+        )
+        assert r.status_code == 201, f"criação da conexão falhou: HTTP {r.status_code} {r.text}"
+        conn_id = int(r.json()["id"])
+        r = admin.post(
+            "/api/flows",
+            json={"project_id": projeto["id"], "name": f"watchdog-{sufixo}", "ts_seconds": 1},
+        )
+        assert r.status_code == 201, (
+            f"criação do flow do watchdog falhou: HTTP {r.status_code} {r.text}"
+        )
+        flow_id = int(r.json()["id"])
+        r = admin.put(
+            f"/api/flows/{flow_id}",
+            json={
+                "watchdog_enabled": True,
+                "watchdog_connection_id": conn_id,
                 "watchdog_read_node_id": NODE_WD_TO_SYSTEM,
                 "watchdog_write_node_id": NODE_WD_FROM_SYSTEM,
                 "watchdog_period_ms": 1000,
             },
         )
-        assert r.status_code == 201, f"criação da conexão falhou: HTTP {r.status_code} {r.text}"
-        conn_id = int(r.json()["id"])
+        assert r.status_code == 200, (
+            f"habilitar watchdog do flow falhou: HTTP {r.status_code} {r.text}"
+        )
         ambiente = Ambiente(
             project_id=projeto["id"],
             conn_id=conn_id,
+            flow_id=flow_id,
             sine=_criar_tag(admin, conn_id, "sine", NODE_SINE, "r"),
             static=_criar_tag(admin, conn_id, "static", NODE_STATIC, "r"),
             mirror=_criar_tag(admin, conn_id, "mirror", NODE_MIRROR_FLOAT, "r"),
             w_float=_criar_tag(admin, conn_id, "w_float", NODE_W_FLOAT, "w"),
         )
         esperar_conexao(conn_id)
+        esperar_flow_watchdog(flow_id, conn_id)
         yield ambiente
     finally:
         _ativar_sentinela(admin)
@@ -477,9 +577,6 @@ def ambiente_mpc(admin: httpx.Client, request: pytest.FixtureRequest) -> Iterato
                 "security_policy": "none",
                 "security_mode": "none",
                 "auth_mode": "anonymous",
-                "watchdog_read_node_id": NODE_WD_TO_SYSTEM,
-                "watchdog_write_node_id": NODE_WD_FROM_SYSTEM,
-                "watchdog_period_ms": 1000,
             },
         )
         assert r.status_code == 201, f"criação da conexão falhou: HTTP {r.status_code} {r.text}"
@@ -759,6 +856,19 @@ def criar_flow_mpc(admin: httpx.Client, ambiente_mpc: AmbienteMpc) -> Iterator[C
         if grafo is not None:
             r = admin.put(f"/api/flows/{flow_id}", json={"graph_json": grafo})
             assert r.status_code == 200, f"PUT do grafo de {nome}: HTTP {r.status_code} {r.text}"
+        # ADR-009 revisado: watchdog é por flow. Todo flow MPC escreve MVs em OPC — sem
+        # watchdog próprio, o gate recusa como `no_watchdog` e a malha nunca fecha.
+        admin.put(
+            f"/api/flows/{flow_id}",
+            json={
+                "watchdog_enabled": True,
+                "watchdog_connection_id": ambiente_mpc.conn_id,
+                "watchdog_read_node_id": NODE_WD_TO_SYSTEM,
+                "watchdog_write_node_id": NODE_WD_FROM_SYSTEM,
+                "watchdog_period_ms": 1000,
+            },
+        )
+        esperar_flow_watchdog(flow_id, ambiente_mpc.conn_id)
         return flow_id
 
     try:

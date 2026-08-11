@@ -23,6 +23,7 @@ from .conftest import (
     esperar_conexao,
     evento_de,
     publicar_escrita,
+    revivar_watchdog_de_flow,
     valor_unico,
 )
 
@@ -67,6 +68,7 @@ def test_e2e_f2_04_watchdog_congelado_alarma_dentro_do_orcamento(
         redis_bus,
         conn_id=conn_id,
         tag_id=projeto_com_conexao.w_float,
+        flow_id=projeto_com_conexao.flow_id,
         value=valor_unico(),
         source=f"e2e-{RUN_ID}-04",
     )
@@ -87,10 +89,22 @@ def test_e2e_f2_05_descongelar_restaura_e_reabre_o_gate(
     opcsim_client: OpcSim,
     redis_bus: redis.Redis,
     congelar_watchdog: Callable[[bool], None],
+    parar_opcsim: Callable[[], None],
 ) -> None:
-    """§3.3/§3.4: descongelar emite `comm_restored` e a escrita seguinte passa sem ação manual."""
+    """§3.3/§3.4: com o watchdog do flow vivo, uma sessão nova depois de descongelar
+    restaura a comunicação e reabre o gate de escrita sem ação manual.
+
+    ADR-009 revisado: a task de watchdog de um flow se encerra sozinha na 1ª detecção de
+    congelamento — só uma sessão nova volta a observar o bit (opc-worker `watchdog.py`),
+    então a recuperação sempre passa por uma queda e religada real da sessão, nunca só por
+    descongelar o rung. O E2E-F2-04, se rodou antes neste módulo, já deixou este watchdog
+    morto; a chamada abaixo cobre os dois casos.
+    """
     conn_id = projeto_com_conexao.conn_id
-    esperar_conexao(conn_id, timeout=120.0)
+    flow_id = projeto_com_conexao.flow_id
+    revivar_watchdog_de_flow(
+        conn_id, flow_id, eventos=eventos, parar_opcsim=parar_opcsim
+    )
 
     congelar_watchdog(True)
     eventos.esperar(
@@ -100,12 +114,9 @@ def test_e2e_f2_05_descongelar_restaura_e_reabre_o_gate(
     )
 
     congelar_watchdog(False)
-    eventos.esperar(
-        evento_de(KIND_COMM_RESTORED, conn_id),
-        timeout=120.0,
-        descricao="comm_restored após descongelar o rung",
+    revivar_watchdog_de_flow(
+        conn_id, flow_id, eventos=eventos, parar_opcsim=parar_opcsim
     )
-    esperar_conexao(conn_id, timeout=60.0)
 
     # Gate stateless (§3.4): a primeira alternância do watchdog já reabre a escrita.
     valor = valor_unico()
@@ -113,6 +124,7 @@ def test_e2e_f2_05_descongelar_restaura_e_reabre_o_gate(
         redis_bus,
         conn_id=conn_id,
         tag_id=projeto_com_conexao.w_float,
+        flow_id=flow_id,
         value=valor,
         source=f"e2e-{RUN_ID}-05",
     )

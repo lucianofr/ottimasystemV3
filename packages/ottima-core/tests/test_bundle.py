@@ -38,9 +38,6 @@ def _conexao(**over: object) -> OpcConnection:
         "auth_username": None,
         "auth_password_enc": None,
         "server_cert_file": None,
-        "watchdog_read_node_id": None,
-        "watchdog_write_node_id": None,
-        "watchdog_period_ms": 1500,
     }
     dados.update(over)
     return OpcConnection(**dados)
@@ -69,6 +66,11 @@ def _flow(**over: object) -> Flow:
         "ts_seconds": 1.0,
         "desired_state": "stopped",
         "graph_json": {"nodes": [], "edges": []},
+        "watchdog_enabled": False,
+        "watchdog_connection_id": None,
+        "watchdog_read_node_id": None,
+        "watchdog_write_node_id": None,
+        "watchdog_period_ms": 1500,
     }
     dados.update(over)
     return Flow(**dados)
@@ -134,9 +136,6 @@ class TestMontarBundle:
             auth_username="ottima",
             auth_password_enc="cifrado-nao-deve-aparecer",
             server_cert_file="certs/gateway-1.pem",
-            watchdog_read_node_id="ns=2;s=WD_R",
-            watchdog_write_node_id="ns=2;s=WD_W",
-            watchdog_period_ms=2000,
         )
 
         bundle = montar_bundle(
@@ -150,9 +149,6 @@ class TestMontarBundle:
             security_mode="sign_and_encrypt",
             auth_mode="user_password",
             auth_username="ottima",
-            watchdog_read_node_id="ns=2;s=WD_R",
-            watchdog_write_node_id="ns=2;s=WD_W",
-            watchdog_period_ms=2000,
         )
         assert not hasattr(bundle.connections[0], "auth_password_enc")
         assert not hasattr(bundle.connections[0], "server_cert_file")
@@ -162,6 +158,30 @@ class TestMontarBundle:
             project=_projeto(), connections=[], tags=[], flows=[], exported_at=EXPORTED_AT
         )
         assert bundle.exported_at == EXPORTED_AT
+
+    def test_flow_projetado_com_campos_de_watchdog(self) -> None:
+        conexao = _conexao(id=1, name="gateway-1")
+        flow = _flow(
+            watchdog_enabled=True,
+            watchdog_connection_id=1,
+            watchdog_read_node_id="ns=2;s=WD_R",
+            watchdog_write_node_id="ns=2;s=WD_W",
+            watchdog_period_ms=2000,
+        )
+
+        bundle = montar_bundle(
+            project=_projeto(),
+            connections=[conexao],
+            tags=[],
+            flows=[flow],
+            exported_at=EXPORTED_AT,
+        )
+
+        assert bundle.flows[0].watchdog_enabled is True
+        assert bundle.flows[0].watchdog_connection == "gateway-1"
+        assert bundle.flows[0].watchdog_read_node_id == "ns=2;s=WD_R"
+        assert bundle.flows[0].watchdog_write_node_id == "ns=2;s=WD_W"
+        assert bundle.flows[0].watchdog_period_ms == 2000
 
 
 class TestRoundTripPorConexao:
@@ -404,6 +424,23 @@ class TestProblemasDeCoerenciaInterna:
                     data_type="float",
                 )
             ],
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("gateway-fantasma" in p for p in problemas)
+
+    def test_flow_watchdog_com_conexao_ausente_no_bundle_e_problema(self) -> None:
+        bundle = _bundle_minimo(
+            flows=[
+                BundleFlow(
+                    name="Coluna C-101",
+                    ts_seconds=1.0,
+                    graph={"nodes": [], "edges": []},
+                    watchdog_enabled=True,
+                    watchdog_connection="gateway-fantasma",
+                    watchdog_read_node_id="ns=2;s=WD_R",
+                    watchdog_write_node_id="ns=2;s=WD_W",
+                )
+            ]
         )
         problemas = problemas_de_coerencia_interna(bundle)
         assert any("gateway-fantasma" in p for p in problemas)

@@ -43,15 +43,7 @@ class ConnectionConfig:
     auth_username: str | None
     auth_password_enc: str | None  # token Fernet — NUNCA logado, NUNCA em snapshot
     server_cert_file: str | None
-    watchdog_read_node_id: str | None
-    watchdog_write_node_id: str | None
-    watchdog_period_ms: int
     tags: tuple[TagConfig, ...]
-
-    @property
-    def has_watchdog(self) -> bool:
-        """Só há watchdog com o par de node_ids: sem os dois não há handshake (ADR-009)."""
-        return bool(self.watchdog_read_node_id and self.watchdog_write_node_id)
 
     @property
     def session_key(self) -> tuple:
@@ -62,6 +54,19 @@ class ConnectionConfig:
     def tags_key(self) -> tuple:
         """Conjunto de tags em ordem estável: muda ⇒ recria só a subscription (tarefa 1.4)."""
         return tuple(sorted(self.tags, key=lambda tag: tag.id))
+
+
+@dataclass(frozen=True, slots=True)
+class FlowWatchdogConfig:
+    """Watchdog de UM flow (ADR-009 revisado): o par de node_ids e o período vivem no flow,
+    não mais na conexão — uma conexão OPC pode ter vários PLCs atrás dela (gateway), e o
+    watchdog monitora especificamente onde CADA flow escreve o controle, não a sessão
+    inteira."""
+
+    flow_id: int
+    read_node_id: str
+    write_node_id: str
+    period_ms: int
 
 
 @dataclass(slots=True)
@@ -85,7 +90,9 @@ class ConnectionSnapshot:
 
     name: str
     state: ConnectionState = ConnectionState.CONNECTING
-    watchdog_alive: bool = False
+    flow_watchdog_alive: dict[int, bool] = field(default_factory=dict)
+    """`flow_id -> vivo`. Chave presente = watchdog registrado para o flow (ADR-009
+    revisado); ausente = flow sem watchdog, escrita sempre recusada (`no_watchdog`)."""
     session_up_since: datetime | None = None
     last_publish_ts: datetime | None = None
     tags_subscribed: int = 0
@@ -102,7 +109,7 @@ class ConnectionSnapshot:
         return {
             "name": self.name,
             "state": self.state.value,
-            "watchdog_alive": self.watchdog_alive,
+            "flow_watchdog_alive": dict(self.flow_watchdog_alive),
             "session_up_since": _iso_utc(self.session_up_since),
             "last_publish_ts": _iso_utc(self.last_publish_ts),
             "tags_subscribed": self.tags_subscribed,

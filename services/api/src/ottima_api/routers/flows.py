@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -22,18 +22,15 @@ from ottima_core.bus import (
     FlowCommand,
     publish_event,
 )
-from ottima_core.connections import conexoes_sem_watchdog
 from ottima_core.flowgraph import (
     FlowGraph,
-    FlowNode,
     GraphParseError,
-    MpcConfig,
     TagRef,
     ValidationResult,
     parse_graph,
     validate_graph,
 )
-from ottima_core.models import Flow, Project, User
+from ottima_core.models import Flow, OpcConnection, Project, User
 from ottima_core.schemas.flows import (
     MAX_BIGINT,
     FlowCreate,
@@ -41,6 +38,7 @@ from ottima_core.schemas.flows import (
     FlowOut,
     FlowSaved,
     FlowUpdate,
+    erro_watchdog_flow,
 )
 from ottima_core.tags import project_tags
 
@@ -81,10 +79,11 @@ def _validar_grafo(
     graph_json: dict,
     tags: Mapping[int, TagRef],
     ts_seconds: float,
-    conexoes_sem_watchdog: Mapping[int, str],
+    *,
+    watchdog_enabled: bool,
 ) -> ValidationResult:
-    """Parse + validação semântica + avisos de watchdog (TD-004) num passo só, para rodar
-    inteiro fora do event loop.
+    """Parse + validação semântica + aviso de watchdog (TD-004, ADR-009 revisado: watchdog
+    por flow, não mais por conexão) num passo só, para rodar inteiro fora do event loop.
 
     As etapas são CPU-bound sobre dados já materializados (TD-002): num grafo grande
     seguram o loop e travam o WS de status de todo mundo enquanto um engenheiro salva.
@@ -93,60 +92,29 @@ def _validar_grafo(
     resultado = validate_graph(grafo, tags, ts_seconds)
     if resultado.errors:
         return resultado
-    avisos_watchdog = _avisos_watchdog(grafo, tags, conexoes_sem_watchdog)
-    if not avisos_watchdog:
+    aviso = _aviso_watchdog(grafo, watchdog_enabled=watchdog_enabled)
+    if aviso is None:
         return resultado
-    return ValidationResult(
-        errors=resultado.errors, warnings=[*resultado.warnings, *avisos_watchdog]
-    )
+    return ValidationResult(errors=resultado.errors, warnings=[*resultado.warnings, aviso])
 
 
-def _aviso_watchdog(node: FlowNode, nome_conexao: str) -> str:
-    label = node.label or node.id
+def _tem_alvo_de_escrita(grafo: FlowGraph) -> bool:
+    """Flow escreve em planta se tiver bloco `opc_write` ou `mpc` (toda MV é alvo de
+    escrita, direta ou por PID). TD-004 revisado: o watchdog agora é um por flow, não por
+    conexão — não precisa mais rastrear qual conexão cada alvo individual usa."""
+    return any(node.type in ("opc_write", "mpc") for node in grafo.nodes)
+
+
+def _aviso_watchdog(grafo: FlowGraph, *, watchdog_enabled: bool) -> str | None:
+    """TD-004 (revisado, ADR-009): flow com alvo de escrita e watchdog desabilitado — o
+    opc-worker recusa TODA escrita desse flow (`writes.py`), então ele vira somente
+    leitura de fato sem ninguém avisar."""
+    if watchdog_enabled or not _tem_alvo_de_escrita(grafo):
+        return None
     return (
-        f"O bloco '{label}' escreve na conexão '{nome_conexao}' sem watchdog: as escritas "
+        "Este flow escreve em planta mas o watchdog está desabilitado: as escritas "
         "serão recusadas (somente leitura de fato)."
     )
-
-
-def _avisos_watchdog_mpc(
-    node: FlowNode, tags: Mapping[int, TagRef], conexoes_sem_watchdog: Mapping[int, str]
-) -> Iterator[str]:
-    """MV com `pid` escreve pelas próprias tags do binding (`write_tag_id`/`mode_cmd_tag_id`),
-    sem depender de aresta nenhuma — MV direta já cai no `opc_write` genérico de
-    `_avisos_watchdog`, seja qual for o bloco que alimenta (TD-004)."""
-    config = MpcConfig.model_validate(node.config.model_dump())
-    ja_avisados: set[str] = set()
-    for mv in config.variables.mvs:
-        if mv.pid is None:
-            continue
-        for tag_id in (mv.pid.write_tag_id, mv.pid.mode_cmd_tag_id):
-            tag = tags.get(tag_id)
-            if tag is None or tag.conn_id not in conexoes_sem_watchdog:
-                continue
-            nome = conexoes_sem_watchdog[tag.conn_id]
-            if nome not in ja_avisados:
-                ja_avisados.add(nome)
-                yield _aviso_watchdog(node, nome)
-
-
-def _avisos_watchdog(
-    grafo: FlowGraph, tags: Mapping[int, TagRef], conexoes_sem_watchdog: Mapping[int, str]
-) -> list[str]:
-    """TD-004: um aviso por bloco que escreve numa conexão sem watchdog completo — o
-    opc-worker recusa TODA escrita nesse caso (`writes.py`, ADR-009), então o flow vira
-    somente leitura de fato sem ninguém avisar."""
-    if not conexoes_sem_watchdog:
-        return []
-    avisos: list[str] = []
-    for node in grafo.nodes:
-        if node.type == "opc_write":
-            tag = tags.get(node.config.tag_id)
-            if tag is not None and tag.conn_id in conexoes_sem_watchdog:
-                avisos.append(_aviso_watchdog(node, conexoes_sem_watchdog[tag.conn_id]))
-        elif node.type == "mpc":
-            avisos.extend(_avisos_watchdog_mpc(node, tags, conexoes_sem_watchdog))
-    return avisos
 
 
 async def _publicar_evento(
@@ -261,11 +229,35 @@ async def update_flow(
     # `ts_seconds` é Numeric(4,1): SQLAlchemy devolve Decimal e a validação faz aritmética
     # com o Ts (teto de atraso do TFS), onde Decimal com float levanta TypeError.
     ts_efetivo = float(flow.ts_seconds if body.ts_seconds is None else body.ts_seconds)
+    # Mesma convenção do grafo/Ts: `None` no body mantém o valor gravado (§ docstring acima).
+    wd_enabled = flow.watchdog_enabled if body.watchdog_enabled is None else body.watchdog_enabled
+    wd_conn_id = (
+        flow.watchdog_connection_id
+        if body.watchdog_connection_id is None
+        else body.watchdog_connection_id
+    )
+    wd_read = (
+        flow.watchdog_read_node_id
+        if body.watchdog_read_node_id is None
+        else body.watchdog_read_node_id
+    )
+    wd_write = (
+        flow.watchdog_write_node_id
+        if body.watchdog_write_node_id is None
+        else body.watchdog_write_node_id
+    )
+    wd_period = flow.watchdog_period_ms if body.watchdog_period_ms is None else body.watchdog_period_ms
+    erro_wd = erro_watchdog_flow(wd_enabled, wd_conn_id, wd_read, wd_write)
+    if erro_wd:
+        raise _reprovado([erro_wd])
+    if wd_conn_id is not None:
+        conexao_wd = await db.get(OpcConnection, wd_conn_id)
+        if conexao_wd is None or conexao_wd.project_id != flow.project_id:
+            raise _reprovado(["Conexão de watchdog não pertence a este projeto"])
     tags = await project_tags(db, flow.project_id)
-    sem_watchdog = await conexoes_sem_watchdog(db, flow.project_id)
     try:
         resultado = await asyncio.to_thread(
-            _validar_grafo, graph_json, tags, ts_efetivo, sem_watchdog
+            _validar_grafo, graph_json, tags, ts_efetivo, watchdog_enabled=wd_enabled
         )
     except GraphParseError as erro:
         raise _reprovado(erro.errors) from None
@@ -276,6 +268,11 @@ async def update_flow(
         flow.name = body.name
     if body.ts_seconds is not None:
         flow.ts_seconds = body.ts_seconds
+    flow.watchdog_enabled = wd_enabled
+    flow.watchdog_connection_id = wd_conn_id
+    flow.watchdog_read_node_id = wd_read
+    flow.watchdog_write_node_id = wd_write
+    flow.watchdog_period_ms = wd_period
     # Gravado verbatim: o editor é o dono do JSON e guarda nele estado de layout que a
     # validação ignora de propósito.
     flow.graph_json = graph_json

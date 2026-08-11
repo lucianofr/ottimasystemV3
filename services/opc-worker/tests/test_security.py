@@ -128,9 +128,6 @@ def make_config(
         auth_username=auth_username,
         auth_password_enc=auth_password_enc,
         server_cert_file=server_cert_file,
-        watchdog_read_node_id=None,
-        watchdog_write_node_id=None,
-        watchdog_period_ms=1000,
         tags=(),
     )
 

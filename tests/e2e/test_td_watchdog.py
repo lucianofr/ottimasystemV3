@@ -1,13 +1,14 @@
-"""L2 do fechamento de tech debts — conexão sem watchdog é somente leitura (TD-004).
+"""L2 do fechamento de tech debts — flow sem watchdog é somente leitura (TD-004).
 
-Cenário E2E-TD-06. `writes.py` recusa TODA escrita numa conexão sem watchdog, e até esta
-entrega o único sinal era um `write_rejected` de severidade warning: numa MV direta o bloco
-MPC seguia com `u_applied = _mv_last`, ACREDITANDO que o comando chegou. O modelo interno
-divergia da planta sem detecção e sem alarme (na campanha: 10 min com 4 escritas recusadas
-por varredura).
+Cenário E2E-TD-06. `writes.py` recusa TODA escrita de um flow sem watchdog habilitado, e
+até esta entrega o único sinal era um `write_rejected` de severidade warning: numa MV
+direta o bloco MPC seguia com `u_applied = _mv_last`, ACREDITANDO que o comando chegou. O
+modelo interno divergia da planta sem detecção e sem alarme (na campanha: 10 min com 4
+escritas recusadas por varredura).
 
-A causa é 100% estática — está na configuração da conexão — então ela é barrada onde dá
-para barrar: aviso no salvar e recusa no arme. O gate aqui prova as duas pontas.
+A causa é 100% estática — está na configuração do flow (ADR-009 revisado: watchdog é por
+flow, não por conexão) — então ela é barrada onde dá para barrar: aviso no salvar e recusa
+no arme. O gate aqui prova as duas pontas.
 """
 
 from collections.abc import Callable, Iterator
@@ -33,10 +34,21 @@ pytestmark = pytest.mark.e2e
 
 BLOCO = "mpc_sem_wd"
 
+AVISO_WATCHDOG_DESABILITADO = (
+    "Este flow escreve em planta mas o watchdog está desabilitado: as escritas "
+    "serão recusadas (somente leitura de fato)."
+)
+"""Texto fixo de `_aviso_watchdog` (`services/api/.../routers/flows.py`) — o aviso não
+cita mais a conexão (watchdog não é dela), é sempre o mesmo, por flow."""
+
 
 @pytest.fixture(scope="module")
-def conexao_sem_watchdog(admin: httpx.Client) -> Iterator[dict[str, Any]]:
-    """Projeto ativo com uma conexão SEM watchdog e o par de tags r/w que o cenário usa.
+def conexao_base(admin: httpx.Client) -> Iterator[dict[str, Any]]:
+    """Projeto ativo com uma conexão e o par de tags r/w que o cenário usa.
+
+    ADR-009 revisado: watchdog não é mais conceito de conexão nenhuma — toda conexão nasce
+    "sem watchdog" hoje, então o que importa para o TD-004 é o FLOW não ter o watchdog
+    habilitado (`criar_flow_sem_watchdog`), não esta conexão.
 
     Escopo de módulo, mesmo padrão de `ambiente_mpc`: o teardown devolve a ativação à
     sentinela antes de excluir, porque excluir o projeto ativo é 409.
@@ -49,12 +61,11 @@ def conexao_sem_watchdog(admin: httpx.Client) -> Iterator[dict[str, Any]]:
     projeto = resposta.json()
     try:
         assert admin.post(f"/api/projects/{projeto['id']}/activate").status_code == 200
-        nome_conexao = f"opcsim-sem-wd-{sufixo}"
         resposta = admin.post(
             "/api/connections",
             json={
                 "project_id": projeto["id"],
-                "name": nome_conexao,
+                "name": f"opcsim-{sufixo}",
                 "endpoint": OPCSIM_URL,
                 "security_policy": "none",
                 "security_mode": "none",
@@ -62,12 +73,9 @@ def conexao_sem_watchdog(admin: httpx.Client) -> Iterator[dict[str, Any]]:
             },
         )
         assert resposta.status_code == 201, (
-            f"criação da conexão sem watchdog: HTTP {resposta.status_code} {resposta.text}"
+            f"criação da conexão: HTTP {resposta.status_code} {resposta.text}"
         )
         conn_id = int(resposta.json()["id"])
-        assert resposta.json()["watchdog_read_node_id"] is None, (
-            "a conexão do cenário precisa nascer SEM watchdog"
-        )
         tags: dict[str, int] = {}
         for nome, node_id, direcao in (
             ("cv-fonte", NODE_SINE, "r"),
@@ -87,10 +95,8 @@ def conexao_sem_watchdog(admin: httpx.Client) -> Iterator[dict[str, Any]]:
                 f"criação da tag {nome}: HTTP {criada.status_code} {criada.text}"
             )
             tags[nome] = int(criada.json()["id"])
-        # Sem watchdog não há `watchdog_alive` para esperar: a conexão sobe do mesmo jeito e
-        # é justamente por isso que ela passa despercebida hoje.
-        esperar_conexao(conn_id, watchdog_alive=None)
-        yield {"project_id": projeto["id"], "conn_id": conn_id, "nome": nome_conexao, **tags}
+        esperar_conexao(conn_id)
+        yield {"project_id": projeto["id"], "conn_id": conn_id, **tags}
     finally:
         _ativar_sentinela(admin)
         admin.delete(f"/api/projects/{projeto['id']}")
@@ -178,16 +184,19 @@ def grafo_mv_direta(tag_cv: int, tag_mv: int) -> dict[str, Any]:
 
 @pytest.fixture
 def criar_flow_sem_watchdog(
-    admin: httpx.Client, conexao_sem_watchdog: dict[str, Any]
+    admin: httpx.Client, conexao_base: dict[str, Any]
 ) -> Iterator[Callable[[dict[str, Any]], tuple[int, list[str]]]]:
-    """Cria o flow e devolve `(flow_id, warnings do PUT)`; teardown para e exclui."""
+    """Cria o flow e devolve `(flow_id, warnings do PUT)`; teardown para e exclui.
+
+    Nasce sem `watchdog_enabled` (`FlowCreate` nem aceita esses campos; o default do banco
+    é `False`) — é exatamente o "flow sem watchdog" que o TD-004 cobre."""
     criados: list[int] = []
 
     def criar(grafo: dict[str, Any]) -> tuple[int, list[str]]:
         resposta = admin.post(
             "/api/flows",
             json={
-                "project_id": conexao_sem_watchdog["project_id"],
+                "project_id": conexao_base["project_id"],
                 "name": f"td-06-{RUN_ID}",
                 "ts_seconds": 1,
             },
@@ -209,18 +218,16 @@ def criar_flow_sem_watchdog(
 
 def test_e2e_td_06_salvar_avisa_e_armar_e_recusado(
     admin: httpx.Client,
-    conexao_sem_watchdog: dict[str, Any],
+    conexao_base: dict[str, Any],
     criar_flow_sem_watchdog: Callable[[dict[str, Any]], tuple[int, list[str]]],
     eventos: EventStream,
 ) -> None:
     """E2E-TD-06: o salvar avisa e o arme é recusado — nas duas pontas, antes da planta."""
-    grafo = grafo_mv_direta(conexao_sem_watchdog["cv-fonte"], conexao_sem_watchdog["mv-destino"])
+    grafo = grafo_mv_direta(conexao_base["cv-fonte"], conexao_base["mv-destino"])
     flow_id, avisos = criar_flow_sem_watchdog(grafo)
 
-    nome_conexao = conexao_sem_watchdog["nome"]
-    casou = [aviso for aviso in avisos if nome_conexao in aviso and "watchdog" in aviso]
-    assert casou, (
-        f"o PUT não avisou sobre a conexão '{nome_conexao}' sem watchdog; avisos: {avisos}"
+    assert AVISO_WATCHDOG_DESABILITADO in avisos, (
+        f"o PUT não avisou sobre o watchdog do flow desabilitado; avisos: {avisos}"
     )
 
     with assinar_mpc_state(admin, flow_id, BLOCO) as fluxo:

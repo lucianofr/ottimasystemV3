@@ -124,6 +124,7 @@ def test_e2e_f2_03_escrita_pelo_barramento(
         redis_bus,
         conn_id=projeto_com_conexao.conn_id,
         tag_id=projeto_com_conexao.w_float,
+        flow_id=projeto_com_conexao.flow_id,
         value=valor,
         source=origem,
     )
@@ -149,9 +150,16 @@ def test_e2e_f2_08_heartbeat_da_tag_estatica_e_qualidade_em_falha(
     admin: httpx.Client,
     projeto_com_conexao: Ambiente,
     eventos: EventStream,
-    congelar_watchdog: Callable[[bool], None],
+    parar_opcsim: Callable[[], None],
 ) -> None:
-    """§2.2-6: tag que nunca muda tem heartbeat; em falha, as amostras novas são `q=2`."""
+    """§2.2-6: tag que nunca muda tem heartbeat; em falha DE SESSÃO, as amostras novas são
+    `q=2`.
+
+    ADR-009 revisado: o watchdog isolado por flow (`congelar_watchdog`) não derruba mais a
+    sessão nem degrada a leitura — só bloqueia a escrita daquele flow (§2.2-8, ver
+    E2E-F2-04/05). Quem ainda dispara a rajada `quality=2` do heartbeat (`heartbeat.py`
+    `burst_bad`) é uma falha DE SESSÃO de verdade (`fail()`), daí a queda real do opcsim.
+    """
     conn_id = projeto_com_conexao.conn_id
     tag = projeto_com_conexao.static
     esperar_conexao(conn_id)
@@ -170,11 +178,11 @@ def test_e2e_f2_08_heartbeat_da_tag_estatica_e_qualidade_em_falha(
     intervalos = [(b - a).total_seconds() for a, b in zip(momentos, momentos[1:], strict=False)]
     assert max(intervalos) < 60.0, f"heartbeat mais lento que 1 amostra/min: {intervalos}"
 
-    congelar_watchdog(True)
+    parar_opcsim()
     eventos.esperar(
         evento_de(KIND_COMM_FAILURE, conn_id),
-        timeout=30.0,
-        descricao="comm_failure após congelar o watchdog",
+        timeout=60.0,
+        descricao="comm_failure após parar o container do opcsim",
     )
 
     inicio_da_falha = datetime.now(UTC)
@@ -195,15 +203,20 @@ def test_e2e_f2_08_heartbeat_da_tag_estatica_e_qualidade_em_falha(
 def test_e2e_f2_09_edicao_da_conexao_reconciliada(
     admin: httpx.Client, projeto_com_conexao: Ambiente
 ) -> None:
-    """§2.2-1/§7.2: PATCH audita `connection_updated` e o worker reconstrói a sessão."""
+    """§2.2-1/§7.2: PATCH audita `connection_updated` e o worker reconstrói a sessão.
+
+    O campo tocado é `name`: ADR-009 revisado tirou o watchdog da conexão, então não sobra
+    campo watchdog nenhum para editar aqui — `name` entra no `session_key` do worker
+    (spec `state.py`) e é o mesmo tipo de reconciliação que o watchdog fazia antes."""
     conn_id = projeto_com_conexao.conn_id
     # O cenário anterior deixou a conexão voltando de uma falha induzida.
     antes = esperar_conexao(conn_id, timeout=120.0)
     sessao_anterior = antes["session_up_since"]
 
-    r = admin.patch(f"/api/connections/{conn_id}", json={"watchdog_period_ms": 1200})
+    novo_nome = f"opcsim-editada-{RUN_ID}"
+    r = admin.patch(f"/api/connections/{conn_id}", json={"name": novo_nome})
     assert r.status_code == 200, f"PATCH da conexão falhou: HTTP {r.status_code} {r.text}"
-    assert r.json()["watchdog_period_ms"] == 1200
+    assert r.json()["name"] == novo_nome
 
     esperar_ate(
         lambda: _evento_na_api(

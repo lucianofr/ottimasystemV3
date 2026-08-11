@@ -65,15 +65,40 @@ Collect = Callable[[str], Awaitable[Collector]]
 Sessions = async_sessionmaker[AsyncSession]
 
 
-async def comm_failure(redis_client: Redis, conn_id: int) -> None:
-    """Evento tal como o opc-worker o emite (spec F2 §3.7)."""
+async def comm_failure(redis_client: Redis, conn_id: int, flow_id: int | None = None) -> None:
+    """Evento tal como o opc-worker o emite (spec F2 §3.7). `flow_id` (ADR-009 revisado,
+    watchdog por flow): presente é falha do watchdog de UM flow só; ausente (padrão) é
+    falha da SESSÃO inteira da conexão, comportamento herdado."""
+    payload: dict[str, object] = {
+        "conn_id": conn_id,
+        "reason": "session_lost",
+        "detail": "sessão perdida",
+    }
+    if flow_id is not None:
+        payload["flow_id"] = flow_id
     await publish_event(
         redis_client,
         severity="alarm",
         origin=f"conn:{conn_id}",
         message=f"Conexão {conn_id} em falha",
         kind=KIND_COMM_FAILURE,
-        payload={"conn_id": conn_id, "reason": "session_lost", "detail": "sessão perdida"},
+        payload=payload,
+    )
+
+
+async def comm_restored(redis_client: Redis, conn_id: int, flow_id: int | None = None) -> None:
+    """Evento tal como o opc-worker o emite. `flow_id` (ADR-009 revisado) restringe a
+    retomada a ESSE flow; ausente, retoma todos os pendentes da conexão."""
+    payload: dict[str, object] = {"conn_id": conn_id}
+    if flow_id is not None:
+        payload["flow_id"] = flow_id
+    await publish_event(
+        redis_client,
+        severity="info",
+        origin=f"conn:{conn_id}",
+        message="Conexão restaurada",
+        kind=KIND_COMM_RESTORED,
+        payload=payload,
     )
 
 
@@ -334,6 +359,101 @@ async def test_comm_failure_derruba_so_os_flows_da_conexao(
     await asyncio.sleep(QUIET_WINDOW_S)
     assert harness.flow_state(puro) == "running"
     assert len(events.events(KIND_FLOW_FAILED)) == 1
+
+
+# --------------------------------------------------------------------------------------
+# 9b-9c: comm_failure/comm_restored escopados por flow_id (ADR-009 revisado — watchdog
+#        virou config do flow, não mais da conexão inteira)
+# --------------------------------------------------------------------------------------
+
+
+async def test_comm_failure_com_flow_id_derruba_so_esse_flow(
+    harness_factory: Factory,
+    collect: Collect,
+    session_factory: Sessions,
+    redis_client: Redis,
+) -> None:
+    """ADR-009 revisado: watchdog por flow — um `comm_failure` com `flow_id` no payload
+    (watchdog de UM flow estourou, não a sessão inteira) derruba só esse flow; o irmão que
+    referencia a MESMA conexão, com watchdog próprio ainda vivo, segue rodando — é
+    exatamente o isolamento que motivou mover o watchdog da conexão para o flow."""
+    project_id = await create_project(session_factory)
+    conn_id = await create_connection(session_factory, project_id)
+    tag_id = await create_tag(session_factory, conn_id)
+    primeiro = await create_flow(
+        session_factory, project_id, graph=read_only_graph(tag_id), name="A"
+    )
+    segundo = await create_flow(
+        session_factory, project_id, graph=read_only_graph(tag_id), name="B"
+    )
+    events = await collect(CHANNEL_EVENTS)
+    harness = await harness_factory()
+
+    await harness.command("deploy", primeiro)
+    await harness.command("deploy", segundo)
+    await harness.await_state(primeiro, "running")
+    await harness.await_state(segundo, "running")
+
+    await comm_failure(redis_client, conn_id, flow_id=primeiro)
+    await harness.await_state(primeiro, "failed")
+
+    await asyncio.sleep(QUIET_WINDOW_S)
+    assert harness.flow_state(segundo) == "running"
+    assert len(events.events(KIND_FLOW_FAILED)) == 1
+    assert events.events(KIND_FLOW_FAILED)[0].payload["flow_id"] == primeiro
+
+
+async def test_comm_restored_com_flow_id_nao_resgata_pendencia_de_outro_flow(
+    harness_factory: Factory,
+    collect: Collect,
+    session_factory: Sessions,
+    redis_client: Redis,
+) -> None:
+    """Regressão do bug que a assinatura de dois parâmetros existe para prevenir: um
+    `comm_restored` escopado por `flow_id` (watchdog de UM flow recuperou) não pode varrer
+    `pendentes` por `conn_id` e resgatar de tabela um IRMÃO cujo watchdog segue mudo — só o
+    flow indicado no payload pode sair de `ResumeOrchestrator.pendentes`."""
+    project_id = await create_project(session_factory)
+    conn_id = await create_connection(session_factory, project_id)
+    tag_id = await create_tag(session_factory, conn_id)
+    primeiro = await create_flow(
+        session_factory,
+        project_id,
+        graph=read_only_graph(tag_id),
+        name="A",
+        desired_state="running",
+    )
+    segundo = await create_flow(
+        session_factory,
+        project_id,
+        graph=read_only_graph(tag_id),
+        name="B",
+        desired_state="running",
+    )
+    events = await collect(CHANNEL_EVENTS)
+    harness = await harness_factory(poll_interval_s=FAST_POLL_S)
+
+    await harness.command("deploy", primeiro)
+    await harness.command("deploy", segundo)
+    await harness.await_state(primeiro, "running")
+    await harness.await_state(segundo, "running")
+
+    # Queda de SESSÃO (sem flow_id): os dois flows da conexão caem e ficam pendentes.
+    await comm_failure(redis_client, conn_id)
+    await harness.await_state(primeiro, "failed")
+    await harness.await_state(segundo, "failed")
+    assert set(harness.supervisor._resume.pendentes) == {primeiro, segundo}  # noqa: SLF001
+
+    # Retomada escopada: só o watchdog do PRIMEIRO recuperou.
+    await comm_restored(redis_client, conn_id, flow_id=primeiro)
+    await harness.await_state(primeiro, "running")
+
+    await asyncio.sleep(QUIET_WINDOW_S)
+    assert harness.flow_state(segundo) == "failed"
+    assert primeiro not in harness.supervisor._resume.pendentes  # noqa: SLF001
+    assert segundo in harness.supervisor._resume.pendentes  # noqa: SLF001
+    assert len(events.events(KIND_FLOW_RESUMED)) == 1
+    assert events.events(KIND_FLOW_RESUMED)[0].payload["flow_id"] == primeiro
 
 
 async def test_comm_restored_retoma_o_flow_automaticamente(

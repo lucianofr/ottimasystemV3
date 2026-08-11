@@ -304,9 +304,10 @@ async def test_put_dimensao_acima_de_120_avisa_e_grava(client, admin_headers):
     assert corpo["flow"]["graph_json"] == graph
 
 
-async def test_put_mpc_com_pid_em_conexao_sem_watchdog_avisa_e_grava(client, admin_headers):
-    """TD-004: a MV com `pid` escreve pelas próprias tags do binding (sem depender de
-    aresta) — sem watchdog na conexão, `writes.py` (opc-worker) recusa toda escrita."""
+async def test_put_mpc_com_pid_e_watchdog_desabilitado_avisa_e_grava(client, admin_headers):
+    """TD-004 (revisado, ADR-009): a MV com `pid` escreve pelas próprias tags do binding
+    (sem depender de aresta) — com watchdog desabilitado no flow, `writes.py` (opc-worker)
+    recusa toda escrita."""
     flow, cid = await _cenario_mpc(client, admin_headers, "MpcSemWatchdog")
     pid = await _pid_tags(client, admin_headers, cid)
     data = _mpc_data(mvs=[_mv("a", pid=pid)])
@@ -315,8 +316,10 @@ async def test_put_mpc_com_pid_em_conexao_sem_watchdog_avisa_e_grava(client, adm
     r = await _salvar(client, admin_headers, flow["id"], graph)
     assert r.status_code == 200, r.text
     corpo = r.json()
-    avisos_watchdog = [a for a in corpo["warnings"] if "m1" in a and "sem watchdog" in a]
-    assert avisos_watchdog, corpo["warnings"]
+    assert corpo["warnings"] == [
+        "Este flow escreve em planta mas o watchdog está desabilitado: as escritas serão "
+        "recusadas (somente leitura de fato)."
+    ]
     assert corpo["flow"]["graph_json"] == graph
 
 

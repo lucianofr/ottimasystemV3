@@ -26,7 +26,9 @@ from opcsim import (
     NODE_W_FLOAT,
     NODE_W_INT,
     NODE_WD_FROM_SYSTEM,
+    NODE_WD_FROM_SYSTEM_2,
     NODE_WD_TO_SYSTEM,
+    NODE_WD_TO_SYSTEM_2,
     OpcSimServer,
     free_port,
 )
@@ -76,25 +78,25 @@ async def test_espelhos_refletem_escrita_do_cliente(sim: OpcSimServer) -> None:
         await await_until(lambda: _equals(client, NODE_MIRROR_BOOL, True))
 
 
-async def test_rung_alterna_a_cada_mudanca_do_sistema(sim: OpcSimServer) -> None:
+async def test_rung_espelha_a_negacao_de_from_system(sim: OpcSimServer) -> None:
+    """`to_system` é sempre `NOT(from_system)`, recalculado todo scan (ADR-009 revisado:
+    quem inverte é o PLC, incondicionalmente — não uma reação a uma mudança)."""
     async with Client(sim.endpoint) as client:
         from_system = client.get_node(NODE_WD_FROM_SYSTEM)
-        expected = await client.get_node(NODE_WD_TO_SYSTEM).read_value()
-        assert expected is False
+        # Estado inicial False/False: o próprio 1º scan já espelha NOT(False) = True, sem
+        # precisar de nenhuma escrita do teste.
+        await await_until(lambda: _equals(client, NODE_WD_TO_SYSTEM, True))
 
-        # Três mudanças em from_system devem produzir três inversões de to_system.
         for written in (True, False, True):
             await from_system.write_value(written, ua.VariantType.Boolean)
-            expected = not expected
             await await_until(
-                lambda expected=expected: _equals(client, NODE_WD_TO_SYSTEM, expected)
+                lambda written=written: _equals(client, NODE_WD_TO_SYSTEM, not written)
             )
-
-        assert expected is True
 
 
 async def test_freeze_watchdog_congela_o_rung(sim: OpcSimServer) -> None:
     async with Client(sim.endpoint) as client:
+        await await_until(lambda: _equals(client, NODE_WD_TO_SYSTEM, True))
         await sim.set_freeze_watchdog(True)
         before = await client.get_node(NODE_WD_TO_SYSTEM).read_value()
 
@@ -102,9 +104,24 @@ async def test_freeze_watchdog_congela_o_rung(sim: OpcSimServer) -> None:
         await asyncio.sleep(QUIET_WINDOW)
         assert await client.get_node(NODE_WD_TO_SYSTEM).read_value() == before
 
-        # A mudança pendente foi preservada: ao descongelar, o rung inverte de imediato.
+        # Descongelado, o próximo scan já espelha o valor corrente de from_system.
         await sim.set_freeze_watchdog(False)
-        await await_until(lambda: _equals(client, NODE_WD_TO_SYSTEM, not before))
+        await await_until(lambda: _equals(client, NODE_WD_TO_SYSTEM, False))
+
+
+async def test_dois_pares_de_watchdog_sao_independentes(sim: OpcSimServer) -> None:
+    """Congelar o par 1 não trava o par 2: prova a base do isolamento por flow."""
+    async with Client(sim.endpoint) as client:
+        await await_until(lambda: _equals(client, NODE_WD_TO_SYSTEM_2, True))
+        await sim.set_freeze_watchdog(True, pair=1)
+        congelado = await client.get_node(NODE_WD_TO_SYSTEM).read_value()
+
+        await client.get_node(NODE_WD_FROM_SYSTEM_2).write_value(True, ua.VariantType.Boolean)
+        await await_until(lambda: _equals(client, NODE_WD_TO_SYSTEM_2, False))
+        await asyncio.sleep(QUIET_WINDOW)
+        assert await client.get_node(NODE_WD_TO_SYSTEM).read_value() == congelado, (
+            "par 1 congelado não pode reagir ao par 2"
+        )
 
 
 async def test_freeze_values_congela_a_senoide(sim: OpcSimServer) -> None:

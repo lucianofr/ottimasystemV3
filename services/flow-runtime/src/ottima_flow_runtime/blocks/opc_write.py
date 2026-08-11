@@ -40,6 +40,7 @@ class OpcWriteBlock(Block):
         super().__init__(block_id)
         self._tag_id = tag_id
         self._conn_id = conn_id
+        self._flow_id = flow_id
         self._redis = redis_client
         # Convenção de origem da fase: evento de bloco carrega o bloco; evento de flow
         # (tarefas 1.4/1.5) usa `flow:<id>` exato, porque a lista do frontend filtra por
@@ -63,6 +64,7 @@ class OpcWriteBlock(Block):
         write = OpcWrite(
             conn_id=self._conn_id,
             tag_id=self._tag_id,
+            flow_id=self._flow_id,
             value=float(sample.v),
             source=self._source,
             ts=datetime.now(UTC),

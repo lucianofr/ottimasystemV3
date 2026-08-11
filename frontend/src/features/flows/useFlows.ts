@@ -53,13 +53,23 @@ export function useSaveFlow(flowId: number) {
   });
 }
 
-/** PUT de propriedades (nome/Ts, tarefa 3.1): `graph_json` fica de fora — o backend mantém
- *  o grafo salvo quando o campo vem ausente (spec F3, contrato 0.3) — o editor não é tocado
- *  por este PUT. Mesma invalidação de `useSaveFlow`. */
+/** PUT de propriedades (nome/Ts/watchdog, tarefa 3.1 + ADR-009 revisado): `graph_json` fica de
+ *  fora — o backend mantém o grafo salvo quando o campo vem ausente (spec F3, contrato 0.3) —
+ *  o editor não é tocado por este PUT. Os cinco campos de watchdog sempre viajam juntos: é o
+ *  único diálogo que os edita, então não há "campo ausente mantém o valor atual" a preservar
+ *  aqui. Mesma invalidação de `useSaveFlow`. */
 export function useSalvarPropriedades(flowId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name: string; ts_seconds: TsSegundos }) =>
+    mutationFn: (body: {
+      name: string;
+      ts_seconds: TsSegundos;
+      watchdog_enabled: boolean;
+      watchdog_connection_id: number | null;
+      watchdog_read_node_id: string | null;
+      watchdog_write_node_id: string | null;
+      watchdog_period_ms: number;
+    }) =>
       api<FlowSaved>(`/api/flows/${String(flowId)}`, {
         method: "PUT",
         body: JSON.stringify(body),

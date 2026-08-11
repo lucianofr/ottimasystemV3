@@ -16,9 +16,8 @@ from ottima_core.schemas.connections import (
     SecurityPolicy,
     erro_auth_username,
     erro_policy_mode,
-    erro_watchdog,
 )
-from ottima_core.schemas.flows import DesiredState, TsSeconds
+from ottima_core.schemas.flows import DesiredState, TsSeconds, erro_watchdog_flow
 from ottima_core.schemas.tags import DataType, Direction
 
 SCHEMA_VERSION: Final[int] = 1
@@ -49,17 +48,12 @@ class BundleConnection(BaseModel):
     security_mode: SecurityMode = "none"
     auth_mode: AuthMode = "anonymous"
     auth_username: str | None = None
-    watchdog_read_node_id: str | None = None
-    watchdog_write_node_id: str | None = None
-    watchdog_period_ms: int = 1500
 
     @model_validator(mode="after")
     def _coerencia(self) -> "BundleConnection":
-        """Mesmas regras de policy/watchdog de ConnectionCreate; auth exige só usuário (§2.1-2)."""
-        erro = (
-            erro_policy_mode(self.security_policy, self.security_mode)
-            or erro_watchdog(self.watchdog_read_node_id, self.watchdog_write_node_id)
-            or erro_auth_username(self.auth_mode, self.auth_username)
+        """Mesmas regras de policy de ConnectionCreate; auth exige só usuário (§2.1-2)."""
+        erro = erro_policy_mode(self.security_policy, self.security_mode) or erro_auth_username(
+            self.auth_mode, self.auth_username
         )
         if erro:
             raise ValueError(erro)
@@ -85,6 +79,27 @@ class BundleFlow(BaseModel):
     ts_seconds: TsSeconds
     desired_state: DesiredState = "stopped"
     graph: dict
+    watchdog_enabled: bool = False
+    watchdog_connection: str | None = None
+    """Nome da conexão (spec §2.2-2, mesma convenção de `BundleTagRef`), não o id — o id
+    não sobrevive ao transplante entre instalações."""
+    watchdog_read_node_id: str | None = None
+    watchdog_write_node_id: str | None = None
+    watchdog_period_ms: int = 1500
+
+    @model_validator(mode="after")
+    def _coerencia(self) -> "BundleFlow":
+        """Mesma regra de `erro_watchdog_flow`, sobre o `connection_id` resolvido por nome —
+        aqui só confere presença/distinção; a existência do nome é camada 3 (bundle.py)."""
+        erro = erro_watchdog_flow(
+            self.watchdog_enabled,
+            0 if self.watchdog_connection else None,
+            self.watchdog_read_node_id,
+            self.watchdog_write_node_id,
+        )
+        if erro:
+            raise ValueError(erro)
+        return self
 
 
 class ProjectBundle(BaseModel):

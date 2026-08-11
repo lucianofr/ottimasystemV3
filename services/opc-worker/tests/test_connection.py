@@ -29,6 +29,7 @@ from ottima_opc_worker.state import (
     ConnectionConfig,
     ConnectionSnapshot,
     ConnectionState,
+    FlowWatchdogConfig,
     TagConfig,
 )
 
@@ -43,7 +44,6 @@ def make_config(
     endpoint: str,
     *,
     conn_id: int = 7,
-    with_watchdog: bool = False,
     auth_mode: str = "anonymous",
     auth_username: str | None = None,
     auth_password_enc: str | None = None,
@@ -59,9 +59,6 @@ def make_config(
         auth_username=auth_username,
         auth_password_enc=auth_password_enc,
         server_cert_file=None,
-        watchdog_read_node_id=NODE_WD_TO_SYSTEM if with_watchdog else None,
-        watchdog_write_node_id=NODE_WD_FROM_SYSTEM if with_watchdog else None,
-        watchdog_period_ms=1000,
         tags=(),
     )
 
@@ -120,13 +117,6 @@ def test_backoff_nao_estoura_com_muitas_tentativas() -> None:
     assert backoff_delay(5000, initial=1.0, maximum=30.0) <= 30.0
 
 
-def test_has_watchdog_exige_os_dois_node_ids() -> None:
-    completo = make_config("opc.tcp://x", with_watchdog=True)
-    assert completo.has_watchdog is True
-    assert make_config("opc.tcp://x").has_watchdog is False
-    assert replace(completo, watchdog_write_node_id=None).has_watchdog is False
-
-
 def test_session_key_ignora_tags_e_tags_key_ordena_por_id() -> None:
     """A 1.4 recria a sessão só quando muda a conexão; tag nova mexe só na subscription."""
     tag_a = TagConfig(id=2, name="a", node_id="ns=2;s=a", direction="r", data_type="float")
@@ -145,7 +135,7 @@ def test_to_health_tem_as_chaves_da_spec_em_ordem() -> None:
     assert list(health) == [
         "name",
         "state",
-        "watchdog_alive",
+        "flow_watchdog_alive",
         "session_up_since",
         "last_publish_ts",
         "tags_subscribed",
@@ -257,25 +247,44 @@ async def test_religar_emite_comm_restored_sem_watchdog(redis_client: Redis) -> 
                 await sim.stop()
 
 
-async def test_com_watchdog_nao_emite_restored_nesta_camada(redis_client: Redis) -> None:
-    """Com watchdog quem emite `comm_restored` é a alternância do bit (tarefa 2.1)."""
+async def test_com_watchdog_de_flow_a_sessao_ainda_emite_restored(redis_client: Redis) -> None:
+    """ADR-009 revisado: a restauração da CONEXÃO não depende mais de watchdog nenhum —
+    cada flow tem o `comm_restored` dele, separado (tarefa 2.1). Aqui o watchdog do flow
+    fica congelado o tempo todo, então se o `comm_restored` da sessão saísse mesmo assim
+    seria só graças à volta da sessão, nunca por ele ter alternado."""
     port = free_port()
     sim = OpcSimServer(port=port)
     await sim.start()
-    config = make_config(sim.endpoint, with_watchdog=True)
+    await sim.set_freeze_watchdog(True)
+    config = make_config(sim.endpoint)
     snapshot = ConnectionSnapshot(name=config.name)
+    watchdog = FlowWatchdogConfig(
+        flow_id=1,
+        read_node_id=NODE_WD_TO_SYSTEM,
+        write_node_id=NODE_WD_FROM_SYSTEM,
+        period_ms=1000,
+    )
     async with collect_events(redis_client) as events:
-        async with running(make_runtime(config, redis_client, snapshot)) as runtime:
+        runtime = make_runtime(config, redis_client, snapshot)
+        await runtime.set_flow_watchdogs({1: watchdog})
+        async with running(runtime):
             await await_until(lambda: runtime.state is ConnectionState.UP)
             await sim.stop()
             await await_until(lambda: runtime.state is ConnectionState.FAILED)
 
             sim = OpcSimServer(port=port)
             await sim.start()
+            await sim.set_freeze_watchdog(True)
             try:
                 await await_until(lambda: runtime.state is ConnectionState.UP)
+                await await_until(lambda: len(of_kind(events, KIND_COMM_RESTORED)) == 1)
+                restaurado = of_kind(events, KIND_COMM_RESTORED)[0]
+                assert restaurado["payload"] == {"kind": KIND_COMM_RESTORED, "conn_id": config.id}
+                assert snapshot.flow_watchdog_alive.get(1) is False, (
+                    "watchdog do flow congelado; quem restaurou foi a sessão"
+                )
                 await asyncio.sleep(QUIET_WINDOW_S)
-                assert of_kind(events, KIND_COMM_RESTORED) == []
+                assert len(of_kind(events, KIND_COMM_RESTORED)) == 1
             finally:
                 await sim.stop()
 
@@ -414,7 +423,7 @@ async def test_fail_concorrente_aborta_o_connect_em_voo(
 
     monkeypatch.setattr(connection_module, "build_client", build_lento)
 
-    config = make_config(sim.endpoint)  # sem watchdog: seria o caso que emite restored
+    config = make_config(sim.endpoint)
     snapshot = ConnectionSnapshot(name=config.name)
     runtime = make_runtime(config, redis_client, snapshot)
     async with collect_events(redis_client) as events:

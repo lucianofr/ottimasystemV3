@@ -17,7 +17,7 @@
 | **recorder** | Consumidor do barramento que grava amostras na hypertable do TimescaleDB. |
 | **Barramento** | Redis pub/sub interno: canais `opc.values.*` (leituras) e `opc.writes` (comandos de escrita). |
 | **Loop vivo** | Processo contínuo que mantém estado e cicla indefinidamente (MPC, sessão OPC); task asyncio, nunca job de fila. |
-| **Watchdog** | Bit alternante com NOT cruzado entre sistema e PLC (1 tag de leitura + 1 de escrita). Bit parado por >10 s ⇒ falha de comunicação ⇒ para escritas e para o flow; PLC retoma controle convencional. |
+| **Watchdog** | Bit alternante com NOT cruzado entre sistema e PLC, configurado **por flow** (não por conexão): um flow escolhe a conexão OPC-UA e o par de nós (1 leitura + 1 escrita, distintos) por onde o handshake passa. O sistema copia o bit lido para a escrita sem inverter; o PLC aplica o NOT do lado dele. Bit parado por >10 s ⇒ falha de comunicação daquele flow ⇒ para as escritas e para o flow; flows-irmãos na mesma conexão não são afetados; PLC retoma controle convencional. |
 | **LOCAL / REMOTO** | Eixo de modo do MPC. LOCAL: PID do PLC controla. REMOTO: MPC assume. Transições bumpless nos dois sentidos, comandadas escrevendo o modo do PID no PLC (AUTO ↔ RCAS/CAS/ROUT). |
 | **MAN / AUTO** | Sub-modo de REMOTO. MAN: operador escreve as MVs pela UI. AUTO: MPC calcula. Em LOCAL o sistema não escreve MV. |
 | **RCAS / CAS / ROUT** | Modos do PID no PLC usados pelo APC: SP remoto em cascata (RCAS/CAS) ou saída remota direta (ROUT). Determina o que o MPC escreve por MV. |

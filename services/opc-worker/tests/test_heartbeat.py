@@ -69,9 +69,6 @@ def make_config(endpoint: str, *, tags: tuple[TagConfig, ...]) -> ConnectionConf
         auth_username=None,
         auth_password_enc=None,
         server_cert_file=None,
-        watchdog_read_node_id=None,
-        watchdog_write_node_id=None,
-        watchdog_period_ms=1000,
         tags=tags,
     )
 

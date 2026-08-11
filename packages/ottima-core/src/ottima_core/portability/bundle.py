@@ -66,9 +66,6 @@ def montar_bundle(
                 security_mode=c.security_mode,
                 auth_mode=c.auth_mode,
                 auth_username=c.auth_username,
-                watchdog_read_node_id=c.watchdog_read_node_id,
-                watchdog_write_node_id=c.watchdog_write_node_id,
-                watchdog_period_ms=c.watchdog_period_ms,
             )
             for c in conexoes_ordenadas
         ],
@@ -90,6 +87,11 @@ def montar_bundle(
                 ts_seconds=float(f.ts_seconds),
                 desired_state=f.desired_state,
                 graph=grafo_para_bundle(f.graph_json, refs),
+                watchdog_enabled=f.watchdog_enabled,
+                watchdog_connection=nome_da_conexao.get(f.watchdog_connection_id),
+                watchdog_read_node_id=f.watchdog_read_node_id,
+                watchdog_write_node_id=f.watchdog_write_node_id,
+                watchdog_period_ms=f.watchdog_period_ms,
             )
             for f in flows_ordenados
         ],
@@ -122,6 +124,13 @@ def problemas_de_coerencia_interna(bundle: ProjectBundle) -> list[str]:
         if tag.connection not in nomes_conexao:
             problemas.append(
                 f"tag '{tag.name}' referencia conexão '{tag.connection}' que não existe no bundle"
+            )
+
+    for flow in bundle.flows:
+        if flow.watchdog_connection is not None and flow.watchdog_connection not in nomes_conexao:
+            problemas.append(
+                f"flow '{flow.name}' referencia conexão de watchdog "
+                f"'{flow.watchdog_connection}' que não existe no bundle"
             )
 
     refs_validas = {(tag.connection, tag.name) for tag in bundle.tags}

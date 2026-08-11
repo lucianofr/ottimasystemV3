@@ -275,9 +275,6 @@ def main() -> None:
                     "security_policy": "none",
                     "security_mode": "none",
                     "auth_mode": "anonymous",
-                    "watchdog_read_node_id": "ns=2;s=sim.watchdog.to_system",
-                    "watchdog_write_node_id": "ns=2;s=sim.watchdog.from_system",
-                    "watchdog_period_ms": 1000,
                 },
             )
             if r.status_code != 201:
@@ -357,7 +354,17 @@ def main() -> None:
         # SEMPRE atualizar grafo (idempotente: PUT com mesmo grafo é seguro)
         print("[*] Atualizando grafo do flow...", file=sys.stderr)
         grafo = grafo_mpc_tfs(ambiente, mpc_id="mpc1")
-        r = admin.put(f"/api/flows/{flow_id}", json={"graph_json": grafo})
+        r = admin.put(
+            f"/api/flows/{flow_id}",
+            json={
+                "graph_json": grafo,
+                "watchdog_enabled": True,
+                "watchdog_connection_id": conn_id,
+                "watchdog_read_node_id": "ns=2;s=sim.watchdog.to_system",
+                "watchdog_write_node_id": "ns=2;s=sim.watchdog.from_system",
+                "watchdog_period_ms": 1000,
+            },
+        )
         if r.status_code != 200:
             print(
                 f"[!] Falha ao atualizar grafo: HTTP {r.status_code} {r.text}",

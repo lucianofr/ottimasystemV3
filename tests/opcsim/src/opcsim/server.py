@@ -53,6 +53,11 @@ NODE_MIRROR_BOOL = "ns=2;s=sim.mirror.bool"
 NODE_WD_FROM_SYSTEM = "ns=2;s=sim.watchdog.from_system"
 NODE_WD_TO_SYSTEM = "ns=2;s=sim.watchdog.to_system"
 NODE_CTRL_FREEZE_WATCHDOG = "ns=2;s=sim.control.freeze_watchdog"
+# Segundo par independente: prova o isolamento por flow (ADR-009 revisado) — dois
+# watchdogs na MESMA conexão, cada um com seu próprio congelamento.
+NODE_WD_FROM_SYSTEM_2 = "ns=2;s=sim.watchdog.from_system_2"
+NODE_WD_TO_SYSTEM_2 = "ns=2;s=sim.watchdog.to_system_2"
+NODE_CTRL_FREEZE_WATCHDOG_2 = "ns=2;s=sim.control.freeze_watchdog_2"
 NODE_CTRL_FREEZE_VALUES = "ns=2;s=sim.control.freeze_values"
 
 VALUES_PERIOD = 0.2
@@ -80,7 +85,18 @@ _NODES: tuple[tuple[str, str, Any, ua.VariantType, bool], ...] = (
     (NODE_WD_FROM_SYSTEM, "wd_from_system", False, ua.VariantType.Boolean, True),
     (NODE_WD_TO_SYSTEM, "wd_to_system", False, ua.VariantType.Boolean, False),
     (NODE_CTRL_FREEZE_WATCHDOG, "freeze_watchdog", False, ua.VariantType.Boolean, True),
+    (NODE_WD_FROM_SYSTEM_2, "wd_from_system_2", False, ua.VariantType.Boolean, True),
+    (NODE_WD_TO_SYSTEM_2, "wd_to_system_2", False, ua.VariantType.Boolean, False),
+    (NODE_CTRL_FREEZE_WATCHDOG_2, "freeze_watchdog_2", False, ua.VariantType.Boolean, True),
     (NODE_CTRL_FREEZE_VALUES, "freeze_values", False, ua.VariantType.Boolean, True),
+)
+
+# (from_system, to_system, freeze) — um trio por par de watchdog simulado; o rung trata
+# os dois de forma idêntica e independente (ADR-009 revisado: watchdog é por flow, uma
+# conexão pode ter vários).
+_WATCHDOG_PAIRS: tuple[tuple[str, str, str], ...] = (
+    (NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM, NODE_CTRL_FREEZE_WATCHDOG),
+    (NODE_WD_FROM_SYSTEM_2, NODE_WD_TO_SYSTEM_2, NODE_CTRL_FREEZE_WATCHDOG_2),
 )
 
 _VARIANT_TYPES: dict[str, ua.VariantType] = {node[0]: node[3] for node in _NODES}
@@ -146,8 +162,6 @@ class OpcSimServer:
         self._cert_der_path: Path | None = None
         # Tempo de simulação: só avança quando os valores não estão congelados.
         self._sim_time = 0.0
-        # Último valor de from_system já consumido pelo rung.
-        self._last_from_system = False
 
     @property
     def endpoint(self) -> str:
@@ -203,8 +217,9 @@ class OpcSimServer:
             if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
                 raise result
 
-    async def set_freeze_watchdog(self, value: bool) -> None:
-        await self.write(NODE_CTRL_FREEZE_WATCHDOG, value)
+    async def set_freeze_watchdog(self, value: bool, *, pair: int = 1) -> None:
+        node = NODE_CTRL_FREEZE_WATCHDOG if pair == 1 else NODE_CTRL_FREEZE_WATCHDOG_2
+        await self.write(node, value)
 
     async def set_freeze_values(self, value: bool) -> None:
         await self.write(NODE_CTRL_FREEZE_VALUES, value)
@@ -279,19 +294,21 @@ class OpcSimServer:
                 _logger.exception("opcsim: falha no loop de simulação de valores")
 
     async def _run_watchdog_rung(self) -> None:
-        """Rung do watchdog: cada mudança em from_system inverte to_system (ADR-009)."""
+        """Rung do watchdog: a cada scan, `to_system := NOT(from_system)` incondicional
+        (ADR-009 revisado — é o PLC quem inverte, todo scan, não o ottima; reagir só à
+        MUDANÇA de `from_system`, como antes, travava a alternância quando o outro lado
+        também passou a copiar em vez de inverter: a partir do par simétrico inicial
+        `False`/`False` nunca haveria mudança a reagir). Um trio por watchdog simulado
+        (`_WATCHDOG_PAIRS`): a conexão pode ter mais de um flow com watchdog.
+        """
         while True:
             await asyncio.sleep(RUNG_PERIOD)
-            try:
-                if await self.read(NODE_CTRL_FREEZE_WATCHDOG):
-                    # Congelado: a mudança pendente não é consumida, e provoca inversão
-                    # imediata assim que o freeze for desligado.
-                    continue
-                current = await self.read(NODE_WD_FROM_SYSTEM)
-                if current == self._last_from_system:
-                    continue
-                self._last_from_system = current
-                await self.write(NODE_WD_TO_SYSTEM, not await self.read(NODE_WD_TO_SYSTEM))
-            except (ua.UaError, OSError):
-                # Mesma política do loop de valores: nada de rede genérica sobre bug.
-                _logger.exception("opcsim: falha no rung do watchdog")
+            for from_node, to_node, freeze_node in _WATCHDOG_PAIRS:
+                try:
+                    if await self.read(freeze_node):
+                        # Congelado: to_system pára onde estava até o freeze sair.
+                        continue
+                    await self.write(to_node, not await self.read(from_node))
+                except (ua.UaError, OSError):
+                    # Mesma política do loop de valores: nada de rede genérica sobre bug.
+                    _logger.exception("opcsim: falha no rung do watchdog (%s)", to_node)

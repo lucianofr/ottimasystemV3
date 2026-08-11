@@ -717,15 +717,6 @@ export interface components {
             auth_username?: string | null;
             /** Server Cert File */
             server_cert_file?: string | null;
-            /** Watchdog Read Node Id */
-            watchdog_read_node_id?: string | null;
-            /** Watchdog Write Node Id */
-            watchdog_write_node_id?: string | null;
-            /**
-             * Watchdog Period Ms
-             * @default 1500
-             */
-            watchdog_period_ms: number;
             /** Project Id */
             project_id: number;
             /** Auth Password */
@@ -759,15 +750,6 @@ export interface components {
             auth_username?: string | null;
             /** Server Cert File */
             server_cert_file?: string | null;
-            /** Watchdog Read Node Id */
-            watchdog_read_node_id?: string | null;
-            /** Watchdog Write Node Id */
-            watchdog_write_node_id?: string | null;
-            /**
-             * Watchdog Period Ms
-             * @default 1500
-             */
-            watchdog_period_ms: number;
             /** Id */
             id: number;
             /** Project Id */
@@ -806,12 +788,6 @@ export interface components {
             auth_password?: string | null;
             /** Server Cert File */
             server_cert_file?: string | null;
-            /** Watchdog Read Node Id */
-            watchdog_read_node_id?: string | null;
-            /** Watchdog Write Node Id */
-            watchdog_write_node_id?: string | null;
-            /** Watchdog Period Ms */
-            watchdog_period_ms?: number | null;
         };
         /**
          * ConstraintOut
@@ -887,6 +863,22 @@ export interface components {
         };
         /** FlowDetail */
         FlowDetail: {
+            /**
+             * Watchdog Enabled
+             * @default false
+             */
+            watchdog_enabled: boolean;
+            /** Watchdog Connection Id */
+            watchdog_connection_id?: number | null;
+            /** Watchdog Read Node Id */
+            watchdog_read_node_id?: string | null;
+            /** Watchdog Write Node Id */
+            watchdog_write_node_id?: string | null;
+            /**
+             * Watchdog Period Ms
+             * @default 1500
+             */
+            watchdog_period_ms: number;
             /** Id */
             id: number;
             /** Project Id */
@@ -915,6 +907,22 @@ export interface components {
          * @description Linha da lista (spec §5.1): sem `graph_json`, que por flow pode ser grande.
          */
         FlowOut: {
+            /**
+             * Watchdog Enabled
+             * @default false
+             */
+            watchdog_enabled: boolean;
+            /** Watchdog Connection Id */
+            watchdog_connection_id?: number | null;
+            /** Watchdog Read Node Id */
+            watchdog_read_node_id?: string | null;
+            /** Watchdog Write Node Id */
+            watchdog_write_node_id?: string | null;
+            /**
+             * Watchdog Period Ms
+             * @default 1500
+             */
+            watchdog_period_ms: number;
             /** Id */
             id: number;
             /** Project Id */
@@ -953,6 +961,16 @@ export interface components {
             graph_json?: {
                 [key: string]: unknown;
             } | null;
+            /** Watchdog Enabled */
+            watchdog_enabled?: boolean | null;
+            /** Watchdog Connection Id */
+            watchdog_connection_id?: number | null;
+            /** Watchdog Read Node Id */
+            watchdog_read_node_id?: string | null;
+            /** Watchdog Write Node Id */
+            watchdog_write_node_id?: string | null;
+            /** Watchdog Period Ms */
+            watchdog_period_ms?: number | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {

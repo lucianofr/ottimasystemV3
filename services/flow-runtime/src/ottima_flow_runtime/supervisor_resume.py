@@ -91,17 +91,28 @@ class ResumeOrchestrator:
         (§2.2-8, RNF-05): limpa a entrada pendente do flow, se houver."""
         self.pendentes.pop(flow_id, None)
 
-    async def on_comm_restored(self, conn_id: int) -> None:
+    async def on_comm_restored(self, conn_id: int, flow_id: int | None = None) -> None:
         """Redeploy + snapshot aplicado sob `self._lock` (rápido); o rearme em si roda
-        destacado (`_rearmar_todos`) — nunca prende o lock atrás de um `sleep`."""
+        destacado (`_rearmar_todos`) — nunca prende o lock atrás de um `sleep`.
+
+        `flow_id` (ADR-009 revisado, watchdog por flow): restringe a retomada a ESSE
+        flow — outro flow pendente na MESMA conexão, cujo watchdog não recuperou, não
+        pode ser resgatado por tabela. Ausente (restauração de SESSÃO): retoma todos os
+        pendentes da conexão, comportamento herdado.
+        """
         async with self._lock:
+            if flow_id is not None:
+                pendente = self.pendentes.get(flow_id)
+                if pendente is not None:
+                    await self._iniciar(flow_id, pendente)
+                return
             casam = [
-                (flow_id, pendente)
-                for flow_id, pendente in self.pendentes.items()
+                (fid, pendente)
+                for fid, pendente in self.pendentes.items()
                 if pendente.conn_id == conn_id
             ]
-            for flow_id, pendente in casam:
-                await self._iniciar(flow_id, pendente)
+            for fid, pendente in casam:
+                await self._iniciar(fid, pendente)
 
     async def _iniciar(self, flow_id: int, pendente: RetomadaPendente) -> None:
         async with self._session_factory() as session:

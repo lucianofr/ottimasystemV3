@@ -80,6 +80,7 @@ async def write_mode_cmd(
             OpcWrite(
                 conn_id=0,
                 tag_id=pid.mode_cmd_tag_id,
+                flow_id=0,
                 value=float(value),
                 source=source,
                 ts=datetime.now(UTC),
