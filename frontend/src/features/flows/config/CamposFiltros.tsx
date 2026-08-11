@@ -61,13 +61,13 @@ export function CamposFiltroKalman({ dados }: { dados: NoKalman["data"] }) {
         id="measurement_noise"
         rotulo="Ruído da medição (EU)"
         valor={dados.measurement_noise}
-        ajuda="Amplitude típica do chiado do sinal em torno do valor real, na unidade da tag. Maior ⇒ o filtro confia menos na medição e suaviza mais."
+        ajuda="Desvio padrão do ruído de medição, na unidade da tag — a amplitude típica do chiado em torno do valor real (leia num trecho estável do trend). Não pode ser zero: entra no divisor do ganho do filtro. Maior ⇒ filtro confia menos na medição e suaviza mais; menor ⇒ acompanha a medição mais de perto, com mais ruído residual na saída."
       />
       <Campo
         id="process_noise"
         rotulo="Variação por varredura (EU)"
         valor={dados.process_noise}
-        ajuda="Quanto o valor real pode mudar de uma varredura para a outra, na unidade da tag. Maior ⇒ o filtro acompanha mais rápido."
+        ajuda="Desvio padrão da variação esperada do valor real entre duas varreduras, na unidade da tag. Zero assume um valor real constante (só filtra ruído, nunca acompanha mudança). Maior ⇒ acompanha degraus/rampas reais mais rápido, mas suaviza menos; menor ⇒ resposta mais lenta e mais suave."
       />
     </div>
   );
