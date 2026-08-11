@@ -70,8 +70,12 @@ def _config(
     return MpcConfig.model_validate(raw)
 
 
-def _request(*, sp: float = 50.0, y: float = 20.0, u: float = 10.0) -> SolveRequest:
-    return SolveRequest(y={"cv_1": y}, u_applied={"mv_1": u}, d={}, sp={"cv_1": sp}, reinit=False)
+def _request(
+    *, sp: float = 50.0, y: float = 20.0, u: float = 10.0, frozen_mvs: frozenset[str] = frozenset()
+) -> SolveRequest:
+    return SolveRequest(
+        y={"cv_1": y}, u_applied={"mv_1": u}, d={}, sp={"cv_1": sp}, reinit=False, frozen_mvs=frozen_mvs
+    )
 
 
 def _sp_escrito(runtime) -> float:
@@ -134,6 +138,23 @@ def test_com_ssto_o_sp_vira_o_alvo_calculado():
     # O SP do operador (50) foi ignorado: quem manda agora é o alvo.
     assert _sp_escrito(runtime) != pytest.approx(50.0)
     assert _sp_escrito(runtime) == pytest.approx(result.ssto.cv_target["cv_1"])
+
+
+def test_mv_congelada_pelo_ciclo_nao_e_movida_pelo_ssto():
+    """ADR-028 x ADR-027 (TD-014): `SolveRequest.frozen_mvs` precisa chegar ao `SstoInput` —
+    sem essa costura o LP trata a MV congelada como livre e devolve um alvo que pressupõe um
+    movimento que ela nunca vai fazer (mesma config de `test_com_ssto_o_sp_vira_o_alvo_calculado`,
+    só que agora `mv_1` chega congelada)."""
+    runtime = _build_runtime(
+        _config(economics={"enabled": True, "costs": {"mv_1": -1.0}}, sp_limits=(0.0, 1e6)),
+        TS_FLOW,
+    )
+
+    result = _solve(runtime, _request(sp=50.0, y=20.0, u=10.0, frozen_mvs=frozenset({"mv_1"})))
+
+    assert result.ssto is not None
+    assert result.ssto.mv_target["mv_1"] == pytest.approx(10.0)
+    assert result.ssto.delta_mv["mv_1"] == pytest.approx(0.0)
 
 
 def test_alvo_e_limitado_pelos_sp_limits_da_cv():

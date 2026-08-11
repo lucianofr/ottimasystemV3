@@ -108,6 +108,58 @@ def _entrada(
 
 
 # ---------------------------------------------------------------------------------------
+# MV congelada pelo ciclo (ADR-028) — TD-014: o LP não pode mover o que não vai se mexer
+# ---------------------------------------------------------------------------------------
+
+
+def test_mv_congelada_fica_com_delta_zero_e_a_saudavel_compensa():
+    """Duas MVs alimentam a mesma CV com o mesmo ganho e o mesmo preço favorável; `mv_b`
+    chega congelada (ADR-028). O LP não pode gerar um `cv_target` que pressuponha `mv_b` se
+    movendo — só `mv_a` pode compensar, e para exatamente no limite dela (60), não da soma
+    das duas (120)."""
+    config = _config(
+        mvs=[_mv("mv_a", lo=0.0, hi=100.0), _mv("mv_b", lo=0.0, hi=100.0)],
+        cvs=[_cv("cv_a", lo=-1e6, hi=1e6)],
+        models={"cv_a": {"mv_a": _sopdt(1.0), "mv_b": _sopdt(1.0)}},
+        economics={"enabled": True, "costs": {"mv_a": -1.0, "mv_b": -1.0}},
+    )
+    ssto = SteadyStateOptimizer(config, TS)
+    entrada = SstoInput(
+        u={"mv_a": 40.0, "mv_b": 40.0},
+        d={},
+        d_prev=None,
+        bias={"cv_a": 0.0},
+        delta_mv_prev=None,
+        frozen_mvs=frozenset({"mv_b"}),
+    )
+
+    result = ssto.solve(entrada)
+
+    assert result.delta_mv["mv_b"] == pytest.approx(0.0)
+    assert result.mv_target["mv_b"] == pytest.approx(40.0)
+    assert result.delta_mv["mv_a"] == pytest.approx(60.0)
+    assert result.mv_target["mv_a"] == pytest.approx(100.0)
+
+
+def test_sem_mv_congelada_as_duas_se_movem_ate_o_limite():
+    """Não-regressão: sem `frozen_mvs`, as duas MVs livres continuam se movendo juntas até o
+    próprio limite — a config é simétrica, então o LP é indiferente a qual delas move
+    primeiro; o que importa é que NENHUMA fica presa em zero."""
+    config = _config(
+        mvs=[_mv("mv_a", lo=0.0, hi=100.0), _mv("mv_b", lo=0.0, hi=100.0)],
+        cvs=[_cv("cv_a", lo=-1e6, hi=1e6)],
+        models={"cv_a": {"mv_a": _sopdt(1.0), "mv_b": _sopdt(1.0)}},
+        economics={"enabled": True, "costs": {"mv_a": -1.0, "mv_b": -1.0}},
+    )
+    ssto = SteadyStateOptimizer(config, TS)
+
+    result = ssto.solve(_entrada({"mv_a": 40.0, "mv_b": 40.0}, bias={"cv_a": 0.0}))
+
+    assert result.mv_target["mv_a"] == pytest.approx(100.0)
+    assert result.mv_target["mv_b"] == pytest.approx(100.0)
+
+
+# ---------------------------------------------------------------------------------------
 # Caso obrigatório 1 — objetivo trivial
 # ---------------------------------------------------------------------------------------
 

@@ -386,6 +386,7 @@ def _run_ssto(runtime: _Runtime, request: SolveRequest) -> tuple[dict[str, float
                 d_prev=runtime.ssto_dv_prev,
                 bias=bias,
                 delta_mv_prev=runtime.ssto_delta_prev,
+                frozen_mvs=request.frozen_mvs,
             )
         )
     except Exception:  # noqa: BLE001 - fronteira entre camadas: SSTO nunca derruba o MPC

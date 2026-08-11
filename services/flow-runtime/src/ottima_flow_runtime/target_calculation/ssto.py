@@ -56,13 +56,24 @@ class SstoInput:
     plano comandado). `d`: DV medida agora. `d_prev`: DV da execução anterior (`None` na
     primeira ⇒ `ΔDV = 0`). `bias`: correção DMC por linha. `delta_mv_prev`: solução anterior,
     consumida só pelo detuning anti-flipping (ADR-027 §8).
-    """
+
+    `frozen_mvs`: MVs fora do comando do MPC neste ciclo (ADR-028, mesmo conjunto que
+    `SolveRequest.frozen_mvs`) — o LP as trata como `ΔMV ≡ 0` (`solve`, limites clampados em
+    `(0, 0)`), nunca como variável de decisão livre: um `cv_target`/`mv_target` que
+    pressupusesse movimento de uma MV congelada seria um alvo que o MPC dinâmico jamais
+    alcança (ela está com `dumax = 0` no horizonte inteiro, TD-014). Default vazio preserva
+    o comportamento pré-ADR-028 bit a bit para quem monta `SstoInput` sem o campo. O
+    detuning anti-flipping (`_quadratic_term`) não precisa de tratamento à parte: com
+    `ΔMV ≡ 0` forçado pelo limite, a penalidade `ρ‖ΔMV − ΔMV_anterior‖²` não muda o
+    resultado da MV congelada — só contribui um termo constante ao objetivo por um ciclo,
+    até `ΔMV_anterior` dela também zerar."""
 
     u: Mapping[str, float]
     d: Mapping[str, float]
     d_prev: Mapping[str, float] | None
     bias: Mapping[str, float]
     delta_mv_prev: Mapping[str, float] | None
+    frozen_mvs: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -173,8 +184,14 @@ class SteadyStateOptimizer:
         dv_shift = model.gd @ delta_dv
         cv_ss_free = base + dv_shift
 
+        # MV congelada (ADR-028): `ΔMV ≡ 0`, mesmo mecanismo do `dumax = 0` do MPC dinâmico
+        # (`worker.py::_apply_tvp`) — clampar o LIMITE, não excluir a coluna, mantém a
+        # montagem estrutural idêntica (`n_mv` não muda) e a MV congelada segue entrando na
+        # predição de `cv_ss_free` pelo `u` real medido (TD-014).
         bounds = tuple(
-            (
+            (0.0, 0.0)
+            if mv_id in entrada.frozen_mvs
+            else (
                 self._mv_limits[mv_id][0] - entrada.u[mv_id],
                 self._mv_limits[mv_id][1] - entrada.u[mv_id],
             )
