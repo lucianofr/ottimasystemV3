@@ -3,15 +3,18 @@ import re
 from pathlib import Path
 
 from ottima_core.contracts_export import build_contracts, main
+from ottima_core.flowgraph import NODE_TYPES
 
 # frontend/src/lib/contracts.gen.ts: gerado a partir daqui via `npm run generate:contracts`
 # (tarefa 1.3, débito 0.2 da F4) — fonte única = build_contracts(), não editar à mão.
 GEN_TS_PATH = Path(__file__).resolve().parents[3] / "frontend" / "src" / "lib" / "contracts.gen.ts"
 
 
-def test_json_tem_os_5_tipos_de_bloco():
+def test_json_tem_todos_os_tipos_de_bloco():
+    """Contra `NODE_TYPES` e não contra uma lista literal: bloco novo em `parse.py` sem
+    contrato de porta aqui deixaria o canvas sem saber desenhá-lo."""
     contratos = build_contracts()
-    assert set(contratos["port_contracts"]) == {"opc_read", "opc_write", "script", "tfs", "mpc"}
+    assert set(contratos["port_contracts"]) == set(NODE_TYPES)
 
 
 def test_schemas_ws_presentes():

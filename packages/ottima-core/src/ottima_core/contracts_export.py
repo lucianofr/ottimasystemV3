@@ -65,6 +65,22 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
             },
         ],
     },
+    # Blocos de filtro (ADR-026): uma entrada e uma saída, numéricas, entrada obrigatória —
+    # a config (`tau`, `measurement_noise`/`process_noise`) não muda porta nenhuma.
+    "first_order": {
+        "dynamic": False,
+        "ports": [
+            {"name": "in", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+        ],
+    },
+    "kalman": {
+        "dynamic": False,
+        "ports": [
+            {"name": "in", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+        ],
+    },
     "tfs": {
         "dynamic": False,
         "ports": [

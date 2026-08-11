@@ -11,8 +11,16 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-NodeType = Literal["opc_read", "opc_write", "script", "tfs", "mpc"]
-NODE_TYPES: tuple[str, ...] = ("opc_read", "opc_write", "script", "tfs", "mpc")
+NodeType = Literal["opc_read", "opc_write", "script", "tfs", "mpc", "first_order", "kalman"]
+NODE_TYPES: tuple[str, ...] = (
+    "opc_read",
+    "opc_write",
+    "script",
+    "tfs",
+    "mpc",
+    "first_order",
+    "kalman",
+)
 
 MAX_SCRIPT_PORTS = 8  # spec §3.3
 
@@ -22,6 +30,14 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
     "script": ("n_inputs", "n_outputs", "code", "output_eu"),
     "tfs": ("matrix", "output_eu"),
     "mpc": ("name", "multiplier", "variables", "models"),
+    "first_order": ("tau",),
+    "kalman": ("measurement_noise", "process_noise"),
+}
+# Blocos de filtro (ADR-026): config é só um punhado de escalares, e o valor do dicionário
+# diz se o campo exige positivo estrito (divisor) ou apenas não-negativo.
+_FILTER_KEYS: dict[str, dict[str, bool]] = {
+    "first_order": {"tau": False},
+    "kalman": {"measurement_noise": True, "process_noise": False},
 }
 _PARAM_KEYS: dict[str, tuple[str, ...]] = {
     "sopdt": ("K", "tau1", "tau2", "theta"),
@@ -117,6 +133,27 @@ class TfsConfig(BaseModel):
         return value
 
 
+class FirstOrderConfig(BaseModel):
+    """Bloco Filtro 1ª ordem (RF-532): `tau` em segundos. `tau = 0` é passagem direta."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tau: float = Field(ge=0)
+
+
+class KalmanConfig(BaseModel):
+    """Bloco Filtro Kalman (RF-533): dois desvios padrão na EU do sinal, nunca variâncias.
+
+    `measurement_noise` é positivo estrito porque entra no divisor do ganho; `process_noise`
+    pode ser zero (modela valor verdadeiro constante).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    measurement_noise: float = Field(gt=0)
+    process_noise: float = Field(ge=0)
+
+
 class MpcRawConfig(BaseModel):
     """Payload bruto do bloco `mpc` (spec §2.1).
 
@@ -132,7 +169,7 @@ class MpcRawConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-NodeConfig = TagConfig | ScriptConfig | TfsConfig | MpcRawConfig
+NodeConfig = TagConfig | ScriptConfig | TfsConfig | MpcRawConfig | FirstOrderConfig | KalmanConfig
 
 
 class FlowNode(BaseModel):
@@ -311,7 +348,35 @@ def _parse_config(where: str, node_type: str, data: dict, errors: list[str]) -> 
         return _parse_script_config(where, data, errors)
     if node_type == "mpc":
         return _parse_mpc_config(data)
+    if node_type in _FILTER_KEYS:
+        return _parse_filter_config(where, node_type, data, errors)
     return _parse_tfs_config(where, data, errors)
+
+
+def _parse_filter_config(
+    where: str, node_type: str, data: dict, errors: list[str]
+) -> FirstOrderConfig | KalmanConfig | None:
+    """Config dos blocos de filtro (ADR-026): só escalares finitos, um erro por campo.
+
+    Exigir finitude importa tanto quanto o sinal: `tau = inf` viraria `exp(-Ts/inf) = 1` (um
+    filtro que nunca responde) e `nan` contaminaria a recorrência inteira em silêncio.
+    """
+    expected = _FILTER_KEYS[node_type]
+    values: dict[str, float] = {}
+    for key, strictly_positive in expected.items():
+        value = data.get(key)
+        if not _is_number(value) or not math.isfinite(value):
+            errors.append(f"{where}: '{key}' é obrigatório e deve ser um número finito")
+        elif strictly_positive and value <= 0:
+            errors.append(f"{where}: '{key}' deve ser maior que zero")
+        elif not strictly_positive and value < 0:
+            errors.append(f"{where}: '{key}' não pode ser negativo")
+        else:
+            values[key] = float(value)
+
+    if len(values) != len(expected):
+        return None
+    return FirstOrderConfig(**values) if node_type == "first_order" else KalmanConfig(**values)
 
 
 def _parse_mpc_config(data: dict) -> MpcRawConfig:
