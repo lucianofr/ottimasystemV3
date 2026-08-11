@@ -46,7 +46,7 @@ test("estado publicado que confirma o alvo materializa (pendência cai para null
     tsMpcSegundos: 2,
     agora: AGORA,
   });
-  const confirmado = estadoPublicado({ vars: { MV1: { v: 42, sp: null } } });
+  const confirmado = estadoPublicado({ vars: { MV1: { v: 42, sp: null, status: null } } });
   const resultado = reduzirPendencia(pendente, {
     tipo: "estadoPublicado",
     state: confirmado,
@@ -63,7 +63,7 @@ test("estado publicado que NÃO confirma o alvo não materializa nem cancela a p
     tsMpcSegundos: 2,
     agora: AGORA,
   });
-  const naoConfirma = estadoPublicado({ vars: { MV1: { v: 41, sp: null } } });
+  const naoConfirma = estadoPublicado({ vars: { MV1: { v: 41, sp: null, status: null } } });
   const resultado = reduzirPendencia(pendente, {
     tipo: "estadoPublicado",
     state: naoConfirma,

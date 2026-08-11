@@ -111,7 +111,8 @@ function mpcComDv(range: { low: number; high: number } | null): MpcNodeOut {
       constraints: [],
       dvs: [{ id: "dv_1", name: "DV constante", eu: "m3/h", range }],
     },
-  } as MpcNodeOut;
+    horizons: { ts_mpc: 1, np: 1, nc: 1 },
+  };
 }
 
 test("gradeDeVariaveis repassa o range publicado da DV até o faceplate", () => {

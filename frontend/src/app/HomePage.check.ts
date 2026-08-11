@@ -17,6 +17,7 @@ function mpc(overrides: { flow_id: number; block_id: string }) {
     name: overrides.block_id,
     multiplier: 1,
     variables: { mvs: [], cvs: [], constraints: [], dvs: [] },
+    horizons: { ts_mpc: 1, np: 1, nc: 1 },
   };
 }
 

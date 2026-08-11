@@ -54,6 +54,7 @@ function mpc(flowId: number, flowName: string, blockId: string, name: string): M
     name,
     multiplier: 1,
     variables: { mvs: [], cvs: [], constraints: [], dvs: [] },
+    horizons: { ts_mpc: 1, np: 1, nc: 1 },
   };
 }
 

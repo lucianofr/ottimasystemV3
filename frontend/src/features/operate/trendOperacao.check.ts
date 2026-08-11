@@ -51,7 +51,7 @@ function historico(varId: string, pontos: readonly Ponto[]): MpcHistoryResponse 
 }
 
 function amostraViva(d: number, v: number, sp: number | null, auto: boolean): AmostraViva {
-  return { ts: carimbo(d), vars: { cv_1: { v, sp } }, auto };
+  return { ts: carimbo(d), vars: { cv_1: { v, sp, status: null } }, auto };
 }
 
 test("janelas de operação: 15m/30m/2h/8h, default 30 min", () => {

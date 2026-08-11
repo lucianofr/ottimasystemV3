@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc --noEmit -p tsconfig.build.json && vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "preview": "vite preview",
     "generate:api": "openapi-typescript openapi.json -o src/lib/api-types.ts && npm run generate:contracts",
     "generate:contracts": "node scripts/generate-contracts.mjs",
