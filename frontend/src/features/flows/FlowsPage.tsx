@@ -24,10 +24,12 @@ import {
   useLastFlowState,
   type UltimoEstadoFlow,
 } from "./useLastFlowState";
+import { useWatchdogStatus } from "./useWatchdogStatus";
+import { cn } from "../../lib/cn";
 
 /** "Desejado" (banco) e "Último estado" (runtime) são colunas distintas e nunca se fundem —
  *  Regra do Estado Publicado (DESIGN.md). Esta tela é onde a divergência fica visível. */
-const COLUNAS = ["Nome", "Ts", "Desejado", "Último estado"] as const;
+const COLUNAS = ["Nome", "Ts", "Desejado", "Último estado", "Watchdog"] as const;
 
 const TS_PADRAO: TsSegundos = 1;
 
@@ -164,6 +166,31 @@ function CelulaUltimoEstado({ estado }: { estado: UltimoEstadoFlow | undefined }
   );
 }
 
+/** Coluna Watchdog (ADR-009 revisado): `undefined` = sem watchdog configurado (ou sem dado do
+ *  worker); `true` = bit alternante vivo; `false` = bit parado = alarme. Mesma convenção visual
+ *  das lâmpadas do faceplate de operação (`LampadaWatchdog`). */
+function CelulaWatchdog({ vivo }: { vivo: boolean | undefined }) {
+  if (vivo === undefined) {
+    return (
+      <span data-testid="flow-watchdog" className="text-fg-muted">—</span>
+    );
+  }
+  return (
+    <span
+      data-testid="flow-watchdog"
+      className={cn(
+        "inline-flex items-center gap-1.5",
+        vivo ? "text-success-fg" : "text-alarm",
+      )}
+    >
+      <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="currentColor" className="shrink-0">
+        {vivo ? <circle cx="5" cy="5" r="4" /> : <path d="M5 0 10 9H0L5 0Z" />}
+      </svg>
+      {vivo ? "Vivo" : "Falha"}
+    </span>
+  );
+}
+
 /**
  * Comutador de posição: o comando que corresponde ao `desired_state` vigente fica discreto e
  * ganha o quadrado de posição; o outro fica primário. Três canais além da cor — preenchimento
@@ -205,6 +232,7 @@ function BotaoComando({
 
 export function FlowsPage() {
   const projeto = useActiveProject();
+  const watchdog = useWatchdogStatus();
   const projectId = projeto.data?.id ?? null;
   const flows = useFlows(projectId);
   const linhas = flows.data ?? [];
@@ -341,6 +369,9 @@ export function FlowsPage() {
                 </td>
                 <td className="px-3 py-2">
                   <CelulaUltimoEstado estado={estados.get(flow.id)} />
+                </td>
+                <td className="px-3 py-2">
+                  <CelulaWatchdog vivo={watchdog.get(flow.id)} />
                 </td>
                 {podeMutar && (
                   <td className="px-3 py-2">

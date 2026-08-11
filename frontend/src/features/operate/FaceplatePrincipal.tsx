@@ -8,6 +8,7 @@ import { ROTULO_ESTADO, formatarNumero, type EstadoFlow } from "../flows/useFlow
 import { reduzirPendencia, type Pendencia } from "./pendencia";
 import { RelogioAgora } from "./RelogioAgora";
 import type { MpcNodeOut } from "./useMpcs";
+import { useWatchdogStatus } from "../flows/useWatchdogStatus";
 
 /**
  * Faceplate principal do MPC (spec F5 §7.4-3; ADR-010; RF-701/704; plano F5b tarefa 4.3):
@@ -101,6 +102,37 @@ function LampadaInputValido({ valido }: { valido: boolean }) {
     </span>
   );
 }
+/** Lâmpada do watchdog de comunicação do flow (ADR-009 revisado): `vivo` é o bit
+ *  alternante reportado pelo opc-worker em `/api/health/workers`. `undefined` = flow sem
+ *  watchdog configurado — vira neutro "Sem watchdog", nunca alarme. Bit parado (false) é
+ *  alarme vermelho: em >10 s o backend declara falha e para o flow (RF-206/207). */
+function LampadaWatchdog({ vivo }: { vivo: boolean | undefined }) {
+  if (vivo === undefined) {
+    return (
+      <span
+        data-testid="faceplate-lampada-watchdog"
+        className={cn(CHIP_LAMPADA, "bg-surface-2 text-fg-muted")}
+      >
+        <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor">
+          <circle cx="5" cy="5" r="4" />
+        </svg>
+        <span className="plaqueta text-[11px]">Sem watchdog</span>
+      </span>
+    );
+  }
+  return (
+    <span
+      data-testid="faceplate-lampada-watchdog"
+      className={cn(CHIP_LAMPADA, vivo ? "bg-success-soft text-success-fg" : "bg-alarm-soft text-alarm")}
+    >
+      <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+        {vivo ? <circle cx="5" cy="5" r="4" /> : <path d="M5 0 10 9H0L5 0Z" />}
+      </svg>
+      <span className="plaqueta text-[11px]">{vivo ? "Watchdog vivo" : "Watchdog falha"}</span>
+    </span>
+  );
+}
+
 
 /** Comutador de posição (DESIGN.md §Shapes): segmented control de posições nítidas, nunca
  *  toggle "amigável". `pendente` (não-nulo) pinta o segmento comandado em fantasma + outline
@@ -181,6 +213,7 @@ export function FaceplatePrincipal({ mpc, flowStatus, mpcState, flowId, blockId 
   const [pendencia, dispatch] = useReducer(reduzirPendencia, null as Pendencia | null);
   const [erroComando, setErroComando] = useState<string | null>(null);
   const tsMpcSegundos = mpc.flow_ts_seconds * mpc.multiplier;
+  const watchdogVivo = useWatchdogStatus().get(flowId);
 
   // Materializa/mantém a pendência a cada `mpc.state` novo publicado pelo canal ao vivo.
   useEffect(() => {
@@ -248,6 +281,7 @@ export function FaceplatePrincipal({ mpc, flowStatus, mpcState, flowId, blockId 
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4">
+          <LampadaWatchdog vivo={watchdogVivo} />
           <LampadaFlow estado={flowStatus?.state ?? "stopped"} />
           <LampadaSolver solver={mpcState?.status.solver ?? "idle"} />
           <LampadaInputValido valido={mpcState?.status.input_valid ?? false} />

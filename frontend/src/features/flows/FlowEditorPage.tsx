@@ -67,6 +67,7 @@ import {
   type EstadoFlow,
 } from "./useFlowStatus";
 
+import { useWatchdogStatus } from "./useWatchdogStatus";
 import "@xyflow/react/dist/base.css";
 import "./flow-canvas.css";
 
@@ -127,6 +128,27 @@ function LampadaEstado({ estado }: { estado: EstadoFlow }) {
   );
 }
 
+
+/** Lâmpada do watchdog (ADR-009 revisado): mesma convenção da lâmpada de estado — cor, forma
+ *  e rótulo. `undefined` = flow sem watchdog configurado; `true` = bit alternando; `false` =
+ *  bit parado (alarme). */
+function LampadaWatchdog({ vivo }: { vivo: boolean | undefined }) {
+  const cor = vivo === undefined ? "text-fg-muted" : vivo ? "text-success" : "text-alarm";
+  const rotulo = vivo === undefined ? "Sem watchdog" : vivo ? "Watchdog vivo" : "Watchdog falha";
+  return (
+    <span
+      data-testid="canvas-watchdog"
+      className={cn("inline-flex items-center gap-1.5", cor)}
+    >
+      <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+        {vivo === undefined && <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" />}
+        {vivo === true && <circle cx="5" cy="5" r="4" />}
+        {vivo === false && <path d="M5 0 10 9H0L5 0Z" />}
+      </svg>
+      <span className="plaqueta text-[11px]">{rotulo}</span>
+    </span>
+  );
+}
 /** Sem replay (§5.3): entre assinar e a varredura seguinte não há valor nenhum a mostrar. */
 const AGUARDO: Record<Exclude<EstadoConexao, "sessao_invalida">, string> = {
   conectando: "Conectando ao canal ao vivo…",
@@ -134,8 +156,14 @@ const AGUARDO: Record<Exclude<EstadoConexao, "sessao_invalida">, string> = {
   reconectando: "Reconectando ao canal ao vivo…",
 };
 
-/** Cabeçalho ao vivo (RF-305, spec §6.2): estado publicado, varredura e overruns. */
-function CabecalhoAoVivo({ aoVivo }: { aoVivo: CanvasAoVivo }) {
+/** Cabeçalho ao vivo (RF-305, spec §6.2): estado publicado, varredura, overruns e watchdog. */
+function CabecalhoAoVivo({
+  aoVivo,
+  watchdogVivo,
+}: {
+  aoVivo: CanvasAoVivo;
+  watchdogVivo: boolean | undefined;
+}) {
   if (aoVivo.conexao === "sessao_invalida") {
     return (
       <p role="alert" data-testid="canvas-vivo" className="text-xs text-alarm">
@@ -145,14 +173,16 @@ function CabecalhoAoVivo({ aoVivo }: { aoVivo: CanvasAoVivo }) {
   }
   if (aoVivo.status === null) {
     return (
-      <p data-testid="canvas-vivo" className="text-xs text-fg-muted">
-        {AGUARDO[aoVivo.conexao]}
-      </p>
+      <div data-testid="canvas-vivo" className="flex items-center gap-3 text-xs text-fg-muted">
+        <LampadaWatchdog vivo={watchdogVivo} />
+        <span>{AGUARDO[aoVivo.conexao]}</span>
+      </div>
     );
   }
   return (
     <div data-testid="canvas-vivo" className="flex items-center gap-3 text-xs text-fg-muted">
       <LampadaEstado estado={aoVivo.status.state} />
+      <LampadaWatchdog vivo={watchdogVivo} />
       <span>
         Duração de execução{" "}
         <span className="process-value text-fg">{formatarNumero(aoVivo.status.scan_ms)}</span> ms
@@ -307,6 +337,7 @@ function Editor({ flowId }: { flowId: number }) {
 
   // Um socket por editor aberto, assinando só este flow e morrendo com a página (§5.3).
   const aoVivo = useFlowStatus(flowId);
+  const watchdogVivo = useWatchdogStatus().get(flowId);
 
   // Modo EDIT/ONLINE (tarefa 3.2): decidido UMA vez, na primeira varredura que o canal
   // publica — antes disso o editor não sabe se o flow está rodando. Depois de decidido, o
@@ -600,7 +631,7 @@ function Editor({ flowId }: { flowId: number }) {
             )}
           </div>
           <div className="flex items-center gap-3">
-            <CabecalhoAoVivo aoVivo={aoVivo} />
+            <CabecalhoAoVivo aoVivo={aoVivo} watchdogVivo={watchdogVivo} />
             <BotaoModo modo={modoEfetivo} onMudar={setModo} />
             {podeMutar && modoEfetivo === "edit" && (
               <Button
