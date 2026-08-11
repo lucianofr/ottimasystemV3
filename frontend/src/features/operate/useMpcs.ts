@@ -7,6 +7,12 @@ import type { components } from "../../lib/api-types";
  *  (§4.1-3); estado rodando/parado do flow não entra (§4.1-4). */
 export type MpcNodeOut = components["schemas"]["MpcNodeOut"];
 
+/** `nome do flow · nome do bloco` — rótulo compartilhado por toda tela que lista MPCs de
+ *  flows diferentes lado a lado (seletor da operação, combobox de troca dentro dela). */
+export function rotuloMpc(mpc: MpcNodeOut): string {
+  return `${mpc.flow_name} · ${mpc.name}`;
+}
+
 const CHAVE = ["operate", "mpcs"] as const;
 
 /**

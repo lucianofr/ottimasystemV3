@@ -1,15 +1,8 @@
 import { Link, Navigate, useLocation } from "react-router";
 
 import { Card } from "../../components/ui/card";
-import { useMpcs, type MpcNodeOut } from "./useMpcs";
+import { rotuloMpc, useMpcs } from "./useMpcs";
 import { useActiveProject } from "../projects/useProjects";
-
-/** `nome do flow · nome do bloco` — mesma composição de rótulo do atalho da Home
- *  (`HomePage.tsx::LinhaFlow`, "Operar <nome>"), só que aqui o flow também precisa aparecer:
- *  o seletor lista MPCs de flows diferentes lado a lado. */
-function rotuloMpc(mpc: MpcNodeOut): string {
-  return `${mpc.flow_name} · ${mpc.name}`;
-}
 
 /**
  * Seletor e roteamento da operação (spec F5 §7.4-1/2; RF-701; decisão A-7): `/operacao` sem
