@@ -227,7 +227,7 @@ export function FaceplatePrincipal({ mpc, flowStatus, mpcState, flowId, blockId 
   const emRemoto = mpcState?.modes.local_remote === "remote";
 
   const motivoDesabilitado = semDados
-    ? "Aguardando estado ao vivo do bloco…"
+    ? `Aguardando estado ao vivo do bloco… (publica a cada ${formatarNumero(tsMpcSegundos)}s)`
     : building
       ? "Solver em build — comutadores desabilitados até a partida concluir."
       : null;
