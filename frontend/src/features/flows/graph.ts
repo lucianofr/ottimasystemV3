@@ -20,7 +20,15 @@ import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
  * isso nenhum estado de interface pode morar ali.
  */
 
-export const TIPOS_BLOCO = ["opc_read", "opc_write", "script", "tfs", "mpc"] as const;
+export const TIPOS_BLOCO = [
+  "opc_read",
+  "opc_write",
+  "script",
+  "first_order",
+  "kalman",
+  "tfs",
+  "mpc",
+] as const;
 export type TipoBloco = (typeof TIPOS_BLOCO)[number];
 
 function tetoDoContrato(regra: RegraPortaDinamica): number {
@@ -39,9 +47,17 @@ export const ROTULO_BLOCO: Record<TipoBloco, string> = {
   opc_read: "Leitura OPC",
   opc_write: "Escrita OPC",
   script: "Script",
+  first_order: "Filtro 1ª ordem",
+  kalman: "Filtro Kalman",
   tfs: "TFS",
   mpc: "MPC",
 };
+
+/** Defaults dos blocos de filtro (ADR-026), compartilhados por `criarBloco` e `lerNo`: o
+ *  bloco recém-arrastado já nasce com uma config que passa no save (`measurement_noise` > 0),
+ *  e um `graph_json` com o campo corrompido cai no mesmo valor em vez de virar `NaN`. */
+const PADRAO_FIRST_ORDER = { tau: 5 } as const;
+const PADRAO_KALMAN = { measurement_noise: 1, process_noise: 0.1 } as const;
 
 export type TipoDadoTag = "float" | "int" | "bool";
 
@@ -71,6 +87,13 @@ export type LinhaTfs = [ElementoTfs, ElementoTfs];
 export type MatrizTfs = [LinhaTfs, LinhaTfs];
 
 export type DadosTfs = DadosBase & { matrix: MatrizTfs; output_eu: Record<string, string> };
+
+/** `tau` em segundos (RF-532); `0` é passagem direta. */
+export type DadosFirstOrder = DadosBase & { tau: number };
+
+/** Os dois campos são **desvio padrão na EU do sinal** (RF-533), nunca variância: o bloco
+ *  eleva ao quadrado no runtime. `process_noise` é por varredura, não por segundo. */
+export type DadosKalman = DadosBase & { measurement_noise: number; process_noise: number };
 
 export type LimitesMpc = { min: number; max: number };
 export type FaixaMpc = { low: number; high: number };
@@ -169,7 +192,13 @@ export type DadosMpc = DadosBase & {
   models: Record<string, Record<string, ParModeloMpc>>;
 };
 
-export type DadosBloco = DadosTag | DadosScript | DadosTfs | DadosMpc;
+export type DadosBloco =
+  | DadosTag
+  | DadosScript
+  | DadosTfs
+  | DadosMpc
+  | DadosFirstOrder
+  | DadosKalman;
 
 /** `type` é opcional em `Node`; aqui ele é o discriminante e nunca falta. */
 type Bloco<D extends Record<string, unknown>, T extends TipoBloco> = Node<D, T> & { type: T };
@@ -179,8 +208,10 @@ export type NoEscrita = Bloco<DadosTag, "opc_write">;
 export type NoScript = Bloco<DadosScript, "script">;
 export type NoTfs = Bloco<DadosTfs, "tfs">;
 export type NoMpc = Bloco<DadosMpc, "mpc">;
+export type NoFirstOrder = Bloco<DadosFirstOrder, "first_order">;
+export type NoKalman = Bloco<DadosKalman, "kalman">;
 
-export type BlocoNode = NoLeitura | NoEscrita | NoScript | NoTfs | NoMpc;
+export type BlocoNode = NoLeitura | NoEscrita | NoScript | NoTfs | NoMpc | NoFirstOrder | NoKalman;
 
 /** Toda aresta do editor nasce de um par de handles resolvidos; `null` nunca chega ao save. */
 export type BlocoEdge = Omit<Edge, "sourceHandle" | "targetHandle"> & {
@@ -245,6 +276,7 @@ export function tipoPorta(no: BlocoNode, tags: MapaTags): TipoPorta {
   if (no.type === "script") return "bivalente";
   if (no.type === "tfs") return "num";
   if (no.type === "mpc") return "num";
+  if (no.type === "first_order" || no.type === "kalman") return "num";
   if (no.data.tag_id === null) return "desconhecido";
   const dado = tags.get(no.data.tag_id);
   if (dado === undefined) return "desconhecido";
@@ -376,6 +408,10 @@ export function comDados(no: BlocoNode, mudanca: Partial<DadosBase>): BlocoNode 
     case "tfs":
       return { ...no, data: { ...no.data, ...mudanca } };
     case "mpc":
+      return { ...no, data: { ...no.data, ...mudanca } };
+    case "first_order":
+      return { ...no, data: { ...no.data, ...mudanca } };
+    case "kalman":
       return { ...no, data: { ...no.data, ...mudanca } };
   }
 }
@@ -569,6 +605,10 @@ export function criarBloco(
           models: {},
         },
       };
+    case "first_order":
+      return { id, type: "first_order", position, data: { exec_order, label: "", ...PADRAO_FIRST_ORDER } };
+    case "kalman":
+      return { id, type: "kalman", position, data: { exec_order, label: "", ...PADRAO_KALMAN } };
   }
 }
 
@@ -737,6 +777,25 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           multiplier: inteiro(dados.multiplier, 1, 1, Number.MAX_SAFE_INTEGER),
           variables: lerVariaveisMpc(dados.variables),
           models: lerModelosMpc(dados.models),
+        },
+      };
+    case "first_order":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: { exec_order, label, tau: numero(dados.tau, PADRAO_FIRST_ORDER.tau) },
+      };
+    case "kalman":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          measurement_noise: numero(dados.measurement_noise, PADRAO_KALMAN.measurement_noise),
+          process_noise: numero(dados.process_noise, PADRAO_KALMAN.process_noise),
         },
       };
   }

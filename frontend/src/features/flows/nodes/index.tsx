@@ -6,6 +6,8 @@ import {
   portasFixas,
   portasScript,
   type NoEscrita,
+  type NoFirstOrder,
+  type NoKalman,
   type NoLeitura,
   type NoMpc as NoMpcData,
   type NoScript,
@@ -167,6 +169,56 @@ export function NoTfsMatriz({ id, data, selected }: NodeProps<NoTfs>) {
   );
 }
 
+/** Regra do Número Tabular (DESIGN.md §Typography): parâmetro de filtro em pt-BR, sem
+ *  notação científica — o mesmo formato que a tendência usa para valor de processo. */
+const FORMATO_PARAM = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 4 });
+
+/** Filtro 1ª ordem (RF-532): uma entrada, uma saída, `tau` no resumo. Abaixo de `Ts/10` o
+ *  bloco vira passagem direta, e o resumo diz isso em texto — o engenheiro não deveria
+ *  precisar dividir o Ts de cabeça para descobrir que o filtro está desligado. */
+export function NoFiltroPrimeiraOrdem({ id, data, selected }: NodeProps<NoFirstOrder>) {
+  return (
+    <BlocoChapa
+      tipo="first_order"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("first_order", "input"))}
+      saidas={portas(portasFixas("first_order", "output"))}
+      blockId={id}
+    >
+      <LinhaResumo
+        rotulo="Constante de tempo"
+        valor={data.tau === 0 ? "passagem direta" : `${FORMATO_PARAM.format(data.tau)} s`}
+      />
+    </BlocoChapa>
+  );
+}
+
+/** Filtro Kalman (RF-533): os dois campos são desvio padrão na EU do sinal, e o resumo os
+ *  rotula como ruído/variação — nunca como variância. */
+export function NoFiltroKalman({ id, data, selected }: NodeProps<NoKalman>) {
+  return (
+    <BlocoChapa
+      tipo="kalman"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("kalman", "input"))}
+      saidas={portas(portasFixas("kalman", "output"))}
+      blockId={id}
+    >
+      <div className="space-y-0.5">
+        <LinhaResumo rotulo="Ruído da medição" valor={FORMATO_PARAM.format(data.measurement_noise)} />
+        <LinhaResumo
+          rotulo="Variação por varredura"
+          valor={FORMATO_PARAM.format(data.process_noise)}
+        />
+      </div>
+    </BlocoChapa>
+  );
+}
+
 /** Portas dinâmicas do config (spec F4 §7.2, decisão A-10): entradas = CVs+Restrições+DVs à
  *  esquerda, saída = MVs à direita, na ordem do config; sem variáveis ⇒ sem portas
  *  (B-F4-01 passo 5). */
@@ -200,6 +252,8 @@ export const TIPOS_DE_NO: NodeTypes = {
   opc_read: NoLeituraOpc,
   opc_write: NoEscritaOpc,
   script: NoScriptPython,
+  first_order: NoFiltroPrimeiraOrdem,
+  kalman: NoFiltroKalman,
   tfs: NoTfsMatriz,
   mpc: NoMpc,
 };

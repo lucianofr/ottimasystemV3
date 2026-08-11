@@ -18,7 +18,8 @@ import {
   type NoMpc,
   type NoScript,
 } from "../graph";
-import { inteiroDoCampo, matrizDoFormulario } from "./campos";
+import { inteiroDoCampo, matrizDoFormulario, numeroDoCampo } from "./campos";
+import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
 import { CamposTfs } from "./CamposTfs";
 
 const OPCOES_PORTAS = Array.from({ length: MAX_PORTAS_SCRIPT + 1 }, (_, i) => i);
@@ -245,6 +246,29 @@ export function ModalConfigBloco({
           execOrder,
         );
         break;
+      case "first_order":
+        onAplicar(
+          { ...no, data: { ...no.data, label, tau: numeroDoCampo(campos.get("tau"), no.data.tau) } },
+          execOrder,
+        );
+        break;
+      case "kalman":
+        onAplicar(
+          {
+            ...no,
+            data: {
+              ...no.data,
+              label,
+              measurement_noise: numeroDoCampo(
+                campos.get("measurement_noise"),
+                no.data.measurement_noise,
+              ),
+              process_noise: numeroDoCampo(campos.get("process_noise"), no.data.process_noise),
+            },
+          },
+          execOrder,
+        );
+        break;
     }
     // `onClose` (linha do <dialog>) chama `onFechar`; fechar via `close()` explícito em vez
     // de chamar `onFechar()` direto evita que o desmonte (estado -> null) derrube o <dialog>
@@ -310,6 +334,8 @@ export function ModalConfigBloco({
           {no.type === "tfs" && matrizTfs !== null && (
             <CamposTfs dados={matrizTfs} aoMudar={setMatrizTfs} />
           )}
+          {no.type === "first_order" && <CamposFiltroPrimeiraOrdem dados={no.data} />}
+          {no.type === "kalman" && <CamposFiltroKalman dados={no.data} />}
         </fieldset>
 
         <footer className="flex justify-end gap-2 border-t border-hairline px-4 py-3">
