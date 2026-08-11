@@ -11,6 +11,11 @@ dependencies = [
   # Montagem do MPC (spec F4 §3): casadi vem transitivo. Só a discretização por par
   # (tarefa 2.1) chega nesta leva; o modelo do-mpc em si nasce na tarefa 2.2.
   "do-mpc>=5.1",
+  # SSTO (ADR-027 §7): `linprog(method="highs")` é o backend LP default. Já vinha
+  # transitivo por do-mpc — dependência usada de propósito é dependência declarada.
+  "scipy>=1.14",
+  # Backend QP do detuning anti-flipping (ADR-027 §8).
+  "osqp>=1.0",
 ]
 
 [tool.uv.sources]

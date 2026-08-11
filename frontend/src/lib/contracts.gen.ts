@@ -187,6 +187,27 @@ export interface MpcVarState {
   sp: number | null;
 }
 
+export interface SstoRun {
+  run_id: string;
+  config_hash: string;
+  model_hash: string;
+  status: "optimal" | "relaxed" | "infeasible" | "unbounded" | "error";
+  solver: string;
+  solve_ms: number;
+  objective: number;
+  mv: Record<string, number>;
+  cv_ss: Record<string, number>;
+  bias: Record<string, number>;
+  dv: Record<string, number>;
+  costs: Record<string, number>;
+  delta_mv: Record<string, number>;
+  mv_target: Record<string, number>;
+  cv_target: Record<string, number>;
+  given_up: string[];
+  active_constraints: string[];
+  duals: Record<string, number>;
+}
+
 export interface MpcState {
   ts: string;
   modes: MpcModes;
@@ -194,4 +215,5 @@ export interface MpcState {
   vars: Record<string, MpcVarState>;
   cost: number;
   prediction: MpcPrediction;
+  ssto: SstoRun | null;
 }

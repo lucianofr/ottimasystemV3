@@ -240,14 +240,16 @@ async def test_cagg_mpc_samples_1m_agrega(db_engine):
 
 
 def test_downgrade_remove_mpc_samples_e_cagg(migrated_database_url):
-    # downgrade simétrico (item 8 da tarefa) — desce um passo (0003 -> 0002) e volta ao head
-    # para não vazar o estado para os demais testes da mesma sessão de container.
+    # downgrade simétrico (item 8 da tarefa) — desce ATÉ a 0002 e volta ao head para não
+    # vazar o estado para os demais testes da mesma sessão de container. Alvo explícito, não
+    # `-1`: o passo relativo mudava de significado a cada migration nova acrescentada
+    # depois da 0003 (foi o que a 0004 do SSTO quebrou).
     # Síncrono de propósito: alembic.command chama asyncio.run() internamente (env.py) e
     # não pode ser aninhado dentro do loop já ativo de um teste `async def`.
     cfg = Config("packages/ottima-core/alembic.ini")
     cfg.set_main_option("sqlalchemy.url", migrated_database_url)
     try:
-        command.downgrade(cfg, "-1")
+        command.downgrade(cfg, "0002_timescale")
 
         async def checar_ausencia() -> tuple[object, object]:
             engine = create_async_engine(migrated_database_url)

@@ -50,12 +50,14 @@ from ottima_core.bus import (
     KIND_MPC_OVERRUN,
     KIND_MPC_SOLVER_ERROR,
     KIND_MPC_SP_WRITTEN,
+    KIND_SSTO_INFEASIBLE,
     MpcModes,
     MpcPrediction,
     MpcState,
     MpcStatus,
     MpcVarState,
     OpcWrite,
+    SstoRun,
 )
 from ottima_core.flowgraph import CvVar, MpcConfig, MvVar, PidBinding, derive_horizons
 
@@ -281,6 +283,11 @@ class MpcBlock(Block):
         self._overrun_reported = False
         self._input_invalid_reported = False
         self._input_ok = True
+        # Registro do SSTO à espera de publicação (ADR-027 §11): preenchido ao aplicar o
+        # resultado, consumido pela publicação da MESMA fronteira. Uma execução, um
+        # registro — republicá-lo duplicaria linha em `ssto_runs`.
+        self._ssto_pending: SstoRun | None = None
+        self._ssto_infeasible_reported = False
         # Baseline p/ distinguir crash real de exceção isolada do worker (fix-final,
         # `_apply_result`): conta reposições JÁ ocorridas até aqui — inclusive de um host
         # reaproveitado num reset() de hot-swap — para nunca acusar "crash" por um respawn
@@ -435,6 +442,8 @@ class MpcBlock(Block):
         respawns_antes = self._last_respawns
         self._last_respawns = self._host.stats()["respawns"]
 
+        await self._absorver_ssto(result.ssto)
+
         if result.status == "ok":
             self._plan = dict(result.u_plan)
             self._cost = result.cost
@@ -574,6 +583,34 @@ class MpcBlock(Block):
     # ------------------------------------------------------------------------------
     # Eventos (spec §5.3) — dedupe por período nos que a spec pede (overrun/invalidez)
     # ------------------------------------------------------------------------------
+
+    async def _absorver_ssto(self, run: SstoRun | None) -> None:
+        """Guarda o registro da camada de alvos para a publicação desta fronteira e alarma
+        quando ela não fechou (ADR-027 §10/§11).
+
+        `relaxed` não alarma: desistir de linha de baixa prioridade é o comportamento
+        projetado do SSTO e já fica registrado em `given_up`. Só o fracasso — que faz o
+        ciclo cair no SP do operador — é evento operacional, deduplicado por episódio.
+        """
+        if run is None:
+            return
+        self._ssto_pending = run
+        if run.status in ("optimal", "relaxed"):
+            self._ssto_infeasible_reported = False
+            return
+        if self._ssto_infeasible_reported:
+            return
+        self._ssto_infeasible_reported = True
+        await self._emit_event(
+            origin=self._source,
+            severity="warning",
+            message=(
+                f"MPC '{self.block_id}': SSTO não fechou ({run.status})"
+                " — alvos caíram no SP do operador"
+            ),
+            kind=KIND_SSTO_INFEASIBLE,
+            payload={"status": run.status, "solver": run.solver},
+        )
 
     async def _report_overrun(self) -> None:
         if self._overrun_reported:
@@ -759,6 +796,10 @@ class MpcBlock(Block):
             solver = self._solver_status
 
         stats = self._host.stats()
+        # Consome o registro pendente: ele sobe UMA vez, no quadro seguinte à aplicação do
+        # resultado que o produziu (ADR-027 §11). Publicações imediatas (mudança de modo,
+        # SP/MV) também o consomem se estiverem à frente — o que importa é não repetir.
+        ssto, self._ssto_pending = self._ssto_pending, None
         return MpcState(
             ts=ts,
             modes=MpcModes(local_remote=self._local_remote, man_auto=self._man_auto),
@@ -772,6 +813,7 @@ class MpcBlock(Block):
             vars=var_state,
             cost=self._cost,
             prediction=self._last_prediction if auto else _empty_prediction(ts),
+            ssto=ssto,
         )
 
     def health(self) -> dict:

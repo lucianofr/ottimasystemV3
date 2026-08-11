@@ -50,6 +50,9 @@ function mpcState(parcial: Partial<MpcState["status"]> = {}): MpcState {
     vars: {},
     cost: 0,
     prediction: { ts: "2026-01-01T00:00:05.000Z", t: [], cv: [], mv: [] },
+    // Quadro sem SSTO (ADR-027): a camada de alvos não roda em todo ciclo, e o wire sempre
+    // carrega o campo — nulo quando não houve execução.
+    ssto: null,
   };
 }
 
