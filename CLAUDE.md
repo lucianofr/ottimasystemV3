@@ -4,7 +4,7 @@ Plataforma on-premise de APC industrial: estratégias de controle montadas em ca
 
 ## 🔒 Fonte da verdade (leia antes de qualquer coisa)
 
-1. **`docs/adr/ADR-001…023` são NORMATIVOS.** Nenhuma decisão registrada em ADR pode ser relitigada, "melhorada" ou contornada em código. Em conflito entre código, plano, PRD e ADR — **o ADR vence**.
+1. **`docs/adr/ADR-001…026` são NORMATIVOS.** Nenhuma decisão registrada em ADR pode ser relitigada, "melhorada" ou contornada em código. Em conflito entre código, plano, PRD e ADR — **o ADR vence**.
 2. **`docs/PRD.md`** é a fonte de requisitos (RF-xxx / RNF-xx) e dos contratos (§7: canais do barramento, JSON de projeto, grupos de API) e fases (§8).
 3. **`docs/GLOSSARY.md`** fixa o vocabulário. Use os termos de lá; não invente sinônimos.
 4. Encontrou contradição ou lacuna real? **PARE.** Não resolva silenciosamente no código: proponha a atualização do ADR/PRD ao usuário e aguarde a decisão.
@@ -35,6 +35,8 @@ services/
   api/                # FastAPI (REST + WebSocket)
   opc-worker/         # asyncua, watchdog, escritas
   flow-runtime/       # motor de scan, MPC, scripts, TFS
+                      #   mpc/                 -> controle DINÂMICO (do-mpc, move plan)
+                      #   target_calculation/  -> SSTO: alvos de regime permanente por LP (ADR-026)
   recorder/           # barramento → hypertable
 deploy/               # docker-compose.yml, Dockerfiles, .env.example
 tests/                # integração cross-service (malha fechada MPC↔TFS — RNF-09)
@@ -55,6 +57,7 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 - **Hot-swap:** troca de definição de flow é atômica entre varreduras, preservando estado dos blocos não alterados. (ADR-011)
 - **Ordem de execução:** blocos executam estritamente em ordem crescente de `exec_order` (1..N, único por flow) — nunca por ordenação topológica; aresta com ordem invertida ⇒ valor da varredura anterior. (ADR-024)
 - Predições do MPC **não são persistidas** — só publicadas no barramento. (ADR-016)
+- **SSTO (camada de alvos):** roda no MESMO ciclo do MPC, dentro do processo worker, ANTES do `make_step` — nunca toca o cálculo do move plan. **MV é a única variável de decisão e o limite dela é duro em todo caminho de código; DV nunca é otimizada; CV/Restrição são soft (folga penalizada + desistência por `priority` crescente).** `G`/`Gd` saem do `PairSS` já discretizado do controlador — **nunca** um segundo modelo de ganho. SSTO desligado/inviável ⇒ SP do operador (fallback), nunca parada do controle. Auditoria imutável em `ssto_runs`, sem canal novo. (ADR-026)
 
 ## Convenções de código
 

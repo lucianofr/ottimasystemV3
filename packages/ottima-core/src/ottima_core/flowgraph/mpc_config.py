@@ -11,6 +11,8 @@ computam e devolvem o valor, sem aplicar as reprovações 422 (Np<2, Np>120) —
 política da validação semântica, que enxerga o resultado devolvido aqui e decide.
 """
 
+import hashlib
+import json
 import math
 from collections.abc import Sequence
 from typing import Literal
@@ -19,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 RowKind = Literal["selfreg", "integrating"]
 TargetMode = Literal["rcas", "cas", "rout"]
+SolverName = Literal["highs", "osqp", "gurobi"]
 
 
 def _exigir_prefixo(value: str, prefixo: str, categoria: str) -> str:
@@ -120,7 +123,14 @@ class MvVar(BaseModel):
 
 
 class CvVar(BaseModel):
-    """Variável controlada — linha da matriz `models` (spec §2.1-2)."""
+    """Variável controlada — linha da matriz `models` (spec §2.1-2).
+
+    `priority`: rank do SSTO (ADR-026 §5). Mesma semântica do `ConstraintVar.priority` do
+    ADR-019 — **maior = mais importante**; a desistência por inviabilidade é em ordem
+    crescente. Só o LP de regime permanente o consome: o objetivo dinâmico segue usando
+    `weight`, e o default `1` deixa todas as CVs no mesmo rank (comportamento de antes do
+    campo existir).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -131,6 +141,7 @@ class CvVar(BaseModel):
     tss: float
     weight: float
     sp_limits: Limits
+    priority: int = Field(default=1, ge=1)
 
     @field_validator("id")
     @classmethod
@@ -198,8 +209,40 @@ class PairModel(BaseModel):
     params: dict[str, float]
 
 
+class EconomicsConfig(BaseModel):
+    """Camada econômica do SSTO (ADR-026 §9) — estrutura pronta para a UI futura.
+
+    `costs`: `var_id` (MV, CV ou Restrição) -> preço no objetivo `min cᵀ·ΔMV`. **Negativo
+    maximiza** a variável. Preço de linha (CV/Restrição) é projetado no espaço de decisão
+    por `c_row·G` na montagem do LP — a variável de decisão continua sendo só `ΔMV`.
+
+    `slack_weight`: peso base da folga das linhas soft; o peso efetivo por linha é
+    `slack_weight × priority` (primeira linha de defesa contra inviabilidade, ADR-026 §6).
+
+    `detuning_weight` (ρ): mitigação de **LP flipping** (ADR-026 §8) — `ρ > 0` acrescenta
+    `ρ‖ΔMV − ΔMV_anterior‖²` ao objetivo e exige um backend QP. `0.0` mantém LP puro.
+
+    `integrating_tolerance` (ε): meia-faixa da condição de taxa nula das linhas
+    integradoras (ADR-026 §4), na EU da linha por segundo.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    costs: dict[str, float] = Field(default_factory=dict)
+    slack_weight: float = Field(default=1e3, gt=0.0)
+    detuning_weight: float = Field(default=0.0, ge=0.0)
+    solver: SolverName = "highs"
+    integrating_tolerance: float = Field(default=0.0, ge=0.0)
+
+
 class MpcConfig(BaseModel):
-    """Config do bloco MPC — vive inteiro no `graph_json` (spec §2.1, decisão A-8/A-9)."""
+    """Config do bloco MPC — vive inteiro no `graph_json` (spec §2.1, decisão A-8/A-9).
+
+    `economics` ausente (default) = SSTO desligado: o MPC segue com o SP do operador, o
+    caminho da F4 (ADR-026 §10). Campo opcional de propósito — config salva antes desta
+    feature continua carregando.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -207,6 +250,7 @@ class MpcConfig(BaseModel):
     multiplier: int = Field(ge=1)
     variables: MpcVariables
     models: dict[str, dict[str, PairModel]]
+    economics: EconomicsConfig | None = None
 
 
 class Horizons(BaseModel):
@@ -230,6 +274,51 @@ def derive_horizons(multiplier: int, ts_flow: float, tss: Sequence[float]) -> Ho
     np_ = math.ceil(max(tss) / ts_mpc)
     nc = max(2, math.ceil(np_ / 4))
     return Horizons(ts_mpc=ts_mpc, np=np_, nc=nc)
+
+
+def economics_config_hash(config: MpcConfig) -> str:
+    """SHA-256 da versão do problema econômico (ADR-026 §9): custos, limites e ranks.
+
+    Identifica O PROBLEMA que o SSTO resolveu, não o bloco: renomear o MPC ou mexer num
+    parâmetro dinâmico (peso de rastreamento, `du_max`) não produz hash novo — mexer num
+    preço, num limite ou num rank produz. É o campo que amarra cada registro de auditoria à
+    configuração vigente no instante do solve.
+
+    JSON canônico (`sort_keys`, separadores fixos) para o hash não depender da ordem em que
+    as chaves chegaram do `graph_json`.
+    """
+    economics = config.economics
+    payload = {
+        "economics": None if economics is None else economics.model_dump(mode="json"),
+        "mvs": {mv.id: [mv.limits.min, mv.limits.max] for mv in config.variables.mvs},
+        "cvs": {
+            cv.id: [cv.sp_limits.min, cv.sp_limits.max, cv.priority] for cv in config.variables.cvs
+        },
+        "constraints": {
+            co.id: [co.range.low, co.range.high, co.priority] for co in config.variables.constraints
+        },
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def gain_model_hash(config: MpcConfig) -> str:
+    """SHA-256 da matriz `models` — a "referência ao modelo de ganho usado" da auditoria do
+    SSTO (ADR-026 §11).
+
+    Separado do `economics_config_hash` de propósito: custo/limite e modelo mudam por
+    motivos diferentes (o primeiro é decisão econômica, o segundo é re-identificação da
+    planta), e um registro de auditoria precisa distinguir os dois.
+    """
+    payload = {
+        row_id: {
+            col_id: {"enabled": pair.enabled, "params": pair.params}
+            for col_id, pair in cols.items()
+        }
+        for row_id, cols in config.models.items()
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def mpc_state_dimension(config: MpcConfig, ts_mpc: float) -> int:

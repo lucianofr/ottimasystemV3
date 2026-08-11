@@ -40,6 +40,35 @@ events_table = Table(
     Column("payload", JSONB, nullable=False, server_default=text("'{}'")),
 )
 
+ssto_runs_table = Table(
+    "ssto_runs",
+    TIMESERIES_METADATA,
+    # Auditoria do SSTO (ADR-026 §11): uma linha por execução, imutável — só INSERT.
+    # Os vetores vão em JSONB porque a dimensão varia por bloco (nº de MVs/linhas é config,
+    # não schema); os escalares que se consulta por filtro ficam em coluna própria.
+    Column("ts", DateTime(timezone=True), nullable=False),
+    Column("flow_id", BigInteger, nullable=False),
+    Column("block_id", Text, nullable=False),
+    Column("run_id", Text, nullable=False),
+    Column("config_hash", Text, nullable=False),
+    Column("model_hash", Text, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("solver", Text, nullable=False),
+    Column("solve_ms", Double, nullable=False),
+    Column("objective", Double, nullable=False),
+    Column("mv", JSONB, nullable=False),
+    Column("cv_ss", JSONB, nullable=False),
+    Column("bias", JSONB, nullable=False),
+    Column("dv", JSONB, nullable=False),
+    Column("costs", JSONB, nullable=False),
+    Column("delta_mv", JSONB, nullable=False),
+    Column("mv_target", JSONB, nullable=False),
+    Column("cv_target", JSONB, nullable=False),
+    Column("given_up", JSONB, nullable=False),
+    Column("active_constraints", JSONB, nullable=False),
+    Column("duals", JSONB, nullable=False),
+)
+
 mpc_samples_table = Table(
     "mpc_samples",
     TIMESERIES_METADATA,

@@ -21,6 +21,7 @@ function estadoPublicado(
     vars: parcial.vars ?? {},
     cost: 0,
     prediction: { ts: "2026-01-01T00:00:05.000Z", t: [], cv: [], mv: [] },
+    ssto: null,
   };
 }
 

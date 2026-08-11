@@ -1,13 +1,14 @@
 # PRD — OttimaSystem (reescrita, v1)
 
 **Produto:** OttimaSystem — plataforma on-premise de Controle Avançado de Processos (APC) com MPC
-**Versão do documento:** 1.4 · 2026-08-08 · **Status:** aprovado para implementação (F1-F5 concluídas)
+**Versão do documento:** 1.5 · 2026-08-10 · **Status:** aprovado para implementação (F1-F6 concluídas)
 **Changelog 1.1:** adicionado o requisito de **ordem de execução explícita por bloco** (`exec_order`) — RF-307 e RF-401 revisados, ADR-024 criado (altera ADR-007). Sem impacto retroativo em F1/F2; efetivo a partir da F3.
 **Changelog 1.2:** payload do canal `flow.status.<flow_id>` estendido com `ports` (valores de porta por varredura, para o canvas ao vivo) — resolve a lacuna do RF-404, que exigia publicar valores de portas sem definir onde. Decisão aprovada no brainstorm da F3 (2026-08-04, `docs/specs/F3-motor-canvas.md` Anexo A-3).
 **Changelog 1.3:** payload do canal `mpc.state.<flow_id>.<block_id>` ganha `ts` e `prediction.ts`; consumidor `recorder` adicionado (§7.1); nova hypertable `MpcSample` (§4, retenção 1 mês, CAgg `mpc_samples_1m`); RF-703 passa a citar a fonte concreta (`mpc_samples`/`mpc_samples_1m`). PRD avança de 1.2 para v1.3 — decisão A-2 · F5R-01/11/26 (spec F5 §1.3-1, `docs/specs/F5-operacao.md`, 2026-08-06).
 **Changelog 1.4:** §7.2 (JSON de projeto) reescrito para espelhar o schema real do bundle de export/import (`ts_seconds`, `direction`, `security_*`/`watchdog_*` planos, `data_type`/`description` nas tags, `auth_mode`/`auth_username` nas conexões, `exported_at`, `desired_state`, `tag_ref` objeto no `graph`); **RF-102** deixa de amarrar o export ao projeto **ativo** e passa a exportar **um projeto** (por id); §7.1 remove `api(WS)` dos consumidores de `opc.values.<conn_id>`; §7.3 detalha o `/ws` como `flow.status`, `mpc.state`, `events`. PRD avança de 1.3 para v1.4 — decisão A-14 · F6R-02 · RFC-05/06 (spec F6 §2.1-4, `docs/specs/F6-portabilidade-hardening.md`, 2026-08-08).
+**Changelog 1.5:** nova camada **SSTO** (otimização econômica de regime permanente por LP acima do MPC) — §5.13 com **RF-901..RF-906**, fase **F7** no §8, hypertable `SstoRun` no §4 e o campo opcional `ssto` no payload de `mpc.state.<flow_id>.<block_id>` (§7.1). Nenhum canal novo. PRD avança de 1.4 para v1.5 — ADR-026 (2026-08-10).
 **Autor:** Luciano França Rocha (LFR Automação), consolidado em sessão de grilling
-**Documentos-irmãos (normativos):** `adr/ADR-001 … ADR-024` · `GLOSSARY.md`
+**Documentos-irmãos (normativos):** `adr/ADR-001 … ADR-026` · `GLOSSARY.md`
 
 > Convenção: itens `RF-xxx` são requisitos funcionais; `RNF-xxx`, não-funcionais. Referências `(ADR-nnn)` apontam a decisão de arquitetura que governa o requisito. Em conflito entre este PRD e um ADR, **o ADR prevalece** e o PRD deve ser corrigido.
 
@@ -53,7 +54,7 @@ frontend (React+Vite) ⇄ api (FastAPI: REST + WebSocket)
 |---|---|---|
 | **api** | REST (auth, CRUD, comandos), WebSocket (valores, estado MPC, eventos), consulta de histórico | 001 |
 | **opc-worker** | Único processo que fala OPC-UA: sessões, subscriptions → publica leituras; consome `opc.writes`; opera watchdog | 002, 006, 009, 021 |
-| **flow-runtime** | Interpreta e executa flows (scan cycle); MPC (do-mpc), scripts, TFS; publica estado/predições; recebe comandos | 004–007, 013, 014, 016, 018, 019, 022 |
+| **flow-runtime** | Interpreta e executa flows (scan cycle); MPC (do-mpc), scripts, TFS; **SSTO** (alvos de regime permanente, no mesmo ciclo do MPC); publica estado/predições; recebe comandos | 004–007, 013, 014, 016, 018, 019, 022, 026 |
 | **recorder** | Assina o barramento e grava amostras na hypertable | 003 |
 | **redis / db** | Barramento fire-and-forget / persistência única (cadastros + hypertables) | 002, 003 |
 
@@ -70,6 +71,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 - **Event** — hypertable (ts, severidade, origem, mensagem, payload JSON), retenção 1 mês (ADR-020)
 - **Sample** — hypertable (ts, tag_id, valor, qualidade), retenção 1 mês + continuous aggregate 1 min (ADR-003)
 - **MpcSample** — hypertable (ts, flow_id, block_id, var_id, v, sp, auto), retenção 1 mês + continuous aggregate `mpc_samples_1m` (ADR-003)
+- **SstoRun** — hypertable (ts, flow_id, block_id, run_id, config_hash, model_hash, status, solver, solve_ms, objective, e os vetores mv/cv_ss/bias/dv/costs/delta_mv/mv_target/cv_target/given_up/active_constraints/duals em JSONB), **só INSERT**, retenção 1 mês (ADR-026, ADR-003)
 
 ## 5. Requisitos funcionais
 
@@ -152,6 +154,14 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 - **RF-802** API de histórico: consulta por tags + janela, com downsampling automático (bruto ≤ ~2 h; agregado acima).
 - **RF-803** Log de eventos consultável e filtrável (severidade, origem, período) na UI; retenção 1 mês. (ADR-020)
 
+### 5.13 Otimização econômica de regime permanente — SSTO (ADR-026)
+- **RF-901** O bloco MPC aceita uma **função objetivo econômica** por variável (`economics.costs`: preço por MV, CV ou Restrição; preço negativo maximiza), desligada por default.
+- **RF-902** A cada execução do MPC, e no mesmo ciclo, o sistema resolve um **LP de regime permanente** que calcula os alvos MVˢˢ\*/CVˢˢ\* a partir de `ΔCVˢˢ = G·ΔMV + Gd·ΔDV`, onde `G`/`Gd` são o ganho estático do modelo já usado pelo controlador. MV é a única variável de decisão, com limites **duros**; CV/Restrição são limites **suaves**; DV nunca é otimizada.
+- **RF-903** Toda execução gera um **registro de auditoria imutável** (hypertable `ssto_runs`, retenção 1 mês): entradas, custos, solução, status, linhas desistidas em ordem, conjunto ativo, shadow prices, solver e tempo.
+- **RF-904** **Inviabilidade:** folga penalizada por linha como 1ª defesa e **desistência por rank** (`priority`) como 2ª — a linha menos importante sai primeiro, iterativamente. Limite de MV nunca é relaxado.
+- **RF-905** **Fallback:** com o SSTO desligado, inviável ou em falha, o MPC opera com o SP manual do operador, como na F4 — a camada econômica nunca interrompe o controle. Falha gera evento `ssto_infeasible`.
+- **RF-906** **Anti-flipping:** penalização quadrática opcional sobre `‖ΔMV − ΔMV_anterior‖` (detuning, backend QP), configurável por bloco.
+
 ## 6. Requisitos não-funcionais
 
 - **RNF-01 Dimensionamento:** ≥10 flows simultâneos, ~100 tags OPC, ≤5 servidores OPC-UA, 1 mês de retenção — num único host on-prem. (ADR-012)
@@ -174,8 +184,10 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 | `opc.writes` | flow-runtime, api | opc-worker | {conn_id, tag_id, value, source, ts} |
 | `flow.status.<flow_id>` | flow-runtime | api(WS) | {state, scan_ms, overruns, ts, ports{block_id→{porta:{v, ok}}}} |
 | `flow.commands` | api | flow-runtime | {flow_id, cmd, args, user, ts} |
-| `mpc.state.<flow_id>.<block_id>` | flow-runtime | api(WS), recorder | {ts, modes, status, vars, cost, prediction{ts, t[], cv[][], mv[][]}} |
+| `mpc.state.<flow_id>.<block_id>` | flow-runtime | api(WS), recorder | {ts, modes, status, vars, cost, prediction{ts, t[], cv[][], mv[][]}, ssto?} |
 | `events` | todos | api(WS→banner), gravação | {ts, severity, origin, message, payload} |
+
+> `ssto` (ADR-026) é **opcional** e só aparece no quadro em que a camada de alvos executou: `{run_id, config_hash, model_hash, status, solver, solve_ms, objective, mv, cv_ss, bias, dv, costs, delta_mv, mv_target, cv_target, given_up[], active_constraints[], duals}`. O recorder o materializa em `ssto_runs`. **Nenhum canal novo foi criado.**
 
 ### 7.2 JSON de projeto (export/import) (ADR-012)
 ```json
@@ -206,6 +218,7 @@ Nós do `graph` que referenciam tags (blocos `opc_read`/`opc_write` e variáveis
 | **F4 — MPC** | Modal com abas, montagem do-mpc (SOPDT/IOPDT, TSS→Np/Nc), modos, bumpless, multiplicador, orçamento | Malha fechada MPC↔TFS: assume/devolve sem salto de MV; restrição vence CV; overrun mantém MV + alarme |
 | **F5 — Operação** | Tela de operação (faceplates + trend com predição), eventos/banner, auditoria | Operador conduz LOCAL/REMOTO/MAN/AUTO, escreve SP/MV; predição sobreposta ao histórico |
 | **F6 — Portabilidade & hardening** | Export/import JSON, gestão de certificados, health/heartbeats, testes RNF-09 | Projeto exportado importa limpo em instalação nova (re-informando segredos); suíte MPC↔TFS verde |
+| **F7 — Otimização econômica (SSTO)** | Camada `target_calculation` (LP/QP plugável), inviabilidade por rank + folga, auditoria `ssto_runs`, integração como referência do MPC com fallback manual | Alvo ótimo respeita todos os limites; inviabilidade desiste da linha de menor prioridade e registra a ordem; SSTO desligado reproduz o comportamento da F4 bit a bit |
 
 ## 9. Riscos e mitigações
 
@@ -215,9 +228,11 @@ Nós do `graph` que referenciam tags (blocos `opc_read`/`opc_write` e variáveis
 4. **Hot-swap concorrente** — troca atômica de definição entre varreduras com preservação de estado por id de bloco (RF-304); testes dedicados na F3.
 6. **`exec_order` incoerente com o fluxo de dados** — usuário pode ordenar um consumidor antes do produtor (atraso de 1 scan não intencional); mitigado pelo aviso de inversão no editor (RF-307) e pela auto-numeração na inserção.
 5. **Bumpless dependente do PLC** — exige SP/OUT-tracking configurado no PID do PLC; documentar pré-requisitos de comissionamento por malha (guia de integração, F6).
+7. **LP flipping no SSTO** — solução de LP vive num vértice: custos quase paralelos a uma aresta fazem o alvo saltar entre extremos por ruído de medida. Mitigado pelo detuning quadrático opcional (RF-906, backend QP); com `ρ = 0` o comportamento de vértice é escolha explícita do usuário. (ADR-026)
+8. **Alvo econômico vs. proteção de faixa** — preço agressivo empurra a planta contra os limites. Mitigado por limite de MV duro e inviolável, faixas de CV/Restrição como restrição do próprio LP, desistência por rank auditada e fallback para o SP do operador (RF-902/904/905).
 
 ## 10. Referências
 
-- `adr/ADR-001…024` — decisões de arquitetura (normativas)
+- `adr/ADR-001…026` — decisões de arquitetura (normativas)
 - `GLOSSARY.md` — vocabulário do domínio
-- do-mpc · asyncua · React Flow (@xyflow/react) · TimescaleDB · uPlot
+- do-mpc · asyncua · React Flow (@xyflow/react) · TimescaleDB · uPlot · SciPy/HiGHS · OSQP

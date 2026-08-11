@@ -21,7 +21,9 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
     "opc_write": ("tag_id",),
     "script": ("n_inputs", "n_outputs", "code", "output_eu"),
     "tfs": ("matrix", "output_eu"),
-    "mpc": ("name", "multiplier", "variables", "models"),
+    # `economics` é opcional (ADR-026 §9): `_parse_mpc_config` só repassa as chaves
+    # presentes, então config salva antes do SSTO continua parseando.
+    "mpc": ("name", "multiplier", "variables", "models", "economics"),
 }
 _PARAM_KEYS: dict[str, tuple[str, ...]] = {
     "sopdt": ("K", "tau1", "tau2", "theta"),

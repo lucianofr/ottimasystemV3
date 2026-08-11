@@ -102,12 +102,48 @@ class MpcPrediction(BaseModel):
     mv: list[list[float]]
 
 
+class SstoRun(BaseModel):
+    """Registro imutável de uma execução do SSTO (ADR-026 §11, RF-903).
+
+    Viaja como campo opcional de `MpcState` — **sem canal novo** (ADR-002): o recorder, que
+    já assina `mpc.state.*` e é o único escritor de hypertable, o materializa em
+    `ssto_runs`. Quadro sem SSTO omite o campo e continua idêntico ao da F5.
+
+    Carrega os dois hashes que amarram o registro ao que produziu aquele alvo:
+    `config_hash` (custos, limites, ranks) e `model_hash` (a matriz de ganho usada).
+
+    `cv_target` de linha `integrating` é uma TAXA [EU/s], não um nível (ADR-026 §4).
+    """
+
+    run_id: str
+    config_hash: str
+    model_hash: str
+    status: Literal["optimal", "relaxed", "infeasible", "unbounded", "error"]
+    solver: str
+    solve_ms: float
+    objective: float
+    mv: dict[str, float]
+    cv_ss: dict[str, float]
+    bias: dict[str, float]
+    dv: dict[str, float]
+    costs: dict[str, float]
+    delta_mv: dict[str, float]
+    mv_target: dict[str, float]
+    cv_target: dict[str, float]
+    given_up: list[str]
+    """CVs/Restrições desistidas, NA ORDEM em que a desistência ocorreu (ADR-026 §6)."""
+    active_constraints: list[str]
+    duals: dict[str, float]
+
+
 class MpcState(BaseModel):
     """Publicado em `mpc.state.<flow_id>.<block_id>` a cada execução (spec F4 §5.1, RF-625).
 
     `ts` (UTC, spec F5 §2.1-1) é obrigatório de propósito — o recorder (F5 §2.3) depende dele
     como âncora de gravação; quadro fora de AUTO publica `prediction.ts == ts` e
     `prediction.t == []` (spec F5 §2.1-2).
+
+    `ssto` só aparece nos quadros em que a camada de alvos de fato rodou (ADR-026 §11).
     """
 
     ts: datetime
@@ -116,6 +152,7 @@ class MpcState(BaseModel):
     vars: dict[str, MpcVarState]
     cost: float
     prediction: MpcPrediction
+    ssto: SstoRun | None = None
 
 
 class EventMessage(BaseModel):
@@ -166,6 +203,10 @@ KIND_MPC_SOLVER_ERROR = "mpc_solver_error"
 KIND_MPC_SHED = "mpc_shed"
 KIND_MPC_ARM_FAILED = "mpc_arm_failed"
 KIND_MPC_INPUT_INVALID = "mpc_input_invalid"
+# SSTO (ADR-026 §10): a camada de alvos não fechou e o ciclo caiu no SP do operador. O
+# relaxamento por rank NÃO gera evento — é operação normal e fica registrado em
+# `ssto_runs.given_up`; alarme por varredura afogaria o log de eventos (ADR-020).
+KIND_SSTO_INFEASIBLE = "ssto_infeasible"
 
 # Vocabulário `kind` novo da F5 (spec F5 §7.2-2, F5R-02b).
 KIND_SCRIPT_RECOVERED = "script_recovered"  # severity "info"
