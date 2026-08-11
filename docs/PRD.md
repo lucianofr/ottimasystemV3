@@ -1,7 +1,7 @@
 # PRD — OttimaSystem (reescrita, v1)
 
 **Produto:** OttimaSystem — plataforma on-premise de Controle Avançado de Processos (APC) com MPC
-**Versão do documento:** 1.7 · 2026-08-11 · **Status:** aprovado para implementação (F1-F6 concluídas)
+**Versão do documento:** 1.8 · 2026-08-11 · **Status:** aprovado para implementação (F1-F6 concluídas)
 **Changelog 1.1:** adicionado o requisito de **ordem de execução explícita por bloco** (`exec_order`) — RF-307 e RF-401 revisados, ADR-024 criado (altera ADR-007). Sem impacto retroativo em F1/F2; efetivo a partir da F3.
 **Changelog 1.2:** payload do canal `flow.status.<flow_id>` estendido com `ports` (valores de porta por varredura, para o canvas ao vivo) — resolve a lacuna do RF-404, que exigia publicar valores de portas sem definir onde. Decisão aprovada no brainstorm da F3 (2026-08-04, `docs/specs/F3-motor-canvas.md` Anexo A-3).
 **Changelog 1.3:** payload do canal `mpc.state.<flow_id>.<block_id>` ganha `ts` e `prediction.ts`; consumidor `recorder` adicionado (§7.1); nova hypertable `MpcSample` (§4, retenção 1 mês, CAgg `mpc_samples_1m`); RF-703 passa a citar a fonte concreta (`mpc_samples`/`mpc_samples_1m`). PRD avança de 1.2 para v1.3 — decisão A-2 · F5R-01/11/26 (spec F5 §1.3-1, `docs/specs/F5-operacao.md`, 2026-08-06).
@@ -9,6 +9,7 @@
 **Changelog 1.5:** dois blocos de filtro de sinal acrescentados à paleta — **Filtro 1ª ordem** e **Filtro Kalman**; RF-301 passa de 5 para **7 blocos**, nova §5.13 com RF-531/532/533, §1 e §4 atualizados. ADR-026 criado. Sem impacto retroativo: os cinco blocos originais e seus contratos seguem inalterados.
 **Changelog 1.6:** nova camada **SSTO** (otimização econômica de regime permanente por LP acima do MPC) — §5.14 com **RF-901..RF-906**, fase **F7** no §8, hypertable `SstoRun` no §4 e o campo opcional `ssto` no payload de `mpc.state.<flow_id>.<block_id>` (§7.1). Nenhum canal novo. PRD avança de 1.5 para v1.6 — ADR-027 (2026-08-10).
 **Changelog 1.7:** **disponibilidade de MV por ciclo** (ADR-028): `mpc.state.<flow_id>.<block_id>` ganha `vars.<mv_id>.status` (§7.1, campo opcional, só MV); **RF-604** ganha a semântica de status das tags de leitura de modo/readback; novos **RF-626/627/628** (classificação por ciclo, modo degradado e shed por perda total); **RF-625** passa a citar `status` por MV; novo evento `mpc_mv_status_changed` (§5.12/RF-803, sem mudança de schema). PRD avança de 1.6 para v1.7 — ADR-028 (`docs/adr/ADR-028-disponibilidade-de-mv-por-ciclo.md`, 2026-08-11).
+**Changelog 1.8:** reorganização cosmética — **§5.13 (Blocos de filtro)** passa a **§5.11**, logo após os demais blocos de canvas (§5.6-§5.10, TFS termina em RF-52x e MPC começa em RF-60x, com os filtros RF-53x já entre os dois); Tela de operação avança de §5.11 para **§5.12** e Histórico e eventos, de §5.12 para **§5.13**. §5.14 (SSTO) inalterado. Nenhum RF renumerado, nenhum conteúdo ou contrato alterado — só a posição das seções. PRD avança de 1.7 para v1.8 — TD-013 (`docs/reports/_tech-debt.md`).
 **Autor:** Luciano França Rocha (LFR Automação), consolidado em sessão de grilling
 **Documentos-irmãos (normativos):** `adr/ADR-001 … ADR-028` · `GLOSSARY.md`
 
@@ -147,22 +148,22 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 - **RF-627** **Modo degradado (ADR-028).** MV que não está `rcas_ok`: (a) é **congelada** na posição real medida — permanece no modelo, como distúrbio medido, para a predição das CVs seguir correta; (b) **não recebe escrita** no PID; (c) sua porta reporta a **posição real**, nunca o plano do MPC. As demais MVs seguem controlando normalmente — reclassificar uma MV não interrompe as outras. Ao voltar a `rcas_ok`, o movimento parte da posição física e o plano anterior à perda da malha é descartado (sem salto).
 - **RF-628** **Shed por perda total (ADR-028, altera o comportamento do RF-604).** O shed do bloco (REMOTO→LOCAL + alarme `mpc_shed`) passa a exigir **nenhuma MV disponível** por 2 execuções consecutivas. Divergência parcial de modo **não** derruba o bloco. A confirmação de arme (2×Ts_mpc, `mpc_arm_failed {reason: no_confirm}`) permanece inalterada e continua exigindo confirmação de todas as MVs monitoradas.
 
-### 5.11 Tela de operação (ADR-016)
+### 5.11 Blocos de filtro de sinal (ADR-026)
+- **RF-531** Ambos os blocos têm **uma entrada (`in`) e uma saída (`out`)**, numéricas; a entrada é obrigatória (RF-302). Estado interno persistente entre varreduras, com as regras de hot-swap do RF-304.
+- **RF-532** **Filtro 1ª ordem:** parâmetro único **`tau`** (constante de tempo, em segundos), discretizado em ZOH no Ts do flow; `tau` abaixo de `Ts/10` degrada para passagem direta (mesma convenção do bloco TFS).
+- **RF-533** **Filtro Kalman:** filtro escalar de passeio aleatório configurado por dois campos **na EU do próprio sinal**, ambos desvios padrão: **`measurement_noise`** (ruído da medição) e **`process_noise`** (variação esperada do valor verdadeiro por varredura). O estimador inicializa na primeira amostra válida após o reset. Variância e covariância são detalhe interno e não aparecem na interface.
+
+### 5.12 Tela de operação (ADR-016)
 - **RF-701** Tela dedicada por bloco MPC (seletor de MPC ativo): **faceplate principal** (LOCAL/REMOTO, MAN/AUTO, status de watchdog/solver, contador de overrun, comandos) no topo.
 - **RF-702** **Faceplates menores** na base: um por variável do MPC — CV (PV + entrada de SP), MV (valor + entrada manual quando MAN), Restrição (valor + faixa), DV (somente leitura) — com EU e limites.
 - **RF-703** **Centro — tendência (uPlot):** histórico das variáveis selecionadas (`mpc_samples`/`mpc_samples_1m`) **+ overlay da predição** de PVs e MVs no horizonte Np, a partir de "agora"; janela de tempo ajustável.
 - **RF-704** Comandos de operação fluem: UI → REST (autorizado a operador) → `flow.commands` → runtime → estado republicado; todos geram evento de auditoria. (ADR-020)
 - **RF-705** **Banner de alarmes ativos** (condições vigentes: watchdog, overrun, script em falha, conexão caída), sem ACK. (ADR-020)
 
-### 5.12 Histórico e eventos
+### 5.13 Histórico e eventos
 - **RF-801** recorder grava toda leitura publicada na hypertable `samples`; retenção **1 mês** via `add_retention_policy`; continuous aggregate de 1 min para trends longos. (ADR-003)
 - **RF-802** API de histórico: consulta por tags + janela, com downsampling automático (bruto ≤ ~2 h; agregado acima).
 - **RF-803** Log de eventos consultável e filtrável (severidade, origem, período) na UI; retenção 1 mês. (ADR-020)
-
-### 5.13 Blocos de filtro de sinal (ADR-026)
-- **RF-531** Ambos os blocos têm **uma entrada (`in`) e uma saída (`out`)**, numéricas; a entrada é obrigatória (RF-302). Estado interno persistente entre varreduras, com as regras de hot-swap do RF-304.
-- **RF-532** **Filtro 1ª ordem:** parâmetro único **`tau`** (constante de tempo, em segundos), discretizado em ZOH no Ts do flow; `tau` abaixo de `Ts/10` degrada para passagem direta (mesma convenção do bloco TFS).
-- **RF-533** **Filtro Kalman:** filtro escalar de passeio aleatório configurado por dois campos **na EU do próprio sinal**, ambos desvios padrão: **`measurement_noise`** (ruído da medição) e **`process_noise`** (variação esperada do valor verdadeiro por varredura). O estimador inicializa na primeira amostra válida após o reset. Variância e covariância são detalhe interno e não aparecem na interface.
 
 ### 5.14 Otimização econômica de regime permanente — SSTO (ADR-027)
 - **RF-901** O bloco MPC aceita uma **função objetivo econômica** por variável (`economics.costs`: preço por MV, CV ou Restrição; preço negativo maximiza), desligada por default.
