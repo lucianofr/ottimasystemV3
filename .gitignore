@@ -27,7 +27,7 @@ frontend/openapi.json
 .mcp.json
 
 # graphify: trava transitoria de rebuild (PID), nunca versionada
-graphify-out/.rebuild.lock
+graphify-out/
 # Added by code-review-graph
 .code-review-graph/
 
