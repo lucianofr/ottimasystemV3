@@ -1,16 +1,16 @@
-# Graph Report - ottimaSystemV3  (2026-08-10)
+# Graph Report - ottimaSystemV3  (2026-08-11)
 
 ## Corpus Check
-- 478 files · ~439,328 words
+- 500 files · ~453,184 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 5882 nodes · 14000 edges · 336 communities (230 shown, 106 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 817 edges (avg confidence: 0.69)
+- 6294 nodes · 14952 edges · 352 communities (240 shown, 112 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 886 edges (avg confidence: 0.68)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b146c469`
+- Built from commit: `0ca2c7eb`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -22,7 +22,7 @@
 - test_flowgraph.py
 - OpcSim
 - ConnectionRuntime
-- FlowEditorPage.tsx
+- graph.ts
 - WSClient
 - _ResilientSubscriber
 - test_flow_commands.py
@@ -40,15 +40,15 @@
 - test_f3_engine.py
 - test_operate.py
 - test_watchdog.py
-- OpcWrite
+- WriteConsumer
 - ScriptPool
 - TagRef
-- ws.py
+- _apply_client_message
 - opc-worker/tests/test_security.py
 - deps.py
 - 4. Cenários
-- ottima_opc_worker/connection.py
-- SolveResult
+- SteadyStateOptimizer
+- OpcWrite
 - test_tfs.py
 - Spec F6 — Portabilidade & hardening (export/import, certificados, suíte RNF-09)
 - opc-worker/tests/test_health.py
@@ -74,26 +74,26 @@
 - generate_app_certificate
 - mpc_config.py
 - test_heartbeat.py
-- TabVariables.tsx
+- test_ssto_model.py
 - ModalConfigBloco.tsx
 - test_pipeline.py
-- ConnectionConfig
+- ottima_opc_worker/security.py
 - Plano F6b — Superfícies (Projetos, certificados, pendências, EU, DV)
 - Spec F5 — Tela de operação (faceplates, trend com predição, eventos e banner)
 - routers/connections.py
 - ottima_core/security.py
 - flowgraph/__init__.py
-- graph.ts
+- SolverResult
 - e2e/conftest.py
 - test_mpc_bumpless.py
 - make_user
 - Supervisor
 - publish_event
-- collect
+- create_flow
 - test_server.py
 - 4. Cenários
 - _get
-- build_mpc
+- test_mpc_builder.py
 - mpc_golden_export.py
 - FlowCommand
 - models/__init__.py
@@ -109,10 +109,10 @@
 - Plano F4a — MPC: config & montagem
 - bus.py
 - test_mpc_worker.py
-- Any
+- test_f4_failure.py
 - flow-runtime
 - compilerOptions
-- routers/tags.py
+- _solve
 - MpcWorker — processo dedicado por bloco MPC
 - ADR-013 — Modelo do MPC: matriz SOPDT + processo integrador; horizontes derivados do TSS
 - build_mpc(config, ts_flow) -> BuiltMpc
@@ -123,7 +123,7 @@
 - Plano F6c — Suíte RNF-09, cenários de portabilidade e guia de implantação
 - Derivacao de horizontes Ts_mpc/Np/Nc (funcao pura)
 - test_script.py
-- WatchdogTask
+- ConnectionConfig
 - MpcBlock (blocks/mpc.py)
 - ADR-012 — Projeto como unidade de agrupamento e portabilidade (JSON)
 - Semantica de invalidez: executa com o valor e propaga flag
@@ -132,7 +132,7 @@
 - MCP Tools: code-review-graph
 - ADR-001…024 (decisões de arquitetura normativas)
 - Supervisor (ciclo de vida dos FlowTasks)
-- await_until
+- test_writes.py
 - test_api_e2e.py
 - test_mpc_load.py
 - ADR-010 — Modos LOCAL/REMOTO e MAN/AUTO com transferência bumpless
@@ -143,7 +143,7 @@
 - Semantica de exec_order e tabela de portas persistente
 - conftest.py
 - Contrato de canais do barramento (PRD §7.1)
-- definition.py
+- build_definition
 - Serviço api (FastAPI, porta interna 8000)
 - generate-contracts.mjs
 - schemas/connections.py
@@ -160,11 +160,11 @@
 - Decision: Redis pub/sub internal bus (opc.values.<conn_id> out, opc.writes in)
 - Decision: per-pair model matrix (MV->CV, DV->CV); response type per CV — self-regulating SOPDT(K,t1,t2,th) or integrating (Ki,th); Np/Nc derived from TSS, not user-edited; hard MV limits and rate limit
 - PRD.md (archived) — OttimaSystem product requirements v1.0
-- blocks/base.py
+- tfs.py
 - _DropOldestBuffer
 - ottima_flow_runtime/main.py
 - scripts
-- Connection
+- solver.py
 - eventos
 - processo_vivo
 - Decision: solver timeout ~70% of effective Ts_mpc — on overrun keep last MV, raise alarm, skip to next scan; per-block multiplier N (Ts_mpc = N x Ts_flow)
@@ -173,11 +173,11 @@
 - Matriz de modelos SOPDT/integrador com horizontes derivados do TSS
 - env.py
 - cert_servidor
-- ottima_recorder/main.py
-- test_snapshot.py
+- Settings
+- await_until
 - Plano F5a — Operação: dados & serviços
 - api/tests/test_tags.py
-- ChannelListener
+- test_ssto_detuning.py
 - WSClient
 - Continuous aggregate samples_1m (avg/min/max/count/worst_quality)
 - Decision: live flow edits take effect on the next scan without interruption; no flow versioning
@@ -201,7 +201,7 @@
 - Camadas L1/L1s/L2/L3 e 19 cenários do gate da F1
 - index.tsx
 - api/tests/test_health.py
-- ValueSubscription
+- subscriptions.py
 - entrypoint-api.sh
 - smoke.sh
 - Faceplates com barras verticais PV/SP/OUT (convenção intocável)
@@ -212,7 +212,7 @@
 - ottima_core.tags.project_tags
 - ConnectionRuntime (máquina connecting→up→failed, backoff + jitter)
 - @fontsource/spline-sans-mono
-- TrendPage.tsx
+- test_mpc_economics.py
 - @tanstack/react-query
 - Harness
 - test_get_app_com_pem_corrompido_devolve_500_em_pt_br
@@ -226,7 +226,7 @@
 - test_handshake_de_boot_falho_loga_o_tamanho_do_pool_que_sobrou
 - ottima_opc_worker/__init__.py
 - FlowStatusHub
-- PatternListener
+- test_ssto_block.py
 - ottima_recorder/__init__.py
 - testkit/__init__.py
 - Arquitetura on-premise APC (React/FastAPI/Redis/workers/TimescaleDB)
@@ -264,7 +264,7 @@
 - Princípio: falhar para o lado seguro é inegociável
 - Princípio: operação e engenharia são mundos distintos
 - v1: reescrita completa do sistema legado Django, sem compatibilidade
-- CancellingRuntime
+- test_stop_loga_desmonte_cancelado_por_fora
 - PubSub
 - PubSub
 - Any
@@ -278,34 +278,34 @@
 - PubSub
 - Supervisor
 - FlowStatus
-- Settings
-- MpcState
+- generate_app_cert
+- Decisão
 - Collector
 - test_ws_mpc.py
 - SolveRequest
 - test_td_flow_props.py
 - test_kind_fora_de_hint_kinds_nao_dispara_reconcile
-- ._fanout
+- channel_mpc_state
 - OpcWrite
 - setup_planta.py
-- flow-runtime/tests/test_events.py
+- test_falha_ao_assinar_nao_vaza_inscricao_nem_conexao
 - parametrize
 - schemas/projects.py
 - schemas/events.py
 - ADR-025 — Retomada automática completa após `comm_restored`
 - planta_virtual/supervisor_mpc.py
-- PairInit
+- builder.py
 - MpcConfig
 - test_f4_ws.py
 - test_health_mpc.py
 - schemas/tags.py
 - plant_ops.py
 - .advance
-- StubPool
+- test_bus_ssto.py
 - schemas/auth.py
 - app.py
-- Block
-- DM
+- build_mpc
+- _Runtime
 - FlowCreate
 - FlowGraph
 - probe_sessao.py
@@ -314,13 +314,13 @@
 - FlowSaved
 - FlowStatus
 - FlowUpdate
-- MpcHost
-- MpcPrediction
+- health
+- test_timescale_ssto.py
 - MvVar
 - PidBinding
 - patch
 - MpcConfig
-- MpcState
+- schemas/flows.py
 - OpcWrite
 - SolveResult
 - FastAPI
@@ -329,29 +329,44 @@
 - MonkeyPatch
 - MpcState
 - parametrize
-- ValueSnapshot
+- _avisos_watchdog
 - react-router
 - test_e2e_td_08_predicao_tem_np_mais_um_ponto_e_parte_do_u_prev
 - test_e2e_td_06_salvar_avisa_e_armar_e_recusado
 - ottima_opc_worker/main.py
 - test_e2e_f6_05_overrun_pela_malha_tfs
-- ._readback_value
+- .stop
 - StatusStream
 - ottima_core/tags.py
-- SocketFalso
-- _excede_o_declarado
-- .__aexit__
-- _parse_e_validar
+- StubPipeline
+- conexoes_sem_watchdog
+- test_reassinatura_limpa_respeita_o_freio
+- fixture
+- .functional_config
+- ._valida_output_eu
+- ._valida_output_eu
+- RecordingSession
+- .decision_ids
+- field_validator
+- Block
+- MpcHost
+- ValueSnapshot
+- Connection
+- DM
+- async_sessionmaker
+- AsyncSession
+- T
+- Table
 
 ## God Nodes (most connected - your core abstractions)
 1. `await_until()` - 136 edges
-2. `harness_factory()` - 68 edges
-3. `mpc_node()` - 64 edges
-4. `collect()` - 62 edges
-5. `mpc_graph()` - 62 edges
-6. `mpc_tags()` - 62 edges
-7. `MpcBlock` - 60 edges
-8. `MpcConfig` - 59 edges
+2. `MpcConfig` - 84 edges
+3. `MpcBlock` - 70 edges
+4. `harness_factory()` - 68 edges
+5. `mpc_node()` - 64 edges
+6. `collect()` - 62 edges
+7. `mpc_graph()` - 62 edges
+8. `mpc_tags()` - 62 edges
 9. `publish_event()` - 57 edges
 10. `has()` - 57 edges
 
@@ -386,19 +401,19 @@
 - **Flow execution semantics (scan cycle, exec_order, hot-swap, solver budget)** — docs_ottimasystem_docsv1_1_adr_adr_007_scan_cycle_ts_por_flow_scan_cycle, docs_ottimasystem_docsv1_1_adr_adr_024_ordem_execucao_explicita_exec_order, docs_ottimasystem_docsv1_1_adr_adr_011_hot_swap_sem_versionamento_hot_swap, docs_ottimasystem_docsv1_1_adr_adr_014_orcamento_solver_multiplicador_solver_budget [EXTRACTED 1.00]
 - **Docker Compose on-prem v1 service topology** — docs_ottimasystem_docsv1_1_adr_adr_023_escopo_plataforma_v1_docker_compose, docs_ottimasystem_docsv1_1_adr_adr_001_fastapi_all_in_fastapi, docs_ottimasystem_docsv1_1_adr_adr_002_barramento_redis_pubsub_redis_pubsub, docs_ottimasystem_docsv1_1_adr_adr_006_separacao_opc_worker_flow_runtime_recorder [EXTRACTED 1.00]
 
-## Communities (336 total, 106 thin omitted)
+## Communities (352 total, 112 thin omitted)
 
 ### Community 0 - "api.ts"
-Cohesion: 0.05
-Nodes (52): ADR-0015, ADR-0020, AnnunciatorBar(), AppShell(), NAV_ENGENHARIA, AuthGuard(), HomePage(), App() (+44 more)
+Cohesion: 0.04
+Nodes (92): ADR-0015, ADR-0020, AnnunciatorBar(), AppShell(), NAV_ENGENHARIA, AuthGuard(), HomePage(), App() (+84 more)
 
 ### Community 1 - "opc-worker/tests/test_supervisor.py"
-Cohesion: 0.15
-Nodes (52): create_connection(), create_project(), create_tag(), make_supervisor(), async_sessionmaker, AsyncSession, fixture, LogCaptureFixture (+44 more)
+Cohesion: 0.19
+Nodes (44): create_connection(), create_project(), create_tag(), make_supervisor(), async_sessionmaker, AsyncSession, fixture, OpcSimServer (+36 more)
 
 ### Community 2 - "mpcLogic.ts"
-Cohesion: 0.06
-Nodes (67): NoMpc, ParModeloMpc, TipoLinhaMpc, VariaveisMpc, VariavelCv, VariavelMv, VariavelRestricao, SelectTag() (+59 more)
+Cohesion: 0.05
+Nodes (71): NoMpc, ParModeloMpc, TipoLinhaMpc, VariaveisMpc, VariavelCv, VariavelRestricao, SelectTag(), arredondarBankers() (+63 more)
 
 ### Community 3 - "test_flowgraph_mpc.py"
 Cohesion: 0.11
@@ -409,36 +424,36 @@ Cohesion: 0.08
 Nodes (82): base_graph(), base_tags(), edge_of(), errors_of(), has(), link(), node_of(), off() (+74 more)
 
 ### Community 5 - "OpcSim"
-Cohesion: 0.09
-Nodes (61): AmbienteMpc, armar_ate_remoto(), armar_auto_com_retentativa(), armar_remoto_direto(), assinar_mpc_state(), _config_mpc_malha(), criar_flow_mpc(), criar_tag_leitura_dummy() (+53 more)
+Cohesion: 0.10
+Nodes (48): AmbienteMpc, assinar_mpc_state(), _config_mpc_malha(), criar_flow_mpc(), deploy_flow(), grafo_mpc_tfs(), OpcSim, operar_modo() (+40 more)
 
 ### Community 6 - "ConnectionRuntime"
-Cohesion: 0.06
-Nodes (33): build_client(), ConnectionRuntime, _disconnect_quiet(), Client, FailureReason, TagConfig, VariantType, Client asyncua vivo; None fora do estado `up`. (+25 more)
-
-### Community 7 - "FlowEditorPage.tsx"
 Cohesion: 0.05
-Nodes (49): ADR-0023, AGUARDO, COR_LAMPADA, Editor(), novoId(), ROTULO_EFEITO, TOM_EFEITO, ADR-0011 (+41 more)
+Nodes (34): backoff_delay(), ConnectionRuntime, _disconnect_quiet(), Client, FailureReason, TagConfig, VariantType, Client asyncua vivo; None fora do estado `up`. (+26 more)
+
+### Community 7 - "graph.ts"
+Cohesion: 0.04
+Nodes (93): ADR-0023, AGUARDO, COR_LAMPADA, Editor(), novoId(), ROTULO_EFEITO, TOM_EFEITO, ADR-0011 (+85 more)
 
 ### Community 8 - "WSClient"
-Cohesion: 0.14
-Nodes (14): channel_mpc_state(), _payload_of(), Any, Trava o envio do servidor para este cliente (TCP cheio)., Tudo o que o cliente ainda tem para receber, até o cano secar., Volta quando o servidor consumiu o envio. O comando é aplicado sem nenhum…, Regressão do roteio duplo: o segundo `PatternListener` do hub (`mpc.state.*`)…, Cliente WS in-process: fala ASGI direto, no mesmo event loop do teste. O… (+6 more)
+Cohesion: 0.11
+Nodes (10): _payload_of(), Any, FastAPI, Trava o envio do servidor para este cliente (TCP cheio)., Tudo o que o cliente ainda tem para receber, até o cano secar., Volta quando o servidor consumiu o envio. O comando é aplicado sem nenhum…, Cliente WS in-process: fala ASGI direto, no mesmo event loop do teste. O…, Código do fechamento; o upgrade é aceito antes de recusar (contrato do §5.3). (+2 more)
 
 ### Community 9 - "_ResilientSubscriber"
-Cohesion: 0.16
-Nodes (10): _close(), Any, PubSub, Só volta com a inscrição confirmada: a publicação seguinte não se perde.…, Fecha o assinante sem nunca levantar: é caminho de desmonte., Esqueleto do laço resiliente. `ChannelListener` e `PatternListener` só variam o…, Assina o alvo e sobe a escuta; só retorna com a inscrição confirmada.…, Cancela a escuta e fecha a inscrição. Idempotente e nunca levanta: é desmonte. (+2 more)
+Cohesion: 0.08
+Nodes (28): ChannelListener, _close(), Any, PubSub, Redis, Só volta com a inscrição confirmada: a publicação seguinte não se perde.…, Assinante resiliente de um canal fixo (`SUBSCRIBE`); `handler` recebe só o…, Fecha o assinante sem nunca levantar: é caminho de desmonte. (+20 more)
 
 ### Community 10 - "test_flow_commands.py"
 Cohesion: 0.08
 Nodes (56): eventos(), Assinante do canal `events` num segundo cliente, como faz o worker (ADR-020).…, _admin_id(), _conexao(), _projeto(), Auditoria da API no canal `events` (ADR-020, spec F2 §7.2): o que emite e o que…, CRUD de users, CRUD de projects sem ativação e qualquer GET: canal silencioso…, Trocar `dependencies=[require_admin]` pelo parâmetro nomeado não pode afrouxar… (+48 more)
 
 ### Community 11 - "FlakyRedis"
-Cohesion: 0.11
-Nodes (9): _BrokenPubSub, ClosingRedis, _EmptyPubSub, FlakyRedis, PubSub, Assinante que morre na primeira escuta, como numa queda de conexão do Redis., Cliente cujo primeiro `pubsub()` devolve um assinante que cai ao escutar., Assinante cuja escuta termina limpa na hora, sem levantar nada. (+1 more)
+Cohesion: 0.15
+Nodes (7): _BrokenPubSub, _EmptyPubSub, FlakyRedis, PubSub, Assinante que morre na primeira escuta, como numa queda de conexão do Redis., Cliente cujo primeiro `pubsub()` devolve um assinante que cai ao escutar., Assinante cuja escuta termina limpa na hora, sem levantar nada.
 
 ### Community 12 - "OpcValue"
-Cohesion: 0.07
-Nodes (31): OpcValue, mode_read_matches(), pid_targets(), Confirmação de armar e shed do bloco MPC (spec F4 §4.4/§4.5, plano F4b tarefa…, Só as MVs cujo `pid` tem `mode_read_tag_id` — sem ele não há como confirmar nem…, `True` só se TODAS as MVs monitoradas confirmam `target` no `mode_read` agora., Task de fundo por bloco armado: confirma em até `CONFIRM_MISSES_LIMIT` ticks de…, watch_arm() (+23 more)
+Cohesion: 0.06
+Nodes (37): OpcValue, PidBinding, Amarração de tags do PID de uma MV (spec §2.1-3, RF-604)., PatternListener, Assinante resiliente de um padrão glob (`PSUBSCRIBE`); `handler` recebe…, `(var_id, pid)` de cada MV com `pid` — o supervisor usa para escrever…, mode_read_matches(), pid_targets() (+29 more)
 
 ### Community 13 - "FakeClock"
 Cohesion: 0.09
@@ -449,36 +464,36 @@ Cohesion: 0.08
 Nodes (51): Ambiente, congelar_watchdog(), esperar_ate(), esperar_conexao(), evento_de(), EventStream, publicar_escrita(), PubSub (+43 more)
 
 ### Community 15 - "Supervisor"
-Cohesion: 0.05
-Nodes (32): FlowTask, _cancel(), _log_teardown_results(), Any, AsyncSession, Block, Flow, Mantém as `FlowTask` alinhadas com os comandos e com o banco. (+24 more)
+Cohesion: 0.07
+Nodes (24): FlowTask, AsyncSession, Block, Flow, Mantém as `FlowTask` alinhadas com os comandos e com o banco., Tasks vivas por `flow_id` — inclui as paradas e as em falha, como o `/health`., Delega a `MpcOrchestrator.mpc_health` (spec F4 §4.10, plano F4b tarefa 2.3/5.0)., Delega a `MpcOrchestrator.script_pool_stats` (débito 5, spec F4 §4.10/§8). (+16 more)
 
 ### Community 16 - "validate.py"
-Cohesion: 0.06
-Nodes (61): FlowEdge, MvVar, Variável manipulada. Sem `pid` ⇒ MV "direta" (spec §2.1-3). Coordenada da…, _check_cycles(), _check_edge_endpoints(), _check_exec_order(), _check_fan_in(), _check_handles() (+53 more)
+Cohesion: 0.07
+Nodes (57): FlowEdge, MvVar, model_validator, Variável manipulada. Sem `pid` ⇒ MV "direta" (spec §2.1-3). Coordenada da…, _check_cycles(), _check_edge_endpoints(), _check_exec_order(), _check_fan_in() (+49 more)
 
 ### Community 17 - "MpcHost"
-Cohesion: 0.07
-Nodes (38): MpcHost, Any, Connection, SpawnProcess, Mata + junta + fecha o pipe. Roda numa thread (ADR-004); nunca levanta — mesmo…, Dono do processo do worker MPC de UM bloco (spec F4 §3.6/§4.2/§4.9). Ver…, Sobe o processo e espera o handshake `("ready", n_x)` — `ready` fica `False`…, `True` só quando há um worker vivo e pronto para receber o PRÓXIMO dispatch —… (+30 more)
+Cohesion: 0.06
+Nodes (43): _empty_result(), MpcHost, Any, Connection, SpawnProcess, Mata + junta + fecha o pipe. Roda numa thread (ADR-004); nunca levanta — mesmo…, Resultado sintético (nunca veio do filho) — mesmo formato vazio de…, Dono do processo do worker MPC de UM bloco (spec F4 §3.6/§4.2/§4.9). Ver… (+35 more)
 
 ### Community 18 - "useFlowStatus.ts"
-Cohesion: 0.05
-Nodes (47): ADR-0010, ValorPorta(), ValoresAoVivo, abrirCanalAoVivo(), AMBIENTE_BROWSER, AmbienteAoVivo, analisarMensagem(), AplicarAoVivo (+39 more)
+Cohesion: 0.04
+Nodes (58): ADR-0010, ADR-0027, AGORA, SEM_FLOW_STATUS, SEM_MPC_STATES, abrirCanalAoVivo(), AMBIENTE_BROWSER, AmbienteAoVivo (+50 more)
 
 ### Community 19 - "FlowTask"
 Cohesion: 0.07
 Nodes (20): PortValue, FlowTask, datetime, Redis, Ancora a grade e sobe a task. Idempotente: deploy em rodando é no-op (RNF-05)., Encerra a task. Idempotente e nunca levanta: é caminho de desmonte (RNF-05).…, Falha imposta de fora: `comm_failure` derruba os flows da conexão caída…, Uma varredura: blocos na ordem da tupla, lendo e escrevendo a tabela de portas. (+12 more)
 
 ### Community 20 - "PortSample"
-Cohesion: 0.08
-Nodes (47): has_cold_input(), PortSample, Valor de uma porta numa varredura. `v is None` é cold start (nunca houve valor…, Portão de cold start (§3.0): alguma entrada conectada ainda não tem valor., OpcReadBlock, Sem entradas; saída `out`. Invalidez (§3.1) é conservadora: `quality != 0`…, _AccumulatorBlock, bus() (+39 more)
+Cohesion: 0.04
+Nodes (68): ABC, Block, has_cold_input(), null_outputs(), PortSample, Protocolo comum dos blocos executáveis e as duas regras de base (spec F3 §3.0).…, Valor de uma porta numa varredura. `v is None` é cold start (nunca houve valor…, Bloco de um flow. `block_id` é o id do nó React Flow (chave do hot-swap,… (+60 more)
 
 ### Community 21 - "test_mpc_block.py"
-Cohesion: 0.05
-Nodes (88): _block(), _config(), _entra_remoto_auto(), entradas(), Events, FakeClock, FakeSnapshot, datetime (+80 more)
+Cohesion: 0.06
+Nodes (83): _block(), _config(), _entra_remoto_auto(), entradas(), FakeClock, datetime, PortSample, Contratos do bloco MPC — cadência, modos, aplicar-na-fronteira e write-back… (+75 more)
 
 ### Community 22 - "test_f3_engine.py"
 Cohesion: 0.08
-Nodes (68): compose(), Roda `docker compose` do stack e2e no diretório do deploy. Escopo…, aguardar_parado(), aresta(), assinantes_de_status(), ativar_projeto(), bloco(), de_varredura() (+60 more)
+Nodes (66): aguardar_parado(), aresta(), assinantes_de_status(), ativar_projeto(), bloco(), de_varredura(), deploy(), elemento_iopdt() (+58 more)
 
 ### Community 23 - "test_operate.py"
 Cohesion: 0.07
@@ -488,53 +503,53 @@ Nodes (64): _aresta(), _cenario(), comandos(), _conexao(), _cv(), _flow(), _graf
 Cohesion: 0.09
 Nodes (44): assert_bit_stable(), await_bit(), await_flips(), connected(), make_config(), make_watchdog(), Client, ConnectionConfig (+36 more)
 
-### Community 25 - "OpcWrite"
+### Community 25 - "WriteConsumer"
 Cohesion: 0.07
-Nodes (33): BlockReason, OpcWrite, RejectReason, Escreve `mode_cmd` em toda MV com `pid` (com ou sem `mode_read` — a escrita em…, write_mode_cmd(), ConnectionState, Estados da máquina de conexão (spec §2.2-2)., _BlockedPeriod (+25 more)
+Nodes (32): BlockReason, RejectReason, describe_exception(), Detalhe curto e sem segredo para o payload do evento., ConnectionState, Estados da máquina de conexão (spec §2.2-2)., _BlockedPeriod, _cancel() (+24 more)
 
 ### Community 26 - "ScriptPool"
-Cohesion: 0.09
-Nodes (26): _PoolState, Any, Connection, ProcessPool dedicado ao bloco Script (RF-511..514, ADR-018/004, spec F3 §3.3,…, Alvo do `spawn`: laço de jobs. Nível de módulo porque `spawn` precisa importá-…, Sobe um worker. Roda **numa thread** — nunca no event loop (ADR-004)., Espera um resultado no pipe. Roda **numa thread** — nunca no event loop…, Encerra o processo e fecha o pipe. Roda numa thread; nunca levanta. (+18 more)
+Cohesion: 0.06
+Nodes (31): _PoolState, Any, Connection, ProcessPool dedicado ao bloco Script (RF-511..514, ADR-018/004, spec F3 §3.3,…, Alvo do `spawn`: laço de jobs. Nível de módulo porque `spawn` precisa importá-…, Sobe um worker. Roda **numa thread** — nunca no event loop (ADR-004)., Espera um resultado no pipe. Roda **numa thread** — nunca no event loop…, Encerra o processo e fecha o pipe. Roda numa thread; nunca levanta. (+23 more)
 
 ### Community 27 - "TagRef"
-Cohesion: 0.13
-Nodes (40): O que a validação precisa saber de uma tag; o chamador projeta a linha do banco., TagRef, _conn_ids(), _mpc_escreve_sem_watchdog(), _mpc_pid_tag_ids(), FlowNode, Conexões que o grafo referencia — o conjunto que o `comm_failure` consulta…, Tags do `pid` de cada MV do bloco `mpc` — MV "direta" (sem `pid`, decisão A-8)… (+32 more)
+Cohesion: 0.15
+Nodes (36): BaseModel, O que a validação precisa saber de uma tag; o chamador projeta a linha do banco., TagRef, _conn_ids(), Conexões que o grafo referencia — o conjunto que o `comm_failure` consulta…, edge(), mpc_node(), mv() (+28 more)
 
-### Community 28 - "ws.py"
-Cohesion: 0.18
-Nodes (13): _apply_client_message(), _authenticate(), _flow_ids(), _mpc_ids(), Any, AsyncSession, Settings, User (+5 more)
+### Community 28 - "_apply_client_message"
+Cohesion: 0.33
+Nodes (7): _apply_client_message(), _flow_ids(), _mpc_ids(), Any, Só inteiros: item de forma inesperada é ignorado, não derruba a conexão., Só pares `flow_id/block_id` bem formados (§6.2); item malformado é ignorado., Aplica `subscribe`/`unsubscribe` de `flow_status`/`mpc_state`; o resto é logado…
 
 ### Community 29 - "opc-worker/tests/test_security.py"
 Cohesion: 0.10
 Nodes (46): certs_dir(), certs_dir_vazio(), endpoint_mudo(), failures(), falha_unica(), make_config(), pin_server_certificate(), ConnectionConfig (+38 more)
 
 ### Community 30 - "deps.py"
-Cohesion: 0.10
-Nodes (25): EventOut, HTTPAuthorizationCredentials, get_app_settings(), get_current_user(), get_db(), get_redis(), AsyncSession, Redis (+17 more)
+Cohesion: 0.08
+Nodes (29): EventOut, HTTPAuthorizationCredentials, get_app_settings(), get_current_user(), get_db(), get_redis(), AsyncSession, Redis (+21 more)
 
 ### Community 31 - "4. Cenários"
 Cohesion: 0.09
 Nodes (21): 1. Precondições de ambiente, 2. Regras de execução com a tool `browser`, 3. Evidências, 4. Cenários, 5. O que este roteiro NÃO cobre, 6. Ordem de gate, B-F6-01 — `/engenharia/projetos`: CRUD, exclusão do ativo recusada, B-F6-02 — Ativar: confirmação nomeia o projeto e o nº de flows a parar; invalidação de cache sem reload (+13 more)
 
-### Community 32 - "ottima_opc_worker/connection.py"
-Cohesion: 0.10
-Nodes (26): DataValue, backoff_delay(), Runtime de uma conexão OPC-UA: máquina de estados, backoff e eventos (spec F2…, Backoff exponencial com teto e full jitter (spec §2.2-2), `attempt` 0-based., Heartbeat de valor de uma conexão: report-by-exception + republicação (spec F2…, ConnectionSnapshot, _iso_utc(), Any (+18 more)
+### Community 32 - "SteadyStateOptimizer"
+Cohesion: 0.15
+Nodes (46): Otimizador de alvos de um bloco MPC (ADR-027 §2). Instância longa: monta…, SteadyStateOptimizer, _co(), _config(), _config_conflitante(), _config_limite(), _cv(), _dv() (+38 more)
 
-### Community 33 - "SolveResult"
-Cohesion: 0.09
-Nodes (39): DMStruct, BuiltMpc, Montagem do-mpc do bloco MPC (spec F4 §3.2-3.5; TDD estrito). `build_mpc` monta…, Controller do-mpc pronto + metadados de índice para o worker (spec F4 §3,…, Init bumpless — rotina única de armar/re-armar (spec F4 §3.6; TDD estrito).…, _empty_result(), `MpcHost` — dono, no processo pai, do processo filho do worker MPC (spec F4…, Resultado sintético (nunca veio do filho) — mesmo formato vazio de… (+31 more)
+### Community 33 - "OpcWrite"
+Cohesion: 0.08
+Nodes (28): MpcState, OpcWrite, Publicado em `mpc.state.<flow_id>.<block_id>` a cada execução (spec F4 §5.1,…, empty_result(), _handle(), Resposta de solve — picklável. Ordem das linhas de…, Isola falhas de UM pedido (spec: exceção no solve -> `status='error'`, worker…, Pedido de solve — picklável (cruza o `Pipe`, spec F4b §Interfaces internas). (+20 more)
 
 ### Community 34 - "test_tfs.py"
-Cohesion: 0.06
-Nodes (56): _Element, _FirstOrder, _Iopdt, Block, PortSample, Entradas `u1,u2`; saídas `y1,y2`. `matrix[J][K]` = contribuição de `uK` para…, Estágio de 1a ordem exato no ZOH: `x <- a*x + (1-a)*u`. Abaixo de…, Dois estágios de 1a ordem em série; ganho K aplicado no final da cascata. (+48 more)
+Cohesion: 0.12
+Nodes (44): double_pole(), first_order(), iopdt(), off(), parametrize, Contratos do bloco TFS contra a solução analítica (RF-521/522, ADR-022, spec F3…, Cascata de dois ZOH exatos != ZOH exato do produto. O 2o estágio consome…, Sem excitação não há resposta: entrada 0.0 é valor legítimo, não invalidez. (+36 more)
 
 ### Community 35 - "Spec F6 — Portabilidade & hardening (export/import, certificados, suíte RNF-09)"
 Cohesion: 0.05
 Nodes (39): 10. Débitos herdados — veredito, 11. Aderência ao aceite F6 (PRD §8), 12. Mapa de seções por plano (RFC-09), 1.1 Dentro da F6, 1.2 Fora da F6 — com destino registrado, 1.3 Emendas a documentos anteriores (consolidação), 1. Escopo da F6, 2.1 Schemas de bundle próprios (decisão A-2; emenda PRD §7.2 → v1.4; F6R-05) (+31 more)
 
 ### Community 36 - "opc-worker/tests/test_health.py"
-Cohesion: 0.10
-Nodes (22): app(), App real com get_db na sessão em SAVEPOINT e get_redis no Redis efêmero dos…, app_state_limpo(), get_health(), fixture, Response, Testes do `/health` do opc-worker (RNF-07, spec F2 §2.2-8). O app é um…, Dublê de `async_sessionmaker`: o `SELECT 1` é executado ou explode, como no… (+14 more)
+Cohesion: 0.07
+Nodes (30): app(), App real com get_db na sessão em SAVEPOINT e get_redis no Redis efêmero dos…, Runtime que não subiu o supervisor está surdo a todo `deploy`: nunca…, StubRedis, test_check_redis_marca_estado(), test_health_responde_200_com_nome_do_servico(), test_health_sem_supervisor_nao_responde_ok(), app_state_limpo() (+22 more)
 
 ### Community 37 - "test_f3_lifecycle.py"
 Cohesion: 0.12
@@ -545,20 +560,20 @@ Cohesion: 0.15
 Nodes (36): channel_flow_status(), connect(), hub(), make_token(), operator_token(), fixture, parametrize, WebSocket `/ws`: auth, protocolo, fanout e isolamento entre clientes (RF-305,… (+28 more)
 
 ### Community 39 - "runtime_test_helpers.py"
-Cohesion: 0.16
-Nodes (37): disabled_element(), edge(), graph(), node(), port_value(), Any, Helpers de teste do flow-runtime, importados por nome qualificado pelos…, Grava o grafo direto no banco, sem passar pela API: é o que o hot-swap relê. (+29 more)
+Cohesion: 0.11
+Nodes (57): create_connection(), create_tag(), disabled_element(), edge(), graph(), mpc_graph_valido(), mpc_host_echo_plan_worker(), node() (+49 more)
 
 ### Community 40 - "test_failure.py"
 Cohesion: 0.15
 Nodes (41): BusTrail, assert_bit_estavel(), bad_tag_ids_before(), bad_values(), collect_bus(), events_of_kind(), index_of_first(), make_config() (+33 more)
 
 ### Community 41 - "harness_factory"
-Cohesion: 0.14
-Nodes (64): Event, LogCaptureFixture, MonkeyPatch, harness_factory(), mpc_host_echo_worker(), publish_tag_value(), Redis, Fica pronto na hora e responde `status=ok` a todo pedido — usado nos testes que… (+56 more)
+Cohesion: 0.13
+Nodes (70): Event, LogCaptureFixture, MonkeyPatch, collect(), harness_factory(), fixture, Redis, Fábrica de assinantes; a inscrição está confirmada quando a fábrica retorna. (+62 more)
 
 ### Community 42 - "test_backpressure.py"
-Cohesion: 0.09
-Nodes (43): backpressure(), count_rows(), event_payloads(), events_seen(), get_health(), health_app(), make_pipeline(), publish_samples() (+35 more)
+Cohesion: 0.14
+Nodes (30): backpressure(), count_rows(), event_payloads(), make_pipeline(), publish_samples(), Any, MonkeyPatch, Table (+22 more)
 
 ### Community 43 - "Plano F6a — Portabilidade & dados"
 Cohesion: 0.14
@@ -574,11 +589,11 @@ Nodes (41): _aresta(), _auto_models(), _cenario_mpc(), _conexao(), _cv(), _dv(),
 
 ### Community 46 - "FlowsPage.tsx"
 Cohesion: 0.08
-Nodes (38): ADR-0007, useCanMutate(), useActiveProject(), FlowPropsModal(), Props, CelulaDesejado(), COLUNAS, FlowForm() (+30 more)
+Nodes (37): ADR-0007, useCanMutate(), FlowPropsModal(), Props, CelulaDesejado(), COLUNAS, FlowForm(), FlowsPage() (+29 more)
 
 ### Community 47 - "test_certificates.py"
 Cohesion: 0.12
-Nodes (30): _admin_id(), _bruto(), _coluna(), _conexao(), _digest(), _projeto_da(), API de certificados (RF-202, ADR-021): app cert de instância e trust por…, `server_cert_file` também é campo do PATCH: as duas rotas têm de auditar igual. (+22 more)
+Nodes (29): _admin_id(), _bruto(), _coluna(), _conexao(), _digest(), _projeto_da(), API de certificados (RF-202, ADR-021): app cert de instância e trust por…, `server_cert_file` também é campo do PATCH: as duas rotas têm de auditar igual. (+21 more)
 
 ### Community 48 - "OpcSimServer"
 Cohesion: 0.08
@@ -589,12 +604,12 @@ Cohesion: 0.10
 Nodes (34): _delay_samples(), discretize_iopdt(), discretize_sopdt(), PairSS, Discretização ZOH-exata por par SOPDT/IOPDT no `Ts_mpc` (spec F4 §3.1; TDD…, IOPDT: integrador retangular `acc += Ki*Ts*u` — idêntico ao `_Iopdt` do TFS, 1…, Modelo discreto de um par da matriz MPC, no `Ts_mpc`, sem o atraso. `a`: matriz…, `round(theta/ts)`: convenção banker's (half-even) do `round()` do Python. NOTA… (+26 more)
 
 ### Community 50 - "routers/flows.py"
-Cohesion: 0.08
-Nodes (54): conexoes_sem_watchdog(), AsyncSession, Consulta de conexões do projeto: compartilhada entre API e flow-runtime., `conn_id -> nome` das conexões do projeto sem watchdog completo (TD-004). Sem…, FlowCreate, FlowDetail, FlowOut, FlowSaved (+46 more)
+Cohesion: 0.16
+Nodes (31): ProjectFilter, put, _carregar(), _comandar(), create_flow(), delete_flow(), deploy_flow(), get_flow() (+23 more)
 
 ### Community 51 - "MpcBlock"
-Cohesion: 0.07
-Nodes (18): _LocalRemote, _clamp(), MpcBlock, Block, datetime, MpcHost, PortSample, Entradas: uma por CV/Restrição/DV (ordem do config, spec §2.1-5). Saídas: uma… (+10 more)
+Cohesion: 0.05
+Nodes (41): Block, _LocalRemote, MpcHost, MpcPrediction, MpcModes, MpcPrediction, MpcStatus, MpcVarState (+33 more)
 
 ### Community 52 - "test_connection.py"
 Cohesion: 0.15
@@ -605,40 +620,40 @@ Cohesion: 0.15
 Nodes (35): collect_events(), collect_values(), make_config(), of_kind(), of_tag(), ConnectionConfig, ConnectionRuntime, MonkeyPatch (+27 more)
 
 ### Community 54 - "RecorderPipeline"
-Cohesion: 0.07
-Nodes (24): health(), Sempre 200: a degradação vai no corpo (spec F2 §2.2-8). Sem lifespan (app cru…, health(), Sempre 200: a degradação vai no corpo (spec F2 §2.2-8/§6.6). Sem pipeline…, datetime, T, Samples + eventos descartados por overflow desde o início; nunca zera., Payloads que não parsearam: lixo no canal, não pressão — contador separado. (+16 more)
+Cohesion: 0.08
+Nodes (18): MpcState, Payloads que não parsearam: lixo no canal, não pressão — contador separado., Assina os canais e sobe as tasks de leitura e de flush; retorna já. Idempotente., Cancela as tasks, encerra as inscrições e faz o flush final. Idempotente.…, Um ciclo de gravação: eventos, ssto_runs, samples, mpc_samples. Auditoria tem…, Parse e enfileira uma amostra; payload inválido é descartado com log., Parse e enfileira um evento; payload inválido é descartado com log., Parse e enfileira um estado MPC; payload inválido é descartado com log. Uma… (+10 more)
 
 ### Community 55 - "TrendOperacao.tsx"
-Cohesion: 0.06
-Nodes (60): LegendaOperacao(), LegendaOperacaoProps, ROTULO_CATEGORIA, calcularRangeXOperacao(), corSecaoFutura(), ParametrosRangeXOperacao, pluginSecaoFutura(), ColunasOperacao (+52 more)
+Cohesion: 0.05
+Nodes (76): LegendaOperacao(), LegendaOperacaoProps, ROTULO_CATEGORIA, calcularRangeXOperacao(), corSecaoFutura(), ParametrosRangeXOperacao, pluginSecaoFutura(), ColunasOperacao (+68 more)
 
 ### Community 56 - "generate_app_certificate"
 Cohesion: 0.14
-Nodes (28): app_cert_paths(), generate_app_certificate(), Gera o certificado autoassinado de instância de aplicação (spec F2 §5.3).…, Monta os caminhos do certificado de aplicação, sem tocar no disco., OttimaSystem — pacote compartilhado (modelos, schemas, barramento, segurança)., _falha_na_gravacao(), _load_cert(), Certificate (+20 more)
+Nodes (32): app_cert_paths(), generate_app_certificate(), Gera o certificado autoassinado de instância de aplicação (spec F2 §5.3).…, Monta os caminhos do certificado de aplicação, sem tocar no disco., Lê os metadados do certificado de aplicação. Devolve `exists=False` quando o…, read_app_certificate(), OttimaSystem — pacote compartilhado (modelos, schemas, barramento, segurança)., _falha_na_gravacao() (+24 more)
 
 ### Community 57 - "mpc_config.py"
-Cohesion: 0.11
-Nodes (24): field_validator, ConstraintVar, CvVar, DvVar, _exigir_prefixo(), Horizons, Limits, ModeValues (+16 more)
+Cohesion: 0.08
+Nodes (30): ConstraintVar, CvVar, derive_horizons(), DvVar, EconomicsConfig, _exigir_prefixo(), Horizons, Limits (+22 more)
 
 ### Community 58 - "test_heartbeat.py"
 Cohesion: 0.18
 Nodes (32): beating(), collect_values(), heartbeat_tags(), make_config(), make_runtime(), of_tag(), ConnectionConfig, ConnectionRuntime (+24 more)
 
-### Community 59 - "TabVariables.tsx"
-Cohesion: 0.08
-Nodes (43): Button, ButtonProps, buttonVariants, Card(), Input, Label(), Select, AuthMode (+35 more)
+### Community 59 - "test_ssto_model.py"
+Cohesion: 0.10
+Nodes (36): PairSS, SSTO — camada de alvos de regime permanente por LP acima do MPC (ADR-027).…, build_steady_state_model(), pair_steady_state_gain(), ndarray, Modelo de regime permanente do SSTO: `G`, `Gd` e a base de predição (ADR-027…, Ganho de regime permanente de UM par, na leitura que o `kind` da linha exige.…, `G`/`Gd` + metadados de ordem (ADR-027 §3). `row_ids`: CVs e depois Restrições… (+28 more)
 
 ### Community 60 - "ModalConfigBloco.tsx"
-Cohesion: 0.11
-Nodes (23): inteiroDoCampo(), matrizDoFormulario(), nomeParam(), numeroDoCampo(), CamposTfs(), PARAMS, Props, trocarElemento() (+15 more)
+Cohesion: 0.12
+Nodes (21): inteiroDoCampo(), matrizDoFormulario(), nomeParam(), numeroDoCampo(), CamposTfs(), PARAMS, Props, trocarElemento() (+13 more)
 
 ### Community 61 - "test_pipeline.py"
 Cohesion: 0.18
 Nodes (30): delete, channel_opc_values(), count_rows(), instrumented(), make_pipeline(), purge(), Any, fixture (+22 more)
 
-### Community 62 - "ConnectionConfig"
-Cohesion: 0.09
-Nodes (33): BaseException, AppCertPaths, Caminhos dos três arquivos do certificado de aplicação., CertMismatchError, CertMissingError, _configure_channel(), configure_client(), _configure_identity() (+25 more)
+### Community 62 - "ottima_opc_worker/security.py"
+Cohesion: 0.11
+Nodes (30): BaseException, AppCertPaths, Caminhos dos três arquivos do certificado de aplicação., decrypt_secret(), CertMismatchError, CertMissingError, _configure_channel(), configure_client() (+22 more)
 
 ### Community 63 - "Plano F6b — Superfícies (Projetos, certificados, pendências, EU, DV)"
 Cohesion: 0.14
@@ -649,24 +664,24 @@ Cohesion: 0.06
 Nodes (32): 10. Aderência ao aceite F5 (PRD §8), 1.1 Dentro da F5, 1.2 Fora da F5 — com destino registrado, 1.3 Emendas a documentos anteriores (consolidação; F5R-26), 1. Escopo da F5, 2.1 Emenda PRD §7.1 → v1.3: `ts` e `prediction.ts` no `mpc.state` (decisão A-2; F5R-01), 2.2 Hypertable `mpc_samples` (decisão A-1; migration `0003_mpc_samples`, SQL cru, três passos como a 0002), 2.3 Recorder (F5R-12) (+24 more)
 
 ### Community 65 - "routers/connections.py"
-Cohesion: 0.16
-Nodes (27): ConnectionCreate, ConnectionOut, ConnectionUpdate, encrypt_secret(), _carregar(), clear_server_certificate(), create_connection(), delete_connection() (+19 more)
+Cohesion: 0.14
+Nodes (31): ConnectionCreate, ConnectionOut, ConnectionUpdate, OpcConnection, _carregar(), clear_server_certificate(), create_connection(), delete_connection() (+23 more)
 
 ### Community 66 - "ottima_core/security.py"
 Cohesion: 0.15
-Nodes (20): LoginOut, create_access_token(), decode_access_token(), decrypt_secret(), verify_password(), test_fernet_roundtrip_e_chave_errada(), test_hash_argon2id_e_verificacao(), test_jwt_expirado_rejeitado() (+12 more)
+Nodes (20): LoginOut, create_access_token(), decode_access_token(), encrypt_secret(), verify_password(), test_fernet_roundtrip_e_chave_errada(), test_hash_argon2id_e_verificacao(), test_jwt_expirado_rejeitado() (+12 more)
 
 ### Community 67 - "flowgraph/__init__.py"
-Cohesion: 0.12
-Nodes (34): NodeConfig, Modelo tipado do `graph_json` de um flow + validação compartilhada (RF-302/307,…, FlowEdge, FlowGraph, FlowNode, GraphParseError, IopdtParams, _is_int() (+26 more)
+Cohesion: 0.11
+Nodes (40): NodeConfig, Modelo tipado do `graph_json` de um flow + validação compartilhada (RF-302/307,…, FirstOrderConfig, FlowEdge, FlowGraph, FlowNode, GraphParseError, IopdtParams (+32 more)
 
-### Community 68 - "graph.ts"
-Cohesion: 0.08
-Nodes (55): ArestaSerializada, Bloco, ConexaoPretendida, DadosBase, DadosBloco, DadosScript, DadosTag, deGraphJson() (+47 more)
+### Community 68 - "SolverResult"
+Cohesion: 0.09
+Nodes (26): Protocol, _active_bounds(), _empty(), Bounds, ndarray, Bounds, ndarray, QuadraticTerm (+18 more)
 
 ### Community 69 - "e2e/conftest.py"
-Cohesion: 0.12
-Nodes (24): FixtureRequest, admin(), _aguardar_flow_parado_mpc(), ambiente_mpc(), _ativar_sentinela(), _conf(), _criar_tag(), _deploy_env() (+16 more)
+Cohesion: 0.09
+Nodes (32): FixtureRequest, admin(), _aguardar_flow_parado_mpc(), ambiente_mpc(), _ativar_sentinela(), compose(), conexao_health(), _conf() (+24 more)
 
 ### Community 70 - "test_mpc_bumpless.py"
 Cohesion: 0.16
@@ -677,20 +692,20 @@ Cohesion: 0.10
 Nodes (17): admin_headers(), client(), make_user(), operator_headers(), fixture, Fixtures da API: settings de teste, app com get_db/get_redis sobrescritos,…, Settings isoladas do .env local, com segredos determinísticos de teste., Cria usuários direto no banco da sessão de teste (senha já em Argon2id). (+9 more)
 
 ### Community 72 - "Supervisor"
-Cohesion: 0.07
-Nodes (32): Tag configurada de uma conexão., TagConfig, _cancel(), _is_hint(), load_active_configuration(), _log_teardown_results(), async_sessionmaker, AsyncSession (+24 more)
+Cohesion: 0.08
+Nodes (23): _cancel(), _is_hint(), _log_teardown_results(), async_sessionmaker, AsyncSession, Path, PubSub, Redis (+15 more)
 
 ### Community 73 - "publish_event"
-Cohesion: 0.13
+Cohesion: 0.12
 Nodes (19): EventMessage, publish_event(), Any, datetime, Redis, Publisher canônico do canal `events` (spec F2 §7.1, ADR-020). Única forma de…, events_sub(), fixture (+11 more)
 
-### Community 74 - "collect"
+### Community 74 - "create_flow"
 Cohesion: 0.15
-Nodes (53): parametrize, collect(), Redis, Fábrica de assinantes; a inscrição está confirmada quando a fábrica retorna., counter_graph(), create_flow(), create_project(), delete_flow() (+45 more)
+Nodes (50): parametrize, counter_graph(), create_flow(), create_project(), delete_flow(), async_sessionmaker, AsyncSession, Um bloco OPC-Read: o grafo válido mais simples que amarra o flow a uma conexão. (+42 more)
 
 ### Community 75 - "test_server.py"
-Cohesion: 0.14
-Nodes (25): Helpers de teste do opc-worker, importados por nome qualificado pelos arquivos…, _any_task_done(), _client_credentials(), _differs(), _equals(), _greater_than(), Any, Client (+17 more)
+Cohesion: 0.16
+Nodes (24): _any_task_done(), _client_credentials(), _differs(), _equals(), _greater_than(), Any, Client, fixture (+16 more)
 
 ### Community 76 - "4. Cenários"
 Cohesion: 0.11
@@ -700,9 +715,9 @@ Nodes (17): 1. Precondições de ambiente, 2. Regras de execução com a tool `b
 Cohesion: 0.16
 Nodes (24): _amostra(), _get(), _inserir(), _instantes(), Any, datetime, fixture, parametrize (+16 more)
 
-### Community 78 - "build_mpc"
-Cohesion: 0.12
-Nodes (41): build_mpc(), Monta o `do_mpc.controller.MPC` do bloco (spec F4 §3.2-3.5)., _co(), _config_integradora(), _cv(), _du_config(), _dv(), _move_weight_config() (+33 more)
+### Community 78 - "test_mpc_builder.py"
+Cohesion: 0.15
+Nodes (30): _co(), _config_integradora(), _cv(), _du_config(), _dv(), _move_weight_config(), _mv(), _mv_plan() (+22 more)
 
 ### Community 79 - "mpc_golden_export.py"
 Cohesion: 0.15
@@ -713,60 +728,60 @@ Cohesion: 0.11
 Nodes (44): BlockId, FlowCommand, ConstraintOut, _cv_do_bloco(), CvOut, DvOut, _horizontes(), list_mpcs() (+36 more)
 
 ### Community 81 - "models/__init__.py"
-Cohesion: 0.17
-Nodes (14): DeclarativeBase, Base, Base declarativa e mixin de timestamps (SQLAlchemy 2.0; DDL: spec F1 §3.1)., TimestampMixin, OpcConnection, Conexão OPC-UA (RF-201/206, ADR-009/021; DDL: spec F1 §3.1)., Flow, Flow (ADR-005/007/011/017; DDL: spec F1 §3.1). (+6 more)
+Cohesion: 0.14
+Nodes (15): DeclarativeBase, Base, Base declarativa e mixin de timestamps (SQLAlchemy 2.0; DDL: spec F1 §3.1)., TimestampMixin, Conexão OPC-UA (RF-201/206, ADR-009/021; DDL: spec F1 §3.1)., Flow, Flow (ADR-005/007/011/017; DDL: spec F1 §3.1)., Flow (ADR-005/007/011/017; DDL: spec F1 §3.1). CRUD chega na F3. (+7 more)
 
 ### Community 82 - "Validacao do bloco MPC (422 pt-BR string unica)"
 Cohesion: 0.11
 Nodes (24): Etapa 4 do F4a: paleta, no dinamico e modal 7 abas, MpcConfig (Pydantic, espelho do spec 2.1), Componentes do modal MPC (MpcModal + TabGeneral..TabSummary), Paleta com MPC arrastavel + no com portas dinamicas, validate_graph libera mpc e valida spec 2.2 inteiro, B-F4-01: paleta com MPC habilitado e no sem portas antes de configurar, B-F4-02: modal 7 abas, criacao de variaveis e matriz de modelos, B-F4-04: portas dinamicas apos salvar e 422 do servidor em pt-BR (+16 more)
 
 ### Community 83 - "certs.py"
-Cohesion: 0.13
-Nodes (29): AppCertificateInfo, _application_uri_of(), _discard(), _ensure_dir(), _info_from_certificate(), _load_certificate(), Certificate, Path (+21 more)
+Cohesion: 0.14
+Nodes (25): AppCertificateInfo, _application_uri_of(), _discard(), _ensure_dir(), _info_from_certificate(), _load_certificate(), Certificate, Path (+17 more)
 
 ### Community 84 - "test_td_hotswap.py"
 Cohesion: 0.16
 Nodes (26): PubSub, _armar_em_auto(), _bloco_mpc(), coletor_eventos(), ColetorEventos, grafo_com_mv_extra(), grafo_com_peso_de_cv(), motivos_de_modo() (+18 more)
 
 ### Community 85 - "MpcConfig"
-Cohesion: 0.12
-Nodes (29): derive_horizons(), mpc_state_dimension(), MpcConfig, Config do bloco MPC — vive inteiro no `graph_json` (spec §2.1, decisão A-8/A-9)., Deriva `Ts_mpc`, `Np` e `Nc` (spec §2.2-5, RF-603). Função pura: devolve `Np`…, Dimensão do estado agregado do modelo do-mpc (spec §2.2-7). Soma, por par…, mpc_skeleton(), Mesa de casos de `ottima_core.flowgraph.mpc_config` (spec F4… (+21 more)
+Cohesion: 0.18
+Nodes (23): mpc_state_dimension(), MpcConfig, Config do bloco MPC — vive inteiro no `graph_json` (spec §2.1, decisão…, Dimensão do estado agregado do modelo do-mpc (spec §2.2-7). Soma, por par…, mpc_skeleton(), Mesa de casos de `ottima_core.flowgraph.mpc_config` (spec F4…, Esqueleto normativo verbatim de `docs/specs/F4-mpc.md` §2.1., Compatibilidade retroativa (TD-003): config salvo antes destes campos não tinha… (+15 more)
 
 ### Community 86 - "routers/projects.py"
 Cohesion: 0.11
-Nodes (34): patch, Project, ProjectCreate, ProjectImportOut, ProjectUpdate, Request, activate_project(), _carregar() (+26 more)
+Nodes (36): patch, Project, ProjectCreate, ProjectImportOut, ProjectUpdate, Request, activate_project(), _carregar() (+28 more)
 
 ### Community 87 - "Plano F5b — Operação: tela de operação"
 Cohesion: 0.14
 Nodes (13): Aderência ao aceite F5 (PRD §8) — Definition of Done da FASE, Etapa 1 — Canal único de sessão (spec §7.1; F5R-04/22), Etapa 2 — `resolverAlarmes` e faixa anunciadora real (spec §7.2; F5R-02/03/19), Etapa 3 — Navegação, Home e `/eventos` (spec §7.3/§7.5), Etapa 4 — Tela `/operacao/:flowId/:blockId` (spec §7.4; RF-701/702/704; ADR-016), Etapa 5 — Trend central com predição (spec §7.4-6; §3; decisão A-11), Etapa 6 — F-3: vetores-golden Python→TS (spec §7.6; decisão A-9; F5R-13), Etapa 7 — Gate final da fase F5 (+5 more)
 
 ### Community 88 - "ValueHeartbeat"
-Cohesion: 0.12
-Nodes (12): Path, Redis, Heartbeat de valor da conexão; vive fora da sessão (spec §2.2-6)., Redis, TagConfig, Republicação periódica de valor por conexão (report-by-exception + heartbeat)., Cria a task do heartbeat e retorna já., Cancela a task. Idempotente. (+4 more)
+Cohesion: 0.13
+Nodes (11): Path, Redis, Heartbeat de valor da conexão; vive fora da sessão (spec §2.2-6)., TagConfig, Republicação periódica de valor por conexão (report-by-exception + heartbeat)., Cria a task do heartbeat e retorna já., Cancela a task. Idempotente., Rajada imediata de quality=2 para TODAS as tags `r` da conexão. Chamada na… (+3 more)
 
 ### Community 89 - "ADR-011 — Hot-swap de flows sem interrupção; sem versionamento"
 Cohesion: 0.13
 Nodes (22): ADR-004 — Loops vivos em asyncio; sem Celery, Solver bloqueante via loop.run_in_executor, ADR-007 — Execução por scan cycle com Ts individual por flow, Scan cycle com Ts por flow (lista fixa 0.5–60 s), ADR-009 — Watchdog de comunicação por bit alternante (NOT cruzado), Watchdog por bit alternante (NOT cruzado), ADR-011 — Hot-swap de flows sem interrupção; sem versionamento, Hot-swap de flows sem versionamento (+14 more)
 
 ### Community 90 - "User"
-Cohesion: 0.20
-Nodes (20): HTTPException, User, BaseModel, Schemas de gestão de usuários (spec F1 §5.5): criação e atualização parcial., UserCreate, UserUpdate, hash_password(), require_admin() (+12 more)
+Cohesion: 0.11
+Nodes (37): HTTPException, User, BaseModel, Schemas de gestão de usuários (spec F1 §5.5): criação e atualização parcial., UserCreate, UserUpdate, hash_password(), require_admin() (+29 more)
 
 ### Community 91 - "Plano F4a — MPC: config & montagem"
 Cohesion: 0.15
 Nodes (20): Comandos canonicos (stack, gate E2E, precondicoes), Gate E2E de 3 camadas (L1 smoke, L2 pytest e2e, L3 browser), Proibicoes rapidas para agentes, TDD estrito em logica pura; malha fechada MPC<->TFS como aceite, Workflow Superpowers: um plano por fase F1..F6, Rodada de gate da F2 (L1 + L2 + L3 browser-tool), Rodada de gate da F3 (L2 = 24 cenários), Plano F4a — MPC: config & montagem (+12 more)
 
 ### Community 92 - "bus.py"
-Cohesion: 0.06
-Nodes (42): Contratos do barramento Redis pub/sub — payloads verbatim do PRD §7.1…, Logging estruturado JSON em stdout (RNF-07; spec F1 §7.1)., Bloco MPC: cadência, modos e write-back do runtime (spec F4…, Definição pronta para subir ou entrar em hot-swap, com o que o supervisor…, StagedDefinition, flow_origin(), mpc_block_origin(), publish_flow_deployed() (+34 more)
+Cohesion: 0.05
+Nodes (53): Connection, Contratos do barramento Redis pub/sub — payloads verbatim do PRD §7.1…, Logging estruturado JSON em stdout (RNF-07; spec F1 §7.1)., Laço resiliente de assinatura ao barramento pub/sub do Redis (canal fixo ou…, WebSocket `/ws`: fanout de `flow.status.<id>` e…, Bloco MPC: cadência, modos e write-back do runtime (spec F4…, Stage do deploy: instanciação de blocos, fiação e conjunto de conexões (spec F3…, Definição pronta para subir ou entrar em hot-swap, com o que o supervisor… (+45 more)
 
 ### Community 93 - "test_mpc_worker.py"
 Cohesion: 0.23
 Nodes (24): _config(), _cv(), _mv(), _par(), Connection, fixture, Contratos de `mpc.worker` — processo filho do MPC (spec F4 §3.3/§3.6/§4.9/§5.1;…, Mata + junta — sem processo órfão ao fim do teste (mesmo padrão de… (+16 more)
 
-### Community 94 - "Any"
+### Community 94 - "test_f4_failure.py"
 Cohesion: 0.13
-Nodes (15): conexao_health(), EstadoMpcStream, evento_mpc(), _health_do_runtime(), mpc_block_health(), Any, `/health` do opc-worker, lido de dentro do container., Bloco da conexão no `/health` do worker; `None` enquanto o worker não a conhece. (+7 more)
+Nodes (22): armar_ate_remoto(), armar_auto_com_retentativa(), armar_remoto_direto(), criar_tag_leitura_dummy(), EstadoMpcStream, evento_mpc(), mpc_block_health(), Any (+14 more)
 
 ### Community 95 - "flow-runtime"
 Cohesion: 0.21
@@ -776,9 +791,9 @@ Nodes (20): ADR-002 — Barramento interno via Redis pub/sub, Barramento interno
 Cohesion: 0.10
 Nodes (19): compilerOptions, isolatedModules, jsx, lib, module, moduleResolution, noEmit, noFallthroughCasesInSwitch (+11 more)
 
-### Community 97 - "routers/tags.py"
-Cohesion: 0.19
-Nodes (19): Tag OPC (RF-203; DDL: spec F1 §3.1)., Tag, _carregar(), create_tag(), delete_tag(), get_tag(), list_tags(), _publicar() (+11 more)
+### Community 97 - "_solve"
+Cohesion: 0.14
+Nodes (32): BuiltMpc, _apply_tvp(), _build_runtime(), Boot: monta o controller + o propagador + as funções de avaliação reutilizadas…, SP e DV (constantes no horizonte, spec §3.2/§3.4) — escritos em TODO pedido,…, Um ciclo completo de execução (spec §3.3/§3.6/§4.9): estado, solve…, _solve(), _BackendQuebrado (+24 more)
 
 ### Community 98 - "MpcWorker — processo dedicado por bloco MPC"
 Cohesion: 0.13
@@ -820,9 +835,9 @@ Nodes (16): derive_horizons(multiplier, ts_flow, tss) -> Horizons, discretize_io
 Cohesion: 0.12
 Nodes (9): Contratos do ProcessPool de scripts e do bloco Script (RF-511..514,…, ADR-004: a subida do processo do respawn também roda fora do loop.…, Determinismo (spec §3.3): OUTx ausente é erro, não 0.0 sintético., Regressão do teto (débito m3): mesmo sob N cancelamentos em sequência, ciclo…, Achado 1 do fix round 1 (revisão da tarefa 0.6): a blindagem vive DENTRO de…, test_cancelamento_durante_replace_nos_outros_ramos_nao_encolhe_o_pool(), test_dez_ciclos_de_cancelamento_preservam_o_tamanho_do_pool(), test_respawn_nao_trava_o_event_loop() (+1 more)
 
-### Community 108 - "WatchdogTask"
-Cohesion: 0.10
-Nodes (14): RuntimeError, Task de watchdog viva; None fora de `up` ou em conexão sem o par de node_ids., Aborta a tentativa se um fail() ocorreu enquanto o connect estava em voo. Sem…, Tentativa de conexão invalidada por um fail() concorrente., _SupersededAttemptError, _describe(), Client, Exception (+6 more)
+### Community 108 - "ConnectionConfig"
+Cohesion: 0.06
+Nodes (42): build_client(), RuntimeError, Runtime de uma conexão OPC-UA: máquina de estados, backoff e eventos (spec F2…, Tentativa de conexão invalidada por um fail() concorrente., Constrói o Client asyncua da conexão; a segurança é montada por…, _SupersededAttemptError, Redis, Heartbeat de valor de uma conexão: report-by-exception + republicação (spec F2… (+34 more)
 
 ### Community 109 - "MpcBlock (blocks/mpc.py)"
 Cohesion: 0.20
@@ -837,8 +852,8 @@ Cohesion: 0.16
 Nodes (15): Cold start: entrada null => bloco nao executa, Decisao F3 #6: invalidez propaga + suprime escrita, E2E-F3-02: deploy Read->Script->Write altera espelho R do opcsim; flow_deployed; running, E2E-F3-10: script em erro desde a 1a varredura => saidas null => write_suppressed, Semantica de invalidez: executa com o valor e propaga flag, Bloco OPC-Read, Bloco OPC-Write, RF-501: bloco OPC-Read (+7 more)
 
 ### Community 112 - "impactoSave.ts"
-Cohesion: 0.13
-Nodes (15): DadosMpc, GraphJson, NoSerializado, ROTULO_BLOCO, DADOS_BASE, VARIAVEIS_BASE, configFuncional(), ehMpc() (+7 more)
+Cohesion: 0.14
+Nodes (14): DadosMpc, GraphJson, NoSerializado, DADOS_BASE, VARIAVEIS_BASE, configFuncional(), ehMpc(), igual() (+6 more)
 
 ### Community 113 - "api/tests/test_events.py"
 Cohesion: 0.32
@@ -856,9 +871,9 @@ Nodes (14): Override E2E (portas de teste publicadas em 127.0.0.1), Stack compos
 Cohesion: 0.12
 Nodes (18): 8 constantes KIND_MPC_* em bus.py, Router /api/operate (routers/operate.py), Boot parado, E2E-F3-07: RF-207 — watchdog congelado => failed(comm_failure); nao volta sozinho; re-deploy manual, E2E-F3-08: project_activated para tudo; boot parado apesar de desired_state=running, Canal flow.commands, Evento flow_overrun, RF-101: project_activated encerra flows do projeto anterior (+10 more)
 
-### Community 117 - "await_until"
-Cohesion: 0.14
-Nodes (41): Config de `opc_read` e `opc_write` — idêntica; quem discrimina é…, TagConfig, Bancada, esperar_valor(), make_config(), of_kind(), publicar(), Any (+33 more)
+### Community 117 - "test_writes.py"
+Cohesion: 0.13
+Nodes (40): Config de `opc_read` e `opc_write` — idêntica; quem discrimina é…, TagConfig, Bancada, esperar_valor(), make_config(), of_kind(), publicar(), Any (+32 more)
 
 ### Community 118 - "test_api_e2e.py"
 Cohesion: 0.30
@@ -900,9 +915,9 @@ Nodes (11): db_engine(), db_session(), migrated_database_url(), fixture, Fixture
 Cohesion: 0.18
 Nodes (12): Regra do Estado Publicado (comandado × confirmado), Regra da Plaqueta (rótulos caps + Archivo Narrow + tracking), Assinatura 'tinta que ainda não secou' (predição tracejada desvanecendo), Plano F2 — Aquisição, Plano F3 — Motor + canvas, Contrato de canais do barramento (PRD §7.1), Predição publicada em mpc.state.*, não persistida (RF-625, ADR-016), Vocabulário kind do canal events (match por kind, mensagens pt-BR) (+4 more)
 
-### Community 128 - "definition.py"
-Cohesion: 0.15
-Nodes (21): Bloco TFS: matriz 2x2 de funções de transferência (RF-521/522, ADR-022, spec F3…, build_definition(), _instantiate(), _instantiate_mpc(), _make_write_opc(), _mv_direta_escreve_sem_watchdog(), _mv_ids_de_functional(), Any (+13 more)
+### Community 128 - "build_definition"
+Cohesion: 0.14
+Nodes (24): build_definition(), _instantiate(), _instantiate_mpc(), _make_write_opc(), _mpc_escreve_sem_watchdog(), _mpc_pid_tag_ids(), _mv_direta_escreve_sem_watchdog(), _mv_ids_de_functional() (+16 more)
 
 ### Community 129 - "Serviço api (FastAPI, porta interna 8000)"
 Cohesion: 0.29
@@ -913,7 +928,7 @@ Cohesion: 0.29
 Nodes (10): ARQUIVO_SAIDA, interfaceDe(), interfacesWsPayloads(), main(), nomeDoRef(), RAIZ_REPO, rodarExportadorPython(), tabelaPortContracts() (+2 more)
 
 ### Community 131 - "schemas/connections.py"
-Cohesion: 0.21
+Cohesion: 0.24
 Nodes (9): model_validator, ConnectionCreate, _ConnectionFields, ConnectionOut, ConnectionUpdate, BaseModel, Schemas de conexões OPC-UA (RF-201, ADR-009/021): senha só entra, nunca sai…, Regras de coerência; o ValueError vira 422 no FastAPI. (+1 more)
 
 ### Community 132 - "bloco"
@@ -950,7 +965,7 @@ Nodes (19): Invariante: barramento limitado aos canais do PRD 7.1, fire-and-forg
 
 ### Community 140 - "ResumeOrchestrator"
 Cohesion: 0.08
-Nodes (21): Exception, Lock, EstadoMpcTransplante, Estado transplantável de um `MpcBlock` para hot-swap sem queda de modo (TD-006)…, async_sessionmaker, Connection, Redis, ValueSnapshot (+13 more)
+Nodes (22): Exception, Lock, _parse_e_validar(), async_sessionmaker, Connection, FlowGraph, Redis, ValueSnapshot (+14 more)
 
 ### Community 141 - "Decision: two mode axes — LOCAL/REMOTO (PID vs MPC, bumpless both ways via PID mode writes AUTO<->RCAS/CAS/ROUT) and MAN/AUTO sub-mode of REMOTO; MV tracking in LOCAL"
 Cohesion: 0.22
@@ -968,25 +983,25 @@ Nodes (9): ADR-008 — Configuração do MPC por formulário estruturado (modal 
 Cohesion: 0.31
 Nodes (9): ADR-012 — Projeto como unidade de agrupamento e portabilidade (JSON), Decision: Project groups flows + system configs; exportable/importable as JSON with schema_version, never historical data, ADR-021 — Segurança OPC-UA: anônimo, usuário/senha e certificado desde a v1, Decision: per-connection security — None / Basic256Sha256 Sign / SignAndEncrypt; anonymous, user/password or X.509 certificate auth, all from v1; instance certificate management, ADR-023 — Escopo de plataforma da v1: pt-BR, auth local, HTTP interno, Compose on-prem, Decision: pt-BR-only UI, local user/password auth (Argon2/bcrypt + JWT), plain HTTP on plant network, Docker Compose on a single on-prem Linux host, PRD.md (archived) — OttimaSystem product requirements v1.0, PRD §7.2 project JSON export/import contract with schema_version, no secrets, no history (+1 more)
 
-### Community 145 - "blocks/base.py"
-Cohesion: 0.06
-Nodes (22): ABC, Block, null_outputs(), Protocolo comum dos blocos executáveis e as duas regras de base (spec F3 §3.0).…, Bloco de um flow. `block_id` é o id do nó React Flow (chave do hot-swap,…, Handles de entrada declarados (não necessariamente conectados)., Executa uma varredura e devolve os valores das portas de saída., Zera o estado interno (deploy/stop). Blocos sem estado não precisam… (+14 more)
+### Community 145 - "tfs.py"
+Cohesion: 0.08
+Nodes (13): _Element, _FirstOrder, _Iopdt, Block, PortSample, Bloco TFS: matriz 2x2 de funções de transferência (RF-521/522, ADR-022, spec F3…, Entradas `u1,u2`; saídas `y1,y2`. `matrix[J][K]` = contribuição de `uK` para…, Estágio de 1a ordem exato no ZOH: `x <- a*x + (1-a)*u`. Abaixo de… (+5 more)
 
 ### Community 146 - "_DropOldestBuffer"
-Cohesion: 0.13
-Nodes (11): _DropOldestBuffer, Any, async_sessionmaker, AsyncSession, Redis, Table, Grava o conteúdo atual do buffer e só então o remove de lá., INSERT multi-linha, fatiado no teto de binds do asyncpg; nunca um INSERT por… (+3 more)
+Cohesion: 0.15
+Nodes (10): async_sessionmaker, AsyncSession, _DropOldestBuffer, Any, Redis, Grava o conteúdo atual do buffer e só então o remove de lá., INSERT multi-linha, fatiado no teto de binds do asyncpg; nunca um INSERT por…, Buffer com teto: cheio, o mais antigo sai e o descarte é contado (spec §6.4). (+2 more)
 
 ### Community 147 - "ottima_flow_runtime/main.py"
-Cohesion: 0.11
-Nodes (21): ChannelListener, FastAPI, build_event_listener(), Assinante do canal `events` com os `kind` que o runtime consome (§2.2-8; TD-005…, check_database(), check_redis(), health(), _heartbeat_loop() (+13 more)
+Cohesion: 0.18
+Nodes (16): ChannelListener, FastAPI, build_event_listener(), Assinante do canal `events` com os `kind` que o runtime consome (§2.2-8; TD-005…, check_database(), check_redis(), health(), _heartbeat_loop() (+8 more)
 
 ### Community 148 - "scripts"
 Cohesion: 0.25
 Nodes (8): scripts, build, dev, e2e, generate:api, generate:contracts, preview, test:unit
 
-### Community 149 - "Connection"
-Cohesion: 0.40
-Nodes (5): mpc_host_never_ready_worker(), mpc_host_slow_build_worker(), Connection, Nunca manda o handshake `("ready", n_x)` — o host fica com `ready=False` para…, Atraso real e finito (`MPC_SLOW_BUILD_DELAY_S`) antes do handshake `("ready",…
+### Community 149 - "solver.py"
+Cohesion: 0.09
+Nodes (28): get_backend(), GurobiBackend, HiGHSBackend, Backends de solver do SSTO — interface plugável (ADR-027 §7). `SolverBackend` é…, LP por `scipy.optimize.linprog(method="highs")` — backend default (ADR-027 §7)., Stub declarado (ADR-027 §7): a interface suporta o plugin comercial, a…, Resolve o backend por nome (`EconomicsConfig.solver`). `osqp` é registrado por…, test_registro_resolve_osqp_por_nome() (+20 more)
 
 ### Community 150 - "eventos"
 Cohesion: 0.25
@@ -1020,13 +1035,13 @@ Nodes (6): do_run_migrations(), include_object(), Connection, run_async_migratio
 Cohesion: 0.29
 Nodes (7): cert_servidor(), certs_dir(), fixture, Mesmo diretório temporário que o app enxerga (conftest aponta certs_dir p/…, Statements UPDATE emitidos em `opc_connections` na sessão do teste. É o…, PEM e DER de um certificado real, gerado fora do certs_dir: faz papel do…, updates_na_conexao()
 
-### Community 158 - "ottima_recorder/main.py"
+### Community 158 - "Settings"
 Cohesion: 0.08
-Nodes (29): AsyncEngine, LogRecord, create_engine(), create_session_factory(), async_sessionmaker, AsyncSession, Engine e session factory assíncronas (SQLAlchemy 2.0 + asyncpg)., JsonFormatter (+21 more)
+Nodes (38): AsyncEngine, BaseSettings, LogRecord, get_settings(), Configuração via variáveis OTTIMA_* (spec F1 §7.2)., Valida os segredos no boot: a chave de assinatura JWT é fatal, a Fernet é…, Settings, validate_secrets() (+30 more)
 
-### Community 159 - "test_snapshot.py"
-Cohesion: 0.13
-Nodes (22): publish(), pubsub_client_ids(), datetime, fixture, Redis, Contratos do espelho de valores do flow-runtime (RF-401, spec F3 §2.1, §3.0,…, Exceção no laço vira reassinatura com espera, não perda permanente do espelho.…, Publica um `OpcValue` e devolve quantos assinantes o receberam. (+14 more)
+### Community 159 - "await_until"
+Cohesion: 0.14
+Nodes (24): publish(), pubsub_client_ids(), datetime, fixture, Redis, Contratos do espelho de valores do flow-runtime (RF-401, spec F3 §2.1, §3.0,…, Exceção no laço vira reassinatura com espera, não perda permanente do espelho.…, Publica um `OpcValue` e devolve quantos assinantes o receberam. (+16 more)
 
 ### Community 160 - "Plano F5a — Operação: dados & serviços"
 Cohesion: 0.15
@@ -1036,9 +1051,9 @@ Nodes (12): Aderência (DoD do plano F5a), Contratos verbatim (PRD §7.1 v1.3 �
 Cohesion: 0.60
 Nodes (5): _conexao(), test_cria_lista_filtra(), test_nome_duplicado_na_conexao_409(), test_patch_e_delete(), test_validacoes_e_papeis()
 
-### Community 164 - "ChannelListener"
-Cohesion: 0.16
-Nodes (18): ChannelListener, Laço resiliente de assinatura ao barramento pub/sub do Redis (canal fixo ou…, Assinante resiliente de um canal fixo (`SUBSCRIBE`); `handler` recebe só o…, _noop(), pubsub_client_ids(), Redis, Contratos do laço resiliente de pubsub compartilhado entre os consumidores…, Handler vazio: o que está sob teste não é o despacho. (+10 more)
+### Community 164 - "test_ssto_detuning.py"
+Cohesion: 0.11
+Nodes (25): OSQPBackend, Backend QP (OSQP) — mitigação de LP flipping por detuning (ADR-027 §7/§8).…, QP por OSQP — backend do detuning anti-flipping (ADR-027 §8). Aceita…, Registra um backend adicional (usado por `solver_qp.py`)., register_backend(), _config(), _entrada(), ndarray (+17 more)
 
 ### Community 165 - "WSClient"
 Cohesion: 0.13
@@ -1121,52 +1136,52 @@ Cohesion: 0.67
 Nodes (3): deploy/smoke.sh (roteiro executável do aceite compose up), Camadas L1/L1s/L2/L3 e 19 cenários do gate da F1, Suíte L2 tests/e2e (marker e2e, contra stack compose real)
 
 ### Community 188 - "index.tsx"
-Cohesion: 0.11
-Nodes (24): NoEscrita, NoLeitura, NoTfs, portasFixas(), VariavelDv, BlocoChapa(), LinhaPorta(), LinhaResumo() (+16 more)
+Cohesion: 0.09
+Nodes (33): handlesEntrada(), handlesSaida(), NoEscrita, NoLeitura, NoScript, NoTfs, podarArestasDoBloco(), podarOutputEuScript() (+25 more)
 
-### Community 190 - "ValueSubscription"
-Cohesion: 0.11
-Nodes (18): DataChangeNotif, Subscription de valores viva; None fora de `up`., coerce_value(), Any, Node, TagConfig, Uma subscription por conexão, com um monitored item por tag `direction='r'`., Subscription do asyncua criada por `start()`; None antes de subir ou após parar. (+10 more)
+### Community 190 - "subscriptions.py"
+Cohesion: 0.08
+Nodes (30): DataChangeNotif, DataValue, Último valor conhecido de uma tag., TagSnapshot, _as_utc(), coerce_value(), _notification_ts(), publish_value() (+22 more)
 
-### Community 201 - "TrendPage.tsx"
-Cohesion: 0.20
-Nodes (16): JanelaId, JANELAS, ROTULO_MODO, TrendPage(), ADR-0017, carimbo(), resposta(), serie() (+8 more)
+### Community 201 - "test_mpc_economics.py"
+Cohesion: 0.13
+Nodes (24): economics_config_hash(), SHA-256 da versão do problema econômico (ADR-027 §9): custos, limites e ranks.…, base_config(), _mpc_graph_node(), parametrize, Mesa de casos do bloco `economics` do `MpcConfig` (ADR-027 §9, RF-901/902). O…, Nó `mpc` mínimo do `graph_json` (spec F3 §2.1) — só a forma importa aqui., `economics` é chave prevista de `data` no bloco `mpc` — sem isto o parse… (+16 more)
 
 ### Community 203 - "Harness"
-Cohesion: 0.19
-Nodes (10): async_sessionmaker, AsyncSession, fixture, Fixtures compartilhadas dos testes do flow-runtime. As fixtures de…, Factory commitada de verdade: o supervisor não vê transação aberta de teste., session_factory(), _truncate(), Harness (+2 more)
+Cohesion: 0.21
+Nodes (9): async_sessionmaker, AsyncSession, Fixtures compartilhadas dos testes do flow-runtime. As fixtures de…, Factory commitada de verdade: o supervisor não vê transação aberta de teste., session_factory(), _truncate(), Harness, Supervisor vivo com os colaboradores que os testes precisam observar. (+1 more)
 
 ### Community 215 - "FlowStatusHub"
-Cohesion: 0.15
-Nodes (11): flow_status_ws(), FlowStatusHub, Assinatura única de `flow.status.*` e `mpc.state.*` roteando aos sockets…, Assina os dois padrões e sobe as tasks de leitura; retorna já. Idempotente. O…, Para os laços, encerra as inscrições e fecha os sockets restantes. Nunca…, Canal ao vivo do canvas: `?token=` de operador e `subscribe`/`unsubscribe` de…, Um socket inscrito: os flows/blocos que ele quer, a fila que o protege e a task…, Cancela a task de envio. Idempotente e nunca levanta: é desmonte. (+3 more)
+Cohesion: 0.08
+Nodes (21): _authenticate(), _flow_id_of(), flow_status_ws(), FlowStatusHub, _mpc_id_of(), AsyncSession, Redis, Settings (+13 more)
 
-### Community 216 - "PatternListener"
-Cohesion: 0.22
-Nodes (5): PatternListener, Redis, Assinante resiliente de um padrão glob (`PSUBSCRIBE`); `handler` recebe…, Redis, Redis
+### Community 216 - "test_ssto_block.py"
+Cohesion: 0.24
+Nodes (18): _entradas(), datetime, PortSample, SstoRun, Bloco MPC: publicação do registro do SSTO e alarme de inviabilidade (ADR-027…, Uma execução do SSTO, um registro: republicá-lo duplicaria linha na auditoria., Inviabilidade persiste por muitos ciclos: um evento por episódio, não por…, Desistir de uma linha de baixa prioridade é operação normal do SSTO — fica na… (+10 more)
 
-### Community 257 - "CancellingRuntime"
-Cohesion: 0.25
-Nodes (5): CancellingRuntime, ExplodingRuntime, ConnectionConfig, Dublê de runtime que falha ao parar (ex.: disconnect travado no transporte)., Dublê cujo `stop()` é cancelado por fora (task interna morta no meio).
+### Community 257 - "test_stop_loga_desmonte_cancelado_por_fora"
+Cohesion: 0.14
+Nodes (11): CancellingRuntime, ExplodingRuntime, ConnectionConfig, LogCaptureFixture, Task, Tasks vivas do worker: nenhuma pode sobrar depois de um `stop()`., Dublê de runtime que falha ao parar (ex.: disconnect travado no transporte)., Dublê cujo `stop()` é cancelado por fora (task interna morta no meio). (+3 more)
 
 ### Community 271 - "FlowStatus"
 Cohesion: 0.11
 Nodes (18): FlowStatus, PortValue, Valor de uma porta de bloco numa varredura (spec F3 §4.2, decisão A-3)., Fonte única dos contratos de porta por bloco + payloads do WS, exportados como…, test_flow_status_aceita_ports_vazio_em_transicao_de_estado(), test_flow_status_com_ports_serializa_verbatim_spec_f3_42(), test_nomes_de_canais_prd_71(), test_payloads_verbatim_prd_71() (+10 more)
 
-### Community 272 - "Settings"
-Cohesion: 0.11
-Nodes (27): BaseSettings, get_settings(), Configuração via variáveis OTTIMA_* (spec F1 §7.2)., Valida os segredos no boot: a chave de assinatura JWT é fatal, a Fernet é…, Settings, validate_secrets(), AppCertificateGenerateIn, AppCertificateGenerateOut (+19 more)
+### Community 272 - "generate_app_cert"
+Cohesion: 0.23
+Nodes (11): AppCertificateGenerateIn, AppCertificateGenerateOut, AppCertificateOut, BaseModel, Schemas de certificados: app cert de instância e trust por conexão (RF-202,…, ServerCertificateOut, generate_app_cert(), get_app_cert() (+3 more)
 
-### Community 273 - "MpcState"
-Cohesion: 0.16
-Nodes (15): MpcModes, MpcPrediction, MpcState, MpcStatus, MpcVarState, BaseModel, Publicado em `mpc.state.<flow_id>.<block_id>` a cada execução (spec F4 §5.1,…, Estado publicado de uma variável do MPC (spec F4 §5.1) — `sp` só existe em CV… (+7 more)
+### Community 273 - "Decisão"
+Cohesion: 0.11
+Nodes (17): 10. Integração com o MPC dinâmico e fallback, 11. Auditoria — sem canal de barramento novo, 1. Camada e localização, 2. Formulação, 3. G e Gd reutilizam o modelo existente — não há segundo modelo de ganho, 4. Linhas integradoras (`kind="integrating"`), 5. Mapeamento das categorias existentes (ADR-019 preservado), 6. Inviabilidade — duas linhas de defesa (+9 more)
 
 ### Community 274 - "Collector"
-Cohesion: 0.08
-Nodes (48): Collector, counters(), create_connection(), create_tag(), mpc_graph_valido(), mpc_host_echo_plan_worker(), mpc_host_slow_solve_worker(), Esqueleto mínimo válido do §2.1 (spec F4): 1 MV direta + 1 CV, matriz cheia.… (+40 more)
+Cohesion: 0.09
+Nodes (28): Collector, counters(), mpc_host_slow_solve_worker(), Assinante de um canal: guarda os payloads crus na ordem em que chegaram., Só as publicações de varredura: transição de estado não leva `ports` (§2.2-5)., Sequência de OUT1 do bloco Script nas varreduras: o contador do `state` do…, TD-008: Atraso real no SOLVE (não no boot) para forçar overrun determinístico.…, _comm_failure() (+20 more)
 
 ### Community 275 - "test_ws_mpc.py"
-Cohesion: 0.15
-Nodes (15): connect(), hub(), make_token(), operator_token(), FastAPI, fixture, WebSocket `/ws`: fanout de `mpc.state.<flow_id>.<block_id>` (spec F4 §6.2,…, Payload de varredura do §4.2, com `ports` preenchido como o runtime publica. (+7 more)
+Cohesion: 0.16
+Nodes (21): connect(), hub(), make_token(), mpc_state_json(), operator_token(), fixture, WebSocket `/ws`: fanout de `mpc.state.<flow_id>.<block_id>` (spec F4 §6.2,…, Payload de varredura do §4.2, com `ports` preenchido como o runtime publica. (+13 more)
 
 ### Community 277 - "test_td_flow_props.py"
 Cohesion: 0.17
@@ -1176,17 +1191,17 @@ Nodes (15): StatusStream, assinar_status(), cadencia_mediana(), AmbienteMpc, Any
 Cohesion: 0.24
 Nodes (11): Contador, contar_mensagens_vistas(), contar_passadas(), publicar_dica(), MonkeyPatch, Contador observável, para provar (ou negar) um efeito sem esperar tempo., Conta passadas de reconciliação CONCLUÍDAS, inclusive as que saem no watermark.…, Conta mensagens do canal já classificadas pelo assinante. (+3 more)
 
-### Community 279 - "._fanout"
+### Community 279 - "channel_mpc_state"
 Cohesion: 0.25
-Nodes (4): _flow_id_of(), _mpc_id_of(), Roteia uma publicação para quem pediu aquele flow/bloco. Não aguarda nenhum…, Enfileira sem nunca aguardar; fila cheia descarta a mensagem mais antiga.…
+Nodes (16): channel_mpc_state(), pipeline(), fixture, MpcState, SstoRun, Recorder: `MpcState.ssto` → hypertable `ssto_runs` (ADR-027 §11). O recorder…, `mpc_samples` tem uma linha por variável; `ssto_runs` tem UMA por execução — a…, Teto próprio, drop-oldest e contador — mesma disciplina dos demais buffers… (+8 more)
 
 ### Community 281 - "setup_planta.py"
 Cohesion: 0.23
 Nodes (18): config_mpc(), criar_tags(), env_deploy(), ganho_recomendado(), login(), main(), montar_grafo(), montar_modelos() (+10 more)
 
-### Community 282 - "flow-runtime/tests/test_events.py"
-Cohesion: 0.29
-Nodes (7): _handler(), MonkeyPatch, Redis, Contratos do assinante de canais do barramento do runtime (spec F3 §2.2-8)., Handler vazio: o que está sob teste é a inscrição, não o despacho., SUBSCRIBE que estoura fecha o pubsub: sem vazamento de conexão e inscrição.…, test_falha_ao_assinar_nao_vaza_inscricao_nem_conexao()
+### Community 282 - "test_falha_ao_assinar_nao_vaza_inscricao_nem_conexao"
+Cohesion: 0.33
+Nodes (6): _handler(), MonkeyPatch, Redis, Handler vazio: o que está sob teste é a inscrição, não o despacho., SUBSCRIBE que estoura fecha o pubsub: sem vazamento de conexão e inscrição.…, test_falha_ao_assinar_nao_vaza_inscricao_nem_conexao()
 
 ### Community 284 - "schemas/projects.py"
 Cohesion: 0.47
@@ -1204,9 +1219,9 @@ Nodes (4): ADR-025 — Retomada automática completa após `comm_restored`, Cons
 Cohesion: 0.31
 Nodes (16): agora(), alvos(), aplicar_sp(), armar(), _env(), estado_bloco(), flow_id(), log() (+8 more)
 
-### Community 288 - "PairInit"
-Cohesion: 0.29
-Nodes (7): ndarray, PairInit, Metadados de um par HABILITADO para `init_bumpless` (spec F4 §3.6, tarefa 2.3).…, _pair_input_value(), Entrada vigente da coluna do par, JÁ em desvio do ponto de linearização — mesma…, `x = x_ss(u, d)` de um par autorregulável: resolve `(I−A)·x = B·u_eff` (spec…, _steady_state()
+### Community 288 - "builder.py"
+Cohesion: 0.24
+Nodes (9): ndarray, PairInit, Montagem do-mpc do bloco MPC (spec F4 §3.2-3.5; TDD estrito). `build_mpc` monta…, Metadados de um par HABILITADO para `init_bumpless` (spec F4 §3.6, tarefa 2.3).…, _pair_input_value(), Init bumpless — rotina única de armar/re-armar (spec F4 §3.6; TDD estrito).…, Entrada vigente da coluna do par, JÁ em desvio do ponto de linearização — mesma…, `x = x_ss(u, d)` de um par autorregulável: resolve `(I−A)·x = B·u_eff` (spec… (+1 more)
 
 ### Community 290 - "test_f4_ws.py"
 Cohesion: 0.20
@@ -1224,9 +1239,9 @@ Nodes (5): BaseModel, Schemas de tags OPC (RF-203): nome lógico, node_id, dire�
 Cohesion: 0.42
 Nodes (8): caminhos(), chamar_metodo(), _com_cliente(), escrever(), _formatar(), main(), Todos os nos de processo lidos pelo `snapshot`, na ordem de exibicao., snapshot()
 
-### Community 295 - "StubPool"
-Cohesion: 0.22
-Nodes (3): Pool-duplo: `OUT1..OUTn` viram o contador de varreduras guardado no `state`.…, Espelha o contrato de `ScriptPool.stats()` (F4a 0.6, spec F4 §4.10) — sem…, StubPool
+### Community 295 - "test_bus_ssto.py"
+Cohesion: 0.21
+Nodes (14): gain_model_hash(), SHA-256 da matriz `models` — a "referência ao modelo de ganho usado" da…, _config(), MpcState, SstoRun, Contrato de auditoria do SSTO no barramento (ADR-027 §11). Decisão normativa…, "Referência ao modelo de ganho usado" (ADR-027 §11): o hash da matriz `models`,…, _run() (+6 more)
 
 ### Community 296 - "schemas/auth.py"
 Cohesion: 0.38
@@ -1235,6 +1250,30 @@ Nodes (6): LoginIn, LoginOut, BaseModel, Schemas de autenticação (spec F1 §5.
 ### Community 297 - "app.py"
 Cohesion: 0.19
 Nodes (10): create_app(), lifespan(), FastAPI, Settings, App factory da API: rotas sob /api, logging JSON e ciclo de vida do engine., Cria engine, session factory, Redis e o hub do /ws na subida; descarta na…, OttimaSystem — API REST., Alvo do uvicorn em produção: ottima_api.main:app. (+2 more)
+
+### Community 298 - "build_mpc"
+Cohesion: 0.22
+Nodes (13): build_mpc(), BuiltMpc, Monta o `do_mpc.controller.MPC` do bloco (spec F4 §3.2-3.5)., Controller do-mpc pronto + metadados de índice para o worker (spec F4 §3,…, _propaga(), DM, Propaga o modelo agregado em malha aberta a partir do repouso, com entradas…, Saída agregada da linha avaliada num `x` arbitrário, com bias zerado (`tvp`… (+5 more)
+
+### Community 299 - "_Runtime"
+Cohesion: 0.12
+Nodes (21): DM, DMStruct, _aplicar_banda_morta(), _audit_record(), _current_bias(), _effective_sp(), _extract_prediction(), _propagate() (+13 more)
+
+### Community 308 - "health"
+Cohesion: 0.15
+Nodes (8): health(), Sempre 200: a degradação vai no corpo (spec F2 §2.2-8). Sem lifespan (app cru…, health(), Sempre 200: a degradação vai no corpo (spec F2 §2.2-8/§6.6). Sem pipeline…, datetime, Samples + eventos + mpc_samples + ssto_runs descartados por overflow; nunca…, Último flush gravou? Começa `True`: sem falha observada, sem degradação., Instante do último flush que gravou linhas (flush vazio não conta).
+
+### Community 309 - "test_timescale_ssto.py"
+Cohesion: 0.18
+Nodes (5): Hypertable `ssto_runs` — auditoria imutável do SSTO (ADR-027 §11, migration…, Downgrade simétrico da 0004. Síncrono de propósito: `alembic.command` chama…, Round-trip dos vetores em JSONB: o registro tem de voltar do banco idêntico ao…, test_downgrade_remove_ssto_runs(), test_grava_e_le_um_registro_completo()
+
+### Community 314 - "schemas/flows.py"
+Cohesion: 0.29
+Nodes (9): FlowCreate, FlowDetail, FlowOut, FlowSaved, FlowUpdate, BaseModel, Schemas de flows (RF-302/306/307): CRUD do diagrama de blocos e envelope do…, Linha da lista (spec §5.1): sem `graph_json`, que por flow pode ser grande. (+1 more)
+
+### Community 323 - "_avisos_watchdog"
+Cohesion: 0.27
+Nodes (10): _aviso_watchdog(), _avisos_watchdog(), _avisos_watchdog_mpc(), FlowGraph, FlowNode, get, MV com `pid` escreve pelas próprias tags do binding…, TD-004: um aviso por bloco que escreve numa conexão sem watchdog completo — o… (+2 more)
 
 ### Community 325 - "test_e2e_td_08_predicao_tem_np_mais_um_ponto_e_parte_do_u_prev"
 Cohesion: 0.26
@@ -1245,16 +1284,16 @@ Cohesion: 0.23
 Nodes (13): conexao_sem_watchdog(), criar_flow_sem_watchdog(), grafo_mv_direta(), Any, Client, EventStream, fixture, L2 do fechamento de tech debts — conexão sem watchdog é somente leitura… (+5 more)
 
 ### Community 327 - "ottima_opc_worker/main.py"
-Cohesion: 0.26
-Nodes (12): check_database(), check_redis(), _heartbeat_loop(), lifespan(), FastAPI, Serviço opc-worker: lifespan com supervisor e `/health` por conexão (RNF-07). O…, Faz ping no Redis e registra o resultado em app.state.redis_ok., Faz um SELECT 1 no banco e registra o resultado em app.state.db_ok. (+4 more)
+Cohesion: 0.31
+Nodes (10): check_database(), check_redis(), _heartbeat_loop(), lifespan(), FastAPI, Serviço opc-worker: lifespan com supervisor e `/health` por conexão (RNF-07). O…, Faz ping no Redis e registra o resultado em app.state.redis_ok., Faz um SELECT 1 no banco e registra o resultado em app.state.db_ok. (+2 more)
 
 ### Community 328 - "test_e2e_f6_05_overrun_pela_malha_tfs"
 Cohesion: 0.24
 Nodes (11): AmbienteMpc, Any, Client, EventStream, OpcSim, rnf09, Camada L2 da F6c (spec F6 §7): suíte RNF-09, cenários de dinâmica pela malha…, E2E-F6-06 (RNF-09, spec §7-3, ADR-011): Flow MPC↔TFS rodando em AUTO. Muda a… (+3 more)
 
-### Community 329 - "._readback_value"
-Cohesion: 0.24
-Nodes (5): Predicado puro e ÚNICO do gate de armar em AMBOS os eixos (fix-final, achado do…, Saída da MV em LOCAL (spec §4.3): a posição real lida da planta. `None` quando…, Tag da posição real da MV: com `pid`, a do `pid` (spec §2.1-3); sem `pid`, a…, Posição real da MV lida do barramento. `None` quando não há tag de readback…, Valor físico "vigente" de uma MV: a posição real lida da planta quando há tag…
+### Community 329 - ".stop"
+Cohesion: 0.20
+Nodes (8): _cancel(), _log_teardown_results(), Any, Derruba poll, consumidor, todas as tasks e o pool — nesta ordem. Idempotente.…, Para a task e tira o flow do mapa e do `/health`. A entrada sai do mapa mesmo…, Registra o que o gather engoliu: desmonte silencioso esconde flow órfão…, Cancela e aguarda a task; erro dela não pode impedir o resto do desmonte., Task
 
 ### Community 330 - "StatusStream"
 Cohesion: 0.24
@@ -1264,33 +1303,45 @@ Nodes (5): PubSub, Assinatura de `flow.status.<flow_id>` aberta ANTES do gatilho
 Cohesion: 0.29
 Nodes (6): project_tags(), AsyncSession, Consulta de tags do projeto: compartilhada entre API e flow-runtime., Tags visíveis ao flow: as do projeto dele, via conexão (o `graph_json` não tem…, Duas conexões, dois projetos: `project_tags` não pode vazar tag de outro…, test_so_traz_tags_das_conexoes_do_projeto()
 
-### Community 333 - "_excede_o_declarado"
-Cohesion: 0.50
-Nodes (4): _excede_o_declarado(), Diz se o `Content-Length` já denuncia um corpo grande demais, sem nunca…, parametrize, test_guard_de_content_length_classifica_sem_nunca_levantar()
+### Community 332 - "StubPipeline"
+Cohesion: 0.28
+Nodes (8): get_health(), datetime, Só as propriedades que o /health lê., StubPipeline, test_health_degrada_com_banco_fora(), test_health_degrada_com_redis_fora(), test_health_ok_exige_redis_e_banco(), test_health_sem_pipeline_usa_defaults()
 
-### Community 335 - "_parse_e_validar"
+### Community 333 - "conexoes_sem_watchdog"
+Cohesion: 0.29
+Nodes (6): conexoes_sem_watchdog(), AsyncSession, Consulta de conexões do projeto: compartilhada entre API e flow-runtime., `conn_id -> nome` das conexões do projeto sem watchdog completo (TD-004). Sem…, TD-004: falta um dos dois node_ids (ou os dois) já conta como sem watchdog; a…, test_traz_so_conexoes_do_projeto_sem_watchdog_completo()
+
+### Community 334 - "test_reassinatura_limpa_respeita_o_freio"
+Cohesion: 0.33
+Nodes (4): ClosingRedis, Cliente cujo `pubsub()` sempre devolve assinante que encerra a escuta na hora., `listen()` que termina limpo não pode virar rajada de reassinatura queimando…, test_reassinatura_limpa_respeita_o_freio()
+
+### Community 335 - "fixture"
+Cohesion: 0.40
+Nodes (5): events_seen(), health_app(), fixture, Coleta os `EventMessage` que passam pelo canal `events` durante o teste., Devolve o app ao estado cru: `main.app` é global e compartilhado entre testes.
+
+### Community 340 - "RecordingSession"
 Cohesion: 0.67
-Nodes (3): _parse_e_validar(), FlowGraph, Parse + validação num passo só, para rodar inteiro fora do event loop dentro de…
+Nodes (3): AsyncSession, Sessão que registra em `info["writes"]` a tabela de cada statement executado., RecordingSession
 
 ## Knowledge Gaps
-- **503 isolated node(s):** `OPCSIM_ENDPOINT`, `SENTINELA`, `Projeto`, `RecursoCriado`, `TagDesejada` (+498 more)
+- **521 isolated node(s):** `buttonVariants`, `ButtonProps`, `Solver`, `PosicaoLocalRemoto`, `PosicaoManAuto` (+516 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **106 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **112 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `TagRef` connect `TagRef` to `definition.py`, `flowgraph/__init__.py`, `test_flowgraph.py`, `test_flowgraph_mpc.py`, `ottima_core/tags.py`, `mpc_golden_export.py`, `validate.py`, `_parse_e_validar`, `routers/flows.py`, `MpcConfig`, `routers/projects.py`?**
-  _High betweenness centrality (0.052) - this node is a cross-community bridge._
-- **Why does `await_until()` connect `await_until` to `opc-worker/tests/test_supervisor.py`, `FakeClock`, `MpcHost`, `test_kind_fora_de_hint_kinds_nao_dispara_reconcile`, `processo_vivo`, `test_watchdog.py`, `opc-worker/tests/test_security.py`, `test_snapshot.py`, `ChannelListener`, `runtime_test_helpers.py`, `test_failure.py`, `test_backpressure.py`, `test_connection.py`, `test_subscriptions.py`, `RecorderPipeline`, `test_heartbeat.py`, `test_pipeline.py`, `test_server.py`, `test_busy_loop_nao_trava_o_event_loop`, `test_dupla_cancelacao_durante_replace_nao_encolhe_o_pool`, `test_stats_conta_respawns_e_reflete_ocupacao`, `test_script.py`?**
-  _High betweenness centrality (0.028) - this node is a cross-community bridge._
-- **Why does `MpcConfig` connect `MpcConfig` to `SolveResult`, `flowgraph/__init__.py`, `test_mpc_bumpless.py`, `build_mpc`, `mpc_golden_export.py`, `validate.py`, `FlowCommand`, `MpcHost`, `test_mpc_block.py`, `test_mpc_load.py`, `mpc_config.py`, `TagRef`, `test_mpc_worker.py`?**
-  _High betweenness centrality (0.025) - this node is a cross-community bridge._
+- **Why does `TagRef` connect `TagRef` to `build_definition`, `test_flowgraph_mpc.py`, `test_flowgraph.py`, `_avisos_watchdog`, `ottima_core/tags.py`, `ResumeOrchestrator`, `mpc_golden_export.py`, `validate.py`, `MpcConfig`, `routers/projects.py`?**
+  _High betweenness centrality (0.040) - this node is a cross-community bridge._
+- **Why does `MpcConfig` connect `MpcConfig` to `validate.py`, `MpcHost`, `test_mpc_block.py`, `TagRef`, `SteadyStateOptimizer`, `OpcWrite`, `test_ssto_detuning.py`, `test_bus_ssto.py`, `build_mpc`, `MpcBlock`, `mpc_config.py`, `test_ssto_model.py`, `flowgraph/__init__.py`, `SolverResult`, `test_mpc_bumpless.py`, `test_mpc_economics.py`, `test_mpc_builder.py`, `mpc_golden_export.py`, `FlowCommand`, `bus.py`, `test_mpc_worker.py`, `_solve`, `test_mpc_load.py`?**
+  _High betweenness centrality (0.027) - this node is a cross-community bridge._
+- **Why does `await_until()` connect `await_until` to `opc-worker/tests/test_supervisor.py`, `_ResilientSubscriber`, `FakeClock`, `MpcHost`, `test_kind_fora_de_hint_kinds_nao_dispara_reconcile`, `processo_vivo`, `test_watchdog.py`, `opc-worker/tests/test_security.py`, `runtime_test_helpers.py`, `test_failure.py`, `test_backpressure.py`, `test_connection.py`, `test_subscriptions.py`, `RecorderPipeline`, `test_heartbeat.py`, `test_pipeline.py`, `test_server.py`, `test_busy_loop_nao_trava_o_event_loop`, `test_dupla_cancelacao_durante_replace_nao_encolhe_o_pool`, `test_stats_conta_respawns_e_reflete_ocupacao`, `test_script.py`, `test_writes.py`?**
+  _High betweenness centrality (0.022) - this node is a cross-community bridge._
 - **Are the 104 inferred relationships involving `await_until()` (e.g. with `test_bloco_identico_mantem_o_estado_interno_do_tfs()` and `test_bloco_removido_desaparece_e_bloco_novo_nasce_null()`) actually correct?**
   _`await_until()` has 104 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 2 inferred relationships involving `MpcConfig` (e.g. with `TagRef` and `ValidationResult`) actually correct?**
+  _`MpcConfig` has 2 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 19 inferred relationships involving `MpcBlock` (e.g. with `MpcModes` and `MpcPrediction`) actually correct?**
+  _`MpcBlock` has 19 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 62 inferred relationships involving `harness_factory()` (e.g. with `test_bloco_identico_mantem_o_estado_interno_do_tfs()` and `test_bloco_removido_desaparece_e_bloco_novo_nasce_null()`) actually correct?**
   _`harness_factory()` has 62 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 57 inferred relationships involving `collect()` (e.g. with `test_bloco_identico_mantem_o_estado_interno_do_tfs()` and `test_bloco_removido_desaparece_e_bloco_novo_nasce_null()`) actually correct?**
-  _`collect()` has 57 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `OPCSIM_ENDPOINT`, `SENTINELA`, `Projeto` to the rest of the system?**
-  _503 weakly-connected nodes found - possible documentation gaps or missing edges._
