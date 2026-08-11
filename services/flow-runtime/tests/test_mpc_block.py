@@ -47,11 +47,17 @@ OPERADOR = "user:7"
 FLOW_ID = 1
 
 
-def _config(*, multiplier: int = 1, readback_direto: int | None = None) -> MpcConfig:
+def _config(
+    *, multiplier: int = 1, readback_direto: int | None = None, mode_read: int | None = None
+) -> MpcConfig:
     """1 CV + 2 MVs (uma com `pid`, outra direta) — cobre a tabela de modos inteira.
 
     `readback_direto`: tag de posição real da MV DIRETA (sem `pid`). `None` mantém o
-    comportamento de hold do `initial_value`, que é o dos demais testes deste arquivo."""
+    comportamento de hold do `initial_value`, que é o dos demais testes deste arquivo.
+
+    `mode_read`: tag de modo real do PID. `None` (default) mantém a MV sem observabilidade
+    de modo — é o que os testes deste arquivo assumem; quem exercita o ADR-028 pede a tag
+    (`test_mpc_mv_status.py`)."""
     return MpcConfig.model_validate(
         {
             "name": "bloco_teste",
@@ -69,6 +75,7 @@ def _config(*, multiplier: int = 1, readback_direto: int | None = None) -> MpcCo
                             "write_tag_id": 501,
                             "target_mode": "rcas",
                             "mode_cmd_tag_id": 502,
+                            "mode_read_tag_id": mode_read,
                             "readback_tag_id": 503,
                             "mode_values": {"auto": 0, "target": 1},
                         },
@@ -204,6 +211,7 @@ def _block(
     multiplier: int = 1,
     now: Callable[[], datetime] | None = None,
     readback_direto: int | None = None,
+    mode_read: int | None = None,
     escreve_sem_watchdog: bool = False,
 ) -> tuple[MpcBlock, FakeHost, FakeSnapshot, Publishes, Writes, Events]:
     host = FakeHost()
@@ -213,7 +221,7 @@ def _block(
     emit_event = Events()
     block = MpcBlock(
         "m1",
-        config=_config(multiplier=multiplier, readback_direto=readback_direto),
+        config=_config(multiplier=multiplier, readback_direto=readback_direto, mode_read=mode_read),
         ts_flow=TS_FLOW,
         snapshot=snapshot,
         host=host,
@@ -368,7 +376,12 @@ async def test_remoto_man_e_o_valor_manual_clampado_em_limits() -> None:
 
 
 async def test_remoto_auto_aplica_o_ultimo_plano() -> None:
-    block, host, *_ = _block()
+    block, host, snapshot, *_ = _block()
+    # Readback publicado: sem ele a MV é `out_of_service` (ADR-028) e sai congelada — estado
+    # que o gate de arme já impede em produção (`cold_input`), mas que um teste que chama
+    # `command()` direto alcança. Publicar deixa o cenário reproduzir um bloco REALMENTE
+    # armável, que é o que este teste quer exercitar.
+    snapshot.set(503, 10.0)
     await _entra_remoto_auto(block)
     host.pending = _resultado_ok({"mv_pid": 33.0, "mv_direto": -4.0})
     saida = await block.step(entradas(20.0))
@@ -392,7 +405,9 @@ async def test_reentrar_em_auto_nao_reaplica_o_plano_velho() -> None:
     Visto em planta: MV recolocada em 52 % no MAN, e a volta para AUTO jogou o atuador para
     7 % (o plano de uma condição anterior) antes de qualquer solve novo — o oposto de
     transferência sem salto. Só o primeiro `SolveResult` NOVO pode mover a MV."""
-    block, host, *_ = _block()
+    block, host, snapshot, *_ = _block()
+    # MV observável (ADR-028) — ver nota em `test_remoto_auto_aplica_o_ultimo_plano`
+    snapshot.set(503, 10.0)
     await _entra_remoto_auto(block)
     host.pending = _resultado_ok({"mv_pid": 33.0, "mv_direto": -4.0})
     await block.step(entradas(20.0))
@@ -491,7 +506,9 @@ async def test_transicao_building_para_ok_em_auto_quando_host_fica_pronto() -> N
 
 
 async def test_resultado_entre_fronteiras_so_muda_a_porta_na_fronteira_seguinte() -> None:
-    block, host, *_ = _block(multiplier=3)
+    block, host, snapshot, *_ = _block(multiplier=3)
+    # MV observável (ADR-028) — ver nota em `test_remoto_auto_aplica_o_ultimo_plano`
+    snapshot.set(503, 10.0)
     await _entra_remoto_auto(block)
 
     primeira = await block.step(entradas(20.0))  # n=0: fronteira, dispara o solve
@@ -650,7 +667,8 @@ async def test_no_convergence_emite_solver_error_e_nao_move_a_mv() -> None:
 
 
 async def test_writes_a_cada_varredura_em_remoto_suprimidos_em_local_e_sob_invalidez() -> None:
-    block, _, _, _, writes, events = _block()
+    block, _, snapshot, _, writes, events = _block()
+    snapshot.set(503, 10.0)  # MV observável (ADR-028) — sem readback a escrita dela é suprimida
 
     await block.step(entradas(20.0))  # LOCAL (padrão de boot, RNF-03): sem escrita nenhuma
     assert writes.writes == []

@@ -57,7 +57,7 @@ from __future__ import annotations
 
 import time
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from multiprocessing.connection import Connection
 from typing import Final
 
@@ -82,6 +82,11 @@ class SolveRequest:
     d: dict[str, float]
     sp: dict[str, float]
     reinit: bool
+    frozen_mvs: frozenset[str] = frozenset()
+    """MVs fora do comando do MPC neste ciclo (ADR-028) — congeladas no `u_applied`
+    correspondente, que já é a posição REAL medida. Default vazio: um pedido montado sem o
+    campo (testes antigos, hot-swap com host reaproveitado) reproduz o comportamento
+    pré-ADR-028 bit a bit."""
 
 
 @dataclass(frozen=True)
@@ -112,6 +117,9 @@ class _Runtime:
     `Simulator.x0`) — a mesma variável serve de x0 do MPC e de x0 do propagador.
     `du_min`: mv_id -> banda morta do atuador (`MvVar.du_min`), lida uma vez no boot — a
     quantização pós-solve (`_aplicar_banda_morta`, TD-007) é a única consumidora.
+    `du_max`/`limits`: mv_id -> passo máximo por execução e curso do atuador, lidos uma vez
+    no boot para o congelamento por MV (ADR-028, `_apply_tvp`/`_clamp_frozen`) reescrever o
+    `dumax` do horizonte e clampar a MV congelada sem reabrir o `MpcConfig` a cada pedido.
     """
 
     built: BuiltMpc
@@ -121,6 +129,8 @@ class _Runtime:
     cost_fun: ca.Function
     x_current: ca.DM
     du_min: dict[str, float]
+    du_max: dict[str, float]
+    limits: dict[str, tuple[float, float]]
 
 
 def _build_runtime(config: MpcConfig, ts_flow: float) -> _Runtime:
@@ -162,6 +172,8 @@ def _build_runtime(config: MpcConfig, ts_flow: float) -> _Runtime:
         cost_fun=cost_fun,
         x_current=model.x(0.0).cat,
         du_min={mv.id: mv.du_min for mv in config.variables.mvs},
+        du_max={mv.id: mv.du_max for mv in config.variables.mvs},
+        limits={mv.id: (mv.limits.min, mv.limits.max) for mv in config.variables.mvs},
     )
 
 
@@ -197,13 +209,58 @@ def _write_bias(
         runtime.built.tvp_template["_tvp", :, bias_name] = bias
 
 
-def _apply_tvp(built: BuiltMpc, request: SolveRequest) -> None:
-    """SP e DV (constantes no horizonte, spec §3.2/§3.4) — escritos em TODO pedido, mesmo em
-    `reinit` (`init_bumpless` só escreve `bias`, nunca SP/DV)."""
+def _apply_tvp(runtime: _Runtime, request: SolveRequest) -> None:
+    """SP, DV e `dumax` por MV — escritos em TODO pedido, mesmo em `reinit`
+    (`init_bumpless` só escreve `bias`, nunca SP/DV/`dumax`).
+
+    SP e DV são constantes no horizonte (spec §3.2/§3.4). O `dumax` é horizonte-variante por
+    construção do builder (`du_max` até `Nc`, `0` depois — a MV não se move além do horizonte
+    de controle) e agora também CICLO-variante: a MV congelada (ADR-028) recebe `0` no
+    horizonte inteiro, o que faz a restrição `|u − uprev| ≤ dumax` do builder virar
+    `u ≡ uprev` para ela. É esse o mecanismo de exclusão do problema — nenhuma variável some
+    da montagem, nenhuma linha de `builder.py` muda, e o solver (IPOPT, ADR-004) segue
+    recebendo o mesmo problema estrutural de sempre. A MV congelada continua entrando na
+    predição das CVs com o valor real medido: é exatamente o papel de distúrbio medido.
+
+    Reescrever o padrão INTEIRO a cada pedido (e não só quando congela) é deliberado: o
+    `tvp_template` é a mesma referência viva entre execuções (`set_tvp_fun` devolve sempre
+    o mesmo struct), então uma MV que descongela precisa ver o `du_max` de volta sem
+    depender de ninguém lembrar de restaurá-lo.
+    """
+    built = runtime.built
     for cv_id, tvp_name in built.sp_tvp_name.items():
         built.tvp_template["_tvp", :, tvp_name] = request.sp[cv_id]
     for dv_id, tvp_name in built.dv_tvp_name.items():
         built.tvp_template["_tvp", :, tvp_name] = request.d[dv_id]
+    n_c = built.horizons.nc
+    for mv_id in built.mv_order:
+        congelada = mv_id in request.frozen_mvs
+        du_max = runtime.du_max[mv_id]
+        name = f"dumax_{mv_id}"
+        for k in range(built.horizons.np + 1):
+            built.tvp_template["_tvp", k, name] = 0.0 if congelada or k >= n_c else du_max
+
+
+def _clamp_frozen(runtime: _Runtime, request: SolveRequest) -> SolveRequest:
+    """Traz a posição medida de cada MV congelada para dentro de `limits` (ADR-028).
+
+    Congelar é impor `u ≡ uprev`, e `uprev` sai do `u_applied`. Se a posição real estiver
+    fora do curso configurado (limite alterado na engenharia, atuador reportando além da
+    faixa), essa igualdade colide com `mpc.bounds["_u"]` e o solve inteiro sai infactível —
+    o controlador cairia por causa de uma MV que nem está sendo comandada. Clampar mantém o
+    problema factível; o desvio residual entre a posição real e a clampada aparece no bias
+    da linha, que é onde ele deve aparecer.
+
+    Só as congeladas: para uma MV livre o `u_applied` cru continua sendo a verdade que o
+    bias precisa ver (comportamento pré-ADR-028, intocado).
+    """
+    if not request.frozen_mvs:
+        return request
+    u_applied = dict(request.u_applied)
+    for mv_id in request.frozen_mvs:
+        lo, hi = runtime.limits[mv_id]
+        u_applied[mv_id] = max(lo, min(hi, u_applied[mv_id]))
+    return replace(request, u_applied=u_applied)
 
 
 def _extract_prediction(
@@ -285,6 +342,7 @@ def _solve(runtime: _Runtime, request: SolveRequest) -> SolveResult:
     """Um ciclo completo de execução (spec §3.3/§3.6/§4.9): estado, solve cronometrado,
     extração da predição/custo."""
     built = runtime.built
+    request = _clamp_frozen(runtime, request)
     if request.reinit:
         init_bumpless(built, u_now=request.u_applied, y_now=request.y, d_now=request.d)
         runtime.x_current = built.mpc.x0.cat
@@ -293,7 +351,7 @@ def _solve(runtime: _Runtime, request: SolveRequest) -> SolveResult:
         _write_bias(runtime, request, x_new, u0)
         runtime.x_current = x_new
 
-    _apply_tvp(built, request)
+    _apply_tvp(runtime, request)
 
     t0 = time.perf_counter()
     built.mpc.make_step(runtime.x_current)

@@ -200,7 +200,13 @@ class MpcOrchestrator:
                 kind=KIND_MPC_SHED,
                 payload={},
                 severity="alarm",
-                message=f"MPC '{block_id}': shed para LOCAL — mode_read divergente do PID",
+                # ADR-028: o shed deixou de ser "algum mode_read divergiu" e passou a ser
+                # "nenhuma MV disponível" (divergência parcial vira modo degradado) — a
+                # mensagem acompanha o que de fato aconteceu.
+                message=(
+                    f"MPC '{block_id}': shed para LOCAL — nenhuma MV disponível "
+                    "(fora de RCAS ou sem leitura confiável)"
+                ),
             )
 
         task = asyncio.create_task(

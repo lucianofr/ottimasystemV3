@@ -214,6 +214,9 @@ def test_mpc_var_state_sp_e_opcional_e_default_none():
 def test_mpc_state_round_trip_payload_verbatim_spec_51_vars_com_e_sem_sp():
     # Payload literal da spec F4 §5.1 (RF-625)/F5 §2.1 (`ts`/`prediction.ts`), enums
     # concretizados: CV carrega `sp`, MV não; `armed = (local_remote == "remote")`.
+    # ADR-028 acrescentou `status` a `vars.*`: só MV o preenche (aqui `None` nas duas, porque
+    # o payload da spec é anterior ao ADR e um consumidor antigo continua válido — é essa
+    # compatibilidade que o round-trip tranca).
     payload = {
         "ts": "2026-08-06T12:00:00Z",
         "modes": {"local_remote": "remote", "man_auto": "auto"},
@@ -225,8 +228,8 @@ def test_mpc_state_round_trip_payload_verbatim_spec_51_vars_com_e_sem_sp():
             "input_valid": True,
         },
         "vars": {
-            "cv_a1b2": {"v": 12.3, "sp": 12.5},
-            "mv_x7k2": {"v": 45.0, "sp": None},
+            "cv_a1b2": {"v": 12.3, "sp": 12.5, "status": None},
+            "mv_x7k2": {"v": 45.0, "sp": None, "status": "rcas_ok"},
         },
         "cost": 0.184,
         "prediction": {
@@ -240,6 +243,8 @@ def test_mpc_state_round_trip_payload_verbatim_spec_51_vars_com_e_sem_sp():
     assert state.model_dump(mode="json") == payload
     assert state.vars["cv_a1b2"].sp == 12.5
     assert state.vars["mv_x7k2"].sp is None
+    assert state.vars["cv_a1b2"].status is None  # `status` é campo de MV (ADR-028)
+    assert state.vars["mv_x7k2"].status == "rcas_ok"
     assert state.status.armed == (state.modes.local_remote == "remote")
 
 
@@ -256,7 +261,7 @@ def test_mpc_state_prediction_vazia_fora_de_auto_round_trip():
             "armed": False,
             "input_valid": True,
         },
-        "vars": {"cv_a1b2": {"v": 20.0, "sp": None}},
+        "vars": {"cv_a1b2": {"v": 20.0, "sp": None, "status": None}},
         "cost": 0.0,
         "prediction": {"ts": "2026-08-06T12:00:00Z", "t": [], "cv": [], "mv": []},
     }

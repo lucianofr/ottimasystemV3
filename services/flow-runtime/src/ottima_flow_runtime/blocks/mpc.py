@@ -46,6 +46,7 @@ from typing import Literal
 from ottima_core.bus import (
     KIND_MPC_INPUT_INVALID,
     KIND_MPC_MODE_CHANGED,
+    KIND_MPC_MV_STATUS_CHANGED,
     KIND_MPC_MV_WRITTEN,
     KIND_MPC_OVERRUN,
     KIND_MPC_SOLVER_ERROR,
@@ -59,6 +60,12 @@ from ottima_core.bus import (
 )
 from ottima_core.flowgraph import CvVar, MpcConfig, MvVar, PidBinding, derive_horizons
 
+from ..mpc.availability import (
+    MvAvailability,
+    classify_mvs,
+    frozen_mv_ids,
+    readback_tag_id,
+)
 from ..mpc.host import MpcHost
 from ..mpc.worker import SolveRequest, SolveResult
 from ..snapshot import ValueSnapshot
@@ -199,6 +206,18 @@ class MpcBlock(Block):
         return self._ts_mpc
 
     @property
+    def mv_status(self) -> dict[str, MvAvailability]:
+        """Disponibilidade por MV apurada na ÚLTIMA varredura (ADR-028) — leitura só.
+
+        O `MpcOrchestrator` (supervisor_mpc.py) precisa ver o mapa por fora do `step()` para
+        decidir o shed do bloco (nenhuma MV sobrou), no mesmo idioma das demais properties
+        de inspeção (`host`/`local_remote`/`ts_mpc`/`pid_bindings`): o supervisor não
+        reclassifica nada por conta própria, para nunca discordar do que o bloco usou no
+        `SolveRequest` daquela varredura.
+        """
+        return dict(self._mv_status)
+
+    @property
     def pid_bindings(self) -> tuple[tuple[str, PidBinding], ...]:
         """`(var_id, pid)` de cada MV com `pid` — o supervisor usa para escrever `mode_cmd`
         e ler `mode_read` nas transições §4.4/§4.5 sem reparsear o `MpcConfig` a partir do
@@ -236,6 +255,15 @@ class MpcBlock(Block):
         warm = all(var_id in self._last_measured for var_id in self._entrada_ids)
         if not warm:
             return "cold_input"
+        # ADR-028 NÃO acrescenta aqui um gate de "nenhuma MV em RCAS": seria circular.
+        # LOCAL->REMOTO é justamente o ato de escrever `mode_cmd = target` nos PIDs — exigir
+        # `rcas_ok` antes dele é exigir que a malha já esteja em RCAS antes do comando que a
+        # põe em RCAS. Quem cobre o caso "o operador travou o PID fora de RCAS" é o watchdog
+        # de confirmação de sempre (`mpc_arming.watch_arm`: sem confirmação em 2×Ts_mpc,
+        # `mpc_arm_failed {reason: no_confirm}` e volta a LOCAL). Em MAN->AUTO o bloco já
+        # está REMOTO e confirmado, e a perda total posterior é o shed. Os dois eixos ficam
+        # com a régua de ENTRADA intacta; o ADR-028 relaxa o conjunto de MVs ativas só
+        # DURANTE a operação.
         # Mesma régua de `_readback_value` (ausente OU qualidade ruim): armar sobre uma
         # amostra que o próprio bloco não aceita como posição seria contraditório.
         sem_readback = any(
@@ -266,6 +294,18 @@ class MpcBlock(Block):
         self._plan: dict[str, float] | None = None
         self._sp: dict[str, float] = dict.fromkeys(self._cv_ids, 0.0)
         self._last_measured: dict[str, float] = {}
+        # ADR-028 — disponibilidade por MV, reapurada a cada varredura. Nasce VAZIO de
+        # propósito: a primeira classificação é a linha de base e não emite evento de
+        # transição. Semear aqui classificando o espelho faria todo deploy publicar uma
+        # enxurrada de "MV voltou a rcas_ok" conforme as tags de readback chegassem — o
+        # estado publicado em `mpc.state.*` já mostra a situação corrente a cada fronteira;
+        # o evento existe para MUDANÇA, e antes da primeira varredura não houve nenhuma.
+        self._mv_status: dict[str, MvAvailability] = {}
+        # Última posição REAL confiável de cada MV (ADR-028): âncora de congelamento quando
+        # a leitura para de prestar. Sem isto o congelamento cairia em `_mv_last` — que em
+        # AUTO é o último valor que o PRÓPRIO MPC calculou, exatamente a realimentação que
+        # o ADR proíbe como base de bias/delta.
+        self._last_good_readback: dict[str, float] = {}
         self._last_prediction = _empty_prediction(self._now())
         # Guarda a fronteira do último `host.dispatch()` aceito (spec §3.5): a âncora que
         # `_apply_result` aplica ao resultado correspondente, consumido no `poll()` da
@@ -333,6 +373,13 @@ class MpcBlock(Block):
         # `_dispatch_ts` desta mesma fronteira — nunca recomputado por chamada.
         ts = (ts if ts is not None else self._now()) if is_frontier else None
 
+        # ADR-028 — reclassificação das MVs ANTES de qualquer decisão desta varredura: o
+        # `SolveRequest` da fronteira, a saída de cada porta e a supressão de escrita no
+        # `pid` leem todos o MESMO mapa, apurado uma vez só. Não depende das portas de
+        # entrada (só do espelho do barramento), então roda antes do gate de cold start —
+        # inclusive o quadro de cold start publica um status honesto.
+        await self._reclassify_mvs()
+
         samples = {pid: inputs.get(pid, PortSample(None, False)) for pid in self._entrada_ids}
         if has_cold_input(samples):
             if is_frontier:
@@ -377,6 +424,51 @@ class MpcBlock(Block):
 
         return outputs
 
+    async def _reclassify_mvs(self) -> None:
+        """Reapura o status de cada MV, atualiza a âncora de posição real e audita só as
+        TRANSIÇÕES (ADR-028).
+
+        A âncora (`_last_good_readback`) é gravada ANTES de o status novo valer, e a partir
+        da leitura viva: é a última posição em que se pode confiar quando a tag azedar na
+        varredura seguinte. Sair de `rcas_ok` é `warning` (o MPC perdeu uma alavanca);
+        voltar é `info`. A primeira classificação de uma MV nunca emite evento — ver
+        `reset()`.
+        """
+        novo = classify_mvs(self._mvs.values(), self._snapshot)
+        for mv in self._mvs.values():
+            posicao = self._readback_value(mv)
+            if posicao is not None:
+                self._last_good_readback[mv.id] = posicao
+        for var_id, status in novo.items():
+            anterior = self._mv_status.get(var_id)
+            if anterior is None or anterior is status:
+                continue
+            voltou = status is MvAvailability.RCAS_OK
+            if voltou and self._plan is not None:
+                # O plano guardado para ESTA MV foi calculado antes de a malha ser tomada,
+                # contra outra posição e outra condição de planta. Aplicá-lo no primeiro
+                # quadro após o retorno é um degrau instantâneo, sem passar pelo Δu — o
+                # mesmo erro que a §4.4 já evita em MAN->AUTO zerando `_plan` inteiro. Aqui
+                # só a entrada desta MV morre: as demais seguem com o plano vigente, que é
+                # legítimo para elas. Sem entrada no plano, a saída segura `_mv_last` (a
+                # posição real, mantida enquanto a MV esteve congelada) até o primeiro
+                # `SolveResult` NOVO chegar.
+                self._plan.pop(var_id, None)
+            await self._emit_event(
+                origin=self._source,
+                severity="info" if voltou else "warning",
+                message=(f"MPC '{self.block_id}': MV {var_id} {anterior.value} -> {status.value}"),
+                kind=KIND_MPC_MV_STATUS_CHANGED,
+                payload={"var_id": var_id, "from": anterior.value, "to": status.value},
+            )
+        self._mv_status = novo
+
+    def _mv_disponivel(self, mv_id: str) -> bool:
+        """`True` quando a MV está sob comando do MPC neste ciclo (ADR-028). MV ainda não
+        classificada (antes da 1a varredura) conta como disponível: é o comportamento
+        pré-ADR-028, e nenhuma escrita acontece antes de a varredura rodar."""
+        return self._mv_status.get(mv_id, MvAvailability.RCAS_OK) is MvAvailability.RCAS_OK
+
     async def _run_frontier(self, ts: datetime) -> None:
         """Consome um resultado pendente (se houver) e dispara o próximo, se em AUTO.
 
@@ -408,6 +500,13 @@ class MpcBlock(Block):
                 d={dv_id: self._last_measured[dv_id] for dv_id in self._dv_ids},
                 sp=dict(self._sp),
                 reinit=self._reinit_pending,
+                # ADR-028: MVs que não estão sob comando do MPC neste ciclo. O worker as
+                # congela no `u_applied` acima (que já é a posição REAL medida, ou o hold
+                # do último valor bom quando a leitura não presta) zerando o `dumax` delas
+                # no horizonte — elas continuam no modelo, como distúrbio medido, para a
+                # predição das CVs seguir correta. Nenhuma exclusão estrutural, nenhum
+                # segundo caminho de montagem.
+                frozen_mvs=frozen_mv_ids(self._mv_status),
             )
             self._reinit_pending = False
             if self._host.dispatch(request):
@@ -486,10 +585,32 @@ class MpcBlock(Block):
                     outputs[mv.id] = PortSample(None, False)
                     continue
                 v = rastreado
+            elif not self._mv_disponivel(mv.id):
+                # MV indisponível em REMOTO (ADR-028): quem manda naquele atuador é a
+                # planta, então a porta reporta a posição vigente — leitura viva, última
+                # leitura confiável, e só então o hold — em vez do plano do MPC. É o que
+                # faz a devolução do controle ser bumpless: a porta nunca conta uma
+                # história que o atuador não viveu, e o `_mv_last` que ancora o retorno é a
+                # posição física, não o cálculo do próprio controlador.
+                #
+                # NÃO cai na porta fria do LOCAL: lá o `None` existe para o `opc_write` a
+                # jusante não escrever um `initial_value` que ninguém comandou. Aqui a
+                # escrita desta MV já está suprimida em `_write_pid`, e apagar a porta
+                # apagaria também o hold que o retorno usa como âncora.
+                v = self._effective_value(mv)
+                if self._man_auto == "man":
+                    # Mesma regra de "MV manual := vigente" das transições (spec §4.4):
+                    # sem isto, a MV voltando a RCAS em MAN saltaria para o valor manual
+                    # de antes da perda da malha.
+                    self._mv_manual[mv.id] = _clamp(v, mv.limits.min, mv.limits.max)
             elif self._man_auto == "man":
                 v = _clamp(self._mv_manual[mv.id], mv.limits.min, mv.limits.max)
             else:
-                v = self._plan[mv.id] if self._plan is not None else self._mv_last[mv.id]
+                # `.get`: a entrada de uma MV que acabou de voltar a RCAS foi removida do
+                # plano (`_reclassify_mvs`) — sem plano para ela, vale o hold da posição
+                # real até o primeiro `SolveResult` novo.
+                plano = self._plan.get(mv.id) if self._plan is not None else None
+                v = self._mv_last[mv.id] if plano is None else plano
             outputs[mv.id] = PortSample(v, ok)
         return outputs
 
@@ -511,8 +632,10 @@ class MpcBlock(Block):
     def _readback_tag_id(self, mv: MvVar) -> int | None:
         """Tag da posição real da MV: com `pid`, a do `pid` (spec §2.1-3); sem `pid`, a
         `readback_tag_id` da própria MV, quando configurada. Uma pergunta só num lugar só —
-        `_effective_value` e `auto_arm_blocked_reason` têm que concordar sobre onde olhar."""
-        return mv.pid.readback_tag_id if mv.pid is not None else mv.readback_tag_id
+        `_effective_value`, `auto_arm_blocked_reason` e o classificador do ADR-028 têm que
+        concordar sobre onde olhar; por isso a resposta mora em `mpc/availability.py` e aqui
+        só se delega."""
+        return readback_tag_id(mv)
 
     def _readback_value(self, mv: MvVar) -> float | None:
         """Posição real da MV lida do barramento. `None` quando não há tag de readback
@@ -542,9 +665,17 @@ class MpcBlock(Block):
         vigente (§4.4) e entrar em AUTO arma sobre esse mesmo valor (§3.6), então nenhuma
         das duas transições move o atuador. O gate de `auto_arm_blocked_reason()` garante
         que, com tag configurada, nenhum dos dois eixos arma antes de ela chegar — o hold
-        abaixo nunca é a base de um arme."""
+        abaixo nunca é a base de um arme.
+
+        ADR-028 insere um degrau entre a leitura viva e o hold: a ÚLTIMA posição real
+        confiável. Só entra em cena quando a tag existia e parou de prestar (MV virou
+        `bad_quality`/`out_of_service`), e é o que mantém o congelamento ancorado na planta
+        em vez de no último plano do próprio MPC — que é o que `_mv_last` guarda em AUTO."""
         value = self._readback_value(mv)
-        return self._mv_last[mv.id] if value is None else value
+        if value is not None:
+            return value
+        ultimo_bom = self._last_good_readback.get(mv.id)
+        return self._mv_last[mv.id] if ultimo_bom is None else ultimo_bom
 
     async def _write_pid(self, outputs: Mapping[str, PortSample], *, ok: bool) -> None:
         """Publica `OpcWrite` por MV com `pid`, a cada varredura, só em REMOTO com entrada
@@ -560,6 +691,13 @@ class MpcBlock(Block):
             return
         for mv in self._mvs.values():
             if mv.pid is None:
+                continue
+            if not self._mv_disponivel(mv.id):
+                # ADR-028: MV fora de RCAS / sem leitura confiável não recebe escrita. É o
+                # núcleo do problema que o ADR resolve: sem BKCAL, escrever numa malha que
+                # não está ouvindo é exatamente o que arma o bump da devolução — o PID
+                # ignora o valor enquanto está em LOCAL e, no instante em que volta a
+                # RCAS, encontra um comando velho já no registrador.
                 continue
             await self._write_opc(
                 OpcWrite(
@@ -737,7 +875,13 @@ class MpcBlock(Block):
         for dv_id in self._dv_ids:
             var_state[dv_id] = MpcVarState(v=self._last_measured.get(dv_id, 0.0))
         for mv_id in self._mv_ids:
-            var_state[mv_id] = MpcVarState(v=self._mv_last.get(mv_id, 0.0))
+            status_mv = self._mv_status.get(mv_id)
+            var_state[mv_id] = MpcVarState(
+                v=self._mv_last.get(mv_id, 0.0),
+                # ADR-028: só MV publica `status` (como só CV publica `sp`). `None` antes da
+                # primeira classificação — nunca um `rcas_ok` que ninguém verificou.
+                status=status_mv.value if status_mv is not None else None,
+            )
 
         if not self._host.ready:
             # spec F5 §6.2 (emenda F4 §4.2/§5.1, tarefa 4.1 F5a — F-1): `building` precede

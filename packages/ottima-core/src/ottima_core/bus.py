@@ -73,10 +73,20 @@ class FlowCommand(BaseModel):
 
 class MpcVarState(BaseModel):
     """Estado publicado de uma variável do MPC (spec F4 §5.1) — `sp` só existe em CV
-    (em AUTO, o SP congelado; fora, o SP rastreado por PV-tracking)."""
+    (em AUTO, o SP congelado; fora, o SP rastreado por PV-tracking).
+
+    `status` só existe em MV: a disponibilidade dela no ciclo publicado (ADR-028,
+    `rcas_ok`/`local_override`/`bad_quality`/`out_of_service`). Campo OPCIONAL com default
+    `None` de propósito — é aditivo ao payload de `mpc.state.*` (PRD §7.1) e nenhum
+    consumidor existente (recorder, `/ws` da API, faceplates) precisa mudar para continuar
+    validando. Não é persistido: `mpc_samples` (migration 0003) segue com as colunas de
+    sempre; a auditoria das transições vive no log de eventos (ADR-020,
+    `mpc_mv_status_changed`), no mesmo espírito do ADR-016 para predições.
+    """
 
     v: float
     sp: float | None = None
+    status: str | None = None
 
 
 class MpcModes(BaseModel):
@@ -164,6 +174,7 @@ KIND_MPC_MV_WRITTEN = "mpc_mv_written"
 KIND_MPC_OVERRUN = "mpc_overrun"
 KIND_MPC_SOLVER_ERROR = "mpc_solver_error"
 KIND_MPC_SHED = "mpc_shed"
+KIND_MPC_MV_STATUS_CHANGED = "mpc_mv_status_changed"
 KIND_MPC_ARM_FAILED = "mpc_arm_failed"
 KIND_MPC_INPUT_INVALID = "mpc_input_invalid"
 

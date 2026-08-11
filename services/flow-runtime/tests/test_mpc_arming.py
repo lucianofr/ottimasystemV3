@@ -34,12 +34,19 @@ _PID = PidBinding(
 
 @dataclass
 class _FakeBlock:
-    """Só o que `watch_arm` lê do bloco de verdade (`MpcBlock.pid_bindings`/`.ts_mpc`)."""
+    """Só o que `watch_arm` lê do bloco de verdade (`MpcBlock.pid_bindings`/`.ts_mpc`/
+    `.mv_status`).
+
+    `mv_status` default VAZIO reproduz o shed herdado (RF-604) nos testes deste arquivo:
+    sem nenhuma MV classificada como disponível, o ADR-028 não intercepta nada e a mecânica
+    do contador de misses fica isolada, que é o que está sob teste aqui. Quem exercita o
+    modo degradado preenche o mapa (`test_mpc_shed_degradado.py`)."""
 
     ts_mpc: float
     pid_bindings: tuple[tuple[str, PidBinding], ...] = field(
         default_factory=lambda: (("mv_a", _PID),)
     )
+    mv_status: dict = field(default_factory=dict)
 
 
 class _ScriptedSnapshot:

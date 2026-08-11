@@ -155,6 +155,7 @@ export interface MpcStatus {
 export interface MpcVarState {
   v: number;
   sp: number | null;
+  status: string | null;
 }
 
 export interface MpcState {

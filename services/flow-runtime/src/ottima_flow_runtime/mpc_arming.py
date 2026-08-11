@@ -29,6 +29,7 @@ from ottima_core.bus import OpcWrite
 from ottima_core.flowgraph import PidBinding
 
 from .blocks.mpc import MpcBlock
+from .mpc.availability import MvAvailability
 from .snapshot import ValueSnapshot
 
 CONFIRM_MISSES_LIMIT = 2
@@ -41,6 +42,17 @@ def pid_targets(bindings: tuple[tuple[str, PidBinding], ...]) -> tuple[PidBindin
     """Só as MVs cujo `pid` tem `mode_read_tag_id` — sem ele não há como confirmar nem
     shedar (spec §4.4/§4.5: "sem mode_read, sem shed")."""
     return tuple(pid for _, pid in bindings if pid.mode_read_tag_id is not None)
+
+
+def tem_mv_disponivel(block: MpcBlock) -> bool:
+    """`True` se ao menos uma MV do bloco está sob comando do MPC (ADR-028).
+
+    Lê a classificação que o PRÓPRIO bloco apurou na última varredura em vez de reclassificar
+    aqui: quem congela a MV no `SolveRequest` e suprime a escrita dela é o bloco, e o shed
+    não pode discordar dessa leitura. Mapa vazio (bloco ainda não varreu) conta como "nenhuma
+    disponível" — conservador, no espírito do RNF-03.
+    """
+    return any(status is MvAvailability.RCAS_OK for status in block.mv_status.values())
 
 
 def mode_read_matches(snapshot: ValueSnapshot, targets: tuple[PidBinding, ...]) -> bool:
@@ -110,6 +122,14 @@ async def watch_arm(
                 return
             continue
         if matched:
+            misses = 0
+            continue
+        if tem_mv_disponivel(block):
+            # ADR-028 — divergência PARCIAL não derruba o bloco: as MVs que continuam em
+            # RCAS seguem controlando (modo degradado) e as que saíram já estão congeladas
+            # e sem escrita, por decisão do próprio bloco. O shed volta a ser tudo-ou-nada
+            # só quando não sobra alavanca nenhuma. Reseta o contador: enquanto houver MV
+            # disponível, a contagem de "2 execuções consecutivas" nem começa.
             misses = 0
             continue
         misses += 1
