@@ -61,26 +61,24 @@ function OperacaoDoMpc({ flowId, blockId }: { flowId: number; blockId: string })
 
   return (
     <div data-testid="operate-page">
-      {mpcs.data.length > 1 && (
-        <label className="mb-4 flex items-center gap-2">
-          <span className="plaqueta text-xs text-fg-muted">MPC</span>
-          <Select
-            data-testid="operate-mpc-select"
-            className="w-72"
-            value={String(indiceAtual)}
-            onChange={(evento) => {
-              const escolhido = mpcs.data[Number(evento.target.value)];
-              navigate(`/operacao/${String(escolhido.flow_id)}/${escolhido.block_id}`);
-            }}
-          >
-            {mpcs.data.map((item, indice) => (
-              <option key={`${String(item.flow_id)}/${item.block_id}`} value={indice}>
-                {rotuloMpc(item)}
-              </option>
-            ))}
-          </Select>
-        </label>
-      )}
+      <label className="mb-4 flex items-center gap-2">
+        <span className="plaqueta text-xs text-fg-muted">MPC</span>
+        <Select
+          data-testid="operate-mpc-select"
+          className="w-72"
+          value={String(indiceAtual)}
+          onChange={(evento) => {
+            const escolhido = mpcs.data[Number(evento.target.value)];
+            navigate(`/operacao/${String(escolhido.flow_id)}/${escolhido.block_id}`);
+          }}
+        >
+          {mpcs.data.map((item, indice) => (
+            <option key={`${String(item.flow_id)}/${item.block_id}`} value={indice}>
+              {rotuloMpc(item)}
+            </option>
+          ))}
+        </Select>
+      </label>
       <FaceplatePrincipal
         mpc={mpc}
         flowStatus={canal.flowStatus.get(flowId)}

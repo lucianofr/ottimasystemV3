@@ -250,4 +250,13 @@ test.describe("Tela de Operação", () => {
       .poll(() => relogio.textContent(), { message: "relógio de 1s avança" })
       .not.toBe(leituraInicial);
   });
+
+  test("PW-OP-06: combobox de MPC aparece mesmo com um único bloco no projeto", async ({
+    page,
+  }) => {
+    const seletor = page.getByTestId("operate-mpc-select");
+    await expect(seletor).toBeVisible();
+    await expect(seletor.locator("option")).toHaveCount(1);
+    await expect(seletor.locator("option").first()).toHaveText(/MPC da tela/);
+  });
 });
