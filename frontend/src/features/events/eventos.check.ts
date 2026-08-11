@@ -41,6 +41,8 @@ function flow(id: number, name: string): FlowOut {
     name,
     ts_seconds: 1,
     desired_state: "running",
+    watchdog_enabled: false,
+    watchdog_period_ms: 1500,
     updated_at: "2026-01-01T00:00:00.000Z",
   };
 }
@@ -65,7 +67,6 @@ function conexao(id: number, name: string): ConnectionOut {
     security_policy: "none",
     security_mode: "none",
     auth_mode: "anonymous",
-    watchdog_period_ms: 1500,
     id,
     project_id: 1,
     has_password: false,
