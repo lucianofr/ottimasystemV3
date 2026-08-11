@@ -14,7 +14,6 @@ Aritmética escalar com `math`: são dois estados por elemento, e `numpy` só so
 por chamada num caminho que roda inline no laço de varredura, sensível a jitter (§2.2-4).
 """
 
-import math
 from collections import deque
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -23,35 +22,15 @@ from ottima_core.flowgraph import IopdtParams, SopdtParams, TfsElement
 
 from .base import Block, PortSample, has_cold_input, null_outputs
 
+# O estágio de 1a ordem mora em `lag.py` desde o ADR-026, compartilhado com o bloco Filtro 1a
+# ordem. `DIRECT_PASS_RATIO` continua reexportado daqui: `mpc/discretize.py` documenta e
+# testa o limiar contra `blocks.tfs`.
+from .lag import DIRECT_PASS_RATIO, FirstOrderLag
+
+__all__ = ["DIRECT_PASS_RATIO", "INPUT_PORTS", "OUTPUT_PORTS", "TfsBlock"]
+
 INPUT_PORTS = ("u1", "u2")
 OUTPUT_PORTS = ("y1", "y2")
-
-DIRECT_PASS_RATIO = 10.0
-"""`tau < Ts/10` degrada o estágio para passagem direta (§3.4, robustez numérica)."""
-
-
-class _FirstOrder:
-    """Estágio de 1a ordem exato no ZOH: `x <- a*x + (1-a)*u`.
-
-    Abaixo de `Ts/DIRECT_PASS_RATIO` o estágio vira passagem direta: nessa faixa `a` já é
-    indistinguível de zero na amostragem do flow, e `tau == 0` (constante legítima na config)
-    dividiria por zero.
-    """
-
-    __slots__ = ("_a", "_x")
-
-    def __init__(self, tau: float, ts: float) -> None:
-        self._a = math.exp(-ts / tau) if tau >= ts / DIRECT_PASS_RATIO else None
-        self._x = 0.0
-
-    def step(self, u: float) -> float:
-        if self._a is None:
-            return u
-        self._x = self._a * self._x + (1.0 - self._a) * u
-        return self._x
-
-    def reset(self) -> None:
-        self._x = 0.0
 
 
 class _Sopdt:
@@ -61,7 +40,7 @@ class _Sopdt:
 
     def __init__(self, params: SopdtParams, ts: float) -> None:
         self._k = params.K
-        self._stages = (_FirstOrder(params.tau1, ts), _FirstOrder(params.tau2, ts))
+        self._stages = (FirstOrderLag(params.tau1, ts), FirstOrderLag(params.tau2, ts))
 
     def step(self, u: float) -> float:
         for stage in self._stages:
