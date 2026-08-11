@@ -11,7 +11,7 @@
 | **Scan cycle** | Semântica de execução: a cada Ts, todos os blocos do flow são avaliados **em ordem crescente de `exec_order`** com os últimos valores conhecidos. |
 | **exec_order** | Parâmetro de todo bloco: inteiro único de 1 a N que define a ordem de execução na varredura (leituras < Script/MPC < escritas). Auto-numerado na inserção, editável, com badge no nó. Ordem invertida em relação a uma aresta ⇒ consumo do valor da varredura anterior (1 scan de atraso). |
 | **Ts (tempo de amostragem)** | Período do scan de um flow. Valores permitidos: 0.5, 1, 2, 5, 10, 30, 60 s. Definido individualmente por flow. |
-| **Bloco** | Nó do flow com entradas/saídas tipadas. Tipos da v1: OPC-Read, OPC-Write, MPC, Python-Script, TFS. |
+| **Bloco** | Nó do flow com entradas/saídas tipadas. Tipos da v1: OPC-Read, OPC-Write, MPC, Python-Script, TFS, Filtro 1ª ordem, Filtro Kalman. |
 | **opc-worker** | Processo asyncio que mantém as sessões OPC-UA (asyncua), publica leituras no barramento, executa escritas e opera o watchdog. Único processo que fala com PLC/DCS. |
 | **flow-runtime** | Processo asyncio que interpreta e executa os flows (MPC, scripts) como loops vivos. |
 | **recorder** | Consumidor do barramento que grava amostras na hypertable do TimescaleDB. |
@@ -39,6 +39,8 @@
 | **Restrição (variável)** | Categoria de variável do MPC controlada dentro de uma **faixa** (low/high), sem SP, com **precedência sobre as CVs** (soft constraint com slack e penalidade dominante). |
 | **TFS** | Bloco de simulação: matriz de funções de transferência até 2×2, cada elemento SOPDT ou IOPDT, em tempo discreto no Ts do flow. Fecha malha com o MPC sem PLC/OPC. |
 | **IOPDT** | Modelo integrador com tempo morto (Ki, θ) — usado em CVs/Restrições integradoras e no bloco TFS. |
+| **Filtro 1ª ordem** | Bloco de uma entrada e uma saída que suaviza o sinal por atraso de 1ª ordem, com parâmetro único `tau` (constante de tempo, em segundos), discretizado no Ts do flow. |
+| **Filtro Kalman** | Bloco de uma entrada e uma saída que estima o valor verdadeiro de um sinal ruidoso (passeio aleatório escalar). Configurado por dois desvios padrão na EU do sinal: `measurement_noise` (ruído da medição) e `process_noise` (variação esperada do valor verdadeiro por varredura). |
 | **MV tracking** | Em LOCAL, a saída MV do MPC segue a MV real do PID (tag de readback), garantindo transição bumpless LOCAL→REMOTO. |
 | **Log de eventos** | Hypertable de eventos (info/warning/alarm) com retenção de 1 mês; alimenta o banner de alarmes ativos (sem ACK) e a auditoria de operação. |
 | **Hypertable** | Tabela particionada por tempo do TimescaleDB; amostras com retenção de 1 mês. |

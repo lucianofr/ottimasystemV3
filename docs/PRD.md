@@ -94,7 +94,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 - **RF-207** Em falha de comunicação/OPC de uma conexão: **cessam imediatamente as escritas** daquela conexão e **param os flows** que a utilizam; evento de alarme é gerado. Retomada exige deploy manual. (ADR-009, 017)
 
 ### 5.4 Editor de flows (canvas)
-- **RF-301** Canvas React Flow com paleta de **5 blocos**: OPC-Read, OPC-Write, MPC, Python-Script, TFS; arrastar, conectar, configurar por duplo-clique. (ADR-005, 022)
+- **RF-301** Canvas React Flow com paleta de **7 blocos**: OPC-Read, OPC-Write, MPC, Python-Script, TFS, Filtro 1ª ordem, Filtro Kalman; arrastar, conectar, configurar por duplo-clique. (ADR-005, 022, 026)
 - **RF-302** Portas tipadas (numérico/booleano); o editor impede conexões de tipos incompatíveis, ciclos sem quebra explícita e entradas obrigatórias soltas.
 - **RF-303** Cada flow define seu **Ts** na lista {0.5, 1, 2, 5, 10, 30, 60 s}. (ADR-007)
 - **RF-304** **Hot-swap**: salvar um flow em execução aplica a nova definição **atomicamente na próxima varredura**, sem interrupção; blocos não alterados preservam estado; bloco MPC alterado é re-instanciado com partida bumpless (das MVs atuais). Sem versionamento. (ADR-011)
@@ -151,6 +151,11 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 - **RF-801** recorder grava toda leitura publicada na hypertable `samples`; retenção **1 mês** via `add_retention_policy`; continuous aggregate de 1 min para trends longos. (ADR-003)
 - **RF-802** API de histórico: consulta por tags + janela, com downsampling automático (bruto ≤ ~2 h; agregado acima).
 - **RF-803** Log de eventos consultável e filtrável (severidade, origem, período) na UI; retenção 1 mês. (ADR-020)
+
+### 5.13 Blocos de filtro de sinal (ADR-026)
+- **RF-531** Ambos os blocos têm **uma entrada (`in`) e uma saída (`out`)**, numéricas; a entrada é obrigatória (RF-302). Estado interno persistente entre varreduras, com as regras de hot-swap do RF-304.
+- **RF-532** **Filtro 1ª ordem:** parâmetro único **`tau`** (constante de tempo, em segundos), discretizado em ZOH no Ts do flow; `tau` abaixo de `Ts/10` degrada para passagem direta (mesma convenção do bloco TFS).
+- **RF-533** **Filtro Kalman:** filtro escalar de passeio aleatório configurado por dois campos **na EU do próprio sinal**, ambos desvios padrão: **`measurement_noise`** (ruído da medição) e **`process_noise`** (variação esperada do valor verdadeiro por varredura). O estimador inicializa na primeira amostra válida após o reset. Variância e covariância são detalhe interno e não aparecem na interface.
 
 ## 6. Requisitos não-funcionais
 
