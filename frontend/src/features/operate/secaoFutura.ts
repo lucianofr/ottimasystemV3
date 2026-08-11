@@ -43,12 +43,6 @@ export function calcularRangeXOperacao(
 
 const TEXTO_SEM_PREDICAO = "Sem predição — MPC fora de AUTO";
 
-/** Fundo levemente distinto da seção futura — mesmo truque de `color-mix` nativo do resto do
- *  arquivo de cor de `TrendOperacao.tsx` (nenhuma matemática OKLCH própria). */
-function corSecaoFutura(corBase: string): string {
-  return `color-mix(in oklch, ${corBase}, transparent 55%)`;
-}
-
 /**
  * Plugin de desenho: sombreia `x ∈ [agora, x_max]`, rotula "Histórico"/"Previsão" e, sem
  * predição em vista ao vivo, escreve o placeholder centrado na região futura. Não é série —
@@ -72,7 +66,7 @@ export function pluginSecaoFutura(
         if (!Number.isFinite(x0) || !Number.isFinite(x1) || x1 <= x0) return;
         const { ctx } = u;
         ctx.save();
-        ctx.fillStyle = corSecaoFutura(tema.poco);
+        ctx.fillStyle = tema.secaoFutura;
         ctx.fillRect(x0, u.bbox.top, x1 - x0, u.bbox.height);
         ctx.restore();
       },

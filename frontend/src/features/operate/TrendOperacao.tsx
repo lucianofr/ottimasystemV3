@@ -80,12 +80,11 @@ function corTransparente(cor: string): string {
   return `color-mix(in oklch, ${cor}, transparent 80%)`;
 }
 
-function corDessaturada(cor: string): string {
-  return `color-mix(in oklch, ${cor}, var(--color-fg-muted) 60%)`;
-}
-
-function corBanda(poco: string): string {
-  return `color-mix(in oklch, ${poco}, transparent 30%)`;
+/** SP rastreado: mesmo matiz puxado para o texto do poço. O valor do texto entra RESOLVIDO
+ *  (`tema.texto`) porque `color-mix` vai para o canvas, que não resolve `var()` — não há
+ *  elemento de onde herdar a custom property. */
+function corDessaturada(cor: string, texto: string): string {
+  return `color-mix(in oklch, ${cor}, ${texto} 60%)`;
 }
 
 /** CV/Restrição tracejada: mesmo matiz mais claro, com fade ao horizonte (§7.4-6). O
@@ -120,8 +119,8 @@ function pluginLinhaAgora(agoraRef: { current: number | null }, tema: TemaTrend)
         if (!Number.isFinite(x) || x < u.bbox.left || x > u.bbox.left + u.bbox.width) return;
         const { ctx } = u;
         ctx.save();
-        ctx.strokeStyle = tema.texto;
-        ctx.setLineDash([2, 2]);
+        ctx.strokeStyle = tema.agora;
+        ctx.setLineDash([2, 3]);
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(Math.round(x) + 0.5, u.bbox.top);
@@ -210,7 +209,7 @@ function montarColunas(
       label: `${cv.name} previsto`,
       stroke: tracoComFade(cor, overlay.agora),
       width: 1.5,
-      dash: [4, 3],
+      dash: [5, 5],
       points: { show: false },
       scale,
     });
@@ -224,7 +223,7 @@ function montarColunas(
     });
     pushSerie(historica.t, divisao.rastreado, {
       label: `${cv.name} SP rastreado`,
-      stroke: corDessaturada(tema.accent),
+      stroke: corDessaturada(tema.accent, tema.texto),
       width: 1.5,
       points: { show: false },
       scale,
@@ -252,7 +251,7 @@ function montarColunas(
       label: `${restricao.name} previsto`,
       stroke: tracoComFade(cor, overlay.agora),
       width: 1.5,
-      dash: [4, 3],
+      dash: [5, 5],
       points: { show: false },
       scale,
     });
@@ -278,7 +277,7 @@ function montarColunas(
         scale,
       },
     );
-    bands.push({ series: [idxLow, idxHigh], fill: corBanda(tema.poco), dir: -1 });
+    bands.push({ series: [idxLow, idxHigh], fill: tema.banda, dir: -1 });
   });
 
   // MVs — degrau fantasma stepped align:-1 (§3.3; `OPCOES_DEGRAU_MV` é a única fonte do
@@ -300,7 +299,7 @@ function montarColunas(
       label: `${mv.name} previsto`,
       stroke: corClara(cor),
       width: 1.5,
-      dash: [4, 3],
+      dash: [5, 5],
       paths: (u, seriesIdx, idx0, idx1) =>
         (uPlot.paths.stepped as (opts: typeof OPCOES_DEGRAU_MV) => uPlot.Series.PathBuilder)(
           OPCOES_DEGRAU_MV,
@@ -705,17 +704,17 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
       )}
 
       {!colunas && !historico.isError && (
-        <div className="rounded-sm border border-border bg-well p-6">
-          <p className="text-sm text-fg-muted">Carregando…</p>
+        <div className="rounded-md border border-well-chart-border bg-well-chart p-6">
+          <p className="text-sm text-well-chart-fg">Carregando…</p>
         </div>
       )}
 
       {colunas && (
         <div
           data-testid="operate-trend-chart"
-          className="rounded-sm border border-border bg-well p-2"
+          className="rounded-md border border-well-chart-border bg-well-chart p-2"
         >
-          <div className="flex justify-between px-1 text-xs text-fg-muted">
+          <div className="flex justify-between px-1 text-xs text-well-chart-fg">
             <span>Histórico</span>
             {janelaDeslizante.aoVivo && (
               <span data-testid="operate-trend-secao-futura">Previsão</span>
@@ -725,7 +724,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
           {semPredicao && (
             <p
               data-testid="operate-trend-sem-predicao"
-              className="mt-1 text-center text-xs text-fg-muted"
+              className="mt-1 text-center text-xs text-well-chart-fg"
             >
               Sem predição — MPC fora de AUTO
             </p>

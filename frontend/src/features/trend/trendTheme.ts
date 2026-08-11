@@ -32,32 +32,40 @@ const ALTURA_TEXTO_EIXO = 11;
 export interface TemaTrend {
   /** Cores das penas, na ordem dos tokens. */
   readonly penas: readonly string[];
-  /** Grade, ticks e bordas dos eixos (token Linha). */
+  /** Grade, ticks e bordas dos eixos sobre o poço do gráfico (branco translúcido). */
   readonly linha: string;
-  /** Texto de eixo (Texto Secundário). */
+  /** Texto de eixo e rótulos desenhados no canvas, sobre o poço escuro. */
   readonly texto: string;
   /** Pilha de fontes mono, para compor o shorthand do canvas. */
   readonly mono: string;
   /** Azul Industrial (DESIGN §Primary) — pena de SP comandado no trend de operação
    *  (`TrendOperacao.tsx`, spec F5 §7.4-6). */
   readonly accent: string;
-  /** Fundo Poço — sombreamento da banda low/high de Restrição no trend de operação. */
-  readonly poco: string;
+  /** Wash da banda low/high de Restrição no trend de operação. */
+  readonly banda: string;
+  /** Wash da seção futura do trend de operação (`secaoFutura.ts`). */
+  readonly secaoFutura: string;
+  /** Linha-cursor do "agora" (`TrendOperacao.tsx`). */
+  readonly agora: string;
 }
 
 /**
  * Lê os tokens do `tokens.css` em runtime. A paleta tem uma fonte só: duplicar os literais
- * OKLCH aqui criaria um segundo lugar para mudá-los (DESIGN.md §Do's).
+ * OKLCH aqui criaria um segundo lugar para mudá-los (DESIGN.md §Do's). O poço do gráfico é
+ * escuro nos DOIS temas (design system), então grade, texto e washes vêm dos tokens
+ * `--color-well-chart-*` — os neutros do tema claro sumiriam sobre ele.
  */
 export function lerTemaTrend(): TemaTrend {
   const estilo = getComputedStyle(document.documentElement);
   return {
     penas: PENAS.map((pena) => estilo.getPropertyValue(pena.token).trim()),
-    linha: estilo.getPropertyValue("--color-border").trim(),
-    texto: estilo.getPropertyValue("--color-fg-muted").trim(),
+    linha: estilo.getPropertyValue("--color-well-chart-grid").trim(),
+    texto: estilo.getPropertyValue("--color-well-chart-fg").trim(),
     mono: estilo.getPropertyValue("--font-mono").trim(),
     accent: estilo.getPropertyValue("--color-accent").trim(),
-    poco: estilo.getPropertyValue("--color-well").trim(),
+    banda: estilo.getPropertyValue("--color-well-chart-band").trim(),
+    secaoFutura: estilo.getPropertyValue("--color-well-chart-future").trim(),
+    agora: estilo.getPropertyValue("--color-well-chart-now").trim(),
   };
 }
 

@@ -6,14 +6,15 @@
   font-family: var(--font-sans);
 }
 
+/* Cursor sobre o poço escuro do gráfico: os neutros do tema claro sumiriam ali. */
 .u-hz .u-cursor-x,
 .u-vt .u-cursor-y {
-  border-right-color: var(--color-border);
+  border-right-color: var(--color-well-chart-now);
 }
 
 .u-hz .u-cursor-y,
 .u-vt .u-cursor-x {
-  border-bottom-color: var(--color-border);
+  border-bottom-color: var(--color-well-chart-now);
 }
 
 /* Seleção de zoom: azul único de interação, translúcido (DESIGN.md §Colors). */

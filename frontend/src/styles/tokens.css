@@ -32,21 +32,35 @@
   --glass-bg: oklch(0.995 0.002 255 / 0.6);
   --glass-border: oklch(1 0 0 / 0.6);
 
-  /* Penas de trend — paleta de série própria, fora da severidade e do azul único
-     (spec F2 §9.3; "A Regra do Azul Único"). Consumidas por JS (uPlot).
-     NÃO alterar: distância OKLab validada contra severidade e acento (relatório 6.5);
-     o design system importado usa matizes 258/230 que colidiriam com o acento — mantida
-     a paleta original. */
-  --color-pen-1: oklch(0.78 0.10 190); /* ciano-petróleo */
-  --color-pen-2: oklch(0.78 0.09 300); /* violeta */
-  --color-pen-3: oklch(0.78 0.10 110); /* oliva */
-  --color-pen-4: oklch(0.78 0.09 330); /* magenta */
-  --color-pen-5: oklch(0.75 0.06 55); /* castanho */
-  --color-pen-6: oklch(0.80 0.02 250); /* cinza neutro */
-  /* §6.6-5: teto de 8 penas do trend de operação — 7ª/8ª dessaturadas, mesma família,
-     matiz longe de severidade e do Azul Único. */
-  --color-pen-7: oklch(0.83 0.06 211); /* teal acinzentado */
-  --color-pen-8: oklch(0.83 0.08 293); /* lilás-azulado */
+  /* Penas de trend — paleta de série do design system (projeto Claude Design, tokens/colors.css),
+     8 posições: cobre o teto do trend de operação (`TETO_PENAS_OPERACAO`) e as 6 primeiras
+     servem o trend de engenharia (`LIMITE_PENAS`). Consumidas por JS (uPlot) e pelas faixas da
+     legenda. Desenhadas sempre sobre o poço escuro do gráfico, não sobre o fundo do tema. */
+  --color-pen-1: oklch(0.68 0.22 258);
+  --color-pen-2: oklch(0.78 0.16 195);
+  --color-pen-3: oklch(0.7 0.26 340);
+  --color-pen-4: oklch(0.85 0.18 95);
+  --color-pen-5: oklch(0.75 0.22 45);
+  --color-pen-6: oklch(0.8 0.02 255);
+  --color-pen-7: oklch(0.7 0.24 285);
+  --color-pen-8: oklch(0.75 0.18 165);
+
+  /* Poço do gráfico — superfície ESCURA nos dois temas (design system: TrendPanel e o card
+     "Trend pens"). Como o canvas do uPlot desenha sempre sobre este fundo, grade, borda e
+     linha do "agora" saem destes tokens, nunca dos neutros do tema. */
+  --color-well-chart: oklch(0.25 0.07 260);
+  --color-well-chart-border: oklch(1 0 0 / 0.1);
+  --color-well-chart-grid: oklch(1 0 0 / 0.1);
+  --color-well-chart-now: oklch(1 0 0 / 0.4);
+  /* Complemento local ao design system, que não define texto de eixo nem os dois washes que o
+     trend de operação já desenhava (banda low/high de Restrição, seção futura): os neutros do
+     tema claro sumiriam sobre o poço escuro. */
+  /* Matiz `none` (não `0`): o texto entra em `color-mix` com a pena de SP em `TrendOperacao.tsx`
+     e um matiz explícito puxaria a mistura para magenta — `none` é matiz sem força, que o
+     color-mix herda da outra cor. */
+  --color-well-chart-fg: oklch(1 0 none / 0.72);
+  --color-well-chart-band: oklch(1 0 0 / 0.08);
+  --color-well-chart-future: oklch(0 0 0 / 0.12);
 
   --font-display: "Sora", "Plus Jakarta Sans", system-ui, sans-serif;
   --font-sans: "Plus Jakarta Sans", system-ui, sans-serif;
@@ -122,6 +136,17 @@
   --color-success: oklch(0.75 0.15 148);
   --color-success-soft: oklch(0.3 0.07 148);
   --color-success-fg: oklch(0.85 0.13 148);
+  /* Penas do tema escuro — mesmas 8 posições, versão do design system para fundo escuro */
+  --color-pen-1: oklch(0.72 0.16 258);
+  --color-pen-2: oklch(0.78 0.14 200);
+  --color-pen-3: oklch(0.76 0.18 340);
+  --color-pen-4: oklch(0.8 0.15 90);
+  --color-pen-5: oklch(0.76 0.17 45);
+  --color-pen-6: oklch(0.75 0.02 255);
+  --color-pen-7: oklch(0.78 0.12 230);
+  --color-pen-8: oklch(0.78 0.11 175);
+  /* Só o fundo do poço muda no escuro; borda, grade e "agora" continuam brancos translúcidos */
+  --color-well-chart: oklch(0.2 0.06 260);
   --gradient-accent: linear-gradient(135deg, oklch(0.7 0.17 258), oklch(0.73 0.15 225) 55%, oklch(0.75 0.13 195));
   --gradient-mesh: radial-gradient(at 15% 20%, oklch(0.4 0.09 258 / 0.35), transparent 55%), radial-gradient(at 85% 0%, oklch(0.4 0.08 195 / 0.3), transparent 50%);
   --glass-bg: oklch(0.22 0.02 255 / 0.55);

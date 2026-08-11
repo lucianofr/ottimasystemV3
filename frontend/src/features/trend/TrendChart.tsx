@@ -112,7 +112,7 @@ export const TrendChart = forwardRef<TrendChartHandle, TrendChartProps>(function
   return (
     <div
       data-testid="trend-chart"
-      className="rounded-lg border border-border bg-surface p-3 shadow-sm"
+      className="rounded-md border border-well-chart-border bg-well-chart p-3 shadow-sm"
     >
       <div ref={container} className="w-full" />
     </div>
