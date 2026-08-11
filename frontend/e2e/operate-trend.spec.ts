@@ -4,7 +4,7 @@ import { criarAmbiente, entrarNoShell, NODES, type AmbienteE2E } from "./fixture
 
 /**
  * PW-OP-01..04 — tela de Operação: seção futura sempre visível (mesmo sem predição), escala
- * manual da variável focada, janela deslizante `<`/`>`/Reset e o card principal (Ts MPC,
+ * manual por linha da legenda, janela deslizante `<`/`>`/Reset e o card principal (Ts MPC,
  * horizontes e relógio).
  *
  * Grafo MPC mínimo (plano de melhorias, "Contract — grafo MPC mínimo válido"): 1 `opc_read`
@@ -128,27 +128,42 @@ test.describe("Tela de Operação", () => {
     );
   });
 
-  test("PW-OP-02: escala manual da variável focada persiste em localStorage", async ({ page }) => {
-    const auto = page.getByTestId("operate-escala-auto");
-    const min = page.getByTestId("operate-escala-min");
-    const max = page.getByTestId("operate-escala-max");
+  test("PW-OP-02: cada variável listada tem escala Y na própria linha, independente", async ({
+    page,
+  }) => {
+    const linhas = page.getByTestId("operate-trend-legend-item");
+    const linha = (varId: string) =>
+      page.locator(`[data-testid="operate-trend-legend-item"][data-var-id="${varId}"]`);
+    const linhaCv = linha("cv_1");
+    const linhaMv = linha("mv_1");
 
-    // Foco default = primeira pena ligada (`selecionarPenasDefault`): a única CV do bloco.
-    await expect(auto).toBeChecked();
-    await expect(min).toBeDisabled();
-    await expect(max).toBeDisabled();
+    // O ponto do cenário: o controle de escala (min/max + AUTOSCALE) mora na LINHA de cada
+    // variável listada, não num bloco único acima da lista — inclusive nas linhas de pena
+    // desligada (`mv_1`), cuja faixa passa a valer no instante em que a pena é ligada.
+    await expect(page.getByTestId("operate-escala-auto")).toHaveCount(await linhas.count());
+    await expect(linhaCv.getByTestId("operate-escala-auto")).toBeChecked();
+    await expect(linhaMv.getByTestId("operate-escala-auto")).toBeChecked();
 
-    await auto.uncheck();
-    await expect(min).toBeEnabled();
-    await min.fill("0");
-    await max.fill("100");
+    await linhaCv.getByTestId("operate-escala-auto").uncheck();
+    await expect(linhaCv.getByTestId("operate-escala-min")).toBeEnabled();
+    await linhaCv.getByTestId("operate-escala-min").fill("0");
+    await linhaCv.getByTestId("operate-escala-max").fill("100");
+
+    // Independência: fixar a faixa de uma variável não tira a outra do autoscale.
+    await expect(linhaMv.getByTestId("operate-escala-auto")).toBeChecked();
+    await expect(linhaMv.getByTestId("operate-escala-min")).toBeDisabled();
+
+    // Editar a escala pela linha não pode alternar a pena da linha (o clique é do controle,
+    // não da legenda) — sem isso o operador desligaria a variável ao ajustar a faixa dela.
+    await expect(linhaCv.getByRole("checkbox").first()).toBeChecked();
 
     await page.reload();
     await expect(page.getByTestId("operate-trend")).toBeVisible();
 
-    await expect(page.getByTestId("operate-escala-auto")).not.toBeChecked();
-    await expect(page.getByTestId("operate-escala-min")).toHaveValue("0");
-    await expect(page.getByTestId("operate-escala-max")).toHaveValue("100");
+    await expect(linhaCv.getByTestId("operate-escala-auto")).not.toBeChecked();
+    await expect(linhaCv.getByTestId("operate-escala-min")).toHaveValue("0");
+    await expect(linhaCv.getByTestId("operate-escala-max")).toHaveValue("100");
+    await expect(linhaMv.getByTestId("operate-escala-auto")).toBeChecked();
   });
 
   test("PW-OP-03: janela deslizante pausa/retoma o polling do histórico", async ({ page }) => {

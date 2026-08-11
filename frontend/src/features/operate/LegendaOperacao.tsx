@@ -1,14 +1,17 @@
 import { Card } from "../../components/ui/card";
 import { EditorEscala } from "../trend/EditorEscala";
-import type { EscalaVar } from "../trend/escalas";
+import { ESCALA_AUTO, type EscalaVar } from "../trend/escalas";
 import type { CategoriaVarOperacao, PenaLegenda } from "./trendOperacao";
 
 /**
  * Legenda do trend de operação (spec F5 §7.4-6; plano F5b tarefa 5.3; plano de melhorias
- * Fase 2 tarefa 2.3): checkbox por variável (liga/desliga pena, teto de 8) + editor de
- * escala Y da variável FOCADA (a última ligada na legenda). Só um editor, não um por linha:
- * o trend desenha um único eixo Y visível por vez (`TrendOperacao.tsx`), então editar a
- * escala de uma variável sem eixo desenhado não daria nenhum retorno visual ao operador.
+ * Fase 2 tarefa 2.3): uma linha por variável, com o checkbox que liga/desliga a pena (teto
+ * de 8) e o editor de escala Y (mín/máx + AUTOSCALE) na PRÓPRIA linha — mesmo arranjo da
+ * legenda do trend de engenharia (`TrendPage.tsx`).
+ *
+ * Cada variável tem escala uPlot própria (`construirEscalasUplot`), então fixar a faixa de
+ * uma pena move só aquela pena no gráfico. O eixo Y desenhado é outra coisa: só a variável
+ * focada ganha eixo visível, e isso não restringe de quem a faixa pode ser editada.
  *
  * Extraído de `TrendOperacao.tsx` para o arquivo caber no teto de 800 linhas (plano, tarefa
  * de teto de arquivo).
@@ -30,9 +33,10 @@ export interface LegendaOperacaoProps {
   readonly cores: ReadonlyMap<string, string>;
   /** Variável focada (dona do único eixo Y visível); `null` quando nenhuma pena está ligada. */
   readonly foco: string | null;
-  readonly focoEscala: EscalaVar;
+  /** Escala Y de cada variável, chaveada pelo id; ausente = `ESCALA_AUTO`. */
+  readonly escalas: Readonly<Record<string, EscalaVar>>;
   readonly onAlternarPena: (pena: PenaLegenda) => void;
-  readonly onMudarEscalaFoco: (escala: EscalaVar) => void;
+  readonly onMudarEscala: (varId: string, escala: EscalaVar) => void;
 }
 
 export function LegendaOperacao({
@@ -41,46 +45,42 @@ export function LegendaOperacao({
   porIdDefinicao,
   cores,
   foco,
-  focoEscala,
+  escalas,
   onAlternarPena,
-  onMudarEscalaFoco,
+  onMudarEscala,
 }: LegendaOperacaoProps) {
-  const nomeFoco = foco !== null ? (porIdDefinicao.get(foco)?.name ?? foco) : null;
-
   return (
     <Card data-testid="operate-trend-legend" className="divide-y divide-border">
-      {nomeFoco !== null && (
-        <div className="flex flex-wrap items-center justify-between gap-2 bg-surface-2 px-4 py-2.5">
-          <span className="plaqueta text-xs text-fg-muted">Escala Y · {nomeFoco}</span>
-          <EditorEscala escala={focoEscala} prefixoTestid="operate" aoMudar={onMudarEscalaFoco} />
-        </div>
-      )}
       {defaults.map((pena) => {
         const definicao = porIdDefinicao.get(pena.id);
         const ligada = ligadas.has(pena.id);
         return (
-          <label
+          <div
             key={pena.id}
             data-testid="operate-trend-legend-item"
             data-var-id={pena.id}
-            className="flex cursor-pointer items-center gap-3 px-4 py-2 transition-colors duration-[var(--duration-fast)] hover:bg-surface-2"
+            className="flex items-center gap-3 px-4 py-2 transition-colors duration-[var(--duration-fast)] hover:bg-surface-2"
           >
-            <input
-              type="checkbox"
-              className="accent-accent"
-              checked={ligada}
-              onChange={() => {
-                onAlternarPena(pena);
-              }}
-            />
-            <span
-              aria-hidden="true"
-              className="h-1.5 w-6 shrink-0 rounded-pill"
-              style={{ backgroundColor: cores.get(pena.id) }}
-            />
-            <span className="plaqueta grow text-xs">
-              {ROTULO_CATEGORIA[pena.categoria]} · {definicao?.name ?? pena.id}
-            </span>
+            {/* Só o trecho identificador é `label`: o editor de escala divide a linha e não
+                pode alternar a pena quando o operador clica num campo dele. */}
+            <label className="flex grow cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                className="accent-accent"
+                checked={ligada}
+                onChange={() => {
+                  onAlternarPena(pena);
+                }}
+              />
+              <span
+                aria-hidden="true"
+                className="h-1.5 w-6 shrink-0 rounded-pill"
+                style={{ backgroundColor: cores.get(pena.id) }}
+              />
+              <span className="plaqueta grow text-xs">
+                {ROTULO_CATEGORIA[pena.categoria]} · {definicao?.name ?? pena.id}
+              </span>
+            </label>
             {ligada && pena.id === foco && (
               <span className="plaqueta text-xs text-fg-muted">Eixo Y</span>
             )}
@@ -92,7 +92,14 @@ export function LegendaOperacao({
                 Acima do teto
               </span>
             )}
-          </label>
+            <EditorEscala
+              escala={escalas[pena.id] ?? ESCALA_AUTO}
+              prefixoTestid="operate"
+              aoMudar={(escala) => {
+                onMudarEscala(pena.id, escala);
+              }}
+            />
+          </div>
         );
       })}
     </Card>

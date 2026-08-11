@@ -508,11 +508,9 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     lerEscalas(chaveEscalasStorage),
   );
 
-  function mudarEscalaFoco(escala: EscalaVar): void {
-    if (foco === null) return;
-    const alvo = foco;
+  function mudarEscala(varId: string, escala: EscalaVar): void {
     setEscalasPorVar((atual) => {
-      const proximo = { ...atual, [alvo]: escala };
+      const proximo = { ...atual, [varId]: escala };
       gravarEscalas(chaveEscalasStorage, proximo);
       return proximo;
     });
@@ -561,7 +559,6 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   );
   const eixoYChave = (foco !== null ? escalasUplot.scaleKeyPorVar.get(foco) : undefined) ?? "y";
   const eixoYCor = (foco !== null ? cores.get(foco) : undefined) ?? tema.texto;
-  const focoEscala = foco !== null ? (escalasPorVar[foco] ?? ESCALA_AUTO) : ESCALA_AUTO;
 
   // Horizonte futuro (tarefa 2.1/2.2): `Np × Ts_mpc`, derivado pelo servidor (`mpc.horizons`)
   // — o cliente nunca recalcula a partir de `tss` (a projeção não expõe, spec §4.1-3).
@@ -742,9 +739,9 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
         porIdDefinicao={porIdDefinicao}
         cores={cores}
         foco={foco}
-        focoEscala={focoEscala}
+        escalas={escalasPorVar}
         onAlternarPena={alternarPena}
-        onMudarEscalaFoco={mudarEscalaFoco}
+        onMudarEscala={mudarEscala}
       />
 
       {aviso && (
