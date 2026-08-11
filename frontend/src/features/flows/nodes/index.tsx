@@ -3,6 +3,7 @@ import type { NodeProps, NodeTypes } from "@xyflow/react";
 import type { TagOut } from "../../../lib/api";
 import { ROTULO_TIPO } from "../../tags/useTags";
 import {
+  passagemDireta,
   portasFixas,
   portasScript,
   type NoEscrita,
@@ -19,7 +20,7 @@ import {
 } from "../graph";
 import { rotuloVariavel } from "../mpc/mpcLogic";
 import { BlocoChapa, LinhaResumo, type Porta } from "./BlocoChapa";
-import { useTagsDoEditor } from "./contexto";
+import { useTagsDoEditor, useTsFlowDoEditor } from "./contexto";
 
 /** Portas rotuladas com o próprio nome do handle: é o que o engenheiro vê no 422 do save. */
 function portas(ids: readonly string[]): Porta[] {
@@ -175,8 +176,10 @@ const FORMATO_PARAM = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 4 
 
 /** Filtro 1ª ordem (RF-532): uma entrada, uma saída, `tau` no resumo. Abaixo de `Ts/10` o
  *  bloco vira passagem direta, e o resumo diz isso em texto — o engenheiro não deveria
- *  precisar dividir o Ts de cabeça para descobrir que o filtro está desligado. */
+ *  precisar dividir o Ts de cabeça para descobrir que o filtro está desligado (TD-011). */
 export function NoFiltroPrimeiraOrdem({ id, data, selected }: NodeProps<NoFirstOrder>) {
+  const tsFlow = useTsFlowDoEditor();
+  const desligado = passagemDireta(data.tau, tsFlow);
   return (
     <BlocoChapa
       tipo="first_order"
@@ -189,7 +192,11 @@ export function NoFiltroPrimeiraOrdem({ id, data, selected }: NodeProps<NoFirstO
     >
       <LinhaResumo
         rotulo="Constante de tempo"
-        valor={data.tau === 0 ? "passagem direta" : `${FORMATO_PARAM.format(data.tau)} s`}
+        valor={
+          data.tau === 0
+            ? "passagem direta"
+            : `${FORMATO_PARAM.format(data.tau)} s${desligado ? " (passagem direta)" : ""}`
+        }
       />
     </BlocoChapa>
   );

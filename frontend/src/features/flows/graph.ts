@@ -91,6 +91,17 @@ export type DadosTfs = DadosBase & { matrix: MatrizTfs; output_eu: Record<string
 /** `tau` em segundos (RF-532); `0` é passagem direta. */
 export type DadosFirstOrder = DadosBase & { tau: number };
 
+/** `tau < Ts/DIRECT_PASS_RATIO` degrada o estágio para passagem direta — mesmo limiar do
+ *  runtime (`services/flow-runtime/.../blocks/lag.py::DIRECT_PASS_RATIO`), espelhado aqui só
+ *  para o rótulo do nó (TD-011): o engenheiro não deveria precisar dividir o Ts de cabeça
+ *  para descobrir que o filtro está desligado. Igualdade exata no limiar continua dinâmica
+ *  (`tau >= Ts/10`), mesmo teste de fronteira do runtime. */
+export const DIRECT_PASS_RATIO = 10;
+
+export function passagemDireta(tau: number, tsFlowSegundos: number): boolean {
+  return tau === 0 || tau < tsFlowSegundos / DIRECT_PASS_RATIO;
+}
+
 /** Os dois campos são **desvio padrão na EU do sinal** (RF-533), nunca variância: o bloco
  *  eleva ao quadrado no runtime. `process_noise` é por varredura, não por segundo. */
 export type DadosKalman = DadosBase & { measurement_noise: number; process_noise: number };

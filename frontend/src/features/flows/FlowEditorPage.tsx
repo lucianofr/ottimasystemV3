@@ -56,7 +56,7 @@ import {
 import { impactoDoSave, type ImpactoMpc } from "./impactoSave";
 import { MpcModal } from "./mpc/MpcModal";
 import { TIPOS_DE_NO } from "./nodes";
-import { ContextoTags, ContextoValores, type ValoresAoVivo } from "./nodes/contexto";
+import { ContextoTags, ContextoTsFlow, ContextoValores, type ValoresAoVivo } from "./nodes/contexto";
 import { formatarTs, useComandarFlow, useFlow, useSaveFlow } from "./useFlows";
 import {
   formatarNumero,
@@ -154,7 +154,7 @@ function CabecalhoAoVivo({ aoVivo }: { aoVivo: CanvasAoVivo }) {
     <div data-testid="canvas-vivo" className="flex items-center gap-3 text-xs text-fg-muted">
       <LampadaEstado estado={aoVivo.status.state} />
       <span>
-        Varredura{" "}
+        Duração de execução{" "}
         <span className="process-value text-fg">{formatarNumero(aoVivo.status.scan_ms)}</span> ms
       </span>
       <span>
@@ -174,15 +174,19 @@ function CabecalhoAoVivo({ aoVivo }: { aoVivo: CanvasAoVivo }) {
 function ContextosDoEditor({
   tags,
   valores,
+  tsFlowSegundos,
   children,
 }: {
   tags: ReadonlyMap<number, TagOut>;
   valores: ValoresAoVivo;
+  tsFlowSegundos: number;
   children: ReactNode;
 }) {
   return (
     <ContextoTags.Provider value={tags}>
-      <ContextoValores.Provider value={valores}>{children}</ContextoValores.Provider>
+      <ContextoValores.Provider value={valores}>
+        <ContextoTsFlow.Provider value={tsFlowSegundos}>{children}</ContextoTsFlow.Provider>
+      </ContextoValores.Provider>
     </ContextoTags.Provider>
   );
 }
@@ -568,7 +572,7 @@ function Editor({ flowId }: { flowId: number }) {
   }
 
   return (
-    <ContextosDoEditor tags={porId} valores={valores}>
+    <ContextosDoEditor tags={porId} valores={valores} tsFlowSegundos={flow.data.ts_seconds}>
       <section className="flex h-[calc(100vh-9rem)] flex-col gap-3">
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-baseline gap-3">

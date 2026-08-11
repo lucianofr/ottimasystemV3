@@ -6,6 +6,7 @@ import {
   handlesEntrada,
   handlesSaida,
   motivoRecusa,
+  passagemDireta,
   paraGraphJson,
   podarArestasDoBloco,
   ROTULO_BLOCO,
@@ -124,6 +125,27 @@ test("filtro de 1ª ordem nasce com tau padrão", () => {
 
   expect(no.data.tau).toBe(5);
   expect(no.data.exec_order).toBe(2);
+});
+
+// --------------------------------------------------------------------------------------
+// passagemDireta — limiar Ts/10 do rótulo (TD-011), espelho de DIRECT_PASS_RATIO do runtime
+// --------------------------------------------------------------------------------------
+
+test("passagemDireta: tau=0 é sempre passagem direta, mesmo sem Ts do flow", () => {
+  expect(passagemDireta(0, 0)).toBe(true);
+  expect(passagemDireta(0, 10)).toBe(true);
+});
+
+test("passagemDireta: tau abaixo de Ts/10 é passagem direta", () => {
+  expect(passagemDireta(0.05, 1)).toBe(true);
+});
+
+test("passagemDireta: tau exatamente em Ts/10 continua dinâmico (mesma fronteira do runtime)", () => {
+  expect(passagemDireta(0.1, 1)).toBe(false);
+});
+
+test("passagemDireta: tau bem acima de Ts/10 continua dinâmico", () => {
+  expect(passagemDireta(5, 1)).toBe(false);
 });
 
 test("Kalman nasce com ruído padrão que passa no save", () => {
