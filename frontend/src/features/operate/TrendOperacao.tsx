@@ -25,11 +25,13 @@ import {
   OPCOES_DEGRAU_MV,
   TETO_PENAS_OPERACAO,
   TOKENS_PENA_OPERACAO,
+  alinharNoEixo,
   atribuirCoresPenas,
   dividirSpPorAuto,
   mesclarSeriesVivas,
   montarOverlayPrevisao,
   selecionarPenasDefault,
+  tetoCarryForwardOperacaoS,
   type AmostraViva,
   type OverlayPrevisao,
   type PenaLegenda,
@@ -162,15 +164,17 @@ function montarColunas(
   cores: ReadonlyMap<string, string>,
   corPadrao: string,
   ligadas: ReadonlySet<string>,
+  tetoCarryS: number,
 ): ColunasOperacao {
   const porId = new Map(seriesHistoricas.map((serie) => [serie.id, serie]));
   const eixoX = [...new Set([...seriesHistoricas.flatMap((s) => s.t), ...overlay.tAbs])].sort(
     (a, b) => a - b,
   );
 
+  // Cada pena tem carimbos próprios: nos instantes das outras ela repete o último valor
+  // conhecido, com gap além de `tetoCarryS` (ver `alinharNoEixo`).
   function remapear(t: readonly number[], valores: readonly (number | null)[]): (number | null)[] {
-    const porT = new Map(t.map((ts, i) => [ts, valores[i]]));
-    return eixoX.map((ts) => porT.get(ts) ?? null);
+    return alinharNoEixo(eixoX, t, valores, tetoCarryS);
   }
 
   const dados: (number | null)[][] = [];
@@ -588,12 +592,19 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     setAviso(null);
   }
 
+  // Teto do carry-forward do eixo compartilhado: a cadência do histórico é Ts_mpc no modo bruto
+  // e o bucket de 1 min no agregado (`GET /api/history/mpc`), então o modo entra no cálculo.
+  const tetoCarryS = tetoCarryForwardOperacaoS(
+    historico.data?.mode ?? "raw",
+    mpc.horizons.ts_mpc,
+  );
+
   const colunas = useMemo(
     () =>
       seriesMescladas
-        ? montarColunas(mpc, seriesMescladas, overlay, tema, cores, coresPena[0], ligadas)
+        ? montarColunas(mpc, seriesMescladas, overlay, tema, cores, coresPena[0], ligadas, tetoCarryS)
         : null,
-    [mpc, seriesMescladas, overlay, tema, cores, coresPena, ligadas],
+    [mpc, seriesMescladas, overlay, tema, cores, coresPena, ligadas, tetoCarryS],
   );
 
   const escalasUplot = useMemo(

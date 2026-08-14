@@ -110,6 +110,64 @@ export function mesclarSeriesVivas(
   });
 }
 
+/** Cadências perdidas até a pena virar gap — mesma regra do trend de engenharia
+ *  (`useHistory.ts`, `CADENCIAS_ATE_SEM_DADO`): uma só viraria falso positivo em qualquer
+ *  jitter de gravação ou de fronteira de bucket. */
+const CADENCIAS_ATE_SEM_DADO = 2;
+
+/** Cadência do modo agregado: um ponto por bucket de 1 min, por construção de `mpc_samples_1m`
+ *  (`routers/history.py`). No modo bruto a cadência é o próprio Ts_mpc do bloco. */
+const CADENCIA_1M_S = 60;
+
+/**
+ * Teto do carry-forward do eixo compartilhado (ver `alinharNoEixo`). Repetir o último valor
+ * conhecido além dele desenharia reta contínua numa variável que parou de amostrar — a mentira
+ * que a Regra do Canal Redundante (DESIGN.md) proíbe.
+ */
+export function tetoCarryForwardOperacaoS(
+  modo: MpcHistoryResponse["mode"],
+  tsMpcS: number,
+): number {
+  return CADENCIAS_ATE_SEM_DADO * (modo === "1m" ? CADENCIA_1M_S : tsMpcS);
+}
+
+/**
+ * Coluna de uma pena no eixo x compartilhado do uPlot (união dos carimbos de todas as penas,
+ * `montarColunas` em `TrendOperacao.tsx`).
+ *
+ * Cada variável tem carimbos próprios — quem tem tag OPC adensa a ponta viva na taxa do worker
+ * (`PontoOpc`), quem não tem (CV vinda de script, MV sem readback) só existe na cadência do
+ * MPC — e a predição só vive no horizonte. Nos instantes em que a pena não amostrou ela repete
+ * o último valor conhecido, que é o que o valor fez de fato no processo: sem isso a pena mais
+ * esparsa fica com um `null` entre cada par de carimbos alheios, vira trecho de 1 ponto e não
+ * desenha nada (`spanGaps: false`, sem marcador). Duas coisas cortam a repetição e as duas
+ * viram gap: `null` na própria série (SP dividido por `auto`, ponto sem valor) e silêncio além
+ * de `tetoS` (`tetoCarryForwardOperacaoS`) — flow parado, recorder fora do ar.
+ *
+ * Mesma regra do trend de engenharia (`montarMatriz` em `useHistory.ts`), aqui por coluna
+ * porque o eixo já vem montado (histórico + horizonte da predição). `eixoX` crescente é
+ * pré-condição (uPlot já exige x monotônico): num salto para trás a diferença fica negativa e
+ * o teto nunca dispararia.
+ */
+export function alinharNoEixo(
+  eixoX: readonly number[],
+  t: readonly number[],
+  valores: readonly (number | null | undefined)[],
+  tetoS: number,
+): (number | null)[] {
+  const porT = new Map(t.map((ts, i) => [ts, valores[i] ?? null]));
+  let atual: number | null = null;
+  let ultimaAmostra = Number.NEGATIVE_INFINITY;
+  return eixoX.map((ts) => {
+    const amostra = porT.get(ts);
+    if (amostra !== undefined) {
+      atual = amostra;
+      ultimaAmostra = ts;
+    }
+    return ts - ultimaAmostra > tetoS ? null : atual;
+  });
+}
+
 // ----------------------------------------------------------------------------------------
 // 5.2 — Overlay de predição (spec F5 §3, §7.4-6 item 3)
 // ----------------------------------------------------------------------------------------

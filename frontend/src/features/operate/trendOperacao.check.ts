@@ -8,11 +8,13 @@ import {
   OPCOES_DEGRAU_MV,
   TETO_PENAS_OPERACAO,
   TOKENS_PENA_OPERACAO,
+  alinharNoEixo,
   atribuirCoresPenas,
   dividirSpPorAuto,
   mesclarSeriesVivas,
   montarOverlayPrevisao,
   selecionarPenasDefault,
+  tetoCarryForwardOperacaoS,
   type AmostraViva,
 } from "./trendOperacao";
 import { chaveHistoricoOperacao } from "./useHistoryMpc";
@@ -79,6 +81,47 @@ test("ponta viva OPC: sem pontos novos a série é idêntica à de antes", () =>
   const [semOpc] = mesclarSeriesVivas(resp, vivas, ["cv_1"]);
   const [comOpcVazio] = mesclarSeriesVivas(resp, vivas, ["cv_1"], new Map());
   expect(comOpcVazio).toEqual(semOpc);
+});
+
+// --------------------------------------------------- eixo x compartilhado (carry-forward, §7.4-6)
+
+test("eixo compartilhado: pena sem tag OPC repete o último valor nos carimbos das penas adensadas", () => {
+  // Regressão: uma CV alimentada por script (sem tag OPC) só tem carimbo na cadência do MPC,
+  // enquanto as penas com tag adensam a 4 Hz. Com `null` nos carimbos alheios, cada ponto da
+  // pena sem tag virava um trecho de 1 ponto — invisível com `spanGaps: false` e sem marcador.
+  const eixoX = [T0, T0 + 0.25, T0 + 0.5, T0 + 0.75, T0 + 1];
+  const alinhada = alinharNoEixo(eixoX, [T0, T0 + 1], [33.3, 33.4], 2);
+
+  expect(alinhada).toEqual([33.3, 33.3, 33.3, 33.3, 33.4]);
+});
+
+test("carimbo alheio antes da primeira amostra da pena fica vazio: carry-forward não anda para trás", () => {
+  const alinhada = alinharNoEixo([T0 - 1, T0, T0 + 1], [T0, T0 + 1], [1, 2], 10);
+
+  expect(alinhada).toEqual([null, 1, 2]);
+});
+
+test("carry-forward para no teto: silêncio de mais de 2 cadências vira gap, não reta contínua", () => {
+  const eixoX = [T0, T0 + 1, T0 + 2, T0 + 3, T0 + 4, T0 + 5];
+  const alinhada = alinharNoEixo(eixoX, [T0, T0 + 5], [1, 2], 2);
+
+  expect(alinhada).toEqual([1, 1, 1, null, null, 2]);
+});
+
+test("null da própria série (SP rastreado, qualidade) é o que se repete adiante: continua gap", () => {
+  // A repetição carrega o último valor conhecido, e um `null` amostrado é conhecido: o traço
+  // fica cortado até a próxima amostra com valor, em vez de voltar ao valor anterior ao gap.
+  const eixoX = [T0, T0 + 0.5, T0 + 1, T0 + 1.5, T0 + 2];
+  const alinhada = alinharNoEixo(eixoX, [T0, T0 + 1, T0 + 2], [1, null, 3], 2);
+
+  expect(alinhada).toEqual([1, 1, null, null, 3]);
+});
+
+test("teto do carry-forward escala com a cadência: Ts_mpc no raw, bucket de 1 min no agregado", () => {
+  expect(tetoCarryForwardOperacaoS("raw", 1)).toBe(2);
+  expect(tetoCarryForwardOperacaoS("raw", 60)).toBe(120);
+  // No `1m` o bucket é de 60 s: um teto de Ts_mpc gaparia toda série agregada saudável.
+  expect(tetoCarryForwardOperacaoS("1m", 1)).toBe(120);
 });
 
 test("borda viva: mpc.state novo faz append na série sem esperar o poll", () => {
