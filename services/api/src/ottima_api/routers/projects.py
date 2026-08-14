@@ -424,6 +424,7 @@ async def import_project(
             watchdog_read_node_id=bf.watchdog_read_node_id,
             watchdog_write_node_id=bf.watchdog_write_node_id,
             watchdog_period_ms=bf.watchdog_period_ms,
+            watchdog_timeout_s=bf.watchdog_timeout_s,
         )
         db.add(flow)
         flows_novos.append(flow)

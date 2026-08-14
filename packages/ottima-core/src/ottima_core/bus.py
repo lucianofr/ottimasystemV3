@@ -212,6 +212,8 @@ KIND_MPC_MV_WRITTEN = "mpc_mv_written"
 KIND_MPC_OVERRUN = "mpc_overrun"
 KIND_MPC_SOLVER_ERROR = "mpc_solver_error"
 KIND_MPC_SHED = "mpc_shed"
+# Ação de falha por variável disparada (RF-613): debounce de 2 execuções, simulate expirado.
+KIND_MPC_FAIL_ACTION_TRIGGERED = "mpc_fail_action_triggered"  # severity "warning"
 KIND_MPC_MV_STATUS_CHANGED = "mpc_mv_status_changed"
 KIND_MPC_ARM_FAILED = "mpc_arm_failed"
 KIND_MPC_INPUT_INVALID = "mpc_input_invalid"
@@ -232,6 +234,9 @@ KIND_FLOW_RESUMED = "flow_resumed"  # severity "info"
 
 # Retenção de histórico configurável (ADR-003 revisado).
 KIND_HISTORY_RETENTION_CHANGED = "history_retention_changed"  # severity "info"
+
+# Nível de log dos serviços alterado em runtime (RF-805).
+KIND_SYSTEM_LOG_LEVEL_CHANGED = "system_log_level_changed"  # severity "info"
 
 
 async def publish_event(

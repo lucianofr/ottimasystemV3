@@ -1,5 +1,7 @@
 import { inteiroSimples, numero, objeto, texto } from "../graph";
 import type {
+  AcaoFalhaLinha,
+  AcaoFalhaMv,
   FaixaMpc,
   LimitesMpc,
   ObjetivoCv,
@@ -105,6 +107,38 @@ function lerPsvMv(bruto: unknown): number | null {
   return typeof bruto === "number" && Number.isFinite(bruto) ? bruto : null;
 }
 
+/** Whitelist + default `"no_action"` (mesmo padrão de `lerObjetivoMv`): config salvo antes
+ *  da feature não tem a chave, e um valor fora do vocabulário nunca atravessa para o form. */
+function lerAcaoFalhaMv(bruto: unknown): AcaoFalhaMv {
+  return bruto === "shed_local" || bruto === "manual" ? bruto : "no_action";
+}
+
+function lerAcaoFalhaLinha(bruto: unknown): AcaoFalhaLinha {
+  return bruto === "shed_local" ||
+    bruto === "manual" ||
+    bruto === "simulate_manual" ||
+    bruto === "simulate_shed_local"
+    ? bruto
+    : "no_action";
+}
+
+/** Inteiro positivo ou `null` (tags opcionais: `remote_sp_tag_id`, `local_shed_mode`) —
+ *  mesmo padrão de `lerReadbackTagIdMv`: ausente/sentinela 0 vira `null`. */
+function lerInteiroOpcional(bruto: unknown): number | null {
+  return typeof bruto === "number" && Number.isInteger(bruto) && bruto > 0 ? bruto : null;
+}
+
+/** `number | null` livre (`sp_range_pct`): ausente/null/não-finito → `null`. */
+function lerNumeroOpcional(bruto: unknown): number | null {
+  return typeof bruto === "number" && Number.isFinite(bruto) ? bruto : null;
+}
+
+/** `track_sp` default `true` (RF-612): config salvo antes do campo rastreia PV — só o
+ *  `false` explícito desliga. */
+function lerTrackSp(bruto: unknown): boolean {
+  return bruto !== false;
+}
+
 function lerVariavelMv(bruto: unknown): VariavelMv | null {
   const cru = objeto(bruto);
   if (cru === null) return null;
@@ -114,8 +148,13 @@ function lerVariavelMv(bruto: unknown): VariavelMv | null {
     id,
     name: texto(cru.name, ""),
     eu: texto(cru.eu, ""),
+    // RF-609/613: defaults retrocompat (config salvo antes do lote não tem as chaves) —
+    // os mesmos do `MvVar` do servidor: "" / 0 / 100 / "no_action" / null.
+    description: texto(cru.description, ""),
+    zero: numero(cru.zero, 0),
+    span: numero(cru.span, 100),
     limits: lerLimitesMpc(cru.limits),
-    du_max: numero(cru.du_max, 0),
+    max_rate: numero(cru.max_rate, 0),
     // TD-007: `graph_json` salvo antes desta tarefa não tem os campos — `0`/`1` são os
     // mesmos defaults do `MvVar` do servidor (`du_min: 0.0`, `move_weight: 1.0`).
     du_min: numero(cru.du_min, 0),
@@ -126,6 +165,8 @@ function lerVariavelMv(bruto: unknown): VariavelMv | null {
     pid: lerPidMv(cru.pid),
     objective: lerObjetivoMv(cru.objective),
     psv: lerPsvMv(cru.psv),
+    fail_action: lerAcaoFalhaMv(cru.fail_action),
+    local_shed_mode: lerInteiroOpcional(cru.local_shed_mode),
   };
 }
 
@@ -138,11 +179,23 @@ function lerVariavelCv(bruto: unknown): VariavelCv | null {
     id,
     name: texto(cru.name, ""),
     eu: texto(cru.eu, ""),
+    description: texto(cru.description, ""),
+    zero: numero(cru.zero, 0),
+    span: numero(cru.span, 100),
     kind: lerTipoLinhaMpc(cru.kind),
     tss: numero(cru.tss, 0),
     weight: numero(cru.weight, 0),
     sp_limits: lerLimitesMpc(cru.sp_limits),
+    priority: inteiroSimples(cru.priority, 1),
     objective: lerObjetivoCv(cru.objective),
+    // RF-611..615: defaults retrocompat — 0 (degrau) / true (rastreia) / no_action / 60 s /
+    // null (livre) / null (SP local) reproduzem o comportamento anterior bit a bit.
+    traj_tau_s: numero(cru.traj_tau_s, 0),
+    track_sp: lerTrackSp(cru.track_sp),
+    fail_action: lerAcaoFalhaLinha(cru.fail_action),
+    fail_timeout_s: numero(cru.fail_timeout_s, 60),
+    sp_range_pct: lerNumeroOpcional(cru.sp_range_pct),
+    remote_sp_tag_id: lerInteiroOpcional(cru.remote_sp_tag_id),
   };
 }
 
@@ -155,11 +208,16 @@ function lerVariavelRestricao(bruto: unknown): VariavelRestricao | null {
     id,
     name: texto(cru.name, ""),
     eu: texto(cru.eu, ""),
+    description: texto(cru.description, ""),
+    zero: numero(cru.zero, 0),
+    span: numero(cru.span, 100),
     kind: lerTipoLinhaMpc(cru.kind),
     tss: numero(cru.tss, 0),
     range: lerFaixaMpc(cru.range),
     priority: inteiroSimples(cru.priority, 1),
     objective: lerObjetivoRestricao(cru.objective),
+    fail_action: lerAcaoFalhaLinha(cru.fail_action),
+    fail_timeout_s: numero(cru.fail_timeout_s, 60),
   };
 }
 
@@ -172,6 +230,8 @@ function lerVariavelDv(bruto: unknown): VariavelDv | null {
     id,
     name: texto(cru.name, ""),
     eu: texto(cru.eu, ""),
+    zero: numero(cru.zero, 0),
+    span: numero(cru.span, 100),
     range: lerFaixaMpcOuNull(cru.range),
     operating_point: numero(cru.operating_point, 0),
   };

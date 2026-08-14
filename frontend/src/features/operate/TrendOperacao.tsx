@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
+import { useCanalAoVivo } from "../../app/CanalAoVivo";
 import { Button } from "../../components/ui/button";
-import { Select } from "../../components/ui/select";
 import type { MpcState } from "../../lib/contracts.gen";
 import {
   chaveEscala,
@@ -11,8 +11,10 @@ import {
   ESCALA_AUTO,
   gravarEscalas,
   lerEscalas,
+  limparEscalas,
   type EscalaVar,
 } from "../trend/escalas";
+import { JanelaTempo } from "../trend/JanelaTempo";
 import { FORMATO_VALOR, lerTemaTrend, type TemaTrend } from "../trend/trendTheme";
 import "../trend/trend.css";
 import { useJanelaDeslizante } from "../trend/useJanelaDeslizante";
@@ -20,8 +22,6 @@ import { LegendaOperacao } from "./LegendaOperacao";
 import { calcularRangeXOperacao, pluginSecaoFutura } from "./secaoFutura";
 import {
   CUSTO_PENAS,
-  JANELAS_OPERACAO,
-  JANELA_PADRAO_ID,
   OPCOES_DEGRAU_MV,
   TETO_PENAS_OPERACAO,
   TOKENS_PENA_OPERACAO,
@@ -31,9 +31,9 @@ import {
   montarOverlayPrevisao,
   selecionarPenasDefault,
   type AmostraViva,
-  type JanelaOperacao,
   type OverlayPrevisao,
   type PenaLegenda,
+  type PontoOpc,
   type SerieOperacao,
 } from "./trendOperacao";
 import { useHistoryMpc } from "./useHistoryMpc";
@@ -397,11 +397,11 @@ export interface TrendOperacaoProps {
 }
 
 export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoProps) {
-  const [janelaId, setJanelaId] = useState<JanelaOperacao["id"]>(JANELA_PADRAO_ID);
-  const janela = JANELAS_OPERACAO.find((item) => item.id === janelaId) ?? JANELAS_OPERACAO[1];
+  // Janela por valor+unidade (B-7): inteiro em segundos/minutos, default 30 min.
+  const [janelaSegundos, setJanelaSegundos] = useState(1800);
 
   // Janela deslizante `<`/`>`/Reset (tarefa 2.4) — `fimEpochS === null` é ao vivo.
-  const janelaDeslizante = useJanelaDeslizante(janela.segundos);
+  const janelaDeslizante = useJanelaDeslizante(janelaSegundos);
 
   // Todas as variáveis são buscadas de uma vez (teto de 14 do `/api/history/mpc` cobre o
   // teto de config do bloco inteiro — 4 MV + 6 CV/Restr + 4 DV): ligar uma pena pela legenda
@@ -420,9 +420,24 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     flowId,
     blockId,
     idsHistorico,
-    janela.segundos,
+    janelaSegundos,
     janelaDeslizante.fimEpochS,
   );
+
+  // Mapa variável → tag OPC (B-2): a ponta viva adensa na taxa OPC para as variáveis com
+  // tag mapeada; as demais seguem só na cadência do `mpc.state` (fallback, sem erro).
+  const tagsPorVar = useMemo(() => {
+    const mapa = new Map<string, number>();
+    for (const v of [
+      ...mpc.variables.cvs,
+      ...mpc.variables.constraints,
+      ...mpc.variables.mvs,
+      ...mpc.variables.dvs,
+    ]) {
+      if (v.tag_id != null) mapa.set(v.id, v.tag_id);
+    }
+    return mapa;
+  }, [mpc]);
 
   // Borda viva (brief 5.1): cada `mpc.state` empilha uma amostra; o corte pela janela atual
   // acontece na leitura (useMemo abaixo), não aqui — trocar de janela não precisa esperar o
@@ -437,6 +452,38 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     ]);
   }, [mpcState]);
 
+  // Ponta viva na taxa OPC (B-4): o provider já coalesce a 250 ms (`tagValues`); aqui cada
+  // flush anexa os pontos novos de cada variável com tag (dedupe pelo `ts` da leitura) e o
+  // buffer publicado alimenta o merge. O histórico REST segue amostrado por Ts_mpc — o
+  // adensamento é só da borda viva (PRD §5.12).
+  const { tagValues } = useCanalAoVivo();
+  const vivasOpcRef = useRef(new Map<string, { ultimoTs: string; pontos: PontoOpc[] }>());
+  const [pontosOpc, setPontosOpc] = useState<ReadonlyMap<string, readonly PontoOpc[]>>(
+    new Map(),
+  );
+  useEffect(() => {
+    if (tagsPorVar.size === 0) return;
+    const buffer = vivasOpcRef.current;
+    let mudou = false;
+    for (const [varId, tagId] of tagsPorVar) {
+      const leitura = tagValues.get(tagId);
+      if (leitura === undefined || !leitura.ok || leitura.v === null) continue;
+      const entrada = buffer.get(varId) ?? { ultimoTs: "", pontos: [] };
+      if (leitura.ts === entrada.ultimoTs) continue;
+      entrada.ultimoTs = leitura.ts;
+      const corte = Date.now() / 1000 - janelaSegundos;
+      entrada.pontos = [
+        ...entrada.pontos.filter((p) => p.t >= corte),
+        { t: Date.parse(leitura.ts) / 1000, v: leitura.v },
+      ];
+      buffer.set(varId, entrada);
+      mudou = true;
+    }
+    if (mudou) {
+      setPontosOpc(new Map([...buffer].map(([varId, e]) => [varId, e.pontos] as const)));
+    }
+  }, [tagValues, tagsPorVar, janelaSegundos]);
+
   // Pausado/deslizado (tarefa 2.4), a borda viva para de entrar no gráfico: a vista congelada
   // não pode ganhar pontos que "vazam" do fim escolhido pelo operador.
   const seriesMescladas = useMemo(() => {
@@ -444,10 +491,10 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     if (!janelaDeslizante.aoVivo) {
       return mesclarSeriesVivas(historico.data, [], idsHistorico);
     }
-    const corte = Date.now() / 1000 - janela.segundos;
+    const corte = Date.now() / 1000 - janelaSegundos;
     const vivasNaJanela = vivas.filter((a) => Date.parse(a.ts) / 1000 >= corte);
-    return mesclarSeriesVivas(historico.data, vivasNaJanela, idsHistorico);
-  }, [historico.data, vivas, janela.segundos, idsHistorico, janelaDeslizante.aoVivo]);
+    return mesclarSeriesVivas(historico.data, vivasNaJanela, idsHistorico, pontosOpc);
+  }, [historico.data, vivas, janelaSegundos, idsHistorico, janelaDeslizante.aoVivo, pontosOpc]);
 
   const overlay = useMemo(
     () => (mpcState ? montarOverlayPrevisao(mpcState.prediction) : OVERLAY_VAZIO),
@@ -566,17 +613,19 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
 
   const container = useRef<HTMLDivElement>(null);
   const grafico = useRef<uPlot | null>(null);
-  // Âncora do divisor "agora"/seção futura: sem predição, vira o relógio — nunca `null` em
-  // vista ao vivo (o divisor não pode sumir só porque o bloco está fora de AUTO).
+  // Âncora do divisor "agora"/seção futura: SEMPRE o relógio de parede na vista ao vivo
+  // (B-5) — a linha anda a cada segundo pelo tique abaixo, mesmo sem dado novo; o overlay de
+  // predição segue ancorado em `prediction.ts` (F5R-01), isso é só a LINHA. `null` fora do
+  // ao vivo (vista congelada não tem "agora").
   const agoraDivisorRef = useRef<number | null>(null);
-  agoraDivisorRef.current = janelaDeslizante.aoVivo ? (overlay.agora ?? Date.now() / 1000) : null;
+  agoraDivisorRef.current = janelaDeslizante.aoVivo ? Date.now() / 1000 : null;
   const semPredicaoRef = useRef(false);
   semPredicaoRef.current = semPredicao;
   const rangeXRef = useRef<readonly [number, number]>([0, 0]);
   rangeXRef.current = calcularRangeXOperacao({
     fimEpochS: janelaDeslizante.fimEpochS,
     agoraEpochS: Date.now() / 1000,
-    janelaSegundos: janela.segundos,
+    janelaSegundos,
     horizonteFuturoS,
   });
   const colunasAtuais = useRef(colunas);
@@ -589,7 +638,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
       return e.auto ? `${id}:a` : `${id}:${String(e.min)}-${String(e.max)}`;
     })
     .join(",");
-  const estrutura = `${janela.id}|${idsEstrutura.join(",")}|${escalaAssinatura}|${foco ?? ""}`;
+  const estrutura = `${String(janelaSegundos)}|${idsEstrutura.join(",")}|${escalaAssinatura}|${foco ?? ""}`;
 
   useEffect(() => {
     const alvo = container.current;
@@ -634,11 +683,42 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     instancia.setData(colunas.dados, !zoomado);
   }, [colunas]);
 
+  // Tique de 1 s da linha "agora" (B-5): ao vivo e sem zoom manual, re-ancora no relógio de
+  // parede e reaplica a janela X via `setScale` — o redesenho (plugin `pluginLinhaAgora`)
+  // acontece mesmo sem dado novo chegando. Com zoom manual o tique congela: o operador está
+  // olhando um recorte e a tela não pode andar debaixo dele.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const instancia = grafico.current;
+      if (!instancia || !janelaDeslizante.aoVivo) return;
+      const x = instancia.data[0];
+      const zoomado =
+        x.length > 0 &&
+        ((instancia.scales.x.min ?? 0) > x[0] || (instancia.scales.x.max ?? 0) < x[x.length - 1]);
+      if (zoomado) return;
+      agoraDivisorRef.current = Date.now() / 1000;
+      rangeXRef.current = calcularRangeXOperacao({
+        fimEpochS: janelaDeslizante.fimEpochS,
+        agoraEpochS: Date.now() / 1000,
+        janelaSegundos,
+        horizonteFuturoS,
+      });
+      instancia.setScale("x", { min: rangeXRef.current[0], max: rangeXRef.current[1] });
+    }, 1000);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [janelaDeslizante.aoVivo, janelaDeslizante.fimEpochS, janelaSegundos, horizonteFuturoS]);
+
   /** Reset layout (tarefa 2.4): volta ao vivo E limpa o zoom manual do uPlot no mesmo clique
    *  — sem o `setData(dados, true)` explícito, um zoom/pan em andamento sobreviveria ao
-   *  `reset()` do hook (o efeito de dados acima preserva zoom por design). */
+   *  `reset()` do hook (o efeito de dados acima preserva zoom por design). Completo (B-6):
+   *  zera também as escalas Y por variável — e remove a preferência persistida, senão o
+   *  próximo reload ressuscitaria a escala que o reset acabou de apagar. */
   function aoClicarReset(): void {
     janelaDeslizante.reset();
+    limparEscalas(chaveEscalasStorage);
+    setEscalasPorVar({});
     const instancia = grafico.current;
     const atuais = colunasAtuais.current;
     if (instancia && atuais) {
@@ -651,21 +731,11 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="plaqueta text-xs text-fg-muted">Trend</h2>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2">
-            <span className="plaqueta text-xs text-fg-muted">Janela</span>
-            <Select
-              data-testid="operate-trend-window"
-              className="w-28"
-              value={janelaId}
-              onChange={(evento) => setJanelaId(evento.target.value as JanelaOperacao["id"])}
-            >
-              {JANELAS_OPERACAO.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.rotulo}
-                </option>
-              ))}
-            </Select>
-          </label>
+          <JanelaTempo
+            prefixoTestid="operate"
+            segundos={janelaSegundos}
+            onChange={setJanelaSegundos}
+          />
           <Button
             type="button"
             variant="outline"

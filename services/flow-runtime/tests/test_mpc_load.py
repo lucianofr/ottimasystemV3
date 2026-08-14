@@ -42,13 +42,13 @@ N_WARMUP = 3
 N_TIMED = 30
 
 
-def _mv(id_: str, *, du_max: float = 50.0) -> dict:
+def _mv(id_: str, *, max_rate: float = 50.0) -> dict:
     return {
         "id": id_,
         "name": id_,
         "eu": "u",
         "limits": {"min": 0.0, "max": 1000.0},
-        "du_max": du_max,
+        "max_rate": max_rate,
         "initial_value": 0.0,
         "pid": None,
     }

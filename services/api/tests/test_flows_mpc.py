@@ -121,7 +121,7 @@ def _mv(suffix: str, *, pid: dict | None = None, **overrides) -> dict:
         "name": f"MV {suffix}",
         "eu": "m3/h",
         "limits": {"min": 0.0, "max": 100.0},
-        "du_max": 5.0,
+        "max_rate": 5.0,
         "initial_value": 0.0,
     }
     if pid is not None:
@@ -344,7 +344,7 @@ async def test_post_put_get_esqueleto_2_1_verbatim_round_trip(client, admin_head
                     "name": "Vazão de refluxo",
                     "eu": "m3/h",
                     "limits": {"min": 0.0, "max": 100.0},
-                    "du_max": 5.0,
+                    "max_rate": 5.0,
                     "initial_value": 0.0,
                     "pid": pid,
                 }

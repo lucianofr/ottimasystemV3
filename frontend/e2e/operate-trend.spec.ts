@@ -54,7 +54,7 @@ function grafoMpc(tagLeituraId: number) {
                 name: "Abertura",
                 eu: "%",
                 limits: { min: 0, max: 100 },
-                du_max: 5,
+                max_rate: 2.5, // EU/s (ts_mpc=2 s -> 5 EU/ciclo, como antes)
                 initial_value: 0,
               },
             ],
@@ -258,5 +258,99 @@ test.describe("Tela de Operação", () => {
     await expect(seletor).toBeVisible();
     await expect(seletor.locator("option")).toHaveCount(1);
     await expect(seletor.locator("option").first()).toHaveText(/MPC da tela/);
+  });
+
+  test("PW-OP-07: linha 'agora' anda no relógio de parede, mesmo sem dado novo", async ({
+    page,
+  }) => {
+    // Sem deploy nesta suíte: nenhum dado novo chega — dois ticks consecutivos do canvas
+    // dentro da janela de 5 s do polling provam a cadência própria de 1 s da linha. O hash
+    // cobre TODAS as camadas do uPlot (a linha "agora" é desenhada na camada "over").
+    const container = page.getByTestId("operate-trend-chart");
+    await expect(container.locator("canvas").first()).toBeVisible();
+    const hash = async () =>
+      container.locator("canvas").evaluateAll((cs) =>
+        cs.map((c: HTMLCanvasElement) => c.toDataURL().length + c.toDataURL().slice(-32)).join("|"),
+      );
+    const quadro0 = await hash();
+    await page.waitForTimeout(3000);
+    const quadro1 = await hash();
+    expect(quadro1, "a linha 'agora' deveria ter andado em 3 s sem dado novo").not.toBe(quadro0);
+    await page.waitForTimeout(1200);
+    const quadro2 = await hash();
+    expect(quadro2, "o tique é de ~1 s — 1,2 s depois já difere de novo").not.toBe(quadro1);
+  });
+
+  test("PW-OP-08: reset layout zera a escala Y fixada e remove a preferência persistida", async ({
+    page,
+  }) => {
+    const chaveStorage = `ottima.operate.escalas.v1:${String(flowId)}/${BLOCK_ID}`;
+    const linhaCv = page.locator(
+      '[data-testid="operate-trend-legend-item"][data-var-id="cv_1"]',
+    );
+
+    await linhaCv.getByTestId("operate-escala-auto").uncheck();
+    await linhaCv.getByTestId("operate-escala-min").fill("10");
+    await linhaCv.getByTestId("operate-escala-max").fill("90");
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          (chave) => window.localStorage.getItem(chave),
+          chaveStorage,
+        ),
+      )
+      .toContain('"cv_1"');
+
+    // Desliza para trás (vista congelada) e reseta: volta ao vivo, escala auto, storage limpo.
+    await page.getByTestId("operate-janela-voltar").click();
+    await expect(page.getByTestId("operate-janela-avancar")).toBeEnabled();
+    await page.getByTestId("operate-janela-reset").click();
+
+    await expect(linhaCv.getByTestId("operate-escala-auto")).toBeChecked();
+    await expect(linhaCv.getByTestId("operate-escala-min")).toBeDisabled();
+    await expect(page.getByTestId("operate-janela-avancar")).toBeDisabled();
+    await expect
+      .poll(async () => page.evaluate((chave) => window.localStorage.getItem(chave), chaveStorage))
+      .toBeNull();
+  });
+
+  test("PW-OP-09: janela por valor + unidade (segundos/minutos) dirige a consulta de histórico", async ({
+    page,
+  }) => {
+    await expect(page.getByTestId("operate-trend-window")).toHaveCount(0);
+
+    const valor = page.getByTestId("operate-janela-valor");
+    const unidade = page.getByTestId("operate-janela-unidade");
+    await expect(valor).toHaveValue("30");
+    await expect(unidade).toHaveValue("min");
+    await expect(valor).toHaveAttribute("min", "1");
+
+    const consultas: URL[] = [];
+    page.on("request", (requisicao) => {
+      const url = new URL(requisicao.url());
+      if (url.pathname === "/api/history/mpc") consultas.push(url);
+    });
+
+    await valor.fill("45");
+    await unidade.selectOption("seg");
+    await expect
+      .poll(() => consultas.length, { message: "consulta com janela de 45 s" })
+      .toBeGreaterThan(0);
+    let ultima = consultas.at(-1)!;
+    let janelaS =
+      (Date.parse(ultima.searchParams.get("end") ?? "") -
+        Date.parse(ultima.searchParams.get("start") ?? "")) / 1000;
+    expect(Math.round(janelaS)).toBe(45);
+
+    await valor.fill("2");
+    await unidade.selectOption("min");
+    await expect
+      .poll(() => consultas.length, { message: "consulta com janela de 2 min" })
+      .toBeGreaterThan(1);
+    ultima = consultas.at(-1)!;
+    janelaS =
+      (Date.parse(ultima.searchParams.get("end") ?? "") -
+        Date.parse(ultima.searchParams.get("start") ?? "")) / 1000;
+    expect(Math.round(janelaS)).toBe(120);
   });
 });

@@ -8,7 +8,7 @@ import FaceplateVariavel from "./FaceplateVariavel";
 import { gradeDeVariaveis } from "./gradeVariaveis";
 import { ResumoOtimizador } from "./ResumoOtimizador";
 import { TrendOperacao } from "./TrendOperacao";
-import { rotuloMpc, useMpcs } from "./useMpcs";
+import { rotuloMpc, useMpcs, type MpcNodeOut } from "./useMpcs";
 
 /**
  * Casca real da tela de operação (spec §7.4-1/2/3/5; RF-701/702): resolve o MPC de
@@ -21,11 +21,88 @@ import { rotuloMpc, useMpcs } from "./useMpcs";
  */
 
 
+/** Conteúdo da operação com o MPC já resolvido: só monta com `mpcs.data` em mãos — a
+ *  assinatura (que só lê o interesse do primeiro render, ver `OperatePage`) já nasce com as
+ *  tags `opc_values` das variáveis com tag mapeada (PV na taxa OPC, decisão F6 A-1
+ *  revertida). Variável sem `tag_id` (CV alimentada por filtro/script) segue só no
+ *  `mpc.state` — fallback explícito, sem erro. */
+function OperacaoResolvida({
+  mpc,
+  indiceAtual,
+  mpcs,
+}: {
+  mpc: MpcNodeOut;
+  indiceAtual: number;
+  mpcs: MpcNodeOut[];
+}) {
+  const navigate = useNavigate();
+  const flowId = mpc.flow_id;
+  const blockId = mpc.block_id;
+  const tagIds = [
+    ...new Set(
+      [
+        ...mpc.variables.mvs,
+        ...mpc.variables.cvs,
+        ...mpc.variables.constraints,
+        ...mpc.variables.dvs,
+      ]
+        .map((v) => v.tag_id)
+        .filter((id): id is number => id != null),
+    ),
+  ];
+  useAssinatura({
+    flow_status: [flowId],
+    mpc_state: [`${String(flowId)}/${blockId}`],
+    opc_values: tagIds,
+  });
+  const canal = useCanalAoVivo();
+  const mpcState = canal.mpcStates.get(`${String(flowId)}/${blockId}`);
+
+  return (
+    <div data-testid="operate-page">
+      <label className="mb-4 flex items-center gap-2">
+        <span className="plaqueta text-xs text-fg-muted">MPC</span>
+        <Select
+          data-testid="operate-mpc-select"
+          className="w-72"
+          value={String(indiceAtual)}
+          onChange={(evento) => {
+            const escolhido = mpcs[Number(evento.target.value)];
+            navigate(`/operacao/${String(escolhido.flow_id)}/${escolhido.block_id}`);
+          }}
+        >
+          {mpcs.map((item, indice) => (
+            <option key={`${String(item.flow_id)}/${item.block_id}`} value={indice}>
+              {rotuloMpc(item)}
+            </option>
+          ))}
+        </Select>
+      </label>
+      <FaceplatePrincipal
+        mpc={mpc}
+        flowStatus={canal.flowStatus.get(flowId)}
+        mpcState={mpcState}
+        flowId={flowId}
+        blockId={blockId}
+      />
+      <div className="mt-6">
+        <ResumoOtimizador mpc={mpc} mpcState={mpcState} flowId={flowId} blockId={blockId} />
+      </div>
+      <div data-testid="operate-variaveis" className="mt-6 flex flex-wrap gap-4">
+        {gradeDeVariaveis(mpc, mpcState, flowId, blockId).map(({ key, ...props }) => (
+          <FaceplateVariavel key={key} {...props} />
+        ))}
+      </div>
+      <div className="mt-6">
+        <TrendOperacao flowId={flowId} blockId={blockId} mpc={mpc} mpcState={mpcState} />
+      </div>
+    </div>
+  );
+}
+
+
 function OperacaoDoMpc({ flowId, blockId }: { flowId: number; blockId: string }) {
   const mpcs = useMpcs();
-  const navigate = useNavigate();
-  useAssinatura({ flow_status: [flowId], mpc_state: [`${String(flowId)}/${blockId}`] });
-  const canal = useCanalAoVivo();
 
   if (mpcs.isPending) {
     return (
@@ -58,48 +135,8 @@ function OperacaoDoMpc({ flowId, blockId }: { flowId: number; blockId: string })
       />
     );
   }
-  const mpcState = canal.mpcStates.get(`${String(flowId)}/${blockId}`);
 
-  return (
-    <div data-testid="operate-page">
-      <label className="mb-4 flex items-center gap-2">
-        <span className="plaqueta text-xs text-fg-muted">MPC</span>
-        <Select
-          data-testid="operate-mpc-select"
-          className="w-72"
-          value={String(indiceAtual)}
-          onChange={(evento) => {
-            const escolhido = mpcs.data[Number(evento.target.value)];
-            navigate(`/operacao/${String(escolhido.flow_id)}/${escolhido.block_id}`);
-          }}
-        >
-          {mpcs.data.map((item, indice) => (
-            <option key={`${String(item.flow_id)}/${item.block_id}`} value={indice}>
-              {rotuloMpc(item)}
-            </option>
-          ))}
-        </Select>
-      </label>
-      <FaceplatePrincipal
-        mpc={mpc}
-        flowStatus={canal.flowStatus.get(flowId)}
-        mpcState={mpcState}
-        flowId={flowId}
-        blockId={blockId}
-      />
-      <div className="mt-6">
-        <ResumoOtimizador mpc={mpc} mpcState={mpcState} flowId={flowId} blockId={blockId} />
-      </div>
-      <div data-testid="operate-variaveis" className="mt-6 flex flex-wrap gap-4">
-        {gradeDeVariaveis(mpc, mpcState, flowId, blockId).map(({ key, ...props }) => (
-          <FaceplateVariavel key={key} {...props} />
-        ))}
-      </div>
-      <div className="mt-6">
-        <TrendOperacao flowId={flowId} blockId={blockId} mpc={mpc} mpcState={mpcState} />
-      </div>
-    </div>
-  );
+  return <OperacaoResolvida mpc={mpc} indiceAtual={indiceAtual} mpcs={mpcs.data} />;
 }
 
 /**

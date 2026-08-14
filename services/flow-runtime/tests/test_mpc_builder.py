@@ -21,7 +21,8 @@ def _mv(
     id_: str,
     *,
     limits: tuple[float, float] = (0.0, 1000.0),
-    du_max: float = 50.0,
+    # EU/s (RF-604 revisado): 10 EU/s × Ts_mpc=5 s = 50 EU/ciclo — o mesmo folga de antes.
+    max_rate: float = 10.0,
     operating_point: float = 0.0,
     move_weight: float = 1.0,
 ) -> dict:
@@ -30,7 +31,7 @@ def _mv(
         "name": id_,
         "eu": "u",
         "limits": {"min": limits[0], "max": limits[1]},
-        "du_max": du_max,
+        "max_rate": max_rate,
         "initial_value": 0.0,
         "operating_point": operating_point,
         "move_weight": move_weight,
@@ -173,7 +174,9 @@ def _du_config() -> MpcConfig:
             "name": "du-nc",
             "multiplier": 5,
             "variables": {
-                "mvs": [_mv("mv_1", limits=(0.0, 1000.0), du_max=0.1)],
+                "mvs": [
+                    _mv("mv_1", limits=(0.0, 1000.0), max_rate=0.02)  # × Ts_mpc=5 s = 0.1 EU/ciclo
+                ],
                 "cvs": [_cv("cv_1", sp_limits=(0.0, 2000.0), tss=50.0)],
                 "constraints": [],
                 "dvs": [],
@@ -234,7 +237,9 @@ def _precedence_config() -> MpcConfig:
             "name": "precedencia",
             "multiplier": 5,
             "variables": {
-                "mvs": [_mv("mv_1", limits=(0.0, 1000.0), du_max=10.0)],
+                "mvs": [
+                    _mv("mv_1", limits=(0.0, 1000.0), max_rate=2.0)  # × Ts_mpc=5 s = 10 EU/ciclo
+                ],
                 "cvs": [_cv("cv_1", sp_limits=(0.0, 1000.0), tss=50.0, weight=1.0)],
                 "constraints": [_co("co_1", range_=(-1000.0, 50.0), tss=50.0, priority=1)],
                 "dvs": [],
@@ -274,7 +279,9 @@ def test_bounds_duros_de_mv_nunca_violados_com_sp_extremo():
             "name": "bounds",
             "multiplier": 5,
             "variables": {
-                "mvs": [_mv("mv_1", limits=(0.0, 10.0), du_max=5.0)],
+                "mvs": [
+                    _mv("mv_1", limits=(0.0, 10.0), max_rate=1.0)  # × Ts_mpc=5 s = 5 EU/ciclo
+                ],
                 "cvs": [_cv("cv_1", sp_limits=(0.0, 1e7), tss=50.0)],
                 "constraints": [],
                 "dvs": [],
@@ -433,14 +440,16 @@ def test_bounds_de_mv_permanecem_na_coordenada_absoluta_da_planta():
 
 
 def _move_weight_config(*, move_weight: float) -> MpcConfig:
-    """1 MV/1 CV com `du_max` folgado (não satura) — só o balanço custo-de-rastreio vs.
+    """1 MV/1 CV com `max_rate` folgado (não satura) — só o balanço custo-de-rastreio vs.
     custo-de-movimento decide o tamanho do primeiro passo."""
     return MpcConfig.model_validate(
         {
             "name": "move_weight",
             "multiplier": 1,
             "variables": {
-                "mvs": [_mv("mv_1", limits=(0.0, 100.0), du_max=50.0, move_weight=move_weight)],
+                "mvs": [
+                    _mv("mv_1", limits=(0.0, 100.0), max_rate=50.0, move_weight=move_weight)
+                ],  # max_rate × Ts_mpc=1 s = 50 EU/ciclo
                 "cvs": [_cv("cv_1", sp_limits=(0.0, 100.0))],
                 "constraints": [],
                 "dvs": [],
@@ -472,7 +481,7 @@ def test_move_weight_maior_encarece_o_movimento_e_reduz_o_primeiro_passo():
 
 def _utarget_config(*, objective: str = "none", psv: float | None = None) -> MpcConfig:
     """1 MV/1 CV mínimos; `objective`/`psv` da MV parametrizáveis."""
-    mv = _mv("mv_1", limits=(0.0, 100.0), du_max=50.0)
+    mv = _mv("mv_1", limits=(0.0, 100.0), max_rate=50.0)  # × Ts_mpc=1 s
     if objective != "none":
         mv["objective"] = objective
     if psv is not None:

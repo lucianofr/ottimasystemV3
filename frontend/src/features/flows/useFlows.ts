@@ -69,6 +69,7 @@ export function useSalvarPropriedades(flowId: number) {
       watchdog_read_node_id: string | null;
       watchdog_write_node_id: string | null;
       watchdog_period_ms: number;
+      watchdog_timeout_s: number;
     }) =>
       api<FlowSaved>(`/api/flows/${String(flowId)}`, {
         method: "PUT",

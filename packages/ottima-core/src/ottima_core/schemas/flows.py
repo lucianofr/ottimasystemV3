@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 # Único registro do conjunto de Ts do ADR-007; é o mesmo do CHECK de `flows.ts_seconds`.
 TsSeconds = Literal[0.5, 1, 2, 5, 10, 30, 60]
@@ -19,16 +19,22 @@ def erro_watchdog_flow(
     connection_id: int | None,
     read_node_id: str | None,
     write_node_id: str | None,
+    period_ms: int = 1500,
+    timeout_s: int = 10,
 ) -> str | None:
     """Coerência do watchdog por flow (ADR-009 revisado): habilitado exige conexão + os dois
     node_ids, e leitura/escrita não podem ser o mesmo node — quem inverte o bit é o DCS/PLC
-    (watchdogA := watchdogB copiado pelo ottima); um nó só nunca alterna (trava)."""
+    (watchdogA := watchdogB copiado pelo ottima); um nó só nunca alterna (trava). O timeout
+    precisa cobrir ao menos dois períodos de toggle, senão qualquer atraso de varredura
+    acusa congelamento falso."""
     if not enabled:
         return None
     if connection_id is None or not read_node_id or not write_node_id:
         return "Watchdog habilitado exige conexão e os dois node_ids (leitura e escrita)"
     if read_node_id == write_node_id:
         return "Watchdog exige node_ids de leitura e escrita distintos"
+    if timeout_s * 1000 < 2 * period_ms:
+        return "timeout do watchdog deve ser ao menos 2x o período"
     return None
 
 
@@ -38,6 +44,7 @@ class _FlowWatchdogFields(BaseModel):
     watchdog_read_node_id: str | None = None
     watchdog_write_node_id: str | None = None
     watchdog_period_ms: int = Field(default=1500, ge=500, le=5000)
+    watchdog_timeout_s: int = Field(default=10, ge=2, le=120)
 
 
 class FlowCreate(BaseModel):
@@ -60,6 +67,7 @@ class FlowUpdate(BaseModel):
     watchdog_read_node_id: str | None = None
     watchdog_write_node_id: str | None = None
     watchdog_period_ms: int | None = Field(default=None, ge=500, le=5000)
+    watchdog_timeout_s: int | None = Field(default=None, ge=2, le=120)
 
 
 class FlowOut(_FlowWatchdogFields):

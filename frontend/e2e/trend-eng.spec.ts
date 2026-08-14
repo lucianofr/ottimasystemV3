@@ -101,9 +101,11 @@ test.describe("Trend de engenharia", () => {
     await marcarTag(page, ambiente.tags["sine"]);
     await expect(page.getByTestId("trend-legend-item")).toHaveCount(1);
 
-    // Ao vivo, `avancar` e `reset` não têm o que fazer.
+    // Ao vivo, `avancar` não tem o que fazer; `reset` fica HABILITADO ao vivo desde o lote
+    // do reset completo (zera zoom X + escalas Y — o zoom manual do uPlot é independente de
+    // `aoVivo`, então o botão morto ao vivo era exatamente quando ele era preciso).
     await expect(page.getByTestId("trend-janela-avancar")).toBeDisabled();
-    await expect(page.getByTestId("trend-janela-reset")).toBeDisabled();
+    await expect(page.getByTestId("trend-janela-reset")).toBeEnabled();
 
     await page.getByTestId("trend-janela-voltar").click();
     await page.getByTestId("trend-janela-voltar").click();
@@ -125,11 +127,90 @@ test.describe("Trend de engenharia", () => {
     expect(consultas.length, "polling deveria estar pausado na vista congelada").toBe(antes);
 
     await page.getByTestId("trend-janela-reset").click();
-    await expect(page.getByTestId("trend-janela-reset")).toBeDisabled();
+    // O reset não tem mais estado desabilitado: ao vivo ele continua clicável (idempotente).
+    await expect(page.getByTestId("trend-janela-reset")).toBeEnabled();
+    await expect(page.getByTestId("trend-janela-avancar")).toBeDisabled();
     await expect
       .poll(() => consultas.length, { message: "consulta ao voltar para o modo ao vivo" })
       .toBeGreaterThan(antes);
     const aoVivo = consultas.at(-1)!;
     expect(Date.now() - Date.parse(aoVivo.searchParams.get("end") ?? "")).toBeLessThan(30_000);
+  });
+
+  test("PW-TR-03: reset ao vivo zera a escala Y fixada e limpa a preferência persistida", async ({
+    page,
+  }) => {
+    await marcarTag(page, ambiente.tags["sine"]);
+    await expect(page.getByTestId("trend-legend-item")).toHaveCount(1);
+
+    const auto = page.getByTestId("trend-escala-auto").first();
+    const min = page.getByTestId("trend-escala-min").first();
+    await auto.uncheck();
+    await min.fill("0");
+    await page.getByTestId("trend-escala-max").first().fill("100");
+    await expect
+      .poll(async () =>
+        page.evaluate(() => window.localStorage.getItem("ottima.trend.escalas.v1")),
+      )
+      .not.toBeNull();
+
+    // Reset AO VIVO (o botão não tem mais estado desabilitado): escala volta a auto e a
+    // chave some do localStorage — o reload não pode ressuscitar a escala apagada.
+    await page.getByTestId("trend-janela-reset").click();
+    await expect(page.getByTestId("trend-escala-auto").first()).toBeChecked();
+    await expect(page.getByTestId("trend-escala-min").first()).toBeDisabled();
+    await expect
+      .poll(async () =>
+        page.evaluate(() => window.localStorage.getItem("ottima.trend.escalas.v1")),
+      )
+      .toBeNull();
+
+    await page.reload();
+    await marcarTag(page, ambiente.tags["sine"]);
+    await expect(page.getByTestId("trend-escala-auto").first()).toBeChecked();
+  });
+
+  test("PW-TR-04: janela por valor + unidade, granularidade livre (90 s, 24 min)", async ({
+    page,
+  }) => {
+    await expect(page.getByTestId("trend-window")).toHaveCount(0);
+    const valor = page.getByTestId("trend-janela-valor");
+    const unidade = page.getByTestId("trend-janela-unidade");
+    await expect(valor).toHaveValue("30");
+    await expect(unidade).toHaveValue("min");
+    await expect(valor).toHaveAttribute("min", "1");
+
+    // Listener ANTES de marcar a tag: a consulta inicial dispara no check e o refetch ao
+    // vivo pode demorar mais que o timeout default do poll.
+    const consultas: URL[] = [];
+    page.on("request", (requisicao) => {
+      const url = new URL(requisicao.url());
+      if (url.pathname === "/api/history") consultas.push(url);
+    });
+    await marcarTag(page, ambiente.tags["sine"]);
+    await expect.poll(() => consultas.length).toBeGreaterThan(0);
+
+    await valor.fill("90");
+    await unidade.selectOption("seg");
+    await expect
+      .poll(() => consultas.length, { message: "consulta com janela de 90 s" })
+      .toBeGreaterThan(1);
+    let ultima = consultas.at(-1)!;
+    let janelaS =
+      (Date.parse(ultima.searchParams.get("end") ?? "") -
+        Date.parse(ultima.searchParams.get("start") ?? "")) / 1000;
+    expect(Math.round(janelaS)).toBe(90);
+
+    // 24 min não existia no enum antigo de presets — prova a granularidade livre.
+    await valor.fill("24");
+    await unidade.selectOption("min");
+    await expect
+      .poll(() => consultas.length, { message: "consulta com janela de 24 min" })
+      .toBeGreaterThan(2);
+    ultima = consultas.at(-1)!;
+    janelaS =
+      (Date.parse(ultima.searchParams.get("end") ?? "") -
+        Date.parse(ultima.searchParams.get("start") ?? "")) / 1000;
+    expect(Math.round(janelaS)).toBe(1440);
   });
 });

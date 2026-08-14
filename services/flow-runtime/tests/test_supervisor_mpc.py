@@ -91,7 +91,7 @@ def mpc_graph_com_pid(
     readback_tag_id: int,
     mode_read_tag_id: int | None,
     multiplier: int = 1,
-    du_max: float = 5.0,
+    max_rate: float = 10.0,
     node_id: str = "m1",
 ) -> dict:
     """1 CV (via OPC-Read) + 1 MV com `pid` COMPLETO — o esqueleto que exercita a tabela de
@@ -120,7 +120,7 @@ def mpc_graph_com_pid(
                         "name": "MV a",
                         "eu": "m3/h",
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": du_max,
+                        "max_rate": max_rate,
                         "initial_value": 10.0,
                         "pid": pid,
                     }
@@ -811,7 +811,7 @@ async def test_mpc_mv_clamp_em_limits(
 
 
 # --------------------------------------------------------------------------------------
-# 15: hot-swap (§4.7, TD-006/ADR-011) — sintonia alterada (`du_max`) com o MESMO conjunto
+# 15: hot-swap (§4.7, TD-006/ADR-011) — sintonia alterada (`max_rate`) com o MESMO conjunto
 #     de MVs, flow rodando: host novo TRANSPLANTA o estado do velho (bumpless) — REMOTO
 #     preservado, NENHUM mode_cmd=auto devolvido, mpc_mode_changed{reason: hot_swap_
 #     bumpless}; flow segue rodando (§4.1-5).
@@ -844,7 +844,7 @@ async def test_hot_swap_sintonia_alterada_mvs_iguais_preserva_remoto_bumpless(
         mode_cmd_tag_id=scenario["mode_cmd_tag_id"],
         readback_tag_id=scenario["readback_tag_id"],
         mode_read_tag_id=scenario["mode_read_tag_id"],
-        du_max=6.0,  # config funcional muda (§4.1-3) sem afetar horizontes/validação
+        max_rate=12.0,  # config funcional muda (§4.1-3) sem afetar horizontes/validação
     )
     await save_graph(session_factory, scenario["flow_id"], changed_graph)
     await harness.command("reload", scenario["flow_id"])

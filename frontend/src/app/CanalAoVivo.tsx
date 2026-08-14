@@ -50,7 +50,15 @@ import { chaveMpc, resolverAlarmes, type CondicaoAtiva } from "./alarmes";
 
 /** O que uma página quer ver no canal. `mpc_state` já na forma de id do wire
  *  (`flowId/blockId`, spec F4 §6.2). Campo ausente = a página não quer nada daquele tipo. */
-export type Interesse = { flow_status?: number[]; mpc_state?: string[] };
+export type Interesse = { flow_status?: number[]; mpc_state?: string[]; opc_values?: number[] };
+
+/** Leitura crua de uma tag vinda do `opc.values.<conn_id>` (RF-204): o PV do faceplate na
+ *  taxa OPC, não na taxa do MPC (decisão F6 A-1 revertida). `ok` = quality 0 (bom). */
+export interface LeituraTag {
+  v: number | null;
+  ts: string;
+  ok: boolean;
+}
 
 /** Mesmo formato de `EventOut` (`GET /api/events`): o canal `events` publica o mesmo
  *  `{ts, severity, origin, message, payload}` que a REST devolve (bus §1.1). */
@@ -63,6 +71,9 @@ export interface EstadoDoCanal {
   flowStatus: ReadonlyMap<number, FlowStatus>;
   mpcStates: ReadonlyMap<string, MpcState>;
   eventos: readonly EventMessage[];
+  /** Últimas leituras `opc.values` por tag, publicadas em lote a cada FLUSH_OPC_MS —
+   *  coalescência para não renderizar 1x por mensagem a 4 Hz × N tags. */
+  tagValues: ReadonlyMap<number, LeituraTag>;
 }
 
 /** Teto de memória do buffer de eventos ao vivo (RNF-05): a tela também pagina via REST
@@ -78,7 +89,12 @@ const ESTADO_INICIAL: EstadoDoCanal = {
   flowStatus: new Map(),
   mpcStates: new Map(),
   eventos: [],
+  tagValues: new Map(),
 };
+
+/** Cadência de publicação do buffer de `opc.values` no estado (ms): 4 render/s no máximo,
+ *  independente da taxa OPC das tags. */
+export const FLUSH_OPC_MS = 250;
 
 // --------------------------------------------------------------------------------------
 // Agregação de interesses (§7.1): refcount por id, delta mínimo a cada subscribe/unsubscribe
@@ -89,6 +105,7 @@ const ESTADO_INICIAL: EstadoDoCanal = {
 export interface DeltaInteresse {
   flow_status: readonly number[];
   mpc_state: readonly string[];
+  opc_values: readonly number[];
 }
 
 export interface RegistroInteresses {
@@ -118,17 +135,24 @@ function ajustarContagem<T>(mapa: Map<T, number>, ids: readonly T[], passo: 1 | 
 export function criarRegistroInteresses(): RegistroInteresses {
   const flowRefs = new Map<number, number>();
   const mpcRefs = new Map<string, number>();
+  const tagRefs = new Map<number, number>();
 
   return {
     adicionar: (interesse) => ({
       flow_status: ajustarContagem(flowRefs, interesse.flow_status ?? [], 1),
       mpc_state: ajustarContagem(mpcRefs, interesse.mpc_state ?? [], 1),
+      opc_values: ajustarContagem(tagRefs, interesse.opc_values ?? [], 1),
     }),
     remover: (interesse) => ({
       flow_status: ajustarContagem(flowRefs, interesse.flow_status ?? [], -1),
       mpc_state: ajustarContagem(mpcRefs, interesse.mpc_state ?? [], -1),
+      opc_values: ajustarContagem(tagRefs, interesse.opc_values ?? [], -1),
     }),
-    agregado: () => ({ flow_status: [...flowRefs.keys()], mpc_state: [...mpcRefs.keys()] }),
+    agregado: () => ({
+      flow_status: [...flowRefs.keys()],
+      mpc_state: [...mpcRefs.keys()],
+      opc_values: [...tagRefs.keys()],
+    }),
   };
 }
 
@@ -139,6 +163,7 @@ export function criarRegistroInteresses(): RegistroInteresses {
 interface CorpoAssinatura {
   flow_status?: readonly number[];
   mpc_state?: readonly string[];
+  opc_values?: readonly number[];
   events?: true;
 }
 
@@ -155,6 +180,7 @@ export function comandoAssinatura(
     const canal: Record<string, unknown> = {};
     if (dados.flow_status?.length) canal.flow_status = dados.flow_status;
     if (dados.mpc_state?.length) canal.mpc_state = dados.mpc_state;
+    if (dados.opc_values?.length) canal.opc_values = dados.opc_values;
     if (dados.events) canal.events = true;
     if (Object.keys(canal).length > 0) quadro[acao] = canal;
   }
@@ -182,10 +208,22 @@ export interface MensagemEvento {
   evento: EventMessage;
 }
 
-export type MensagemCanal = MensagemFlowStatus | MensagemMpcState | MensagemEvento;
+/** `opc.values.<conn_id>` (RF-204): payload cru `{tag_id, ts, value, quality}` do opc-worker.
+ *  NÃO passa pelo `reduzir` por mensagem — o provider acumula num buffer e publica em lote
+ *  a cada FLUSH_OPC_MS (coalescência, ver docstring do provider). */
+export interface MensagemOpcValues {
+  canal: "opc_values";
+  tagId: number;
+  v: number | null;
+  ts: string;
+  ok: boolean;
+}
+
+export type MensagemCanal = MensagemFlowStatus | MensagemMpcState | MensagemEvento | MensagemOpcValues;
 
 const PREFIXO_FLOW_STATUS = "flow.status.";
 const PREFIXO_MPC_STATE = "mpc.state.";
+const PREFIXO_OPC_VALUES = "opc.values.";
 const CANAL_EVENTS = "events";
 
 const SEVERIDADES: Record<string, true> = { info: true, warning: true, alarm: true };
@@ -216,6 +254,17 @@ function lerEvento(data: Record<string, unknown>): EventMessage | null {
   if (typeof data.message !== "string") return null;
   if (objeto(data.payload) === null) return null;
   return data as unknown as EventMessage;
+}
+
+/** Forma do RF-204: `value` pode ser null (falha de leitura no worker); `ok` espelha a
+ *  convenção do barramento (quality 0 = bom). Qualquer campo fora de forma descarta. */
+function lerOpcValues(data: Record<string, unknown>): Omit<MensagemOpcValues, "canal"> | null {
+  const { tag_id, ts, value, quality } = data;
+  if (typeof tag_id !== "number" || !Number.isInteger(tag_id)) return null;
+  if (typeof ts !== "string") return null;
+  if (value !== null && typeof value !== "number") return null;
+  if (typeof quality !== "number") return null;
+  return { tagId: tag_id, v: value, ts, ok: quality === 0 };
 }
 
 /**
@@ -260,6 +309,13 @@ export function analisarMensagemCanal(raw: string): MensagemCanal | null {
     return state === null ? null : { canal: "mpc_state", chave: `${flowIdStr}/${blockId}`, state };
   }
 
+  if (canal.startsWith(PREFIXO_OPC_VALUES)) {
+    // O sufixo é o conn_id — o filtro por tag acontece no servidor (`ws.py`), aqui o que
+    // interessa é o payload; envelope sem payload de forma exata é descartado.
+    const leitura = lerOpcValues(data);
+    return leitura === null ? null : { canal: "opc_values", ...leitura };
+  }
+
   return null;
 }
 
@@ -293,6 +349,10 @@ function reduzir(atual: EstadoDoCanal, mensagem: MensagemCanal): EstadoDoCanal {
       const eventos = [mensagem.evento, ...atual.eventos].slice(0, TETO_EVENTOS);
       return { ...atual, eventos };
     }
+    case "opc_values":
+      // Nunca passa por aqui por mensagem (ver MensagemOpcValues): o buffer do provider
+      // publica em lote. Caso presente só para o switch cobrir a união.
+      return atual;
   }
 }
 
@@ -328,6 +388,7 @@ export function abrirCanalSessao(
   aplicar: AplicarCanal,
   agregado: () => Interesse,
   ambiente: AmbienteAoVivo = AMBIENTE_BROWSER,
+  aoOpcValues?: (mensagem: MensagemOpcValues) => void,
 ): CicloVidaCanal {
   let ativo = true;
   let socket: WebSocket | null = null;
@@ -342,8 +403,10 @@ export function abrirCanalSessao(
     }
     if (socket === null) return;
     if (socket.readyState === WebSocket.OPEN) {
-      const { flow_status, mpc_state } = agregado();
-      const comando = comandoAssinatura({ unsubscribe: { flow_status, mpc_state, events: true } });
+      const { flow_status, mpc_state, opc_values } = agregado();
+      const comando = comandoAssinatura({
+        unsubscribe: { flow_status, mpc_state, opc_values, events: true },
+      });
       if (comando !== null) socket.send(comando);
     }
     socket.close(1000, "Sessão encerrada");
@@ -365,8 +428,10 @@ export function abrirCanalSessao(
     ws.onopen = () => {
       if (!ativo) return;
       tentativa = 0;
-      const { flow_status, mpc_state } = agregado();
-      const comando = comandoAssinatura({ subscribe: { flow_status, mpc_state, events: true } });
+      const { flow_status, mpc_state, opc_values } = agregado();
+      const comando = comandoAssinatura({
+        subscribe: { flow_status, mpc_state, opc_values, events: true },
+      });
       if (comando !== null) ws.send(comando);
       aplicar((atual) => ({ ...atual, estado: "aberto" }));
     };
@@ -375,6 +440,12 @@ export function abrirCanalSessao(
       if (!ativo || typeof evento.data !== "string") return;
       const mensagem = analisarMensagemCanal(evento.data);
       if (mensagem === null) return;
+      // `opc_values` NÃO vai ao `reduzir`: uma mensagem por tag a até 4 Hz renderizaria a
+      // árvore inteira por leitura — o provider acumula e publica em lote (FLUSH_OPC_MS).
+      if (mensagem.canal === "opc_values") {
+        aoOpcValues?.(mensagem);
+        return;
+      }
       aplicar((atual) => reduzir(atual, mensagem));
     };
 
@@ -575,6 +646,7 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
   const [estado, setEstado] = useState<EstadoDoCanal>(ESTADO_INICIAL);
   const [registro] = useState(() => criarRegistroInteresses());
   const cicloRef = useRef<CicloVidaCanal | null>(null);
+  const bufferOpcRef = useRef(new Map<number, LeituraTag>());
   const projetoAtivo = useActiveProject();
   const projectId = projetoAtivo.data?.id ?? null;
   const flows = useFlows(projectId);
@@ -643,9 +715,30 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
   const bootstrapFeitoRef = useRef(false);
 
   useEffect(() => {
-    const ciclo = abrirCanalSessao((transformacao) => setEstado(transformacao), registro.agregado);
+    // Buffer de `opc.values`: cada mensagem entra aqui (barato); o flush de FLUSH_OPC_MS
+    // publica o lote no estado numa única atualização — 4 render/s no máximo, não 4 Hz × N.
+    const buffer = bufferOpcRef.current;
+    const ciclo = abrirCanalSessao(
+      (transformacao) => setEstado(transformacao),
+      registro.agregado,
+      AMBIENTE_BROWSER,
+      (mensagem) => {
+        buffer.set(mensagem.tagId, { v: mensagem.v, ts: mensagem.ts, ok: mensagem.ok });
+      },
+    );
     cicloRef.current = ciclo;
+    const flush = window.setInterval(() => {
+      if (buffer.size === 0) return;
+      const lote = new Map(buffer);
+      buffer.clear();
+      setEstado((atual) => {
+        const tagValues = new Map(atual.tagValues);
+        for (const [tagId, leitura] of lote) tagValues.set(tagId, leitura);
+        return { ...atual, tagValues };
+      });
+    }, FLUSH_OPC_MS);
     return () => {
+      window.clearInterval(flush);
       cicloRef.current = null;
       ciclo.desmontar();
     };

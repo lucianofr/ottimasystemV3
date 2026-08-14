@@ -36,7 +36,7 @@ def _config() -> MpcConfig:
                         "name": "mv",
                         "eu": "%",
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 10.0,
+                        "max_rate": 10.0,
                     }
                 ],
                 "cvs": [

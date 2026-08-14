@@ -190,9 +190,10 @@ async def load_active_configuration(
             Flow.watchdog_read_node_id,
             Flow.watchdog_write_node_id,
             Flow.watchdog_period_ms,
+            Flow.watchdog_timeout_s,
         ).where(Flow.project_id == project_id, Flow.watchdog_enabled.is_(True))
     )
-    for flow_id, conn_id, read_node_id, write_node_id, period_ms in flow_rows:
+    for flow_id, conn_id, read_node_id, write_node_id, period_ms, timeout_s in flow_rows:
         # Coerência já garantida no schema (`erro_watchdog_flow`): habilitado implica os
         # três campos presentes e distintos. Defesa em profundidade — uma linha
         # incoerente (ex.: conexão de watchdog apagada por fora da API) é ignorada em vez
@@ -204,6 +205,7 @@ async def load_active_configuration(
             read_node_id=read_node_id,
             write_node_id=write_node_id,
             period_ms=period_ms,
+            timeout_s=float(timeout_s),
         )
     return connection_configs, flow_watchdogs
 

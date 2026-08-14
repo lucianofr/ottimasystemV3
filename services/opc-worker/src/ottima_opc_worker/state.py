@@ -67,6 +67,7 @@ class FlowWatchdogConfig:
     read_node_id: str
     write_node_id: str
     period_ms: int
+    timeout_s: float = 10.0
 
 
 @dataclass(slots=True)

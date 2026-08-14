@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -6,6 +6,8 @@ import { Label } from "../../../components/ui/label";
 import { Select } from "../../../components/ui/select";
 import type { TagOut } from "../../../lib/api";
 import type {
+  AcaoFalhaLinha,
+  AcaoFalhaMv,
   ObjetivoCv,
   ObjetivoMv,
   ObjetivoRestricao,
@@ -17,7 +19,14 @@ import type {
   VariavelRestricao,
 } from "../graph";
 import { CamposPid } from "./CamposPid";
-import { gerarIdVariavel, nomeCampoVar, pidAoAlternar, variavelMvDoFormulario } from "./mpcLogic";
+import {
+  gerarIdVariavel,
+  nomeCampoVar,
+  pidAoAlternar,
+  tagsPorDirecao,
+  variavelMvDoFormulario,
+} from "./mpcLogic";
+import { SelectTag } from "./SelectTag";
 
 /** Rótulos do combobox "Função objetivo" por tipo de variável (ADR-027 §9 estendido) —
  *  `Record` completo por tipo para o TS provar em compile-time que nenhuma opção ficou sem
@@ -45,6 +54,21 @@ const ROTULO_OBJETIVO_RESTRICAO: Record<ObjetivoRestricao, string> = {
   minimize: "Minimizar",
 };
 
+/** Rótulos da ação de falha (RF-613): MV não tem o que simular (sem modelo próprio). */
+const ROTULO_FALHA_MV: Record<AcaoFalhaMv, string> = {
+  no_action: "Sem ação",
+  shed_local: "Shed p/ local",
+  manual: "Manual",
+};
+
+const ROTULO_FALHA_LINHA: Record<AcaoFalhaLinha, string> = {
+  no_action: "Sem ação",
+  shed_local: "Shed p/ local",
+  manual: "Manual",
+  simulate_manual: "Simular→Manual",
+  simulate_shed_local: "Simular→Local",
+};
+
 interface Props {
   variaveis: VariaveisMpc;
   aoMudar: (variaveis: VariaveisMpc) => void;
@@ -62,6 +86,44 @@ function CampoNomeEu({ id, nome, eu }: { id: string; nome: string; eu: string })
         <Label htmlFor={`${id}-eu`}>EU</Label>
         <Input id={`${id}-eu`} name={nomeCampoVar(id, "eu")} defaultValue={eu} />
       </div>
+    </div>
+  );
+}
+
+/** Linha base de toda variável (RF-609/610): `description` (≤14, não-controlado) e a faixa
+ *  de instrumento `zero`/`span` — a escala do faceplate e a base do ganho %/%. DV não tem
+ *  description (o config não tem o campo): `comDescricao={false}` rende só zero/span. */
+function CampoZeroSpan({
+  id,
+  descricao,
+  zero,
+  span,
+  testidPrefixo,
+}: {
+  id: string;
+  /** `undefined` (DV) omite o campo de descrição. */
+  descricao: string | undefined;
+  zero: number;
+  span: number;
+  testidPrefixo: string;
+}) {
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      {descricao !== undefined && (
+        <div className="space-y-1">
+          <Label htmlFor={`${id}-description`}>Descrição</Label>
+          <Input
+            id={`${id}-description`}
+            name={nomeCampoVar(id, "description")}
+            defaultValue={descricao}
+            maxLength={14}
+            placeholder="descrição (≤14)"
+            data-testid={`${testidPrefixo}-description`}
+          />
+        </div>
+      )}
+      <CampoNumero id={id} campo="zero" rotulo="Zero" valor={zero} testid={`${testidPrefixo}-zero`} />
+      <CampoNumero id={id} campo="span" rotulo="Span" valor={span} testid={`${testidPrefixo}-span`} />
     </div>
   );
 }
@@ -156,8 +218,11 @@ function ListaMv({
                 id,
                 name: "",
                 eu: "",
+                description: "",
+                zero: 0,
+                span: 100,
                 limits: { min: 0, max: 100 },
-                du_max: 1,
+                max_rate: 1,
                 du_min: 0,
                 move_weight: 1,
                 initial_value: 0,
@@ -168,6 +233,8 @@ function ListaMv({
                 pid: null,
                 objective: "none",
                 psv: null,
+                fail_action: "no_action",
+                local_shed_mode: null,
               },
             ]);
           }}
@@ -183,10 +250,23 @@ function ListaMv({
           aoRemover={() => aoMudar(mvs.filter((item) => item.id !== mv.id))}
         >
           <CampoNomeEu id={mv.id} nome={mv.name} eu={mv.eu} />
+          <CampoZeroSpan
+            id={mv.id}
+            descricao={mv.description}
+            zero={mv.zero}
+            span={mv.span}
+            testidPrefixo="mpc-mv"
+          />
           <div className="grid grid-cols-3 gap-3">
             <CampoNumero id={mv.id} campo="limits_min" rotulo="Limite mín." valor={mv.limits.min} />
             <CampoNumero id={mv.id} campo="limits_max" rotulo="Limite máx." valor={mv.limits.max} />
-            <CampoNumero id={mv.id} campo="du_max" rotulo="Δu máx." valor={mv.du_max} />
+            <CampoNumero
+              id={mv.id}
+              campo="max_rate"
+              rotulo="Taxa máx (EU/s)"
+              valor={mv.max_rate}
+              testid="mpc-mv-max-rate"
+            />
             <CampoNumero
               id={mv.id}
               campo="du_min"
@@ -292,6 +372,60 @@ function ListaMv({
             MV com PID (RF-604) — ausente ⇒ MV direta (decisão A-8)
           </label>
           {mv.pid !== null && <CamposPid varId={mv.id} pid={mv.pid} tags={tags} />}
+          <details className="space-y-2 border-t border-border pt-2">
+            <summary className="plaqueta cursor-pointer text-[10px] text-fg-muted">
+              Avançado
+            </summary>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor={`${mv.id}-fail-action`}>Ação de falha</Label>
+                <Select
+                  id={`${mv.id}-fail-action`}
+                  data-testid="mpc-mv-fail-action"
+                  value={mv.fail_action}
+                  onChange={(evento) => {
+                    const fail_action = evento.target.value as AcaoFalhaMv;
+                    aoMudar(
+                      mvs.map((item) =>
+                        item.id !== mv.id
+                          ? item
+                          : {
+                              ...item,
+                              fail_action,
+                              // Fora de shed_local o campo sai do DOM — zera junto para não
+                              // ficar um modo de shed invisível guardado no config.
+                              local_shed_mode:
+                                fail_action === "shed_local" ? item.local_shed_mode : null,
+                            },
+                      ),
+                    );
+                  }}
+                >
+                  {(Object.keys(ROTULO_FALHA_MV) as AcaoFalhaMv[]).map((valor) => (
+                    <option key={valor} value={valor}>
+                      {ROTULO_FALHA_MV[valor]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              {mv.fail_action === "shed_local" && (
+                <div className="space-y-1" title={mv.pid === null ? "Exige MV com PID" : undefined}>
+                  <Label htmlFor={`${mv.id}-local_shed_mode`}>Modo local no shed</Label>
+                  <Input
+                    id={`${mv.id}-local_shed_mode`}
+                    name={nomeCampoVar(mv.id, "local_shed_mode")}
+                    type="text"
+                    inputMode="decimal"
+                    className="process-value"
+                    defaultValue={mv.local_shed_mode === null ? "" : String(mv.local_shed_mode)}
+                    disabled={mv.pid === null}
+                    placeholder="auto do PID"
+                    data-testid="mpc-mv-local-shed-mode"
+                  />
+                </div>
+              )}
+            </div>
+          </details>
         </LinhaVariavel>
       ))}
     </div>
@@ -300,9 +434,11 @@ function ListaMv({
 
 function ListaCv({
   cvs,
+  tags,
   aoMudar,
 }: {
   cvs: VariavelCv[];
+  tags: readonly TagOut[];
   aoMudar: (cvs: VariavelCv[]) => void;
 }) {
   return (
@@ -321,11 +457,21 @@ function ListaCv({
                 id,
                 name: "",
                 eu: "",
+                description: "",
+                zero: 0,
+                span: 100,
                 kind: "selfreg",
                 tss: 600,
                 weight: 1,
                 sp_limits: { min: 0, max: 100 },
+                priority: 1,
                 objective: "none",
+                traj_tau_s: 0,
+                track_sp: true,
+                fail_action: "no_action",
+                fail_timeout_s: 60,
+                sp_range_pct: null,
+                remote_sp_tag_id: null,
               },
             ]);
           }}
@@ -341,6 +487,13 @@ function ListaCv({
           aoRemover={() => aoMudar(cvs.filter((item) => item.id !== cv.id))}
         >
           <CampoNomeEu id={cv.id} nome={cv.name} eu={cv.eu} />
+          <CampoZeroSpan
+            id={cv.id}
+            descricao={cv.description}
+            zero={cv.zero}
+            span={cv.span}
+            testidPrefixo="mpc-cv"
+          />
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor={`${cv.id}-kind`}>Modelo (kind)</Label>
@@ -400,7 +553,34 @@ function ListaCv({
               valor={cv.weight}
               testid="mpc-cv-weight"
             />
+            <CampoNumero
+              id={cv.id}
+              campo="priority"
+              rotulo="Prioridade"
+              valor={cv.priority}
+              testid="mpc-cv-priority"
+            />
+            <CampoNumero
+              id={cv.id}
+              campo="traj_tau_s"
+              rotulo="Trajetória τ (s)"
+              valor={cv.traj_tau_s}
+              testid="mpc-cv-traj-tau"
+            />
           </div>
+          <label className="flex items-center gap-2 text-xs text-fg">
+            <input
+              type="checkbox"
+              data-testid="mpc-cv-track-sp"
+              checked={cv.track_sp}
+              onChange={(evento) => {
+                const track_sp = evento.target.checked;
+                aoMudar(cvs.map((item) => (item.id !== cv.id ? item : { ...item, track_sp })));
+              }}
+              className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+            />
+            SP rastreia PV fora de AUTO (RF-612)
+          </label>
           <div className="grid grid-cols-2 gap-3">
             <CampoNumero
               id={cv.id}
@@ -415,6 +595,60 @@ function ListaCv({
               valor={cv.sp_limits.max}
             />
           </div>
+          <details className="space-y-2 border-t border-border pt-2">
+            <summary className="plaqueta cursor-pointer text-[10px] text-fg-muted">
+              Avançado
+            </summary>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor={`${cv.id}-fail-action`}>Ação de falha</Label>
+                <Select
+                  id={`${cv.id}-fail-action`}
+                  data-testid="mpc-cv-fail-action"
+                  value={cv.fail_action}
+                  onChange={(evento) => {
+                    const fail_action = evento.target.value as AcaoFalhaLinha;
+                    aoMudar(
+                      cvs.map((item) => (item.id !== cv.id ? item : { ...item, fail_action })),
+                    );
+                  }}
+                >
+                  {(Object.keys(ROTULO_FALHA_LINHA) as AcaoFalhaLinha[]).map((valor) => (
+                    <option key={valor} value={valor}>
+                      {ROTULO_FALHA_LINHA[valor]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              {cv.fail_action !== "no_action" && (
+                <CampoNumero
+                  id={cv.id}
+                  campo="fail_timeout_s"
+                  rotulo="Timeout de falha (s)"
+                  valor={cv.fail_timeout_s}
+                  testid="mpc-cv-fail-timeout"
+                />
+              )}
+              <CampoNumero
+                id={cv.id}
+                campo="sp_range_pct"
+                rotulo="Faixa do SP (%)"
+                valor={cv.sp_range_pct}
+                testid="mpc-cv-sp-range-pct"
+              />
+              <div className="space-y-1">
+                <Label htmlFor={`${cv.id}-remote-sp`}>SP remoto (tag R, RF-614)</Label>
+                <SelectTag
+                  id={`${cv.id}-remote-sp`}
+                  campo="remote_sp_tag_id"
+                  varId={cv.id}
+                  tags={tagsPorDirecao(tags, "r")}
+                  valorAtual={cv.remote_sp_tag_id}
+                  testid="mpc-cv-remote-sp-tag"
+                />
+              </div>
+            </div>
+          </details>
         </LinhaVariavel>
       ))}
     </div>
@@ -444,11 +678,16 @@ function ListaRestricao({
                 id,
                 name: "",
                 eu: "",
+                description: "",
+                zero: 0,
+                span: 100,
                 kind: "selfreg",
                 tss: 600,
                 range: { low: 0, high: 100 },
                 priority: 1,
                 objective: "none",
+                fail_action: "no_action",
+                fail_timeout_s: 60,
               },
             ]);
           }}
@@ -464,6 +703,13 @@ function ListaRestricao({
           aoRemover={() => aoMudar(constraints.filter((item) => item.id !== co.id))}
         >
           <CampoNomeEu id={co.id} nome={co.name} eu={co.eu} />
+          <CampoZeroSpan
+            id={co.id}
+            descricao={co.description}
+            zero={co.zero}
+            span={co.span}
+            testidPrefixo="mpc-restricao"
+          />
           <div className="space-y-1">
             <Label htmlFor={`${co.id}-kind`}>Modelo (kind)</Label>
             <Select
@@ -520,29 +766,65 @@ function ListaRestricao({
             <CampoNumero id={co.id} campo="range_high" rotulo="Faixa máx." valor={co.range.high} />
             <CampoNumero id={co.id} campo="priority" rotulo="Prioridade" valor={co.priority} />
           </div>
+          <details className="space-y-2 border-t border-border pt-2">
+            <summary className="plaqueta cursor-pointer text-[10px] text-fg-muted">
+              Avançado
+            </summary>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor={`${co.id}-fail-action`}>Ação de falha</Label>
+                <Select
+                  id={`${co.id}-fail-action`}
+                  data-testid="mpc-restricao-fail-action"
+                  value={co.fail_action}
+                  onChange={(evento) => {
+                    const fail_action = evento.target.value as AcaoFalhaLinha;
+                    aoMudar(
+                      constraints.map((item) =>
+                        item.id !== co.id ? item : { ...item, fail_action },
+                      ),
+                    );
+                  }}
+                >
+                  {(Object.keys(ROTULO_FALHA_LINHA) as AcaoFalhaLinha[]).map((valor) => (
+                    <option key={valor} value={valor}>
+                      {ROTULO_FALHA_LINHA[valor]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              {co.fail_action !== "no_action" && (
+                <CampoNumero
+                  id={co.id}
+                  campo="fail_timeout_s"
+                  rotulo="Timeout de falha (s)"
+                  valor={co.fail_timeout_s}
+                  testid="mpc-restricao-fail-timeout"
+                />
+              )}
+            </div>
+          </details>
         </LinhaVariavel>
       ))}
     </div>
   );
 }
 
-/** Linha de uma DV. Os dois campos de faixa seguem não-controlados (padrão do modal), mas a
- *  nota precisa sumir assim que o operador digita — senão contradiz o que ele está vendo. Um
- *  `onInput` no par de campos basta: lê o DOM sob demanda, sem tornar os inputs controlados. */
+/** Linha de uma DV. Os dois campos de faixa seguem não-controlados (padrão do modal). A
+ *  barra do faceplate usa a faixa de instrumento (zero/span, RF-609) — o `range` opcional da
+ *  DV não alimenta mais escala nenhuma. */
 function LinhaDv({ dv, aoRemover }: { dv: VariavelDv; aoRemover: () => void }) {
-  const [digitou, setDigitou] = useState(dv.range !== null);
-  const faixa = useRef<HTMLDivElement>(null);
   return (
     <LinhaVariavel varId={dv.id} testid={`mpc-var-row-${dv.id}`} aoRemover={aoRemover}>
       <CampoNomeEu id={dv.id} nome={dv.name} eu={dv.eu} />
-      <div
-        ref={faixa}
-        className="grid grid-cols-2 gap-3"
-        onInput={() => {
-          const campos = faixa.current?.querySelectorAll("input") ?? [];
-          setDigitou(Array.from(campos).some((campo) => campo.value.trim() !== ""));
-        }}
-      >
+      <CampoZeroSpan
+        id={dv.id}
+        descricao={undefined}
+        zero={dv.zero}
+        span={dv.span}
+        testidPrefixo="mpc-dv"
+      />
+      <div className="grid grid-cols-2 gap-3">
         <CampoNumero id={dv.id} campo="range_low" rotulo="Faixa mín." valor={dv.range?.low ?? null} />
         <CampoNumero id={dv.id} campo="range_high" rotulo="Faixa máx." valor={dv.range?.high ?? null} />
       </div>
@@ -554,20 +836,13 @@ function LinhaDv({ dv, aoRemover }: { dv: VariavelDv; aoRemover: () => void }) {
         rotulo="Ponto de operação"
         valor={dv.operating_point}
       />
-      {!digitou && (
-        <p className="text-[10px] text-fg-muted">
-          Sem faixa: o faceplate desta DV ficará sem barra (RF-702).
-        </p>
-      )}
     </LinhaVariavel>
   );
 }
 
 /** DVs têm faixa OPCIONAL (spec §4.2-5, RFC-16, ao contrário de MV/CV/Restrição, que sempre
  *  têm uma): os dois campos ficam ao lado de Nome/EU, mesmo padrão `CampoNumero` que a
- *  Restrição já usa para `range_low`/`range_high` (`ListaRestricao` acima). Sem faixa, uma
- *  nota discreta avisa que o faceplate (§6.5) ficará sem barra — RF-702 pede limites, e
- *  omissão silenciosa é exatamente o defeito que RFC-16 fecha. */
+ *  Restrição já usa para `range_low`/`range_high` (`ListaRestricao` acima). */
 function ListaDv({
   dvs,
   aoMudar,
@@ -586,7 +861,15 @@ function ListaDv({
           onClick={() =>
             aoMudar([
               ...dvs,
-              { id: gerarIdVariavel("dv"), name: "", eu: "", range: null, operating_point: 0 },
+              {
+                id: gerarIdVariavel("dv"),
+                name: "",
+                eu: "",
+                zero: 0,
+                span: 100,
+                range: null,
+                operating_point: 0,
+              },
             ])
           }
         >
@@ -612,7 +895,7 @@ export function TabVariables({ variaveis, aoMudar, tags }: Props) {
   return (
     <div data-testid="mpc-tab-variaveis" className="space-y-6">
       <ListaMv mvs={variaveis.mvs} tags={tags} aoMudar={(mvs) => aoMudar({ ...variaveis, mvs })} />
-      <ListaCv cvs={variaveis.cvs} aoMudar={(cvs) => aoMudar({ ...variaveis, cvs })} />
+      <ListaCv cvs={variaveis.cvs} tags={tags} aoMudar={(cvs) => aoMudar({ ...variaveis, cvs })} />
       <ListaRestricao
         constraints={variaveis.constraints}
         aoMudar={(constraints) => aoMudar({ ...variaveis, constraints })}

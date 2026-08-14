@@ -1,6 +1,6 @@
 """Hot-swap com transplante de estado do bloco `mpc` (TD-006, ADR-011).
 
-Sintonia muda (peso de CV, `du_max` etc.) com o MESMO conjunto de MVs: o bloco novo nasce
+Sintonia muda (peso de CV, `max_rate` etc.) com o MESMO conjunto de MVs: o bloco novo nasce
 com os modos/últimos valores/SPs do bloco velho em vez de zerado em LOCAL — o operador não
 vê o controle cair só porque um parâmetro de ajuste mudou. Conjunto de MVs mudado (ou Ts do
 flow) continua reiniciando para LOCAL, comportamento herdado do ADR-011.
@@ -60,7 +60,7 @@ def _mpc_graph_2_mvs(tag_id: int, *, node_id: str = "m1") -> dict:
                         "name": "MV a",
                         "eu": "m3/h",
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 5.0,
+                        "max_rate": 5.0,
                         "initial_value": 0.0,
                     },
                     {
@@ -68,7 +68,7 @@ def _mpc_graph_2_mvs(tag_id: int, *, node_id: str = "m1") -> dict:
                         "name": "MV b",
                         "eu": "m3/h",
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 5.0,
+                        "max_rate": 5.0,
                         "initial_value": 0.0,
                     },
                 ],

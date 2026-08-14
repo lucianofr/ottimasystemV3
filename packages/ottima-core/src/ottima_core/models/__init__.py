@@ -5,6 +5,7 @@ from ottima_core.models.connection import OpcConnection
 from ottima_core.models.flow import Flow
 from ottima_core.models.history_retention import HistoryRetentionSettings
 from ottima_core.models.project import Project
+from ottima_core.models.system_settings import SystemSettings
 from ottima_core.models.tag import Tag
 from ottima_core.models.timeseries import (
     events_table,
@@ -23,6 +24,7 @@ __all__ = [
     "Tag",
     "Flow",
     "HistoryRetentionSettings",
+    "SystemSettings",
     "samples_table",
     "events_table",
     "mpc_samples_table",

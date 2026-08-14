@@ -29,6 +29,7 @@ from ottima_core.flowgraph import (
     ConstraintObjective,
     CvObjective,
     CvVar,
+    FlowGraph,
     GraphParseError,
     Horizons,
     Limits,
@@ -36,6 +37,7 @@ from ottima_core.flowgraph import (
     MvObjective,
     MvVar,
     Range,
+    TagConfig,
     derive_horizons,
     parse_graph,
 )
@@ -74,24 +76,42 @@ class MvCommand(BaseModel):
 
 
 class MvOut(BaseModel):
-    """Projeção de uma MV do bloco (spec §4.1-1) — sem `pid`/`initial_value`/`psv` (§4.1-3)."""
+    """Projeção de uma MV do bloco (spec §4.1-1) — sem `pid`/`initial_value`/`psv` (§4.1-3).
+
+    `tag_id`: tag da posição real (readback do `pid` ou da MV direta) — a operação assina
+    `opc.values` dela para o PV na taxa OPC (decisão F6 A-1 revertida). `zero`/`span`: faixa
+    de instrumento — a escala do faceplate (RF-609)."""
 
     id: str
     name: str
     eu: str
+    description: str = ""
+    zero: float = 0.0
+    span: float = 100.0
     limits: Limits
-    du_max: float
+    max_rate: float
     objective: MvObjective
+    tag_id: int | None = None
 
 
 class CvOut(BaseModel):
-    """Projeção de uma CV do bloco (spec §4.1-1) — sem `weight`/`tss`/`kind` (§4.1-3)."""
+    """Projeção de uma CV do bloco (spec §4.1-1) — sem `weight`/`tss`/`kind` (§4.1-3).
+
+    `tag_id`: tag OPC que alimenta a CV (aresta direta de um `opc_read`); `None` quando a
+    origem é filtro/script — o faceplate cai para a taxa do `mpc.state`. `remote_sp`: SP
+    vem de tag OPC (RF-614) — a escrita manual é recusada (422) e a UI desabilita o campo.
+    """
 
     id: str
     name: str
     eu: str
+    description: str = ""
+    zero: float = 0.0
+    span: float = 100.0
     sp_limits: Limits
     objective: CvObjective
+    tag_id: int | None = None
+    remote_sp: bool = False
 
 
 class ConstraintOut(BaseModel):
@@ -100,8 +120,12 @@ class ConstraintOut(BaseModel):
     id: str
     name: str
     eu: str
+    description: str = ""
+    zero: float = 0.0
+    span: float = 100.0
     range: Range
     objective: ConstraintObjective
+    tag_id: int | None = None
 
 
 class DvOut(BaseModel):
@@ -110,7 +134,10 @@ class DvOut(BaseModel):
     id: str
     name: str
     eu: str
+    zero: float = 0.0
+    span: float = 100.0
     range: Range | None = None
+    tag_id: int | None = None
 
 
 class MpcVariablesOut(BaseModel):
@@ -221,6 +248,8 @@ async def set_sp(
 ) -> Response:
     config = await _mpc_config(db, flow_id, block_id)
     cv = _cv_do_bloco(config, body.var_id)
+    if cv.remote_sp_tag_id is not None:
+        raise _reprovado("SP desta CV é remoto (tag OPC)")
     if not (cv.sp_limits.min <= body.value <= cv.sp_limits.max):
         raise _reprovado(
             f"Valor {body.value} fora da faixa de SP de '{body.var_id}' "
@@ -271,6 +300,25 @@ def _horizontes(config: MpcConfig, ts_flow: float) -> Horizons:
     )
 
 
+def _tags_de_entrada(graph: FlowGraph, node_id: str) -> dict[str, int]:
+    """Mapa `var_id -> tag_id` das entradas de um bloco `mpc` alimentadas DIRETO por um
+    `opc_read` (aresta com `target == node_id` e `target_handle == var_id`). Origem que não
+    é `opc_read` (filtro/script) não tem tag crua — a variável segue na taxa do `mpc.state`
+    (fallback explícito da operação, sem erro)."""
+    nos_por_id = {no.id: no for no in graph.nodes}
+    tags: dict[str, int] = {}
+    for edge in graph.edges:
+        if edge.target != node_id:
+            continue
+        origem = nos_por_id.get(edge.source)
+        if origem is None or origem.type != "opc_read":
+            continue
+        config = origem.config
+        if isinstance(config, TagConfig):
+            tags[edge.target_handle] = config.tag_id
+    return tags
+
+
 def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
     """Projeta os blocos `mpc` de um flow (spec §4.1-1). `graph_json` que não parseia, ou
     cujo bloco `mpc` não tipa como `MpcConfig` (grafo estruturalmente válido mas conteúdo do
@@ -286,6 +334,7 @@ def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
             if node.type != "mpc":
                 continue
             config = MpcConfig.model_validate(node.config.model_dump())
+            tags_entrada = _tags_de_entrada(graph, node.id)
             saida.append(
                 MpcNodeOut(
                     flow_id=flow.id,
@@ -300,9 +349,15 @@ def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
                                 id=mv.id,
                                 name=mv.name,
                                 eu=mv.eu,
+                                description=mv.description,
+                                zero=mv.zero,
+                                span=mv.span,
                                 limits=mv.limits,
-                                du_max=mv.du_max,
+                                max_rate=mv.max_rate,
                                 objective=mv.objective,
+                                tag_id=(
+                                    mv.pid.readback_tag_id if mv.pid else mv.readback_tag_id
+                                ),
                             )
                             for mv in config.variables.mvs
                         ],
@@ -311,8 +366,13 @@ def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
                                 id=cv.id,
                                 name=cv.name,
                                 eu=cv.eu,
+                                description=cv.description,
+                                zero=cv.zero,
+                                span=cv.span,
                                 sp_limits=cv.sp_limits,
                                 objective=cv.objective,
+                                tag_id=tags_entrada.get(cv.id),
+                                remote_sp=cv.remote_sp_tag_id is not None,
                             )
                             for cv in config.variables.cvs
                         ],
@@ -321,13 +381,25 @@ def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
                                 id=co.id,
                                 name=co.name,
                                 eu=co.eu,
+                                description=co.description,
+                                zero=co.zero,
+                                span=co.span,
                                 range=co.range,
                                 objective=co.objective,
+                                tag_id=tags_entrada.get(co.id),
                             )
                             for co in config.variables.constraints
                         ],
                         dvs=[
-                            DvOut(id=dv.id, name=dv.name, eu=dv.eu, range=dv.range)
+                            DvOut(
+                                id=dv.id,
+                                name=dv.name,
+                                eu=dv.eu,
+                                zero=dv.zero,
+                                span=dv.span,
+                                range=dv.range,
+                                tag_id=tags_entrada.get(dv.id),
+                            )
                             for dv in config.variables.dvs
                         ],
                     ),

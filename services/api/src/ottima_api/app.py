@@ -16,7 +16,7 @@ from ottima_api.ws import FlowStatusHub
 from ottima_api.ws import router as ws_router
 from ottima_core.config import Settings, get_settings, validate_secrets
 from ottima_core.db import create_engine, create_session_factory
-from ottima_core.logging import setup_logging
+from ottima_core.logging import setup_logging, watch_log_level
 
 
 async def _validation_exception_handler(
@@ -48,10 +48,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     heartbeat_task = asyncio.create_task(
         heartbeat_loop(app.state.redis, app.state.session_factory, app)
     )
+    log_level_task = asyncio.create_task(watch_log_level(app.state.session_factory))
     yield
+    log_level_task.cancel()
     heartbeat_task.cancel()
     try:
         await heartbeat_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await log_level_task
     except asyncio.CancelledError:
         pass
     await app.state.flow_status_hub.stop()  # antes do aclose: o hub usa este cliente
@@ -84,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         history_retention,
         operate,
         projects,
+        system_settings,
         tags,
         users,
     )
@@ -99,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(events.router, prefix="/api/events", tags=["events"])
     app.include_router(history.router, prefix="/api/history", tags=["history"])
     app.include_router(history_retention.router, prefix="/api", tags=["history-retention"])
+    app.include_router(system_settings.router, prefix="/api", tags=["system-settings"])
     app.include_router(certificates.router, prefix="/api/certificates", tags=["certificates"])
     app.include_router(ws_router, tags=["ws"])  # /ws sem prefixo /api (plano e spec §5.3)
     return app

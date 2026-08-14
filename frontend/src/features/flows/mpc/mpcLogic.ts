@@ -74,6 +74,8 @@ export function variavelDvDoFormulario(atual: VariavelDv, dados: FormData): Vari
     id: atual.id,
     name: texto(dados, c("name"), atual.name),
     eu: texto(dados, c("eu"), atual.eu),
+    zero: n("zero", atual.zero),
+    span: n("span", atual.span),
     range,
     // TD-003: ponto de linearização da DV — o modelo do MPC é incremental, então a porta de
     // entrada fica na coordenada absoluta da planta em vez de precisar de um Script somando.
@@ -93,8 +95,11 @@ export function variavelMvDoFormulario(
     id: atual.id,
     name: texto(dados, c("name"), atual.name),
     eu: texto(dados, c("eu"), atual.eu),
+    description: texto(dados, c("description"), atual.description),
+    zero: n("zero", atual.zero),
+    span: n("span", atual.span),
     limits: { min: n("limits_min", atual.limits.min), max: n("limits_max", atual.limits.max) },
-    du_max: n("du_max", atual.du_max),
+    max_rate: n("max_rate", atual.max_rate),
     du_min: n("du_min", atual.du_min),
     move_weight: n("move_weight", atual.move_weight),
     initial_value: n("initial_value", atual.initial_value),
@@ -119,6 +124,18 @@ export function variavelMvDoFormulario(
     // (o servidor valida as duas direções).
     objective: atual.objective,
     psv: atual.objective === "psv" ? n("psv", atual.psv ?? 0) : null,
+    // Controlados (mesmo padrão de `objective`): já decididos pelo Select no estado.
+    fail_action: atual.fail_action,
+    // Não-controlado, ausente-fora-da-aba preserva, vazio é `null` (mesma regra do
+    // readback acima: "limpei e continuou lá" seria grave — o PLC receberia um modo que
+    // ninguém mais vê no form).
+    local_shed_mode: (() => {
+      const bruto = dados.get(c("local_shed_mode"));
+      if (bruto === null) return atual.local_shed_mode;
+      if (bruto === "") return null;
+      const valor = Number(bruto);
+      return Number.isInteger(valor) ? valor : null;
+    })(),
     pid: !comPid
       ? null
       : {
@@ -176,6 +193,9 @@ export function variavelCvDoFormulario(atual: VariavelCv, dados: FormData): Vari
     id: atual.id,
     name: texto(dados, c("name"), atual.name),
     eu: texto(dados, c("eu"), atual.eu),
+    description: texto(dados, c("description"), atual.description),
+    zero: n("zero", atual.zero),
+    span: n("span", atual.span),
     kind: atual.kind,
     tss: n("tss", atual.tss),
     weight: n("weight", atual.weight),
@@ -183,7 +203,29 @@ export function variavelCvDoFormulario(atual: VariavelCv, dados: FormData): Vari
       min: n("sp_limits_min", atual.sp_limits.min),
       max: n("sp_limits_max", atual.sp_limits.max),
     },
+    priority: Math.max(1, Math.trunc(n("priority", atual.priority))),
     objective: atual.objective,
+    traj_tau_s: n("traj_tau_s", atual.traj_tau_s),
+    // Controlados (mesmo padrão de `objective`/`kind`): já vêm decididos pelo estado.
+    track_sp: atual.track_sp,
+    fail_action: atual.fail_action,
+    fail_timeout_s: n("fail_timeout_s", atual.fail_timeout_s),
+    // Vazio = livre (null), mesmo padrão da faixa da DV — um "0" impresso voltaria como
+    // texto e o servidor recusaria (`sp_range_pct` é `gt=0, le=100`).
+    sp_range_pct: (() => {
+      const bruto = dados.get(c("sp_range_pct"));
+      if (bruto === null) return atual.sp_range_pct;
+      if (typeof bruto !== "string" || bruto.trim() === "") return null;
+      const valor = Number(bruto);
+      return Number.isFinite(valor) ? valor : null;
+    })(),
+    remote_sp_tag_id: (() => {
+      const bruto = dados.get(c("remote_sp_tag_id"));
+      if (bruto === null) return atual.remote_sp_tag_id;
+      if (bruto === "") return null;
+      const valor = Number(bruto);
+      return Number.isInteger(valor) && valor > 0 ? valor : null;
+    })(),
   };
 }
 
@@ -197,11 +239,17 @@ export function variavelRestricaoDoFormulario(
     id: atual.id,
     name: texto(dados, c("name"), atual.name),
     eu: texto(dados, c("eu"), atual.eu),
+    description: texto(dados, c("description"), atual.description),
+    zero: n("zero", atual.zero),
+    span: n("span", atual.span),
     kind: atual.kind,
     tss: n("tss", atual.tss),
     range: { low: n("range_low", atual.range.low), high: n("range_high", atual.range.high) },
     priority: Math.max(1, Math.trunc(n("priority", atual.priority))),
     objective: atual.objective,
+    // Controlada (mesmo padrão de `objective`): já vem decidida pelo Select no estado.
+    fail_action: atual.fail_action,
+    fail_timeout_s: n("fail_timeout_s", atual.fail_timeout_s),
   };
 }
 
@@ -435,21 +483,33 @@ export function validarConfigMpc(
   // `variavelRestricaoDoFormulario`/`TabGeneral` —, mas `weight`/`du_max`/`tss` são floats sem
   // nenhum piso de UI; forçar um `Math.max` num float mascararia um erro de digitação em vez
   // de avisar, então o piso deles vive aqui, como erro bloqueante explícito no Resumo).
+  // §2.2-4 — pisos numéricos (harmoniza a inconsistência apontada na revisão da tarefa 4.2:
+  // `priority`/`multiplier` já têm piso de UI — `Math.max(1, Math.trunc(...))` em
+  // `variavelRestricaoDoFormulario`/`TabGeneral` —, mas `weight`/`max_rate`/`tss` são floats
+  // sem nenhum piso de UI; forçar um `Math.max` num float mascararia um erro de digitação em
+  // vez de avisar, então o piso deles vive aqui, como erro bloqueante explícito no Resumo).
   for (const mv of variaveis.mvs) {
     if (!(mv.limits.min < mv.limits.max)) {
       erros.push(`A MV '${rotuloVariavel(mv)}' precisa de limite mínimo menor que o máximo.`);
     }
-    if (!(mv.du_max > 0)) {
-      erros.push(`A MV '${rotuloVariavel(mv)}' precisa de Δu máx. maior que zero.`);
+    if (!(mv.max_rate > 0)) {
+      erros.push(`A MV '${rotuloVariavel(mv)}' precisa de taxa máxima maior que zero.`);
     }
     if (!(mv.du_min >= 0)) {
       erros.push(`A MV '${rotuloVariavel(mv)}' precisa de Δu mínimo maior ou igual a zero.`);
     }
-    if (!(mv.du_min <= mv.du_max)) {
-      erros.push(`A MV '${rotuloVariavel(mv)}' precisa de du_min menor ou igual a du_max.`);
-    }
     if (!(mv.move_weight > 0)) {
       erros.push(`A MV '${rotuloVariavel(mv)}' precisa de peso de movimento maior que zero.`);
+    }
+    if (!(mv.span > 0)) {
+      erros.push(`A MV '${rotuloVariavel(mv)}' precisa de span maior que zero.`);
+    }
+    if (mv.description.length > 14) {
+      erros.push(`A MV '${rotuloVariavel(mv)}' tem descrição acima de 14 caracteres.`);
+    }
+    // Verbatim ao servidor (`_valida_local_shed_mode`, value_error pt-BR do pydantic).
+    if (mv.local_shed_mode !== null && mv.pid === null) {
+      erros.push("local_shed_mode exige MV com PID");
     }
   }
   for (const cv of variaveis.cvs) {
@@ -458,6 +518,24 @@ export function validarConfigMpc(
       erros.push(`A CV '${rotuloVariavel(cv)}' precisa de SP mínimo menor que o máximo.`);
     }
     if (!(cv.weight > 0)) erros.push(`A CV '${rotuloVariavel(cv)}' precisa de peso maior que zero.`);
+    if (!(cv.span > 0)) {
+      erros.push(`A CV '${rotuloVariavel(cv)}' precisa de span maior que zero.`);
+    }
+    if (cv.description.length > 14) {
+      erros.push(`A CV '${rotuloVariavel(cv)}' tem descrição acima de 14 caracteres.`);
+    }
+    if (!(cv.fail_timeout_s > 0)) {
+      erros.push(`A CV '${rotuloVariavel(cv)}' precisa de timeout de falha maior que zero.`);
+    }
+    if (
+      cv.sp_range_pct !== null &&
+      !(cv.sp_range_pct > 0 && cv.sp_range_pct <= 100)
+    ) {
+      erros.push(`A CV '${rotuloVariavel(cv)}' precisa de faixa do SP entre 0 e 100%.`);
+    }
+    if (!(cv.traj_tau_s >= 0)) {
+      erros.push(`A CV '${rotuloVariavel(cv)}' precisa de trajetória τ maior ou igual a zero.`);
+    }
   }
   for (const co of variaveis.constraints) {
     if (!(co.tss > 0)) {
@@ -465,6 +543,20 @@ export function validarConfigMpc(
     }
     if (!(co.range.low < co.range.high)) {
       erros.push(`A Restrição '${rotuloVariavel(co)}' precisa de faixa mínima menor que a máxima.`);
+    }
+    if (!(co.span > 0)) {
+      erros.push(`A Restrição '${rotuloVariavel(co)}' precisa de span maior que zero.`);
+    }
+    if (co.description.length > 14) {
+      erros.push(`A Restrição '${rotuloVariavel(co)}' tem descrição acima de 14 caracteres.`);
+    }
+    if (!(co.fail_timeout_s > 0)) {
+      erros.push(`A Restrição '${rotuloVariavel(co)}' precisa de timeout de falha maior que zero.`);
+    }
+  }
+  for (const dv of variaveis.dvs) {
+    if (!(dv.span > 0)) {
+      erros.push(`A DV '${rotuloVariavel(dv)}' precisa de span maior que zero.`);
     }
   }
 

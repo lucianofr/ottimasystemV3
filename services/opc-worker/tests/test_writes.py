@@ -603,7 +603,9 @@ async def test_dois_flows_na_mesma_conexao_watchdog_de_um_nao_trava_o_outro(
     )
     await runtime.set_flow_watchdogs(
         {
-            flow_a: make_watchdog(flow_id=flow_a, read_node=NODE_WD_TO_SYSTEM, write_node=NODE_WD_FROM_SYSTEM),
+            flow_a: make_watchdog(
+                flow_id=flow_a, read_node=NODE_WD_TO_SYSTEM, write_node=NODE_WD_FROM_SYSTEM
+            ),
             flow_b: make_watchdog(
                 flow_id=flow_b, read_node=NODE_WD_TO_SYSTEM_2, write_node=NODE_WD_FROM_SYSTEM_2
             ),

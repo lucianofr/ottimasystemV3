@@ -178,16 +178,16 @@ class SteadyStateOptimizer:
         self._mv_limits = {mv.id: (mv.limits.min, mv.limits.max) for mv in config.variables.mvs}
 
         # ---- Estruturas da função objetivo por variável (pré-computadas uma vez) ----
-        # Spans sempre > 0 (validado por `_check_mpc_numbers` no save; defesa aqui assume).
-        self._mv_span = {
-            mv.id: mv.limits.max - mv.limits.min for mv in config.variables.mvs
+        # Spans de instrumento (RF-609: preços ∓1/span, equalize, âncoras — `span` > 0 é
+        # garantido pelo Pydantic, `Field(gt=0)`).
+        self._mv_span = {mv.id: mv.span for mv in config.variables.mvs}
+        self._row_span = {var.id: var.span for var in rows}
+        # Banda do SP por CV (RF-615): `%` do span em torno do SP do operador no solve.
+        self._cv_sp_range = {
+            cv.id: cv.sp_range_pct
+            for cv in config.variables.cvs
+            if cv.sp_range_pct is not None
         }
-        self._row_span: dict[str, float] = {}
-        for var in rows:
-            if hasattr(var, "sp_limits"):
-                self._row_span[var.id] = var.sp_limits.max - var.sp_limits.min
-            else:
-                self._row_span[var.id] = var.range.high - var.range.low
         # CVs ancoradas no SP do operador: (row_id, peso por span), na ordem do config.
         self._cv_anchors: list[tuple[str, float]] = [
             (cv.id, peso)
@@ -369,6 +369,21 @@ class SteadyStateOptimizer:
         for k, row_id in enumerate(kept):
             i = row_index[row_id]
             low, high = self._row_limits[row_id]
+            banda_pct = self._cv_sp_range.get(row_id)
+            if (
+                banda_pct is not None
+                and model.row_kind[row_id] == "selfreg"  # integradora: limites são ±ε de taxa
+                and entrada.sp is not None
+                and row_id in entrada.sp
+            ):
+                # Banda do SP (RF-615): a linha fica presa a `SP ± pct/100 × span`. Se a
+                # banda não couber nos limites estáticos (lo > hi), vale a banda pura —
+                # prioridade ao SP do operador; a linha é soft, a folga absorve o conflito.
+                sp = entrada.sp[row_id]
+                delta = banda_pct / 100.0 * self._row_span[row_id]
+                low, high = max(low, sp - delta), min(high, sp + delta)
+                if low > high:
+                    low, high = sp - delta, sp + delta
             a_ub[2 * k, :n_mv] = model.g[i]
             a_ub[2 * k, n_mv + k] = -1.0
             b_ub[2 * k] = high - cv_ss_free[i]

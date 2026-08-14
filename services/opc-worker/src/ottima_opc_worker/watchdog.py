@@ -27,15 +27,6 @@ from .state import ConnectionSnapshot, FlowWatchdogConfig
 
 logger = logging.getLogger(__name__)
 
-FREEZE_THRESHOLD_S = 10.0
-"""Limiar de congelamento, FIXO em produção (ADR-009).
-
-Não é knob de usuário nem entra em `Settings` (spec §10.1): só o período de toggle é
-configurável. O parâmetro do construtor existe para os testes não gastarem 10 s por
-ensaio.
-"""
-
-
 def _describe(exc: Exception) -> str:
     """Detalhe curto para o payload do evento, no mesmo idioma de `subscriptions.py`.
 
@@ -60,7 +51,7 @@ class WatchdogTask:
         on_freeze: Callable[[str], Awaitable[None]],
         on_alive: Callable[[], Awaitable[None]],
         on_hard_failure: Callable[[str], Awaitable[None]],
-        freeze_threshold_s: float = FREEZE_THRESHOLD_S,
+        freeze_threshold_s: float | None = None,
     ) -> None:
         self._config = config
         self._client = client
@@ -68,8 +59,17 @@ class WatchdogTask:
         self._on_freeze = on_freeze
         self._on_alive = on_alive
         self._on_hard_failure = on_hard_failure
-        self._freeze_threshold_s = freeze_threshold_s
+        # Limiar de congelamento configurável por flow (`watchdog_timeout_s`, RF-206); o
+        # parâmetro existe para os testes não gastarem 10 s por ensaio.
+        self._freeze_threshold_s = (
+            config.timeout_s if freeze_threshold_s is None else freeze_threshold_s
+        )
         self._period_s = config.period_ms / 1000
+        # Leitura/escrita travada não pode congelar a task para sempre (achado do E2E: uma
+        # sessão zumbi deixava o `read_value` pendurado e o watchdog morria calado, com a
+        # chave de `flow_watchdog_alive` presa em False). Timeout generoso — escrita/leitura
+        # que não completa nele é sessão morta, e o `on_hard_failure` reconecta e rearma.
+        self._io_timeout_s = max(10.0, 3 * self._period_s)
         self._task: asyncio.Task[None] | None = None
         self._last_value: bool | None = None
         # Decurso medido no relógio monotônico, como no heartbeat (tarefa 1.3): ajuste de
@@ -82,6 +82,12 @@ class WatchdogTask:
         (node_ids ou período) e decidir se reinicia (`FlowWatchdogConfig` é comparável por
         valor, dataclass frozen)."""
         return self._config
+
+    @property
+    def is_dead(self) -> bool:
+        """Task que morreu (hard failure/freeze) sem ser removida: o reconcile a reinicia
+        na próxima reconciliação, em vez de deixar o flow preso em `watchdog_dead`."""
+        return self._task is None or self._task.done()
 
     async def start(self) -> None:
         """Cria a task do watchdog e retorna já."""
@@ -121,19 +127,43 @@ class WatchdogTask:
         except Exception as exc:
             await self._on_hard_failure(_describe(exc))
             return
+        # Amostragem 8× mais rápida que a escrita (Nyquist, achado do gate E2E): quando
+        # OUTROS escritores compartilham o mesmo par de nós — vários flows apontados ao
+        # mesmo par, ou um PLC que inverte mais rápido que o período — o bit alterna a
+        # N×/período e uma leitura por período veria sempre o MESMO valor (aliasing),
+        # acusando congelamento de um handshake vivo. 8× cobre até 4 escritores. A ESCRITA
+        # segue na cadência configurada: ela é o contrato de handshake com o PLC
+        # (`watchdog_period_ms`), a leitura não. Piso de 50 ms para não virar poll cego.
+        sample_s = max(0.05, self._period_s / 8)
+        proxima_escrita = time.monotonic()
         while True:
-            await asyncio.sleep(self._period_s)
+            await asyncio.sleep(sample_s)
             try:
-                value = bool(await read_node.read_value())
+                value = bool(
+                    await asyncio.wait_for(read_node.read_value(), timeout=self._io_timeout_s)
+                )
                 await self._observe(value)
                 # Escrita direta no node: não passa pelo consumidor de `opc.writes` nem
                 # pelo gate de escrita, que exige watchdog vivo — pelo gate, o watchdog
                 # nunca poderia armar a si mesmo (spec §3.4). Cópia pura do valor lido: o
                 # ottima NÃO inverte — quem inverte é o DCS/PLC do outro lado (ver
                 # docstring do módulo).
-                await write_node.write_value(value, ua.VariantType.Boolean)
+                agora = time.monotonic()
+                if agora >= proxima_escrita:
+                    proxima_escrita = agora + self._period_s
+                    await asyncio.wait_for(
+                        write_node.write_value(value, ua.VariantType.Boolean),
+                        timeout=self._io_timeout_s,
+                    )
             except asyncio.CancelledError:
                 raise
+            except TimeoutError as exc:
+                # Sessão zumbi: a leitura/escrita não completa; sem isso a task ficaria
+                # pendurada para sempre e o flow preso em `watchdog_dead`.
+                await self._on_hard_failure(
+                    f"leitura/escrita do watchdog sem resposta em {self._io_timeout_s:.0f}s: {exc}"
+                )
+                return
             except Exception as exc:
                 # Falha dura de sessão (spec §2.2-2): sem retry interno, quem reconecta é
                 # o runtime, com backoff.

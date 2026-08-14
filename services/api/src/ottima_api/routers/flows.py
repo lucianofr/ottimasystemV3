@@ -246,8 +246,13 @@ async def update_flow(
         if body.watchdog_write_node_id is None
         else body.watchdog_write_node_id
     )
-    wd_period = flow.watchdog_period_ms if body.watchdog_period_ms is None else body.watchdog_period_ms
-    erro_wd = erro_watchdog_flow(wd_enabled, wd_conn_id, wd_read, wd_write)
+    wd_period = (
+        flow.watchdog_period_ms if body.watchdog_period_ms is None else body.watchdog_period_ms
+    )
+    wd_timeout = (
+        flow.watchdog_timeout_s if body.watchdog_timeout_s is None else body.watchdog_timeout_s
+    )
+    erro_wd = erro_watchdog_flow(wd_enabled, wd_conn_id, wd_read, wd_write, wd_period, wd_timeout)
     if erro_wd:
         raise _reprovado([erro_wd])
     if wd_conn_id is not None:
@@ -273,6 +278,7 @@ async def update_flow(
     flow.watchdog_read_node_id = wd_read
     flow.watchdog_write_node_id = wd_write
     flow.watchdog_period_ms = wd_period
+    flow.watchdog_timeout_s = wd_timeout
     # Gravado verbatim: o editor é o dono do JSON e guarda nele estado de layout que a
     # validação ignora de propósito.
     flow.graph_json = graph_json

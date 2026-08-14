@@ -18,6 +18,7 @@ CAMPOS_LEVES = {
     "watchdog_read_node_id",
     "watchdog_write_node_id",
     "watchdog_period_ms",
+    "watchdog_timeout_s",
 }
 INF = float("inf")  # `json.dumps` emite `Infinity`, que o parser do corpo aceita
 

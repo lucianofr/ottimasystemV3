@@ -92,6 +92,7 @@ def montar_bundle(
                 watchdog_read_node_id=f.watchdog_read_node_id,
                 watchdog_write_node_id=f.watchdog_write_node_id,
                 watchdog_period_ms=f.watchdog_period_ms,
+                watchdog_timeout_s=f.watchdog_timeout_s,
             )
             for f in flows_ordenados
         ],

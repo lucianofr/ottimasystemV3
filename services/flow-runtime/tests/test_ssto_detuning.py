@@ -31,14 +31,14 @@ def _config(*, delta_preco: float, detuning: float) -> MpcConfig:
                         "name": "a",
                         "eu": "%",
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 10.0,
+                        "max_rate": 10.0,
                     },
                     {
                         "id": "mv_b",
                         "name": "b",
                         "eu": "%",
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 10.0,
+                        "max_rate": 10.0,
                     },
                 ],
                 "cvs": [

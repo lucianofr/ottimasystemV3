@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field, ValidationError
 
 from ottima_core.flowgraph.mpc_config import (
     MpcConfig,
-    MvVar,
     RowKind,
     derive_horizons,
     mpc_state_dimension,
@@ -607,8 +606,8 @@ def _check_mpc_numbers(node: FlowNode, config: MpcConfig, errors: list[str]) -> 
             errors.append(
                 f"nó '{node.id}' (mpc): a MV '{mv_var.id}' precisa de limits.min < limits.max"
             )
-        if not _positive(mv_var.du_max):
-            errors.append(f"nó '{node.id}' (mpc): a MV '{mv_var.id}' precisa de du_max > 0")
+        if not _positive(mv_var.max_rate):
+            errors.append(f"nó '{node.id}' (mpc): a MV '{mv_var.id}' precisa de max_rate > 0")
     for cv_var in variables.cvs:
         if not _positive(cv_var.tss):
             errors.append(f"nó '{node.id}' (mpc): a CV '{cv_var.id}' precisa de tss > 0")
@@ -636,7 +635,8 @@ def _check_mpc_numbers(node: FlowNode, config: MpcConfig, errors: list[str]) -> 
 
 def _check_mv_tag(
     node: FlowNode,
-    mv_var: MvVar,
+    var_id: str,
+    categoria: str,
     field_name: str,
     tag_id: int,
     expected: Literal["r", "w"],
@@ -646,13 +646,13 @@ def _check_mv_tag(
     tag = tags.get(tag_id)
     if tag is None:
         errors.append(
-            f"nó '{node.id}' (mpc): a MV '{mv_var.id}' referencia em '{field_name}' a tag "
+            f"nó '{node.id}' (mpc): a {categoria} '{var_id}' referencia em '{field_name}' a tag "
             f"{tag_id}, que não existe ou não pertence ao projeto do flow"
         )
         return
     if tag.direction != expected:
         errors.append(
-            f"nó '{node.id}' (mpc): a MV '{mv_var.id}' referencia em '{field_name}' a tag "
+            f"nó '{node.id}' (mpc): a {categoria} '{var_id}' referencia em '{field_name}' a tag "
             f"{tag_id} com direção '{tag.direction}'; este campo exige direção '{expected}'"
         )
 
@@ -672,18 +672,28 @@ def _check_mpc_tags(
     for mv_var in config.variables.mvs:
         if mv_var.readback_tag_id is not None:
             _check_mv_tag(
-                node, mv_var, "readback_tag_id", mv_var.readback_tag_id, "r", tags, errors
+                node, mv_var.id, "MV", "readback_tag_id", mv_var.readback_tag_id, "r", tags, errors
             )
         pid = mv_var.pid
         if pid is None:
             continue
         for field_name in _PID_WRITE_FIELDS:
-            _check_mv_tag(node, mv_var, field_name, getattr(pid, field_name), "w", tags, errors)
+            _check_mv_tag(
+                node, mv_var.id, "MV", field_name, getattr(pid, field_name), "w", tags, errors
+            )
         for field_name in _PID_READ_FIELDS:
             tag_id = getattr(pid, field_name)
             if tag_id is None:  # mode_read_tag_id é opcional (spec §2.1-3)
                 continue
-            _check_mv_tag(node, mv_var, field_name, tag_id, "r", tags, errors)
+            _check_mv_tag(node, mv_var.id, "MV", field_name, tag_id, "r", tags, errors)
+    for cv_var in config.variables.cvs:
+        # SP remoto (RF-614): mesma barreira das tags do PID — existe no projeto e é de
+        # leitura (o MPC nunca escreve nela).
+        if cv_var.remote_sp_tag_id is not None:
+            _check_mv_tag(
+                node, cv_var.id, "CV", "remote_sp_tag_id", cv_var.remote_sp_tag_id, "r",
+                tags, errors,
+            )
 
 
 def _check_mpc_horizons(

@@ -1,0 +1,18 @@
+{
+  "servers": {
+    "typescript-language-server": {
+      "rootMarkers": ["package.json", "tsconfig.json", "jsconfig.json", ".git"],
+      "initOptions": {
+        "hostInfo": "omp-coding-agent",
+        "preferences": {
+          "includeInlayParameterNameHints": "all",
+          "includeInlayVariableTypeHints": true,
+          "includeInlayFunctionParameterTypeHints": true
+        },
+        "tsserver": {
+          "path": "/home/luciano/Documentos/ProjetosClaudeCode/ottimaSystemV3/frontend/node_modules/typescript/lib/tsserver.js"
+        }
+      }
+    }
+  }
+}

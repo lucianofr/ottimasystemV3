@@ -22,6 +22,12 @@ const NAV_ENGENHARIA = [
   { rotulo: "Trend", para: "/engenharia/trend", testid: "nav-trend" },
 ] as const;
 
+/* Configurações gerais (RF-805): grupo próprio, só admin — operador nem vê o item (a rota
+   também redireciona, SettingsPage). */
+const NAV_ADMIN = [
+  { rotulo: "Configurações", para: "/configuracoes", testid: "nav-configuracoes" },
+] as const;
+
 function ItemNav({ rotulo, para, testid }: { rotulo: string; para: string; testid: string }) {
   return (
     <NavLink
@@ -63,6 +69,16 @@ export function AppShell() {
                 <ItemNav key={item.para} {...item} />
               ))}
             </nav>
+            {user?.role === "admin" && (
+              <>
+                <span aria-hidden="true" className="h-4 w-px bg-border" />
+                <nav aria-label="Administração" className="flex items-center gap-1">
+                  {NAV_ADMIN.map((item) => (
+                    <ItemNav key={item.para} {...item} />
+                  ))}
+                </nav>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <span data-testid="current-user" className="text-xs text-fg-muted">

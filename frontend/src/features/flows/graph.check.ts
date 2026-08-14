@@ -72,8 +72,11 @@ function variavelMv(id: string, name: string, eu: string, comPid = false) {
     id,
     name,
     eu,
+    description: "",
+    zero: 0,
+    span: 100,
     limits: { min: 0, max: 100 },
-    du_max: 5,
+    max_rate: 5,
     du_min: 0,
     move_weight: 1,
     initial_value: 0,
@@ -91,6 +94,8 @@ function variavelMv(id: string, name: string, eu: string, comPid = false) {
       : null,
     objective: "none" as const,
     psv: null,
+    fail_action: "no_action" as const,
+    local_shed_mode: null,
   };
 }
 
@@ -99,11 +104,21 @@ function variavelCv(id: string, name: string, eu: string) {
     id,
     name,
     eu,
+    description: "",
+    zero: 0,
+    span: 100,
     kind: "selfreg" as const,
     tss: 600,
     weight: 1,
     sp_limits: { min: 80, max: 120 },
+    priority: 1,
     objective: "none" as const,
+    traj_tau_s: 0,
+    track_sp: true,
+    fail_action: "no_action" as const,
+    fail_timeout_s: 60,
+    sp_range_pct: null,
+    remote_sp_tag_id: null,
   };
 }
 
@@ -112,16 +127,21 @@ function variavelRestricao(id: string, name: string, eu: string) {
     id,
     name,
     eu,
+    description: "",
+    zero: 0,
+    span: 100,
     kind: "integrating" as const,
     tss: 900,
     range: { low: 20, high: 80 },
     priority: 1,
     objective: "none" as const,
+    fail_action: "no_action" as const,
+    fail_timeout_s: 60,
   };
 }
 
 function variavelDv(id: string, name: string, eu: string, range: FaixaMpc | null = null) {
-  return { id, name, eu, range, operating_point: 0 };
+  return { id, name, eu, zero: 0, span: 100, range, operating_point: 0 };
 }
 
 function aresta(
@@ -726,7 +746,7 @@ test("DV sem range fica com null explícito na ida e volta (padrão de DV nova)"
   const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson([no], []))));
   if (volta.nodes[0]?.type !== "mpc") throw new Error("tipo preservado");
   expect(volta.nodes[0].data.variables.dvs).toEqual([
-    { id: "dv_1", name: "Vazão de carga", eu: "m3/h", range: null, operating_point: 0 },
+    { id: "dv_1", name: "Vazão de carga", eu: "m3/h", zero: 0, span: 100, range: null, operating_point: 0 },
   ]);
 });
 
@@ -757,6 +777,6 @@ test("DV salva antes da F6, sem a chave range, carrega com null (compatibilidade
   const no = grafo.nodes.find((n) => n.id === "m");
   if (no?.type !== "mpc") throw new Error("tipo preservado");
   expect(no.data.variables.dvs).toEqual([
-    { id: "dv_1", name: "Vazão de carga", eu: "m3/h", range: null, operating_point: 0 },
+    { id: "dv_1", name: "Vazão de carga", eu: "m3/h", zero: 0, span: 100, range: null, operating_point: 0 },
   ]);
 });

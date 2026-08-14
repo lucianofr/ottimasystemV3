@@ -25,7 +25,7 @@ from do_mpc.model import Model
 
 from ottima_core.flowgraph import Horizons, MpcConfig, RowKind, derive_horizons
 
-from .discretize import PairSS, discretize_iopdt, discretize_sopdt
+from .discretize import PairSS, discretize_iopdt, discretize_sopdt, eu_gain_params
 
 R_DELTA_U = 0.1
 """Peso do termo `R_Δu·Δu²_norm` do objetivo (spec F4 §3.4) — constante nomeada: a spec fixa
@@ -142,6 +142,9 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
     # é absoluta. Fica aqui, e não em cada par, porque o ponto é da planta — duas linhas que
     # olham a mesma MV não podem discordar de onde é o zero dela.
     operating_point = {var.id: var.operating_point for var in (*mvs, *dvs)}
+    # Faixa de instrumento por variável (RF-609): os ganhos do config são %/%, convertidos
+    # a EU por `span_linha/span_coluna` em UM ponto (`eu_gain_params`).
+    span_por_id = {var.id: var.span for var in (*mvs, *dvs, *cvs, *constraints)}
     bias_symbol = {row_id: model.set_variable("_tvp", f"bias_{row_id}") for row_id in row_ids}
     for cv in cvs:
         model.set_variable("_tvp", f"sp_{cv.id}")
@@ -168,7 +171,12 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
         for col_id, pair_cfg in config.models.get(row_id, {}).items():
             if not pair_cfg.enabled:
                 continue
-            params = pair_cfg.params
+            params = eu_gain_params(
+                pair_cfg.params,
+                kind=kind,
+                row_span=span_por_id[row_id],
+                col_span=span_por_id[col_id],
+            )
             if kind == "selfreg":
                 pair = discretize_sopdt(
                     params["K"], params["tau1"], params["tau2"], params["theta"], ts_mpc
@@ -264,11 +272,11 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
 
     spans: dict[str, float] = {}
     for cv in cvs:
-        spans[cv.id] = cv.sp_limits.max - cv.sp_limits.min
+        spans[cv.id] = cv.span
     for co in constraints:
-        spans[co.id] = co.range.high - co.range.low
+        spans[co.id] = co.span
     for mv in mvs:
-        spans[mv.id] = mv.limits.max - mv.limits.min
+        spans[mv.id] = mv.span
 
     max_w_cv = max((cv.weight for cv in cvs), default=1.0)
 
@@ -334,8 +342,15 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
     tvp_template = mpc.get_tvp_template()
     for mv in mvs:
         name = f"dumax_{mv.id}"
+        # `max_rate` é EU/s (RF-604 revisado); a constraint do solve é por ciclo. A banda
+        # morta só é decidível aqui, com o Ts_mpc em mãos (era validator do MvVar).
+        du_max_ciclo = mv.max_rate * ts_mpc
+        if mv.du_min > du_max_ciclo:
+            raise ValueError(
+                f"du_min da MV '{mv.id}' deve ser menor ou igual a max_rate × Ts_mpc"
+            )
         for k in range(horizons.np + 1):
-            tvp_template["_tvp", k, name] = mv.du_max if k < horizons.nc else 0.0
+            tvp_template["_tvp", k, name] = du_max_ciclo if k < horizons.nc else 0.0
     for mv in mvs:
         if mv.objective != "none":
             # Âncora neutra até o primeiro SSTO: a posição configurada como inicial — o

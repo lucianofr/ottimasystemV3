@@ -115,7 +115,7 @@ def _mpc_data() -> dict:
         "name": "MV a",
         "eu": "m3/h",
         "limits": {"min": 0.0, "max": 100.0},
-        "du_max": 5.0,
+        "max_rate": 5.0,
         "initial_value": 0.0,
     }
     cv = {
@@ -159,7 +159,9 @@ async def _cenario(client, admin_headers, nome: str) -> tuple[int, str]:
     return flow["id"], "m1"
 
 
-def _ssto_row(flow_id: int, block_id: str, offset_s: int = 0, run_id: str = "run-1") -> dict[str, Any]:
+def _ssto_row(
+    flow_id: int, block_id: str, offset_s: int = 0, run_id: str = "run-1"
+) -> dict[str, Any]:
     """Uma linha completa de `ssto_runs` — vetores JSONB pequenos mas com a forma real."""
     return {
         "ts": BASE.astimezone(UTC).replace(second=offset_s),

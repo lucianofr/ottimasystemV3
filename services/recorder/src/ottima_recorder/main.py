@@ -12,7 +12,7 @@ from fastapi import FastAPI
 
 from ottima_core.config import get_settings
 from ottima_core.db import create_engine, create_session_factory
-from ottima_core.logging import setup_logging
+from ottima_core.logging import setup_logging, watch_log_level
 from ottima_recorder.pipeline import RecorderPipeline
 
 SERVICE_NAME = "recorder"
@@ -45,14 +45,21 @@ async def lifespan(app: FastAPI):
     # decode_responses=True é contrato do barramento na F2: consumidor recebe str
     client = redis.from_url(settings.redis_url, decode_responses=True)
     engine = create_engine(settings.database_url)
-    pipeline = RecorderPipeline(client, create_session_factory(engine))
+    session_factory = create_session_factory(engine)
+    pipeline = RecorderPipeline(client, session_factory)
     app.state.pipeline = pipeline
     await pipeline.start()
     task = asyncio.create_task(_heartbeat_loop(client, app))
+    log_task = asyncio.create_task(watch_log_level(session_factory))
     yield
     task.cancel()
+    log_task.cancel()
     try:
         await task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await log_task
     except asyncio.CancelledError:
         pass
     await pipeline.stop()

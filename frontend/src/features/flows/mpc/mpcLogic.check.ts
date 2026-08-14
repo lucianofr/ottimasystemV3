@@ -59,20 +59,22 @@ function formulario(pares: Record<string, string>): FormData {
 }
 
 test("variavelDvDoFormulario lê nome/eu pelo id e cai no padrão quando ausente", () => {
-  const atual = { id: "dv_e5f6", name: "Vazão de carga", eu: "m3/h", range: null, operating_point: 0 };
+  const atual = { id: "dv_e5f6", name: "Vazão de carga", eu: "m3/h", zero: 0, span: 100, range: null, operating_point: 0 };
   const dados = formulario({ [nomeCampoVar("dv_e5f6", "name")]: "Nova DV" });
   const nova = variavelDvDoFormulario(atual, dados);
   expect(nova).toEqual({
     id: "dv_e5f6",
     name: "Nova DV",
     eu: "m3/h",
+    zero: 0,
+    span: 100,
     range: null,
     operating_point: 0,
   });
 });
 
 test("variavelDvDoFormulario: os dois campos de faixa preenchidos montam o range (spec §4.2-5)", () => {
-  const atual = { id: "dv_e5f6", name: "Vazão de carga", eu: "m3/h", range: null, operating_point: 0 };
+  const atual = { id: "dv_e5f6", name: "Vazão de carga", eu: "m3/h", zero: 0, span: 100, range: null, operating_point: 0 };
   const dados = formulario({
     [nomeCampoVar("dv_e5f6", "range_low")]: "0",
     [nomeCampoVar("dv_e5f6", "range_high")]: "100",
@@ -81,7 +83,7 @@ test("variavelDvDoFormulario: os dois campos de faixa preenchidos montam o range
 });
 
 test("variavelDvDoFormulario: os dois campos de faixa vazios (ou ausentes) devolvem range null", () => {
-  const comFaixa = { id: "dv_e5f6", name: "", eu: "", range: { low: 0, high: 100 }, operating_point: 0 };
+  const comFaixa = { id: "dv_e5f6", name: "", eu: "", zero: 0, span: 100, range: { low: 0, high: 100 }, operating_point: 0 };
   const dados = formulario({
     [nomeCampoVar("dv_e5f6", "range_low")]: "  ",
     [nomeCampoVar("dv_e5f6", "range_high")]: "",
@@ -90,14 +92,14 @@ test("variavelDvDoFormulario: os dois campos de faixa vazios (ou ausentes) devol
 });
 
 test("variavelDvDoFormulario: só um campo de faixa preenchido não deixa a faixa pela metade — o vazio cai no valor anterior (decisão desta tarefa, servidor recusaria faixa parcial)", () => {
-  const semFaixaAinda = { id: "dv_novo", name: "", eu: "", range: null, operating_point: 0 };
+  const semFaixaAinda = { id: "dv_novo", name: "", eu: "", zero: 0, span: 100, range: null, operating_point: 0 };
   const soLow = variavelDvDoFormulario(
     semFaixaAinda,
     formulario({ [nomeCampoVar("dv_novo", "range_low")]: "10" }),
   );
   expect(soLow.range).toEqual({ low: 10, high: 0 }); // sem faixa anterior, o vazio cai em 0
 
-  const comFaixaAnterior = { id: "dv_e5f6", name: "", eu: "", range: { low: 5, high: 50 }, operating_point: 0 };
+  const comFaixaAnterior = { id: "dv_e5f6", name: "", eu: "", zero: 0, span: 100, range: { low: 5, high: 50 }, operating_point: 0 };
   const soHigh = variavelDvDoFormulario(
     comFaixaAnterior,
     formulario({ [nomeCampoVar("dv_e5f6", "range_high")]: "80" }),
@@ -106,7 +108,7 @@ test("variavelDvDoFormulario: só um campo de faixa preenchido não deixa a faix
 });
 
 test("variavelDvDoFormulario: operating_point faz round-trip pelo formulário (TD-003, ponto de linearização)", () => {
-  const atual = { id: "dv_e5f6", name: "", eu: "", range: null, operating_point: 0 };
+  const atual = { id: "dv_e5f6", name: "", eu: "", zero: 0, span: 100, range: null, operating_point: 0 };
   const dados = formulario({ [nomeCampoVar("dv_e5f6", "operating_point")]: "12,3" });
   expect(variavelDvDoFormulario(atual, dados).operating_point).toBe(12.3);
 });
@@ -116,8 +118,11 @@ test("variavelMvDoFormulario sem pid devolve pid null mesmo com campos de pid no
     id: "mv_x7k2",
     name: "Vazão de refluxo",
     eu: "m3/h",
+    description: "",
+    zero: 0,
+    span: 100,
     limits: { min: 0, max: 100 },
-    du_max: 5,
+    max_rate: 5,
     du_min: 0,
     move_weight: 1,
     initial_value: 0,
@@ -126,6 +131,8 @@ test("variavelMvDoFormulario sem pid devolve pid null mesmo com campos de pid no
     pid: null,
     objective: "none" as const,
     psv: null,
+    fail_action: "no_action" as const,
+    local_shed_mode: null,
   };
   const dados = formulario({
     [nomeCampoVar("mv_x7k2", "limits_min")]: "1,5",
@@ -142,8 +149,11 @@ test("variavelMvDoFormulario com pid reconstrói os campos obrigatórios do pid"
     id: "mv_x7k2",
     name: "Vazão de refluxo",
     eu: "m3/h",
+    description: "",
+    zero: 0,
+    span: 100,
     limits: { min: 0, max: 100 },
-    du_max: 5,
+    max_rate: 5,
     du_min: 0,
     move_weight: 1,
     initial_value: 0,
@@ -152,6 +162,8 @@ test("variavelMvDoFormulario com pid reconstrói os campos obrigatórios do pid"
     pid: null,
     objective: "none" as const,
     psv: null,
+    fail_action: "no_action" as const,
+    local_shed_mode: null,
   };
   const dados = formulario({
     [nomeCampoVar("mv_x7k2", "pid_write_tag_id")]: "12",
@@ -177,8 +189,11 @@ test("variavelMvDoFormulario: operating_point e readback_tag_id da MV direta faz
     id: "mv_x7k2",
     name: "Vazão de refluxo",
     eu: "m3/h",
+    description: "",
+    zero: 0,
+    span: 100,
     limits: { min: 0, max: 100 },
-    du_max: 5,
+    max_rate: 5,
     du_min: 0,
     move_weight: 1,
     initial_value: 0,
@@ -187,6 +202,8 @@ test("variavelMvDoFormulario: operating_point e readback_tag_id da MV direta faz
     pid: null,
     objective: "none" as const,
     psv: null,
+    fail_action: "no_action" as const,
+    local_shed_mode: null,
   };
   const dados = formulario({
     [nomeCampoVar("mv_x7k2", "operating_point")]: "42,5",
@@ -202,8 +219,11 @@ test("variavelMvDoFormulario: readback_tag_id vazio cai no valor anterior, mesma
     id: "mv_x7k2",
     name: "",
     eu: "",
+    description: "",
+    zero: 0,
+    span: 100,
     limits: { min: 0, max: 100 },
-    du_max: 5,
+    max_rate: 5,
     du_min: 0,
     move_weight: 1,
     initial_value: 0,
@@ -212,6 +232,8 @@ test("variavelMvDoFormulario: readback_tag_id vazio cai no valor anterior, mesma
     pid: null,
     objective: "none" as const,
     psv: null,
+    fail_action: "no_action" as const,
+    local_shed_mode: null,
   };
   const semCampo = variavelMvDoFormulario(comReadback, formulario({}), false);
   expect(semCampo.readback_tag_id).toBe(9); // campo ausente do FormData preserva o anterior
@@ -230,11 +252,21 @@ test("variavelCvDoFormulario e variavelRestricaoDoFormulario preservam kind (dec
     id: "cv_a1b2",
     name: "Temperatura de topo",
     eu: "C",
+    description: "",
+    zero: 0,
+    span: 100,
     kind: "selfreg" as const,
     tss: 600,
     weight: 1,
     sp_limits: { min: 80, max: 120 },
+    priority: 1,
     objective: "none" as const,
+    traj_tau_s: 0,
+    track_sp: true,
+    fail_action: "no_action" as const,
+    fail_timeout_s: 60,
+    sp_range_pct: null,
+    remote_sp_tag_id: null,
   };
   const novaCv = variavelCvDoFormulario(
     cv,
@@ -247,11 +279,16 @@ test("variavelCvDoFormulario e variavelRestricaoDoFormulario preservam kind (dec
     id: "co_c3d4",
     name: "Nível do vaso",
     eu: "%",
+    description: "",
+    zero: 0,
+    span: 100,
     kind: "integrating" as const,
     tss: 900,
     range: { low: 20, high: 80 },
     priority: 1,
     objective: "none" as const,
+    fail_action: "no_action" as const,
+    fail_timeout_s: 60,
   };
   const novaRestricao = variavelRestricaoDoFormulario(
     restricao,
@@ -306,8 +343,11 @@ function mv(id: string, parcial: Partial<VariavelMv> = {}): VariavelMv {
     id,
     name: "",
     eu: "",
+    description: "",
+    zero: 0,
+    span: 100,
     limits: { min: 0, max: 100 },
-    du_max: 5,
+    max_rate: 5,
     du_min: 0,
     move_weight: 1,
     initial_value: 0,
@@ -316,6 +356,8 @@ function mv(id: string, parcial: Partial<VariavelMv> = {}): VariavelMv {
     pid: null,
     objective: "none",
     psv: null,
+    fail_action: "no_action",
+    local_shed_mode: null,
     ...parcial,
   };
 }
@@ -325,11 +367,21 @@ function cv(id: string, parcial: Partial<VariavelCv> = {}): VariavelCv {
     id,
     name: "",
     eu: "",
+    description: "",
+    zero: 0,
+    span: 100,
     kind: "selfreg",
     tss: 600,
     weight: 1,
     sp_limits: { min: 0, max: 100 },
+    priority: 1,
     objective: "none",
+    traj_tau_s: 0,
+    track_sp: true,
+    fail_action: "no_action",
+    fail_timeout_s: 60,
+    sp_range_pct: null,
+    remote_sp_tag_id: null,
     ...parcial,
   };
 }
@@ -339,11 +391,16 @@ function restricao(id: string, parcial: Partial<VariavelRestricao> = {}): Variav
     id,
     name: "",
     eu: "",
+    description: "",
+    zero: 0,
+    span: 100,
     kind: "selfreg",
     tss: 600,
     range: { low: 0, high: 100 },
     priority: 1,
     objective: "none",
+    fail_action: "no_action",
+    fail_timeout_s: 60,
     ...parcial,
   };
 }
@@ -440,16 +497,16 @@ test("validarConfigMpc: MV sem nenhum par habilitado na matriz vira erro (spec �
   ).toBe(true);
 });
 
-test("validarConfigMpc: pisos numéricos de weight/du_max/tss/faixas bloqueiam (harmonização da revisão 4.2)", () => {
+test("validarConfigMpc: pisos numéricos de weight/max_rate/tss/faixas bloqueiam (harmonização da revisão 4.2)", () => {
   const variaveis: VariaveisMpc = {
-    mvs: [mv("mv_1", { limits: { min: 10, max: 5 }, du_max: 0 })],
+    mvs: [mv("mv_1", { limits: { min: 10, max: 5 }, max_rate: 0 })],
     cvs: [cv("cv_1", { tss: 0, weight: 0, sp_limits: { min: 10, max: 5 } })],
     constraints: [restricao("co_1", { tss: 0, range: { low: 10, high: 5 } })],
     dvs: [],
   };
   const { erros } = validarConfigMpc(variaveis, {}, 1, 1);
   expect(erros.some((e) => e.includes("limite mínimo menor que o máximo"))).toBe(true);
-  expect(erros.some((e) => e.includes("Δu máx."))).toBe(true);
+  expect(erros.some((e) => e.includes("taxa máxima maior que zero"))).toBe(true);
   expect(erros.some((e) => e.includes("CV") && e.includes("TSS maior que zero"))).toBe(true);
   expect(erros.some((e) => e.includes("SP mínimo menor que o máximo"))).toBe(true);
   expect(erros.some((e) => e.includes("peso maior que zero"))).toBe(true);
@@ -457,20 +514,17 @@ test("validarConfigMpc: pisos numéricos de weight/du_max/tss/faixas bloqueiam (
   expect(erros.some((e) => e.includes("faixa mínima menor que a máxima"))).toBe(true);
 });
 
-test("validarConfigMpc: du_min negativo, du_min > du_max e move_weight não positivo bloqueiam (TD-007)", () => {
+test("validarConfigMpc: du_min negativo e move_weight não positivo bloqueiam (TD-007)", () => {
+  // `du_min <= max_rate x Ts_mpc` NÃO é mais espelho: depende do Ts_mpc e virou erro de
+  // build do bloco no servidor (ValueError pt-BR) — fora do alcance desta validação.
   const variaveis: VariaveisMpc = {
-    mvs: [
-      mv("mv_neg", { du_min: -1 }),
-      mv("mv_faixa", { du_min: 10 }),
-      mv("mv_peso", { move_weight: 0 }),
-    ],
+    mvs: [mv("mv_neg", { du_min: -1 }), mv("mv_peso", { move_weight: 0 })],
     cvs: [cv("cv_1")],
     constraints: [],
     dvs: [],
   };
   const { erros } = validarConfigMpc(variaveis, {}, 1, 1);
   expect(erros.some((e) => e.includes("Δu mínimo maior ou igual a zero"))).toBe(true);
-  expect(erros).toContain("A MV 'mv_faixa' precisa de du_min menor ou igual a du_max.");
   expect(erros.some((e) => e.includes("peso de movimento maior que zero"))).toBe(true);
 });
 
@@ -597,8 +651,11 @@ test("mesmo mecanismo em TabVariables: limites/Δu digitados numa MV sobrevivem 
     id: "mv_1",
     name: "Vazão de refluxo",
     eu: "m3/h",
+    description: "",
+    zero: 0,
+    span: 100,
     limits: { min: 5, max: 95 },
-    du_max: 3.5,
+    max_rate: 3.5,
     du_min: 0,
     move_weight: 1,
     initial_value: 10,
@@ -607,6 +664,8 @@ test("mesmo mecanismo em TabVariables: limites/Δu digitados numa MV sobrevivem 
     pid: null,
     objective: "none" as const,
     psv: null,
+    fail_action: "no_action" as const,
+    local_shed_mode: null,
   };
   // Aba Resumo montada (nenhum campo `var_mv_1_*` no FormData) — a reconstrução deve
   // preservar o valor já sincronizado no estado, não cair nos campos padrão.
@@ -674,8 +733,11 @@ test("cenário do checkbox 'com PID': campos digitados sobrevivem a desmarcar+ma
     id: "mv_1",
     name: "Vazão",
     eu: "m3/h",
+    description: "",
+    zero: 0,
+    span: 100,
     limits: { min: 0, max: 100 },
-    du_max: 1,
+    max_rate: 1,
     du_min: 0,
     move_weight: 1,
     initial_value: 0,
@@ -691,6 +753,8 @@ test("cenário do checkbox 'com PID': campos digitados sobrevivem a desmarcar+ma
     },
     objective: "none" as const,
     psv: null,
+    fail_action: "no_action" as const,
+    local_shed_mode: null,
   };
   // Passo 1 — checkbox ligado, engenheiro digita os campos do pid, sem trocar de aba.
   const camposDigitados = formulario({

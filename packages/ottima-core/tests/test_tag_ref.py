@@ -56,7 +56,7 @@ def grafo_banco() -> dict:
                                 "name": "MV1",
                                 "eu": "%",
                                 "limits": {"min": 0.0, "max": 100.0},
-                                "du_max": 5.0,
+                                "max_rate": 5.0,
                                 "initial_value": 0.0,
                                 "pid": {
                                     "write_tag_id": 301,
@@ -72,7 +72,7 @@ def grafo_banco() -> dict:
                                 "name": "MV2",
                                 "eu": "%",
                                 "limits": {"min": 0.0, "max": 100.0},
-                                "du_max": 5.0,
+                                "max_rate": 5.0,
                                 "initial_value": 0.0,
                                 "pid": {
                                     "write_tag_id": 401,

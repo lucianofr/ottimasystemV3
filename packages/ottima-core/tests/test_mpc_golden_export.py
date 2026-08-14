@@ -90,8 +90,11 @@ def test_nomes_de_variavel_e_pid_batem_verbatim_com_os_campos_do_mpcconfig():
         "id",
         "name",
         "eu",
+        "description",
+        "zero",
+        "span",
         "limits",
-        "du_max",
+        "max_rate",
         "du_min",
         "move_weight",
         "initial_value",
@@ -100,5 +103,8 @@ def test_nomes_de_variavel_e_pid_batem_verbatim_com_os_campos_do_mpcconfig():
         # defaults retrocompat, mesma lógica do TD-007 com `du_min`/`move_weight`.
         "objective",
         "psv",
+        # RF-613: idem `fail_action`/`local_shed_mode`.
+        "fail_action",
+        "local_shed_mode",
     }
     assert mv["pid"] is None

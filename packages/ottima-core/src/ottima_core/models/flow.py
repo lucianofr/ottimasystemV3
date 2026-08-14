@@ -46,6 +46,9 @@ class Flow(TimestampMixin, Base):
     watchdog_period_ms: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("1500")
     )
+    watchdog_timeout_s: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("10")
+    )
 
     __table_args__ = (
         UniqueConstraint("project_id", "name", name="uq_flows_project_name"),
@@ -54,4 +57,5 @@ class Flow(TimestampMixin, Base):
         CheckConstraint(
             "watchdog_period_ms BETWEEN 500 AND 5000", name="ck_flows_wd_period"
         ),
+        CheckConstraint("watchdog_timeout_s BETWEEN 2 AND 120", name="ck_flows_wd_timeout"),
     )

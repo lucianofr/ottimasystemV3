@@ -2,27 +2,19 @@ import { useMemo, useRef, useState } from "react";
 
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
-import { Select } from "../../components/ui/select";
 import { cn } from "../../lib/cn";
 import { useConnections } from "../connections/useConnections";
 import { useActiveProject } from "../projects/useProjects";
 import { EditorEscala } from "./EditorEscala";
-import { ESCALA_AUTO, gravarEscalas, lerEscalas, type EscalaVar } from "./escalas";
-import { RetencaoHistorico } from "./RetencaoHistorico";
+import { ESCALA_AUTO, gravarEscalas, lerEscalas, limparEscalas, type EscalaVar } from "./escalas";
+import { JanelaTempo } from "./JanelaTempo";
 import { TrendChart, type TrendChartHandle } from "./TrendChart";
 import { CLASSES_PENA, FORMATO_VALOR, LIMITE_PENAS } from "./trendTheme";
 import { montarMatriz, resumirSeries, useHistory, useTags } from "./useHistory";
 import { useJanelaDeslizante } from "./useJanelaDeslizante";
 
-const JANELAS = [
-  { id: "30m", rotulo: "30 min", segundos: 1800 },
-  { id: "2h", rotulo: "2 h", segundos: 7200 },
-  { id: "8h", rotulo: "8 h", segundos: 28800 },
-  { id: "24h", rotulo: "24 h", segundos: 86400 },
-  { id: "7d", rotulo: "7 d", segundos: 604800 },
-] as const;
-
-type JanelaId = (typeof JANELAS)[number]["id"];
+/** Janela default: 30 min (era o preset "30m" do seletor que o JanelaTempo substitui). */
+const JANELA_DEFAULT_SEGUNDOS = 1800;
 
 /** O engenheiro precisa saber quando está olhando agregado, não amostra bruta (spec F2 §9.2). */
 const ROTULO_MODO: Record<"raw" | "1m", string> = { raw: "bruto", "1m": "1 min" };
@@ -33,19 +25,18 @@ const CHAVE_ESCALAS = "ottima.trend.escalas.v1";
 
 export function TrendPage() {
   const [selecionadas, setSelecionadas] = useState<number[]>([]);
-  const [janelaId, setJanelaId] = useState<JanelaId>("30m");
+  const [janelaSegundos, setJanelaSegundos] = useState(JANELA_DEFAULT_SEGUNDOS);
   const [aviso, setAviso] = useState<string | null>(null);
   const [escalas, setEscalas] = useState<Record<string, EscalaVar>>(() =>
     lerEscalas(CHAVE_ESCALAS),
   );
   const chartRef = useRef<TrendChartHandle>(null);
 
-  const janela = JANELAS.find((item) => item.id === janelaId) ?? JANELAS[0];
-  const deslizante = useJanelaDeslizante(janela.segundos);
+  const deslizante = useJanelaDeslizante(janelaSegundos);
   const projeto = useActiveProject();
   const conexoes = useConnections(projeto.data?.id ?? null);
   const tags = useTags();
-  const historico = useHistory(selecionadas, janela.segundos, deslizante.fimEpochS);
+  const historico = useHistory(selecionadas, janelaSegundos, deslizante.fimEpochS);
 
   // `selecionadas` é estado: a identidade só muda quando a seleção muda de fato.
   const dados = useMemo(
@@ -98,6 +89,10 @@ export function TrendPage() {
   function resetLayout(): void {
     deslizante.reset();
     chartRef.current?.resetZoom();
+    // Reset completo: escalas Y fixadas à mão também voltam ao autoscale (e a preferência
+    // persistida some — senão o próximo reload ressuscitaria a escala que o reset apagou).
+    limparEscalas(CHAVE_ESCALAS);
+    setEscalas({});
   }
 
   return (
@@ -113,22 +108,11 @@ export function TrendPage() {
               {ROTULO_MODO[historico.data.mode]}
             </span>
           )}
-          <RetencaoHistorico />
-          <label className="flex items-center gap-2">
-            <span className="plaqueta text-xs text-fg-muted">Janela</span>
-            <Select
-              data-testid="trend-window"
-              className="w-28"
-              value={janelaId}
-              onChange={(evento) => setJanelaId(evento.target.value as JanelaId)}
-            >
-              {JANELAS.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.rotulo}
-                </option>
-              ))}
-            </Select>
-          </label>
+          <JanelaTempo
+            prefixoTestid="trend"
+            segundos={janelaSegundos}
+            onChange={setJanelaSegundos}
+          />
           <div className="flex items-center gap-1">
             <Button
               type="button"
@@ -160,7 +144,6 @@ export function TrendPage() {
               variant="outline"
               size="sm"
               data-testid="trend-janela-reset"
-              disabled={deslizante.aoVivo}
               onClick={resetLayout}
             >
               Reset layout
@@ -238,7 +221,7 @@ export function TrendPage() {
               dados={dados}
               ids={selecionadas}
               rotulos={rotulos}
-              janelaSegundos={janela.segundos}
+              janelaSegundos={janelaSegundos}
               escalas={escalas}
             />
           )}

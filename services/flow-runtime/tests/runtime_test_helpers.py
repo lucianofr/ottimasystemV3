@@ -274,12 +274,12 @@ def counter_graph(node_id: str = "s1") -> dict:
 
 
 def mpc_graph_valido(
-    tag_id: int, *, node_id: str = "m1", du_max: float = 5.0, weight: float = 1.0
+    tag_id: int, *, node_id: str = "m1", max_rate: float = 10.0, weight: float = 1.0
 ) -> dict:
     """Esqueleto mínimo válido do §2.1 (spec F4): 1 MV direta + 1 CV, matriz cheia.
 
     Compartilhado entre `test_supervisor.py` (deploy), `test_hotswap.py` (reload) e
-    `test_mpc_boot_async.py` (tarefa 4.2 F5a — F-1, reload com host novo: `du_max`
+    `test_mpc_boot_async.py` (tarefa 4.2 F5a — F-1, reload com host novo: `max_rate`
     muda config funcional sem afetar horizontes/validação, §4.1-3, mesmo truque de
     `test_supervisor_mpc.py::mpc_graph_com_pid`). A CV entra pela porta obrigatória
     (decisão A-10): precisa de 1 leitor OPC dedicado.
@@ -298,7 +298,7 @@ def mpc_graph_valido(
                         "name": "MV a",
                         "eu": "m3/h",
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": du_max,
+                        "max_rate": max_rate,  # 10 EU/s x Ts_mpc=0.5 s = 5 EU/ciclo
                         "initial_value": 0.0,
                     }
                 ],

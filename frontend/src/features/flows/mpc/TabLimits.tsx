@@ -23,7 +23,7 @@ function LinhaResumo({ id, rotulo, colunas }: { id: string; rotulo: string; colu
 }
 
 /**
- * Aba Restrições & Limites (spec F4 §7.3): `limits`/`du_max`/`initial_value` (MV),
+ * Aba Restrições & Limites (spec F4 §7.3): `limits`/`max_rate`/`initial_value` (MV),
  * `sp_limits` (CV) e `range` (Restrição) — a 4.2 já colocou todos esses campos como entrada
  * editável na aba Variáveis (um fieldset por variável, identidade + números juntos). Duplicar
  * os mesmos `<input name=...>` aqui criaria dois campos não-sincronizados editando o mesmo
@@ -56,7 +56,7 @@ export function TabLimits({ variaveis }: Props) {
               colunas={[
                 ["mín.", formatarNumero(mv.limits.min)],
                 ["máx.", formatarNumero(mv.limits.max)],
-                ["Δu máx.", formatarNumero(mv.du_max)],
+                ["taxa máx. (EU/s)", formatarNumero(mv.max_rate)],
                 ["inicial", formatarNumero(mv.initial_value)],
               ]}
             />

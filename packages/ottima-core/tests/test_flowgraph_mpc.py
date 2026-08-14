@@ -38,7 +38,7 @@ def mv(
         "name": f"MV {suffix}",
         "eu": "m3/h",
         "limits": {"min": 0.0, "max": 100.0},
-        "du_max": 5.0,
+        "max_rate": 5.0,
         "initial_value": 0.0,
     }
     if pid is not None:
@@ -591,11 +591,11 @@ def test_dv_range_valido_nao_afeta_validacao_de_mv_cv_restricao():
     assert not has(errors, "dv_a", "range.low < range.high")
 
 
-def test_du_max_zero_e_erro():
-    node = mpc_node(mvs=[mv("a", du_max=0.0)])
+def test_max_rate_zero_e_erro():
+    node = mpc_node(mvs=[mv("a", max_rate=0.0)])
     graph = mpc_graph(node)
     tags = mpc_tags(node)
-    assert has(errors_of(graph, tags), "mv_a", "du_max > 0")
+    assert has(errors_of(graph, tags), "mv_a", "max_rate > 0")
 
 
 def test_weight_zero_e_erro():

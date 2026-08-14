@@ -120,7 +120,7 @@ def grafo_mv_direta(tag_cv: int, tag_mv: int) -> dict[str, Any]:
                         "name": "MV direta",
                         "eu": "%",
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 5.0,
+                        "max_rate": 5.0,
                         "initial_value": 0.0,
                     }
                 ],

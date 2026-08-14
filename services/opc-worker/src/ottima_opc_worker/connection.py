@@ -34,7 +34,7 @@ from .state import (
     TagConfig,
 )
 from .subscriptions import ValueSubscription
-from .watchdog import FREEZE_THRESHOLD_S, WatchdogTask
+from .watchdog import WatchdogTask
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ class ConnectionRuntime:
         backoff_initial_s: float = BACKOFF_INITIAL_S,
         backoff_max_s: float = BACKOFF_MAX_S,
         heartbeat_interval_s: float = HEARTBEAT_INTERVAL_S,
-        watchdog_freeze_threshold_s: float = FREEZE_THRESHOLD_S,
+        watchdog_freeze_threshold_s: float | None = None,
         failure_pending: bool = False,
     ) -> None:
         self._config = config
@@ -316,8 +316,12 @@ class ConnectionRuntime:
             existing = self._flow_watchdogs.get(flow_id)
             if existing is None:
                 await self._start_flow_watchdog(client, config)
-            elif existing.config != config:
-                await self._stop_flow_watchdog(flow_id)
+            elif existing.config != config or existing.is_dead:
+                # `stop()` da task, não `_stop_flow_watchdog`: a chave de
+                # `flow_watchdog_alive` e a falha pendente do flow são estado da CONEXÃO e
+                # sobrevivem ao rearme (task morta por freeze/hard failure precisa voltar,
+                # mas o `comm_restored` pendente ainda tem de sair quando o bit alternar).
+                await existing.stop()
                 await self._start_flow_watchdog(client, config)
 
     async def _start_flow_watchdog(self, client: Client, config: FlowWatchdogConfig) -> None:

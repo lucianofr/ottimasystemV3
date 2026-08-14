@@ -36,7 +36,7 @@ def _mv(
         "name": id_,
         "eu": "%",
         "limits": {"min": lo, "max": hi},
-        "du_max": 5.0,
+        "max_rate": 5.0,
     }
     if objective != "none":
         mv["objective"] = objective

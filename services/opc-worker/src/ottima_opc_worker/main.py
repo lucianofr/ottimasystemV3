@@ -16,7 +16,7 @@ from sqlalchemy import text
 
 from ottima_core.config import get_settings
 from ottima_core.db import create_engine, create_session_factory
-from ottima_core.logging import setup_logging
+from ottima_core.logging import setup_logging, watch_log_level
 from ottima_opc_worker.state import WorkerState
 from ottima_opc_worker.supervisor import Supervisor
 from ottima_opc_worker.writes import WriteConsumer
@@ -83,6 +83,7 @@ async def lifespan(app: FastAPI):
         # compose; o loop de poll do supervisor reconcilia quando o banco voltar.
         logger.exception("falha ao iniciar o supervisor; o worker sobe sem conexões")
     task = asyncio.create_task(_heartbeat_loop(client, session_factory, app))
+    log_task = asyncio.create_task(watch_log_level(session_factory))
     # O consumidor recebe o mapping VIVO de runtimes: conexão criada depois desta linha
     # já é atendida sem reinscrição no canal (spec §4.1).
     write_consumer = WriteConsumer(client, supervisor.runtimes)
@@ -94,8 +95,13 @@ async def lifespan(app: FastAPI):
     await write_consumer.stop()
     await supervisor.stop()
     task.cancel()
+    log_task.cancel()
     try:
         await task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await log_task
     except asyncio.CancelledError:
         pass
     await engine.dispose()

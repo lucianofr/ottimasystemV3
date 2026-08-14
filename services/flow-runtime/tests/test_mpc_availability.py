@@ -42,7 +42,7 @@ def _config(*, mode_read: int | None = MODE_READ_PID, readback_direto: int | Non
                         "name": "MV com pid",
                         "eu": "m3/h",
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 5.0,
+                        "max_rate": 5.0,
                         "initial_value": 10.0,
                         "pid": {
                             "write_tag_id": 501,
@@ -58,7 +58,7 @@ def _config(*, mode_read: int | None = MODE_READ_PID, readback_direto: int | Non
                         "name": "MV direta",
                         "eu": "%",
                         "limits": {"min": -10.0, "max": 10.0},
-                        "du_max": 2.0,
+                        "max_rate": 2.0,
                         "initial_value": 1.5,
                         "readback_tag_id": readback_direto,
                         "pid": None,

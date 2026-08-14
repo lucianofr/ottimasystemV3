@@ -86,6 +86,7 @@ class BundleFlow(BaseModel):
     watchdog_read_node_id: str | None = None
     watchdog_write_node_id: str | None = None
     watchdog_period_ms: int = 1500
+    watchdog_timeout_s: int = 10
 
     @model_validator(mode="after")
     def _coerencia(self) -> "BundleFlow":
@@ -96,6 +97,8 @@ class BundleFlow(BaseModel):
             0 if self.watchdog_connection else None,
             self.watchdog_read_node_id,
             self.watchdog_write_node_id,
+            self.watchdog_period_ms,
+            self.watchdog_timeout_s,
         )
         if erro:
             raise ValueError(erro)

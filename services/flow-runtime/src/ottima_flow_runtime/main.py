@@ -25,7 +25,7 @@ from sqlalchemy import text
 
 from ottima_core.config import get_settings
 from ottima_core.db import create_engine, create_session_factory
-from ottima_core.logging import setup_logging
+from ottima_core.logging import setup_logging, watch_log_level
 from ottima_flow_runtime.events import build_event_listener
 from ottima_flow_runtime.script_pool import ScriptPool
 from ottima_flow_runtime.snapshot import ValueSnapshot
@@ -108,6 +108,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("falha ao iniciar o runtime; o serviço sobe sem flows")
     task = asyncio.create_task(_heartbeat_loop(client, session_factory, app))
+    log_task = asyncio.create_task(watch_log_level(session_factory))
     yield
     # Assinante de eventos primeiro: vivo depois do supervisor, tentaria derrubar flow já
     # desmontado. O `ScriptPool` é encerrado dentro do `supervisor.stop()`, depois das
@@ -116,8 +117,13 @@ async def lifespan(app: FastAPI):
     await supervisor.stop()
     await snapshot.stop()
     task.cancel()
+    log_task.cancel()
     try:
         await task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await log_task
     except asyncio.CancelledError:
         pass
     await engine.dispose()

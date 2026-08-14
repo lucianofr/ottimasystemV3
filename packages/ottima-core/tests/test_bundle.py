@@ -71,6 +71,7 @@ def _flow(**over: object) -> Flow:
         "watchdog_read_node_id": None,
         "watchdog_write_node_id": None,
         "watchdog_period_ms": 1500,
+        "watchdog_timeout_s": 10,
     }
     dados.update(over)
     return Flow(**dados)

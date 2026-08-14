@@ -24,7 +24,7 @@ def mpc_skeleton() -> dict:
                     "name": "Vazão de refluxo",
                     "eu": "m3/h",
                     "limits": {"min": 0.0, "max": 100.0},
-                    "du_max": 5.0,
+                    "max_rate": 5.0,
                     "initial_value": 0.0,
                     "pid": {
                         "write_tag_id": 12,
@@ -88,7 +88,7 @@ def test_esqueleto_verbatim_parseia_todos_os_campos():
     assert mv.eu == "m3/h"
     assert mv.limits.min == 0.0
     assert mv.limits.max == 100.0
-    assert mv.du_max == 5.0
+    assert mv.max_rate == 5.0
     assert mv.initial_value == 0.0
     assert mv.pid is not None
     assert mv.pid.write_tag_id == 12
@@ -264,7 +264,7 @@ def two_by_two_config(*, theta_extra: float = 0.0) -> dict:
             "name": id_,
             "eu": "u",
             "limits": {"min": 0.0, "max": 1.0},
-            "du_max": 1.0,
+            "max_rate": 1.0,
             "initial_value": 0.0,
             "pid": None,
         }

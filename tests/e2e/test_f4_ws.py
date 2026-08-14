@@ -66,9 +66,20 @@ def test_e2e_f4_09_shed_por_mode_read_divergente(
     do espelho (`sim.w.int`, o mesmo node físico de `mode_cmd`): o loop do opcsim
     (`VALUES_PERIOD=0,2s`) copia pro espelho, e como nada mais volta a escrever `mode_cmd`
     até a próxima transição de modo, a divergência PERSISTE (contexto da tarefa: "a
-    escrita precisa persistir") sem precisar congelar nada."""
+    escrita precisa persistir") sem precisar congelar nada.
+
+    O grafo aqui tem SÓ a MV com `pid`: sob o ADR-028 a divergência de UMA MV é parcial e
+    não derruba o bloco enquanto sobrar alavanca (`mv_direta` do grafo padrão nunca sai de
+    `rcas_ok`, por não ter readback nem modo). O shed tudo-ou-nada que este teste afirma
+    exige que a MV divergente seja a única — é o cenário de perda total (RF-628)."""
     resetar_atuador_mpc(opcsim_client)
-    flow_id = criar_flow_mpc("f4-09", grafo=grafo_mpc_tfs(ambiente_mpc))
+    grafo = grafo_mpc_tfs(ambiente_mpc)
+    bloco = next(no for no in grafo["nodes"] if no["id"] == "mpc1")
+    bloco["data"]["variables"]["mvs"] = [
+        mv for mv in bloco["data"]["variables"]["mvs"] if mv["id"] == "mv_pid"
+    ]
+    del bloco["data"]["models"]["co_1"]["mv_direta"]
+    flow_id = criar_flow_mpc("f4-09", grafo=grafo)
 
     with assinar_mpc_state(admin, flow_id, "mpc1") as fluxo:
         deploy_flow(admin, flow_id)
@@ -124,7 +135,7 @@ def _config_mpc_leve(*, mv_id: str, cv_id: str, weight: float) -> dict:
                     "name": f"MV {mv_id}",
                     "eu": "%",
                     "limits": dict(LIMITES_MV),
-                    "du_max": DU_MAX_MV,
+                    "max_rate": DU_MAX_MV,
                     "initial_value": 0.0,
                 }
             ],
@@ -233,7 +244,15 @@ def test_e2e_f4_10_ws_fanout_e_hot_swap(
         amostra = fluxo1.esperar(
             lambda _e: True, timeout=30.0, descricao="1ª amostra de mpc1 pós-deploy"
         )
-        assert set(amostra.keys()) == {"modes", "status", "vars", "cost", "prediction", "ts"}
+        assert set(amostra.keys()) == {
+            "modes",
+            "status",
+            "vars",
+            "cost",
+            "prediction",
+            "ts",
+            "ssto",
+        }
         assert set(amostra["modes"].keys()) == {"local_remote", "man_auto"}
         assert set(amostra["status"].keys()) == {
             "solver",
@@ -244,7 +263,9 @@ def test_e2e_f4_10_ws_fanout_e_hot_swap(
         }
         assert set(amostra["prediction"].keys()) == {"t", "cv", "mv", "ts"}
         for estado_var in amostra["vars"].values():
-            assert set(estado_var.keys()) == {"v", "sp"}
+            # `status` é opcional e só existe em MV (ADR-028/RF-626): o contrato §5.1 é
+            # `v`+`sp` sempre, `status` quando a MV tem tag de modo/readback.
+            assert {"v", "sp"} <= set(estado_var.keys()) <= {"v", "sp", "status"}
 
         fluxo1.esperar(
             lambda e: e["modes"]["local_remote"] == "local",

@@ -12,23 +12,6 @@ import type { MpcPrediction, MpcVarState } from "../../lib/contracts.gen";
 // 5.1 — Dados: janelas, polling e borda viva (spec F5 §7.4-6 item 1-2)
 // ----------------------------------------------------------------------------------------
 
-export interface JanelaOperacao {
-  readonly id: "15m" | "30m" | "2h" | "8h";
-  readonly rotulo: string;
-  readonly segundos: number;
-}
-
-/** Janelas do trend de operação (brief 5.1) — teto próprio, distinto das janelas do trend de
- *  engenharia (`features/trend/TrendPage.tsx`), que serve outro caso de uso (tags OPC). */
-export const JANELAS_OPERACAO: readonly JanelaOperacao[] = [
-  { id: "15m", rotulo: "15 min", segundos: 900 },
-  { id: "30m", rotulo: "30 min", segundos: 1800 },
-  { id: "2h", rotulo: "2 h", segundos: 7200 },
-  { id: "8h", rotulo: "8 h", segundos: 28800 },
-];
-
-export const JANELA_PADRAO_ID: JanelaOperacao["id"] = "30m";
-
 /** Polling do histórico (brief 5.1) — mesma cadência do trend de engenharia (`useHistory.ts`). */
 export const INTERVALO_POLLING_OPERACAO_MS = 5000;
 
@@ -52,6 +35,13 @@ export interface SerieOperacao {
   readonly auto: readonly boolean[];
 }
 
+/** Ponto da ponta viva na taxa OPC (canal `opc.values`, decisão F6 A-1 revertida): só `v`
+ *  — SP/modo seguem vindo do `mpc.state` (o merge abaixo carrega o último conhecido). */
+export interface PontoOpc {
+  readonly t: number;
+  readonly v: number;
+}
+
 /**
  * Une o histórico do poll (`GET /api/history/mpc`) com a borda viva (`mpc.state` via WS):
  * cada amostra vira um ponto por `ts`, deduplicado — quando o poll re-sincroniza e já traz um
@@ -59,11 +49,17 @@ export interface SerieOperacao {
  * e a borda viva descrevem o mesmo `ts`, então o `Map` por `ts` funde os dois sem distinção;
  * não importa qual "vence", os dois têm que concordar por construção — mesmo `mpc.state` que
  * o recorder persistiu). Pura: não muta `historico` nem `vivas`.
+ *
+ * `pontosOpc` (opcional): adensamento da ponta viva na taxa OPC por variável. Ponto em `ts`
+ * já coberto pelo histórico/borda viva é ignorado (o `mpc.state` manda); o `sp`/`auto` de um
+ * ponto OPC herdam o último valor conhecido da série — SP e modo só mudam na cadência do
+ * MPC, e um buraco `null` quebraria a linha de SP a cada ponto adensado.
  */
 export function mesclarSeriesVivas(
   historico: MpcHistoryResponse,
   vivas: readonly AmostraViva[],
   ordem: readonly string[],
+  pontosOpc?: ReadonlyMap<string, readonly PontoOpc[]>,
 ): SerieOperacao[] {
   const porVar = new Map(historico.series.map((serie) => [serie.var_id, serie]));
 
@@ -83,15 +79,34 @@ export function mesclarSeriesVivas(
         pontos.set(tsSegundos, { v: valor.v, sp: valor.sp, auto: amostra.auto });
       }
     }
+    const tsOpc = new Set<number>();
+    for (const ponto of pontosOpc?.get(id) ?? []) {
+      if (pontos.has(ponto.t)) continue;
+      // sp/auto provisórios: o passe cronológico abaixo troca pelo último conhecido.
+      pontos.set(ponto.t, { v: ponto.v, sp: null, auto: false });
+      tsOpc.add(ponto.t);
+    }
 
     const t = [...pontos.keys()].sort((a, b) => a - b);
-    return {
-      id,
-      t,
-      v: t.map((ts) => pontos.get(ts)!.v),
-      sp: t.map((ts) => pontos.get(ts)!.sp),
-      auto: t.map((ts) => pontos.get(ts)!.auto),
-    };
+    const v: number[] = [];
+    const sp: (number | null)[] = [];
+    const auto: boolean[] = [];
+    let spVigente: number | null = null;
+    let autoVigente = false;
+    for (const ts of t) {
+      const ponto = pontos.get(ts)!;
+      if (tsOpc.has(ts)) {
+        sp.push(spVigente);
+        auto.push(autoVigente);
+      } else {
+        spVigente = ponto.sp ?? spVigente;
+        autoVigente = ponto.auto;
+        sp.push(ponto.sp);
+        auto.push(ponto.auto);
+      }
+      v.push(ponto.v);
+    }
+    return { id, t, v, sp, auto };
   });
 }
 

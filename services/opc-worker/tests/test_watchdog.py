@@ -32,7 +32,7 @@ from ottima_opc_worker.state import (
     ConnectionState,
     FlowWatchdogConfig,
 )
-from ottima_opc_worker.watchdog import FREEZE_THRESHOLD_S, WatchdogTask
+from ottima_opc_worker.watchdog import WatchdogTask
 
 CONN_ID = 9
 FLOW_ID = 501
@@ -202,9 +202,10 @@ async def watchdog_running(
 # --- limiar de produção ------------------------------------------------------------
 
 
-def test_limiar_de_congelamento_e_fixo_em_dez_segundos() -> None:
-    """ADR-009: 10 s é limiar fixo de produção, não knob de usuário; injeção só em teste."""
-    assert FREEZE_THRESHOLD_S == 10.0
+def test_limiar_de_congelamento_default_em_dez_segundos() -> None:
+    """RF-206 revisado: 10 s é o DEFAULT por flow (`timeout_s`); injeção só em teste."""
+    cfg = FlowWatchdogConfig(flow_id=1, read_node_id="a", write_node_id="b", period_ms=1500)
+    assert cfg.timeout_s == 10.0
 
 
 # --- ciclo do watchdog contra o rung do opcsim -------------------------------------
@@ -444,7 +445,9 @@ async def test_dois_flow_watchdogs_na_mesma_conexao_sao_isolados(
     runtime = ConnectionRuntime(
         config, redis_client, snapshot, watchdog_freeze_threshold_s=TEST_FREEZE_THRESHOLD_S
     )
-    flow_a = make_watchdog_config(flow_id=1, read_node=NODE_WD_TO_SYSTEM, write_node=NODE_WD_FROM_SYSTEM)
+    flow_a = make_watchdog_config(
+        flow_id=1, read_node=NODE_WD_TO_SYSTEM, write_node=NODE_WD_FROM_SYSTEM
+    )
     flow_b = make_watchdog_config(
         flow_id=2, read_node=NODE_WD_TO_SYSTEM_2, write_node=NODE_WD_FROM_SYSTEM_2
     )
@@ -463,5 +466,42 @@ async def test_dois_flow_watchdogs_na_mesma_conexao_sao_isolados(
         assert snapshot.flow_watchdog_alive.get(2) is True
         assert runtime.state is ConnectionState.UP
         assert set(runtime.flow_watchdogs) == {1, 2}
+    finally:
+        await runtime.stop()
+
+
+async def test_dois_flows_no_mesmo_par_de_nos_nao_se_congelam(
+    sim: OpcSimServer, redis_client: Redis
+) -> None:
+    """Dois flows apontados ao MESMO par de nós continuam vivos (achado do gate E2E).
+
+    Cada watchdog copia `to_system` para `from_system` na sua cadência; com dois copiadores
+    defasados o bit alterna 2× por período, e uma leitura por período veria sempre o MESMO
+    valor (aliasing) e acusaria congelamento de um handshake vivo. A leitura é
+    sobreamostrada justamente para isso — o par compartilhado é topologia degenerada (em
+    planta cada flow tem o seu par), mas não pode virar `watchdog_dead` fantasma.
+    """
+    config = make_connection_config(sim.endpoint)
+    snapshot = ConnectionSnapshot(name=config.name)
+    runtime = ConnectionRuntime(
+        config, redis_client, snapshot, watchdog_freeze_threshold_s=TEST_FREEZE_THRESHOLD_S
+    )
+    par = {"read_node": NODE_WD_TO_SYSTEM, "write_node": NODE_WD_FROM_SYSTEM}
+    await runtime.set_flow_watchdogs(
+        {
+            1: make_watchdog_config(flow_id=1, **par),
+            2: make_watchdog_config(flow_id=2, **par),
+        }
+    )
+    await runtime.start()
+    try:
+        await await_until(
+            lambda: snapshot.flow_watchdog_alive.get(1) and snapshot.flow_watchdog_alive.get(2)
+        )
+        # Passada a janela do limiar, nenhum dos dois pode ter caído por falso congelamento.
+        await asyncio.sleep(TEST_FREEZE_THRESHOLD_S * 1.5)
+        assert snapshot.flow_watchdog_alive.get(1) is True
+        assert snapshot.flow_watchdog_alive.get(2) is True
+        assert runtime.state is ConnectionState.UP
     finally:
         await runtime.stop()

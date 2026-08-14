@@ -111,3 +111,13 @@ export function gravarEscalas(chaveStorage: string, valor: Record<string, Escala
     // Preferência de layout não vale derrubar a tela de operação.
   }
 }
+
+/** Remove a entrada persistida (reset de layout): a tela volta ao autoscale em todas as
+ *  variáveis. Storage bloqueado é silencioso pelo mesmo motivo de `gravarEscalas`. */
+export function limparEscalas(chaveStorage: string): void {
+  try {
+    localStorage.removeItem(chaveStorage);
+  } catch {
+    // idem
+  }
+}

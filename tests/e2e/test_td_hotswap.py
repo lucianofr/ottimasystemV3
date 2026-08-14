@@ -1,7 +1,7 @@
 """L2 do fechamento de tech debts — hot-swap com transplante de estado (TD-006).
 
 Cenários E2E-TD-01/02/03. A política fixada é: mudar a SINTONIA do MPC (pesos, limites,
-du_max) com o MESMO conjunto de MVs preserva REMOTO/AUTO com rearme bumpless; mudar o
+max_rate) com o MESMO conjunto de MVs preserva REMOTO/AUTO com rearme bumpless; mudar o
 CONJUNTO de MVs continua derrubando o bloco para LOCAL. Salvar o flow com o grafo idêntico
 não pode nem reconstruir o bloco.
 
@@ -109,7 +109,7 @@ def grafo_com_mv_extra(ambiente: AmbienteMpc) -> dict[str, Any]:
             "name": "MV acrescentada",
             "eu": "%",
             "limits": dict(LIMITES_MV),
-            "du_max": DU_MAX_MV,
+            "max_rate": DU_MAX_MV,
             "initial_value": 0.0,
         }
     )
@@ -174,7 +174,7 @@ def test_e2e_td_01_resintonia_preserva_auto_e_nao_da_salto_na_mv(
     valores = [quadro["vars"]["mv_pid"]["v"] for quadro in quadros]
     saltos = [abs(depois - antes) for antes, depois in zip(valores, valores[1:], strict=False)]
     assert all(salto <= DU_MAX_MV + TOLERANCIA_DU for salto in saltos), (
-        f"MV saltou além de du_max ({DU_MAX_MV}) durante o swap: {saltos}"
+        f"MV saltou além de du_max/ciclo ({DU_MAX_MV}) durante o swap: {saltos}"
     )
 
 

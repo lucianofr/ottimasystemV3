@@ -68,7 +68,7 @@ def _config() -> MpcConfig:
                         "name": "mv_1",
                         "eu": "u",
                         "limits": {"min": 0.0, "max": 1000.0},
-                        "du_max": 5.0,
+                        "max_rate": 5.0,
                         "initial_value": 0.0,
                         "pid": None,
                     }

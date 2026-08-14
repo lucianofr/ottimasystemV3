@@ -24,6 +24,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ottima_core.flowgraph import RowKind
+
 DIRECT_PASS_RATIO = 10.0
 """`tau < Ts/DIRECT_PASS_RATIO` degrada o estágio para passagem direta — mesmo limiar do
 TFS (`ottima_flow_runtime.blocks.tfs.DIRECT_PASS_RATIO`): a simulação e o modelo interno do
@@ -134,3 +136,20 @@ def discretize_iopdt(Ki: float, theta: float, ts: float) -> PairSS:
     b = np.array([[Ki * ts]])
     c = np.array([[1.0]])
     return PairSS(a=a, b=b, c=c, delay=_delay_samples(theta, ts))
+
+
+def eu_gain_params(
+    params: dict[str, float], *, kind: RowKind, row_span: float, col_span: float
+) -> dict[str, float]:
+    """Converte o ganho do config — adimensional %/% (ΔCV%/ΔMV%, RF-602 revisado) — para a
+    forma em EU que `discretize_*` espera: multiplica `K` (selfreg) ou `Ki` (integrating)
+    por `span_linha / span_coluna`. Os defaults 0/100 dão razão 1, então config sem
+    zero/span explícito reproduz o ganho de antes bit a bit. Cópia rasa: `params` do
+    chamador nunca é mutado."""
+    escala = row_span / col_span
+    convertido = dict(params)
+    if kind == "selfreg":
+        convertido["K"] = params["K"] * escala
+    else:
+        convertido["Ki"] = params["Ki"] * escala
+    return convertido

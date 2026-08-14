@@ -647,7 +647,8 @@ def _config_mpc_malha(ambiente: AmbienteMpc, *, multiplier: int = MULTIPLICADOR_
                     "name": "MV com PID",
                     "eu": "%",
                     "limits": dict(LIMITES_MV),
-                    "du_max": DU_MAX_MV,
+                    # EU/s -> mesmo DU_MAX_MV por ciclo
+                    "max_rate": DU_MAX_MV / (TS_FLOW_MPC * multiplier),
                     "initial_value": 0.0,
                     "pid": pid,
                 },
@@ -656,7 +657,8 @@ def _config_mpc_malha(ambiente: AmbienteMpc, *, multiplier: int = MULTIPLICADOR_
                     "name": "MV direta",
                     "eu": "%",
                     "limits": dict(LIMITES_MV),
-                    "du_max": DU_MAX_MV,
+                    # EU/s -> mesmo DU_MAX_MV por ciclo
+                    "max_rate": DU_MAX_MV / (TS_FLOW_MPC * multiplier),
                     "initial_value": 0.0,
                 },
             ],

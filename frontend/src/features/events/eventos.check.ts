@@ -43,6 +43,7 @@ function flow(id: number, name: string): FlowOut {
     desired_state: "running",
     watchdog_enabled: false,
     watchdog_period_ms: 1500,
+    watchdog_timeout_s: 10,
     updated_at: "2026-01-01T00:00:00.000Z",
   };
 }

@@ -240,7 +240,9 @@ async def test_congelamento_de_flow_alarma_sem_afetar_sessao_ou_tags(
     snapshot = ConnectionSnapshot(name=config.name)
     watchdog = make_watchdog()
     async with collect_bus(redis_client, config.id) as trail:
-        async with running(make_runtime(config, redis_client, snapshot), watchdog=watchdog) as runtime:
+        async with running(
+            make_runtime(config, redis_client, snapshot), watchdog=watchdog
+        ) as runtime:
             await await_until(lambda: snapshot.flow_watchdog_alive.get(FLOW_ID))
             await sim.set_freeze_watchdog(True)
             await await_until(lambda: len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1)
@@ -426,7 +428,9 @@ async def test_tentativa_superada_nao_deixa_watchdog_orfao(
     snapshot = ConnectionSnapshot(name=config.name)
     watchdog = make_watchdog(period_ms=SLOW_PERIOD_MS)
     async with collect_bus(redis_client, config.id) as trail:
-        async with running(make_runtime(config, redis_client, snapshot), watchdog=watchdog) as runtime:
+        async with running(
+            make_runtime(config, redis_client, snapshot), watchdog=watchdog
+        ) as runtime:
             await await_until(lambda: len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1)
             # Marcador determinístico: a tentativa superada já desenrolou por completo.
             await await_until(lambda: tentativas_encerradas >= 1)
@@ -458,7 +462,9 @@ async def test_flow_so_restaura_depois_de_alternar_apos_a_sessao_voltar(
     snapshot = ConnectionSnapshot(name=config.name)
     watchdog = make_watchdog()
     async with collect_bus(redis_client, config.id) as trail:
-        async with running(make_runtime(config, redis_client, snapshot), watchdog=watchdog) as runtime:
+        async with running(
+            make_runtime(config, redis_client, snapshot), watchdog=watchdog
+        ) as runtime:
             await await_until(lambda: snapshot.flow_watchdog_alive.get(FLOW_ID))
             await sim.set_freeze_watchdog(True)
             await await_until(
@@ -485,7 +491,9 @@ async def test_flow_so_restaura_depois_de_alternar_apos_a_sessao_voltar(
                     )
                 )
                 restaurado = next(
-                    e for e in events_of_kind(trail, KIND_COMM_RESTORED) if "flow_id" in e["payload"]
+                    e
+                    for e in events_of_kind(trail, KIND_COMM_RESTORED)
+                    if "flow_id" in e["payload"]
                 )
                 assert restaurado["severity"] == "info"
                 assert restaurado["origin"] == f"conn:{config.id}"
@@ -497,9 +505,12 @@ async def test_flow_so_restaura_depois_de_alternar_apos_a_sessao_voltar(
                 assert snapshot.flow_watchdog_alive[FLOW_ID] is True
 
                 await asyncio.sleep(QUIET_WINDOW_S)
-                assert len(
-                    [e for e in events_of_kind(trail, KIND_COMM_RESTORED) if "flow_id" in e["payload"]]
-                ) == 1
+                restaurados = [
+                    e
+                    for e in events_of_kind(trail, KIND_COMM_RESTORED)
+                    if "flow_id" in e["payload"]
+                ]
+                assert len(restaurados) == 1
             finally:
                 await sim.stop()
 

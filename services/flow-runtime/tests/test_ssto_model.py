@@ -25,7 +25,7 @@ def _mv(id_: str, *, operating_point: float = 0.0) -> dict:
         "name": id_,
         "eu": "%",
         "limits": {"min": 0.0, "max": 100.0},
-        "du_max": 5.0,
+        "max_rate": 5.0,
         "operating_point": operating_point,
     }
 

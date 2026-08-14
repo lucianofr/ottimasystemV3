@@ -24,7 +24,8 @@ from ottima_core.flowgraph import MpcConfig
 from ottima_flow_runtime.mpc.worker import SolveRequest, SolveResult
 
 LIMITES = (0.0, 1000.0)
-DU_MAX = 5.0
+DU_MAX = 5.0  # EU/ciclo
+MAX_RATE = DU_MAX / 2.0  # EU/s (Ts_mpc=2 s, mesma régua de test_mpc_worker)
 
 
 def _config_2x1() -> MpcConfig:
@@ -36,8 +37,8 @@ def _config_2x1() -> MpcConfig:
             "multiplier": 2,
             "variables": {
                 "mvs": [
-                    _mv("mv_1", limits=LIMITES, du_max=DU_MAX),
-                    _mv("mv_2", limits=LIMITES, du_max=DU_MAX),
+                    _mv("mv_1", limits=LIMITES, max_rate=MAX_RATE),
+                    _mv("mv_2", limits=LIMITES, max_rate=MAX_RATE),
                 ],
                 "cvs": [_cv("cv_1")],
                 "constraints": [],
@@ -57,7 +58,7 @@ def _pedido(
     sp: float = 400.0,
     reinit: bool = True,
 ) -> SolveRequest:
-    """SP bem acima da CV medida: o solve QUER subir as duas MVs no `du_max` inteiro."""
+    """SP bem acima da CV medida: o solve QUER subir as duas MVs no teto de taxa inteiro."""
     return SolveRequest(
         y={"cv_1": 0.0},
         u_applied=u_applied,

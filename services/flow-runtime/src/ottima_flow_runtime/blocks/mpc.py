@@ -38,6 +38,7 @@ mudar o comportamento desta tarefa (achado da tarefa 2.2, documentado no relató
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -164,6 +165,22 @@ class MpcBlock(Block):
 
         self._mvs: dict[str, MvVar] = {v.id: v for v in config.variables.mvs}
         self._cvs: dict[str, CvVar] = {v.id: v for v in config.variables.cvs}
+        # RF-612/614: PV-tracking fora de AUTO por CV, e SP remoto por tag OPC-UA.
+        self._track_sp = {cv.id: cv.track_sp for cv in config.variables.cvs}
+        self._remote_sp = {
+            cv.id: cv.remote_sp_tag_id
+            for cv in config.variables.cvs
+            if cv.remote_sp_tag_id is not None
+        }
+        # RF-613: ação de falha por variável (rows + MVs) e timeout de simulação (só rows).
+        self._fail_action = {
+            v.id: v.fail_action
+            for v in (*config.variables.cvs, *config.variables.constraints, *config.variables.mvs)
+        }
+        self._fail_timeout = {
+            v.id: v.fail_timeout_s for v in (*config.variables.cvs, *config.variables.constraints)
+        }
+        self.tem_fail_action = any(acao != "no_action" for acao in self._fail_action.values())
         self._mv_ids = tuple(self._mvs)
         self._cv_ids = tuple(self._cvs)
         self._co_ids = tuple(v.id for v in config.variables.constraints)
@@ -323,6 +340,15 @@ class MpcBlock(Block):
         self._overrun_reported = False
         self._input_invalid_reported = False
         self._input_ok = True
+        # RF-613 — debounce de 2 execuções por variável (mesma régua do shed RF-628):
+        # `_fail_streak` conta fronteiras ruins consecutivas; `_fail_pending` guarda o
+        # (ação final, motivo) pronto para o orquestrador consumir; `_fail_fired` é o
+        # edge-trigger (não re-dispara enquanto a condição não sanear); `_simulacao_desde`
+        # marca o início da janela de simulação (`fail_timeout_s`) por linha.
+        self._fail_streak: dict[str, int] = {}
+        self._fail_pending: dict[str, tuple[str, str]] = {}
+        self._fail_fired: set[str] = set()
+        self._simulacao_desde: dict[str, float] = {}
         # Registro do SSTO à espera de publicação (ADR-027 §11): preenchido ao aplicar o
         # resultado, consumido pela publicação da MESMA fronteira. Uma execução, um
         # registro — republicá-lo duplicaria linha em `ssto_runs`.
@@ -387,6 +413,19 @@ class MpcBlock(Block):
         # inclusive o quadro de cold start publica um status honesto.
         await self._reclassify_mvs()
 
+        # SP remoto (RF-614): a cada varredura, antes de qualquer gate — qualidade boa
+        # atualiza `_sp` (clamp em sp_limits); ruim/ausente mantém o último (dado cíclico,
+        # sem evento). A cada varredura, não só na fronteira: o operador vê o SP seguir a
+        # tag no `mpc.state` mesmo entre execuções.
+        for cv_id, tag_id in self._remote_sp.items():
+            if tag_id is None:
+                continue
+            tag = self._snapshot.get(tag_id)
+            if tag is None or tag.quality != 0:
+                continue
+            cv = self._cvs[cv_id]
+            self._sp[cv_id] = _clamp(float(tag.value), cv.sp_limits.min, cv.sp_limits.max)
+
         samples = {pid: inputs.get(pid, PortSample(None, False)) for pid in self._entrada_ids}
         if has_cold_input(samples):
             if is_frontier:
@@ -398,17 +437,51 @@ class MpcBlock(Block):
                 await self._publish(self._build_state(ts))
             return null_outputs(self._mv_ids)
 
-        valid = all(sample.ok for sample in samples.values())
+        # RF-613 — validez por linha: CV/Restrição com amostra ruim e `fail_action`
+        # `simulate_*` DENTRO de `fail_timeout_s` recebe o valor previsto da última
+        # predição aplicada (ou, sem predição, a última medição boa) e conta como válida
+        # para o solve. DVs seguem no gate global (não têm o que simular). Expirada a
+        # janela, a linha volta a contar como ruim e a ação final corre pelo debounce da
+        # fronteira (`_avaliar_fail_actions`).
+        agora_mono = time.monotonic()
+        simuladas: set[str] = set()
+        for row_id in self._row_ids:
+            if samples[row_id].ok:
+                self._simulacao_desde.pop(row_id, None)
+                continue
+            if self._fail_action.get(row_id) not in ("simulate_manual", "simulate_shed_local"):
+                continue
+            inicio = self._simulacao_desde.setdefault(row_id, agora_mono)
+            if agora_mono - inicio > self._fail_timeout.get(row_id, 60.0):
+                continue
+            previsto = self._valor_previsto(row_id)
+            if previsto is None:
+                continue
+            self._last_measured[row_id] = previsto
+            simuladas.add(row_id)
+
+        valid = all(samples[dv_id].ok for dv_id in self._dv_ids) and all(
+            samples[row_id].ok or row_id in simuladas for row_id in self._row_ids
+        )
         self._input_ok = valid
         if valid:
             self._input_invalid_reported = False
             for var_id, sample in samples.items():
+                if not sample.ok:
+                    continue  # linha simulada: `_last_measured` já recebeu o previsto
                 self._last_measured[var_id] = float(sample.v)  # type: ignore[arg-type]
             if not self._in_auto:
                 for cv_id in self._cv_ids:
+                    # SP remoto (RF-614) segue a tag, não o PV; `track_sp=False` (RF-612)
+                    # segura o SP do operador fora de AUTO.
+                    if cv_id in self._remote_sp or not self._track_sp[cv_id]:
+                        continue
                     self._sp[cv_id] = self._last_measured[cv_id]
         else:
             await self._report_input_invalid()
+
+        if is_frontier:
+            self._avaliar_fail_actions(samples, simuladas)
 
         if is_frontier and valid:
             await self._run_frontier(ts)
@@ -430,6 +503,95 @@ class MpcBlock(Block):
             await self._publish(self._build_state(ts))
 
         return outputs
+
+    def _valor_previsto(self, row_id: str) -> float | None:
+        """Valor simulado de uma linha com medição ruim (RF-613): o primeiro passo à frente
+        da última predição aplicada (índice 1 da série — o 0 é o instante do solve); sem
+        predição disponível, a última medição boa (`_last_measured`, hold conservador)."""
+        idx = self._row_ids.index(row_id)
+        serie = (
+            self._last_prediction.cv[idx] if idx < len(self._last_prediction.cv) else []
+        )
+        if len(serie) > 1:
+            return float(serie[1])
+        return self._last_measured.get(row_id)
+
+    def _avaliar_fail_actions(
+        self, samples: Mapping[str, PortSample], simuladas: set[str]
+    ) -> None:
+        """Debounce das fail actions (RF-613), na cadência da fronteira (Ts_mpc): 2
+        execuções ruins consecutivas registram a ação final em `_fail_pending` para o
+        orquestrador consumir. Só em REMOTO — em LOCAL o MPC não escreve, a ação não teria
+        efeito (e os contadores zeram: a entrada em REMOTO recomeça a régua).
+
+        Condição "ruim": linha com amostra ruim NÃO simulada (sem `simulate_*` ou janela
+        expirada — motivo `simulate_timeout`) / MV fora de `rcas_ok` (`mv_unavailable`,
+        lido do `_mv_status` já apurado nesta varredura). Sã: zera o streak, limpa o
+        pendente não consumido e rearma o edge-trigger.
+        """
+        if self._local_remote != "remote":
+            self._fail_streak.clear()
+            self._fail_pending.clear()
+            self._fail_fired.clear()
+            return
+        for var_id in (*self._row_ids, *self._mv_ids):
+            acao = self._fail_action.get(var_id, "no_action")
+            if acao == "no_action":
+                continue
+            if var_id in self._mv_ids:
+                ruim = (
+                    self._mv_status.get(var_id, MvAvailability.RCAS_OK)
+                    is not MvAvailability.RCAS_OK
+                )
+                motivo = "mv_unavailable"
+                final = acao
+            else:
+                ruim = not samples[var_id].ok and var_id not in simuladas
+                expirou = ruim and var_id in self._simulacao_desde
+                motivo = "bad_quality"
+                if expirou:
+                    agora = time.monotonic()
+                    if (
+                        acao in ("simulate_manual", "simulate_shed_local")
+                        and agora - self._simulacao_desde[var_id]
+                        > self._fail_timeout.get(var_id, 60.0)
+                    ):
+                        motivo = "simulate_timeout"
+                final = {
+                    "simulate_manual": "manual",
+                    "simulate_shed_local": "shed_local",
+                }.get(acao, acao)
+            if not ruim:
+                self._fail_streak.pop(var_id, None)
+                self._fail_pending.pop(var_id, None)
+                self._fail_fired.discard(var_id)
+                self._simulacao_desde.pop(var_id, None)
+                continue
+            if var_id in self._fail_fired:
+                continue
+            streak = self._fail_streak.get(var_id, 0) + 1
+            self._fail_streak[var_id] = streak
+            if streak >= 2:
+                self._fail_pending[var_id] = (final, motivo)
+                self._fail_fired.add(var_id)
+
+    @property
+    def fail_pending(self) -> dict[str, tuple[str, str]]:
+        """Fail actions prontas para o orquestrador: `var_id -> (ação final, motivo)`
+        (RF-613). Leitura só — mesmo idioma das properties `mv_status`/`pid_bindings`."""
+        return dict(self._fail_pending)
+
+    def pop_fail_pending(self) -> dict[str, tuple[str, str]]:
+        """Consome o mapa de fail actions pendentes (orquestrador, um tick por Ts_mpc)."""
+        pendente = self._fail_pending
+        self._fail_pending = {}
+        return pendente
+
+    @property
+    def local_shed_modes(self) -> dict[str, int | None]:
+        """`var_id -> local_shed_mode` das MVs com `pid` (RF-613): o valor escrito no
+        `mode_cmd` em QUALQUER devolução ao controle local; `None` = `mode_values.auto`."""
+        return {mv.id: mv.local_shed_mode for mv in self._mvs.values() if mv.pid is not None}
 
     async def _reclassify_mvs(self) -> None:
         """Reapura o status de cada MV, atualiza a âncora de posição real e audita só as

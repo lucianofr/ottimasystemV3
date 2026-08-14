@@ -89,7 +89,7 @@ def _config(k: float) -> MpcConfig:
                         "name": "a",
                         "eu": "%",
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 1.0,
+                        "max_rate": 1.0,
                     }
                 ],
                 "cvs": [

@@ -22,7 +22,7 @@ duas ao mesmo tempo, então `mpc_arm_failed` e `mpc_shed` nunca disputam o mesmo
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 
 from ottima_core.bus import OpcWrite
@@ -70,18 +70,27 @@ async def write_mode_cmd(
     which: str,
     *,
     source: str,
+    local_shed_modes: Mapping[str, int | None] | None = None,
 ) -> None:
     """Escreve `mode_cmd` em toda MV com `pid` (com ou sem `mode_read` — a escrita em si
     vale para qualquer `pid`, spec §4.4: "por MV com pid"; confirmação é só quem HABILITA
-    o gate de espera)."""
-    for _, pid in bindings:
-        value = pid.mode_values.target if which == "target" else pid.mode_values.auto
+    o gate de espera).
+
+    Devolução ao controle local (`which != "target"`): o valor é o `local_shed_mode` da MV
+    quando configurado (RF-613 — shed global, shed por fail action ou comando REMOTO→LOCAL,
+    tanto faz), senão `mode_values.auto` como sempre foi."""
+    for var_id, pid in bindings:
+        if which == "target":
+            value: float = float(pid.mode_values.target)
+        else:
+            shed_mode = (local_shed_modes or {}).get(var_id)
+            value = float(shed_mode if shed_mode is not None else pid.mode_values.auto)
         await write_opc(
             OpcWrite(
                 conn_id=0,
                 tag_id=pid.mode_cmd_tag_id,
                 flow_id=0,
-                value=float(value),
+                value=value,
                 source=source,
                 ts=datetime.now(UTC),
             )
@@ -137,3 +146,25 @@ async def watch_arm(
         if misses >= SHED_MISSES_LIMIT:
             await on_shed()
             return
+
+
+async def watch_fail_actions(
+    *,
+    block: MpcBlock,
+    on_fail_action: Callable[[str, str, str], Awaitable[None]],
+) -> None:
+    """Task de vigilância das fail actions por bloco armado (RF-613): a cada tick de
+    `Ts_mpc` consome `block.pop_fail_pending()` e dispara o callback por variável —
+    `(var_id, ação final, motivo)`. O QUÊ fazer (MAN, shed p/ LOCAL, eventos) é de quem
+    injeta o callback (o orquestrador), mesma divisão de `watch_arm`.
+
+    Sem nenhuma `fail_action` configurada no bloco, devolve na hora (default `no_action`
+    reproduz A-6/RF-627 bit a bit — nenhum contador dispara ação). Quem cancela é o mesmo
+    dono do `watch_arm` (sair de REMOTO por qualquer caminho cancela as duas)."""
+    if not block.tem_fail_action:
+        return
+    ts_mpc = block.ts_mpc
+    while True:
+        await asyncio.sleep(ts_mpc)
+        for var_id, (acao, motivo) in block.pop_fail_pending().items():
+            await on_fail_action(var_id, acao, motivo)

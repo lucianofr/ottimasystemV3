@@ -43,7 +43,7 @@ def _mv(
     id_: str,
     *,
     limits: tuple[float, float] = (0.0, 1000.0),
-    du_max: float = 5.0,
+    max_rate: float = 2.5,
     du_min: float = 0.0,
 ) -> dict:
     return {
@@ -51,7 +51,10 @@ def _mv(
         "name": id_,
         "eu": "u",
         "limits": {"min": limits[0], "max": limits[1]},
-        "du_max": du_max,
+        # span = largura de `limits`: reproduz a normalização de custo anterior (os
+        # testes de du_min têm constantes derivadas dela).
+        "span": limits[1] - limits[0],
+        "max_rate": max_rate,  # 2.5 EU/s x Ts_mpc=2 s = 5 EU/ciclo
         "du_min": du_min,
         "initial_value": 0.0,
         "pid": None,
@@ -66,6 +69,8 @@ def _cv(id_: str, *, sp_limits: tuple[float, float] = (0.0, 2000.0), tss: float 
         "kind": "selfreg",
         "tss": tss,
         "weight": 1.0,
+        # span = largura de `sp_limits`: idem MV — normalização de custo anterior.
+        "span": sp_limits[1] - sp_limits[0],
         "sp_limits": {"min": sp_limits[0], "max": sp_limits[1]},
     }
 
@@ -77,19 +82,22 @@ def _par(K: float, tau1: float, tau2: float, theta: float) -> dict:
 
 
 def _config(
-    *, du_max: float = 5.0, limits: tuple[float, float] = (0.0, 1000.0), du_min: float = 0.0
+    *, max_rate: float = 2.5, limits: tuple[float, float] = (0.0, 1000.0), du_min: float = 0.0
 ) -> MpcConfig:
     return MpcConfig.model_validate(
         {
             "name": "worker_1x1",
             "multiplier": MULTIPLIER,
             "variables": {
-                "mvs": [_mv("mv_1", limits=limits, du_max=du_max, du_min=du_min)],
+                "mvs": [_mv("mv_1", limits=limits, max_rate=max_rate, du_min=du_min)],
                 "cvs": [_cv("cv_1")],
                 "constraints": [],
                 "dvs": [],
             },
-            "models": {"cv_1": {"mv_1": _par(2.0, 5.0, 2.0, 0.0)}},
+            # K=1.0 %/% (RF-602 revisado): com span_cv=2000 e span_mv=1000, o ganho
+            # efetivo segue 2.0 EU/EU — idêntico ao K cru de antes do zero/span, então as
+            # constantes dos testes de du_min continuam bit a bit.
+            "models": {"cv_1": {"mv_1": _par(1.0, 5.0, 2.0, 0.0)}},
         }
     )
 
@@ -211,8 +219,8 @@ def test_round_trip_solve_status_ok_e_predicao_coerente(
 def test_reinit_bumpless_primeira_mv_perto_do_u_aplicado(
     spawn_worker: Callable[[MpcConfig], tuple[SpawnProcess, Connection]],
 ) -> None:
-    du_max = 5.0
-    config = _config(du_max=du_max)
+    du_max = 5.0  # EU/ciclo (max_rate 2.5 x Ts_mpc=2)
+    config = _config()
     proc, conn = spawn_worker(config)
     _wait_ready(conn)
 

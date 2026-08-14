@@ -48,6 +48,7 @@ export function FlowPropsModal({ flow, onFechar }: Props) {
     flow.watchdog_write_node_id ?? "",
   );
   const [watchdogPeriodMs, setWatchdogPeriodMs] = useState(String(flow.watchdog_period_ms));
+  const [watchdogTimeoutS, setWatchdogTimeoutS] = useState(String(flow.watchdog_timeout_s));
   // Conexões do próprio projeto do flow (mesmo hook de `ConnectionsPage.tsx`) — o backend
   // recusa `watchdog_connection_id` de outro projeto (422, `erro_watchdog_flow`-adjacent), o
   // seletor já restringe a esse universo.
@@ -79,6 +80,13 @@ export function FlowPropsModal({ flow, onFechar }: Props) {
     if (!Number.isInteger(periodo) || periodo < 500 || periodo > 5000) {
       return "Período do watchdog deve ser um número inteiro entre 500 e 5000 ms";
     }
+    const timeout = Number(watchdogTimeoutS);
+    if (Number.isInteger(timeout) && timeout * 1000 < 2 * periodo) {
+      return "timeout do watchdog deve ser ao menos 2x o período";
+    }
+    if (!Number.isInteger(timeout) || timeout < 2 || timeout > 120) {
+      return "Timeout do watchdog deve ser um número inteiro entre 2 e 120 s";
+    }
     return null;
   }
 
@@ -98,6 +106,7 @@ export function FlowPropsModal({ flow, onFechar }: Props) {
         watchdog_read_node_id: watchdogEnabled ? watchdogReadNodeId.trim() : null,
         watchdog_write_node_id: watchdogEnabled ? watchdogWriteNodeId.trim() : null,
         watchdog_period_ms: Number(watchdogPeriodMs),
+        watchdog_timeout_s: Number(watchdogTimeoutS),
       });
       dialogo.current?.close();
     } catch (err) {
@@ -218,19 +227,35 @@ export function FlowPropsModal({ flow, onFechar }: Props) {
                     />
                   </div>
                 </div>
-                <div className="space-y-1">
-                  <Label htmlFor="flow-props-wd-period">Período (ms)</Label>
-                  <Input
-                    id="flow-props-wd-period"
-                    data-testid="flow-props-wd-period"
-                    className="process-value"
-                    type="number"
-                    min={500}
-                    max={5000}
-                    step={100}
-                    value={watchdogPeriodMs}
-                    onChange={(evento) => setWatchdogPeriodMs(evento.target.value)}
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="flow-props-wd-period">Período (ms)</Label>
+                    <Input
+                      id="flow-props-wd-period"
+                      data-testid="flow-props-wd-period"
+                      className="process-value"
+                      type="number"
+                      min={500}
+                      max={5000}
+                      step={100}
+                      value={watchdogPeriodMs}
+                      onChange={(evento) => setWatchdogPeriodMs(evento.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="flow-props-wd-timeout">Timeout (s)</Label>
+                    <Input
+                      id="flow-props-wd-timeout"
+                      data-testid="flow-props-wd-timeout"
+                      className="process-value"
+                      type="number"
+                      min={2}
+                      max={120}
+                      step={1}
+                      value={watchdogTimeoutS}
+                      onChange={(evento) => setWatchdogTimeoutS(evento.target.value)}
+                    />
+                  </div>
                 </div>
               </div>
             )}

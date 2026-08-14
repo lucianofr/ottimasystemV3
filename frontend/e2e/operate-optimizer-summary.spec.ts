@@ -55,7 +55,7 @@ function grafo(tagLeituraId: number, objetivoCv?: string) {
                 name: "Abertura",
                 eu: "%",
                 limits: { min: 0, max: 100 },
-                du_max: 5,
+                max_rate: 2.5, // EU/s (ts_mpc=2 s -> 5 EU/ciclo, como antes)
                 initial_value: 0,
               },
             ],

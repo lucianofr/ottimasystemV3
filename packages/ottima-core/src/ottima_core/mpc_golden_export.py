@@ -44,10 +44,15 @@ def _mv(sufixo: str, **overrides: object) -> dict[str, object]:
         "id": f"mv_{sufixo}",
         "name": "",
         "eu": "",
+        # RF-609/613: defaults retrocompat dos campos novos de `MvVar` — o tipo TS
+        # `VariavelMv` os exige (mesma lógica do TD-007 abaixo), então a fonte única emite.
+        "description": "",
+        "zero": 0.0,
+        "span": 100.0,
         "limits": {"min": 0.0, "max": 100.0},
-        "du_max": 1.0,
+        "max_rate": 1.0,
         # TD-007: defaults neutros de `MvVar.du_min`/`.move_weight` — as regras espelhadas em
-        # `validarConfigMpc` (piso `du_min >= 0`/`du_min <= du_max`, `move_weight > 0`) exigem
+        # `validarConfigMpc` (piso `du_min >= 0`, `move_weight > 0`) exigem
         # os dois campos presentes, senão os casos de validação existentes ganhariam erros
         # espúrios do lado TS (campo ausente vira `undefined`, nunca `>= 0`).
         "du_min": 0.0,
@@ -59,6 +64,8 @@ def _mv(sufixo: str, **overrides: object) -> dict[str, object]:
         # dado bruto), então a fonte única precisa emiti-los.
         "objective": "none",
         "psv": None,
+        "fail_action": "no_action",
+        "local_shed_mode": None,
     }
     var.update(overrides)
     return var
@@ -69,11 +76,22 @@ def _cv(sufixo: str, **overrides: object) -> dict[str, object]:
         "id": f"cv_{sufixo}",
         "name": "",
         "eu": "",
+        "description": "",
+        "zero": 0.0,
+        "span": 100.0,
         "kind": "selfreg",
         "tss": 30.0,
         "weight": 1.0,
         "sp_limits": {"min": 0.0, "max": 100.0},
+        "priority": 1,
         "objective": "none",
+        # RF-611/612/613/614/615: defaults retrocompat dos campos novos de `CvVar`.
+        "traj_tau_s": 0.0,
+        "track_sp": True,
+        "fail_action": "no_action",
+        "fail_timeout_s": 60.0,
+        "sp_range_pct": None,
+        "remote_sp_tag_id": None,
     }
     var.update(overrides)
     return var
@@ -84,18 +102,23 @@ def _co(sufixo: str, **overrides: object) -> dict[str, object]:
         "id": f"co_{sufixo}",
         "name": "",
         "eu": "",
+        "description": "",
+        "zero": 0.0,
+        "span": 100.0,
         "kind": "selfreg",
         "tss": 30.0,
         "range": {"low": 0.0, "high": 100.0},
         "priority": 1,
         "objective": "none",
+        "fail_action": "no_action",
+        "fail_timeout_s": 60.0,
     }
     var.update(overrides)
     return var
 
 
 def _dv(sufixo: str) -> dict[str, object]:
-    return {"id": f"dv_{sufixo}", "name": "", "eu": ""}
+    return {"id": f"dv_{sufixo}", "name": "", "eu": "", "zero": 0.0, "span": 100.0}
 
 
 def _par(kind: str = "selfreg", enabled: bool = True, **overrides: float) -> dict[str, object]:
@@ -275,11 +298,11 @@ def _cenario_numbers_mv_limits() -> tuple[str, dict[str, object], float]:
     )
 
 
-def _cenario_numbers_mv_du_max() -> tuple[str, dict[str, object], float]:
-    mv_ = _mv("a", du_max=0.0)
+def _cenario_numbers_mv_max_rate() -> tuple[str, dict[str, object], float]:
+    mv_ = _mv("a", max_rate=0.0)
     cv_ = _cv("a")
     modelos = {cv_["id"]: {mv_["id"]: _par()}}
-    return "numbers_mv_du_max_nao_positivo", _config([mv_], [cv_], models=modelos), 1.0
+    return "numbers_mv_max_rate_nao_positivo", _config([mv_], [cv_], models=modelos), 1.0
 
 
 def _cenario_numbers_cv_tss() -> tuple[str, dict[str, object], float]:
@@ -380,7 +403,7 @@ def _validacao() -> list[dict[str, object]]:
         _cenario_matrix_mv_sem_par,
         _cenario_matrix_dv_sem_par,
         _cenario_numbers_mv_limits,
-        _cenario_numbers_mv_du_max,
+        _cenario_numbers_mv_max_rate,
         _cenario_numbers_cv_tss,
         _cenario_numbers_cv_sp_limits,
         _cenario_numbers_cv_weight,

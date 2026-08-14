@@ -114,7 +114,7 @@ def _mv(suffix: str, **overrides) -> dict:
         "name": f"MV {suffix}",
         "eu": "m3/h",
         "limits": {"min": 0.0, "max": 100.0},
-        "du_max": 5.0,
+        "max_rate": 5.0,
         "initial_value": 0.0,
     }
     node.update(overrides)
@@ -586,17 +586,26 @@ async def test_mpcs_projecao_verbatim_sem_pid_nem_models(client, admin_headers, 
                         "id": "mv_a",
                         "name": "MV a",
                         "eu": "m3/h",
+                        "description": "",
+                        "zero": 0.0,
+                        "span": 100.0,
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 5.0,
+                        "max_rate": 5.0,
                         "objective": "none",
+                        # readback do `pid` — a tag que a operação assina no `opc.values`.
+                        "tag_id": tag_pid_rb,
                     },
                     {
                         "id": "mv_b",
                         "name": "MV b",
                         "eu": "m3/h",
+                        "description": "",
+                        "zero": 0.0,
+                        "span": 100.0,
                         "limits": {"min": 0.0, "max": 100.0},
-                        "du_max": 5.0,
+                        "max_rate": 5.0,
                         "objective": "none",
+                        "tag_id": None,
                     },
                 ],
                 "cvs": [
@@ -604,8 +613,14 @@ async def test_mpcs_projecao_verbatim_sem_pid_nem_models(client, admin_headers, 
                         "id": "cv_a",
                         "name": "CV a",
                         "eu": "C",
+                        "description": "",
+                        "zero": 0.0,
+                        "span": 100.0,
                         "sp_limits": {"min": 80.0, "max": 120.0},
                         "objective": "none",
+                        # aresta direta do `opc_read` r1 (spec §4.1-1 revisado, RF-702).
+                        "tag_id": tag_in_cv,
+                        "remote_sp": False,
                     }
                 ],
                 "constraints": [
@@ -613,11 +628,25 @@ async def test_mpcs_projecao_verbatim_sem_pid_nem_models(client, admin_headers, 
                         "id": "co_a",
                         "name": "Restrição A",
                         "eu": "kPa",
+                        "description": "",
+                        "zero": 0.0,
+                        "span": 100.0,
                         "range": {"low": 0.0, "high": 10.0},
                         "objective": "none",
+                        "tag_id": tag_in_co,
                     }
                 ],
-                "dvs": [{"id": "dv_a", "name": "DV A", "eu": "C", "range": None}],
+                "dvs": [
+                    {
+                        "id": "dv_a",
+                        "name": "DV A",
+                        "eu": "C",
+                        "zero": 0.0,
+                        "span": 100.0,
+                        "range": None,
+                        "tag_id": tag_in_dv,
+                    }
+                ],
             },
             # Derivado no servidor (`derive_horizons`): a projeção não expõe `tss` (§4.1-3),
             # então o cliente não teria como calcular. `Ts_mpc = 1 x 1 s`; a maior TSS das
@@ -683,8 +712,24 @@ async def test_mpcs_projecao_de_dv_com_range(client, admin_headers, operator_hea
     assert r.status_code == 200, r.text
     dvs = r.json()[0]["variables"]["dvs"]
     assert dvs == [
-        {"id": "dv_sem", "name": "DV sem faixa", "eu": "C", "range": None},
-        {"id": "dv_com", "name": "DV com faixa", "eu": "C", "range": {"low": 0.0, "high": 50.0}},
+        {
+            "id": "dv_sem",
+            "name": "DV sem faixa",
+            "eu": "C",
+            "zero": 0.0,
+            "span": 100.0,
+            "range": None,
+            "tag_id": tag_dv_sem,
+        },
+        {
+            "id": "dv_com",
+            "name": "DV com faixa",
+            "eu": "C",
+            "zero": 0.0,
+            "span": 100.0,
+            "range": {"low": 0.0, "high": 50.0},
+            "tag_id": tag_dv_com,
+        },
     ]
 
 

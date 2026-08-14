@@ -22,7 +22,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from ottima_core.flowgraph import MpcConfig, RowKind
-from ottima_flow_runtime.mpc.discretize import PairSS, discretize_iopdt, discretize_sopdt
+from ottima_flow_runtime.mpc.discretize import (
+    PairSS,
+    discretize_iopdt,
+    discretize_sopdt,
+    eu_gain_params,
+)
 
 
 def pair_steady_state_gain(
@@ -105,13 +110,28 @@ def build_steady_state_model(config: MpcConfig, ts_mpc: float) -> SteadyStateMod
     gd = np.zeros((len(row_ids), len(dv_ids)))
     mv_index = {mv_id: j for j, mv_id in enumerate(mv_ids)}
     dv_index = {dv_id: j for j, dv_id in enumerate(dv_ids)}
+    # Ganhos do config são %/% (RF-602 revisado): converte a EU por span_linha/span_coluna.
+    span_por_id = {
+        var.id: var.span
+        for var in (
+            *config.variables.cvs,
+            *config.variables.constraints,
+            *config.variables.mvs,
+            *config.variables.dvs,
+        )
+    }
 
     for i, row_id in enumerate(row_ids):
         kind = row_kind[row_id]
         for col_id, pair_cfg in config.models.get(row_id, {}).items():
             if not pair_cfg.enabled:
                 continue
-            params = pair_cfg.params
+            params = eu_gain_params(
+                pair_cfg.params,
+                kind=kind,
+                row_span=span_por_id[row_id],
+                col_span=span_por_id[col_id],
+            )
             if kind == "selfreg":
                 pair = discretize_sopdt(
                     params["K"], params["tau1"], params["tau2"], params["theta"], ts_mpc

@@ -56,10 +56,11 @@ Custo: `mpc.nlp['f']` é a MESMA expressão simbólica passada ao `nlpsol` inter
 from __future__ import annotations
 
 import logging
+import math
 import time
 import traceback
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from multiprocessing.connection import Connection
 from typing import TYPE_CHECKING, Final
 
@@ -131,9 +132,11 @@ class _Runtime:
     `Simulator.x0`) — a mesma variável serve de x0 do MPC e de x0 do propagador.
     `du_min`: mv_id -> banda morta do atuador (`MvVar.du_min`), lida uma vez no boot — a
     quantização pós-solve (`_aplicar_banda_morta`, TD-007) é a única consumidora.
-    `du_max`/`limits`: mv_id -> passo máximo por execução e curso do atuador, lidos uma vez
-    no boot para o congelamento por MV (ADR-028, `_apply_tvp`/`_clamp_frozen`) reescrever o
-    `dumax` do horizonte e clampar a MV congelada sem reabrir o `MpcConfig` a cada pedido.
+    `du_max`/`limits`: mv_id -> passo máximo por execução (`max_rate × Ts_mpc`, já
+    convertido no boot) e curso do atuador, para o congelamento por MV (ADR-028,
+    `_apply_tvp`/`_clamp_frozen`) reescrever o `dumax` do horizonte e clampar a MV
+    congelada sem reabrir o `MpcConfig` a cada pedido.
+    `traj_tau`: cv_id -> τ da trajetória de referência (RF-611), só CVs com `traj_tau_s > 0`.
     """
 
     built: BuiltMpc
@@ -145,6 +148,7 @@ class _Runtime:
     du_min: dict[str, float]
     du_max: dict[str, float]
     limits: dict[str, tuple[float, float]]
+    traj_tau: dict[str, float] = field(default_factory=dict)
     ssto: SteadyStateOptimizer | None = None
     """Camada de alvos (ADR-027). `None` = `economics` ausente/desligado ⇒ caminho da F4."""
     cvs: tuple[CvVar, ...] = ()
@@ -202,8 +206,9 @@ def _build_runtime(config: MpcConfig, ts_flow: float) -> _Runtime:
         cost_fun=cost_fun,
         x_current=model.x(0.0).cat,
         du_min={mv.id: mv.du_min for mv in config.variables.mvs},
-        du_max={mv.id: mv.du_max for mv in config.variables.mvs},
+        du_max={mv.id: mv.max_rate * built.horizons.ts_mpc for mv in config.variables.mvs},
         limits={mv.id: (mv.limits.min, mv.limits.max) for mv in config.variables.mvs},
+        traj_tau={cv.id: cv.traj_tau_s for cv in config.variables.cvs if cv.traj_tau_s > 0.0},
         ssto=ssto,
         cvs=tuple(config.variables.cvs),
         model_hash=gain_model_hash(config),
@@ -272,12 +277,29 @@ def _apply_tvp(
     depender de ninguém lembrar de restaurá-lo.
     """
     built = runtime.built
+    ts_mpc = built.horizons.ts_mpc
     for cv_id, tvp_name in built.sp_tvp_name.items():
-        built.tvp_template["_tvp", :, tvp_name] = sp[cv_id]
+        tau = runtime.traj_tau.get(cv_id, 0.0)
+        if tau <= 0.0:
+            built.tvp_template["_tvp", :, tvp_name] = sp[cv_id]
+            continue
+        # Trajetória de referência exponencial até o SP (RF-611): `r_k = sp − (sp − y0)·
+        # exp(−(k+1)·Ts_mpc/τ)` — o primeiro passo parte de PERTO da medição e o último
+        # chega ~no SP (mterm herda o mesmo tvp). `tau == 0` acima é o degrau de sempre.
+        y0 = request.y[cv_id]
+        alvo = sp[cv_id]
+        for k in range(built.horizons.np + 1):
+            built.tvp_template["_tvp", k, tvp_name] = alvo - (alvo - y0) * math.exp(
+                -(k + 1) * ts_mpc / tau
+            )
     for dv_id, tvp_name in built.dv_tvp_name.items():
         built.tvp_template["_tvp", :, tvp_name] = request.d[dv_id]
     for mv_id, tvp_name in built.utarget_tvp_name.items():
-        alvo = request.u_applied[mv_id] if mv_target is None else mv_target.get(mv_id, request.u_applied[mv_id])
+        alvo = (
+            request.u_applied[mv_id]
+            if mv_target is None
+            else mv_target.get(mv_id, request.u_applied[mv_id])
+        )
         built.tvp_template["_tvp", :, tvp_name] = alvo
     n_c = built.horizons.nc
     for mv_id in built.mv_order:

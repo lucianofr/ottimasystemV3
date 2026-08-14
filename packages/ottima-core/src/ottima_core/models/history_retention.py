@@ -17,6 +17,9 @@ class HistoryRetentionSettings(Base):
     retention_days: Mapped[int] = mapped_column(
         SmallInteger, nullable=False, server_default=text("30")
     )
+    events_retention_days: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("30")
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
@@ -25,5 +28,9 @@ class HistoryRetentionSettings(Base):
         CheckConstraint("id = 1", name="ck_history_retention_settings_singleton"),
         CheckConstraint(
             "retention_days BETWEEN 1 AND 120", name="ck_history_retention_settings_days"
+        ),
+        CheckConstraint(
+            "events_retention_days BETWEEN 1 AND 90",
+            name="ck_history_retention_settings_events_days",
         ),
     )

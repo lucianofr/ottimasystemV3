@@ -33,7 +33,7 @@ def base_config() -> dict:
                     "name": "MV A",
                     "eu": "%",
                     "limits": {"min": 0.0, "max": 100.0},
-                    "du_max": 5.0,
+                    "max_rate": 5.0,
                 }
             ],
             "cvs": [
@@ -360,7 +360,7 @@ def test_equalize_com_duas_mvs_e_aceito():
             "name": "MV B",
             "eu": "%",
             "limits": {"min": 0.0, "max": 100.0},
-            "du_max": 5.0,
+            "max_rate": 5.0,
         }
     )
     raw["variables"]["mvs"][0]["objective"] = "equalize"

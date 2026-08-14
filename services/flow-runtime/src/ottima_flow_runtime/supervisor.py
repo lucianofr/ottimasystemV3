@@ -155,6 +155,9 @@ class _FlowRuntime:
     escrever `mode_cmd` fora do `step()` do bloco (transições §4.4/§4.5)."""
     mpc_watchdogs: dict[str, asyncio.Task[None]] = field(default_factory=dict)
     """`block_id -> task` de `mpc_arming.watch_arm`, uma por bloco armado agora mesmo."""
+    mpc_fail_watchdogs: dict[str, asyncio.Task[None]] = field(default_factory=dict)
+    """`block_id -> task` de `mpc_arming.watch_fail_actions` (RF-613) — mesmo ciclo de vida
+    de `mpc_watchdogs`: toda saída de REMOTO cancela as duas (`cancel_watchdog`)."""
 
 
 class Supervisor:

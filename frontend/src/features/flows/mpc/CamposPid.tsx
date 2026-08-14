@@ -4,31 +4,7 @@ import { Select } from "../../../components/ui/select";
 import type { TagOut } from "../../../lib/api";
 import type { PidMv } from "../graph";
 import { nomeCampoVar, tagsPorDirecao } from "./mpcLogic";
-
-function SelectTag({
-  id,
-  campo,
-  varId,
-  tags,
-  valorAtual,
-}: {
-  id: string;
-  campo: string;
-  varId: string;
-  tags: readonly TagOut[];
-  valorAtual: number | null;
-}) {
-  return (
-    <Select id={id} name={nomeCampoVar(varId, campo)} defaultValue={valorAtual ?? ""}>
-      <option value="">— nenhuma —</option>
-      {tags.map((tag) => (
-        <option key={tag.id} value={tag.id}>
-          {tag.name} ({tag.eu})
-        </option>
-      ))}
-    </Select>
-  );
-}
+import { SelectTag } from "./SelectTag";
 
 /** Seção `pid` de uma MV (spec F4 §2.1-3, decisão A-8): tags filtradas por direção —
  *  write/mode_cmd exigem tag de escrita (W), readback/mode_read exigem leitura (R). Campos

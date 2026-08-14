@@ -5,6 +5,7 @@ import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { api, ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
+import { useCanalAoVivo } from "../../app/CanalAoVivo";
 import { clampNaFaixa, type Faixa } from "./clamp";
 import { reduzirPendencia, type Pendencia } from "./pendencia";
 
@@ -35,10 +36,20 @@ export type FaceplateVariavelProps = {
     id: string;
     name: string;
     eu: string;
+    /** Descrição curta (≤14) sob o nome — RF-610; vazia não renderiza nada. */
+    description?: string;
+    /** Faixa de instrumento (RF-609): a escala da barra é `[zero, zero+span]`. */
+    zero?: number;
+    span?: number;
     limits?: Faixa | null;
     sp_limits?: Faixa | null;
     range?: { low: number; high: number } | null;
-    du_max?: number | null;
+    max_rate?: number | null;
+    /** Tag OPC do PV ao vivo (canal `opc.values`, taxa OPC); `null`/ausente = fallback ao
+     *  `mpc.state` (taxa do MPC). */
+    tag_id?: number | null;
+    /** CV com SP remoto (RF-614): o campo de SP fica desabilitado (escrita manual é 422). */
+    remote_sp?: boolean;
   };
   valor: { v: number; sp?: number | null } | undefined;
   modos: { local_remote: "local" | "remote"; man_auto: "man" | "auto" };
@@ -54,29 +65,16 @@ const ROTULO_TIPO: Record<VariavelTipo, string> = {
   dv: "DV",
 };
 
-/** Faixa da escala: `limits` (MV) / `sp_limits` (CV) já chegam como `{min,max}` (schema
- *  `Limits` do backend, sem conversão); `range` da Restrição e da DV é `{low,high}` (schema
- *  `Range`, decisão A-11) — normalizado aqui só para alimentar a mesma barra. DV sem `range`
- *  publicado (`DvOut.range` opcional) segue sem faixa: só PV + EU, sem barra (spec §4.2/§6.5).
- *
- *  `range` só alimenta a barra com os dois lados finitos e `low` estritamente menor que
- *  `high`. O backend garante essa invariante para Restrição na validação semântica do flow
- *  (`validate.py:_less_than`, `range.low < range.high`), mas **não** cobre `DvVar.range`
- *  (`_check_mpc_numbers` varre `mvs`/`cvs`/`constraints`, não `dvs`) — sem esta guarda um
- *  `range` degenerado de DV (`low >= high` ou não-finito) dividiria por zero em
- *  `percentualNaBarra` ou desenharia barra invertida. Tratado como ausência de faixa. */
+/** Faixa da escala da BARRA: a faixa de instrumento `[zero, zero+span]` (RF-609), para os 4
+ *  tipos. Os limites de engenharia (`limits`/`sp_limits`/`range`) seguem na definição e
+ *  continuam sendo o clamp dos COMANDOS (`enviar`) — mas a escala desenhada é a do
+ *  instrumento. Defaults 0/100 reproduzem a faixa antiga quando zero/span não vieram na
+ *  projeção (testes de unidade e projeções velhas). */
 export function faixaDaEscala(props: FaceplateVariavelProps): Faixa | null {
-  if (props.tipo === "mv") return props.definicao.limits ?? null;
-  if (props.tipo === "cv") return props.definicao.sp_limits ?? null;
-  if (props.tipo === "constraint" || props.tipo === "dv") {
-    const range = props.definicao.range;
-    if (!range) return null;
-    if (!Number.isFinite(range.low) || !Number.isFinite(range.high) || range.low >= range.high) {
-      return null;
-    }
-    return { min: range.low, max: range.high };
-  }
-  return null;
+  const zero = props.definicao.zero ?? 0;
+  const span = props.definicao.span ?? 100;
+  if (!Number.isFinite(zero) || !Number.isFinite(span) || span <= 0) return null;
+  return { min: zero, max: zero + span };
 }
 
 /** Barra vertical de instrumento (DESIGN §Shapes): escala com 10% de folga além da faixa
@@ -105,7 +103,12 @@ function BarraVertical({
   const spPercentual = sp !== null && sp !== undefined ? percentualNaBarra(sp, faixa) : null;
   return (
     <div className="flex flex-col items-center gap-1">
-      <span className="process-value text-[10px] text-fg-muted">{faixa.max.toFixed(2)}</span>
+      <span
+        className="process-value text-[10px] text-fg-muted"
+        data-testid={`${testId}-topo`}
+      >
+        {faixa.max.toFixed(2)}
+      </span>
       <div
         className="relative h-32 w-4 overflow-hidden rounded-pill border border-border bg-well"
         data-testid={testId}
@@ -131,7 +134,12 @@ function BarraVertical({
           />
         )}
       </div>
-      <span className="process-value text-[10px] text-fg-muted">{faixa.min.toFixed(2)}</span>
+      <span
+        className="process-value text-[10px] text-fg-muted"
+        data-testid={`${testId}-base`}
+      >
+        {faixa.min.toFixed(2)}
+      </span>
     </div>
   );
 }
@@ -141,6 +149,14 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
   const faixa = faixaDaEscala(props);
   const campoComandado = tipo === "mv" ? "v" : "sp";
   const alvo = `vars.${definicao.id}.${campoComandado}`;
+
+  // PV na taxa OPC (decisão F6 A-1 revertida): variável com `tag_id` lê o valor ao vivo do
+  // buffer `opc.values` (flush de 250 ms no provider); tag ausente ou leitura ruim cai no
+  // `mpc.state` (comportamento anterior), sem erro — a barra e o PV grande usam `pv` abaixo.
+  const canal = useCanalAoVivo();
+  const leituraOpc = definicao.tag_id != null ? canal.tagValues.get(definicao.tag_id) : undefined;
+  const pvOpc = leituraOpc !== undefined && leituraOpc.ok ? leituraOpc.v : undefined;
+  const pv = pvOpc ?? valor?.v;
 
   const [pendencia, setPendencia] = useState<Pendencia | null>(null);
   const [rascunho, setRascunho] = useState<string | null>(null);
@@ -174,17 +190,23 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
     tipo === "mv"
       ? modos.local_remote === "remote" && modos.man_auto === "man"
       : tipo === "cv"
-        ? modos.man_auto === "auto"
+        ? // SP remoto (RF-614): a escrita manual é 422 — o campo já nasce desabilitado.
+          modos.man_auto === "auto" && definicao.remote_sp !== true
         : false;
 
   async function enviar(): Promise<void> {
-    if (!editavel || rascunho === null || faixa === null) return;
+    if (!editavel || rascunho === null) return;
+    // Clamp do comando: limites de engenharia (`limits`/`sp_limits`) — NÃO a escala do
+    // instrumento: o operador comanda o curso inteiro do atuador mesmo com a barra
+    // mostrando só a faixa de medição (RF-609).
+    const faixaComando = tipo === "mv" ? definicao.limits : definicao.sp_limits;
+    if (faixaComando == null) return;
     const bruto = Number(rascunho.replace(",", "."));
     if (!Number.isFinite(bruto)) {
       setErro("Valor inválido");
       return;
     }
-    const alvoValor = clampNaFaixa(bruto, faixa);
+    const alvoValor = clampNaFaixa(bruto, faixaComando);
     setErro(null);
     try {
       const caminho = tipo === "mv" ? "mv" : "sp";
@@ -209,8 +231,8 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
 
   const valorPublicadoTexto =
     tipo === "mv"
-      ? valor?.v !== undefined
-        ? valor.v.toFixed(2)
+      ? pv !== undefined && pv !== null
+        ? pv.toFixed(2)
         : ""
       : valor?.sp != null
         ? valor.sp.toFixed(2)
@@ -229,13 +251,21 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
         <p className="truncate text-sm text-fg" title={definicao.name}>
           {definicao.name}
         </p>
+        {(definicao.description ?? "") !== "" && (
+          <p
+            className="truncate text-[10px] text-fg-muted"
+            data-testid={`faceplate-desc-${definicao.id}`}
+          >
+            {definicao.description}
+          </p>
+        )}
       </div>
 
       <div className="flex items-end justify-center gap-3">
         {faixa !== null && (
           <BarraVertical
             faixa={faixa}
-            pv={valor?.v}
+            pv={pv}
             sp={tipo === "cv" ? (valor?.sp ?? null) : null}
             testId={`faceplate-escala-${definicao.id}`}
           />
@@ -245,7 +275,7 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
             className="process-value text-3xl font-medium leading-none tracking-tight"
             data-testid={`faceplate-pv-${definicao.id}`}
           >
-            {valor?.v !== undefined ? valor.v.toFixed(2) : "—"}
+            {pv !== undefined && pv !== null ? pv.toFixed(2) : "—"}
           </p>
           <p className="plaqueta mt-1 text-[10px]">{definicao.eu}</p>
         </div>

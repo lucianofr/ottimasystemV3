@@ -24,6 +24,7 @@ const ESTADO_VAZIO: EstadoDoCanal = {
   flowStatus: new Map(),
   mpcStates: new Map(),
   eventos: [],
+  tagValues: new Map(),
 };
 
 const STATUS: FlowStatus = {

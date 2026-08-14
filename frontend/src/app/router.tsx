@@ -10,6 +10,7 @@ import { FlowsPage } from "../features/flows/FlowsPage";
 import { OperatePage } from "../features/operate/OperatePage";
 import { OperateSelectorPage } from "../features/operate/OperateSelectorPage";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
+import { SettingsPage } from "../features/settings/SettingsPage";
 import { TagsPage } from "../features/tags/TagsPage";
 import { TrendPage } from "../features/trend/TrendPage";
 import { AppShell } from "./AppShell";
@@ -37,6 +38,7 @@ export function App() {
                 <Route path="/engenharia/flows" element={<FlowsPage />} />
                 <Route path="/engenharia/flows/:flowId" element={<FlowEditorPage />} />
                 <Route path="/engenharia/trend" element={<TrendPage />} />
+                <Route path="/configuracoes" element={<SettingsPage />} />
               </Route>
               {/* dentro do guarda: rota desconhecida sem sessão vai direto a /login */}
               <Route path="*" element={<Navigate to="/" replace />} />

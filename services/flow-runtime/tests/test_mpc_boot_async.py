@@ -126,7 +126,7 @@ async def test_b_reload_de_flow_mpc_pesado_nao_bloqueia_comando_de_outro_flow(
     await harness.await_state(scenario["flow_id"], "running", timeout_s=DEPLOY_TIMEOUT_S)
     # host "m1" ainda está subindo (MPC_SLOW_BUILD_DELAY_S=7s) quando o reload chega.
 
-    changed_graph = mpc_graph_valido(scenario["cv_tag_id"], du_max=6.0)  # host novo (§4.1-3)
+    changed_graph = mpc_graph_valido(scenario["cv_tag_id"], max_rate=12.0)  # host novo (§4.1-3)
     await save_graph(session_factory, scenario["flow_id"], changed_graph)
     await harness.command("reload", scenario["flow_id"])  # host velho, em build, precisa parar
     await harness.command("stop", flow_b_id)  # mesma fila, logo depois

@@ -5,8 +5,6 @@ import { fileURLToPath } from "node:url";
 import type { MpcHistoryResponse } from "../../lib/api";
 import type { MpcPrediction } from "../../lib/contracts.gen";
 import {
-  JANELAS_OPERACAO,
-  JANELA_PADRAO_ID,
   OPCOES_DEGRAU_MV,
   TETO_PENAS_OPERACAO,
   TOKENS_PENA_OPERACAO,
@@ -54,10 +52,33 @@ function amostraViva(d: number, v: number, sp: number | null, auto: boolean): Am
   return { ts: carimbo(d), vars: { cv_1: { v, sp, status: null } }, auto };
 }
 
-test("janelas de operação: 15m/30m/2h/8h, default 30 min", () => {
-  expect(JANELAS_OPERACAO.map((j) => j.segundos)).toEqual([900, 1800, 7200, 28800]);
-  const padrao = JANELAS_OPERACAO.find((j) => j.id === JANELA_PADRAO_ID);
-  expect(padrao?.segundos).toBe(1800);
+test("ponta viva OPC: pontos adensados entram na série sem buraco de SP/modo", () => {
+  const resp = historico("cv_1", [{ d: 0, v: 1, sp: 1.5, auto: true }]);
+  const vivas: AmostraViva[] = [amostraViva(10, 1.2, 1.5, true)];
+  const opc = new Map([["cv_1", [{ t: T0 + 12, v: 1.25 }, { t: T0 + 14, v: 1.3 }]]]);
+  const [serie] = mesclarSeriesVivas(resp, vivas, ["cv_1"], opc);
+  expect(serie.t).toEqual([T0, T0 + 10, T0 + 12, T0 + 14]);
+  expect(serie.v).toEqual([1, 1.2, 1.25, 1.3]);
+  // SP e modo dos pontos OPC herdam o último conhecido (só mudam na cadência do MPC).
+  expect(serie.sp).toEqual([1.5, 1.5, 1.5, 1.5]);
+  expect(serie.auto).toEqual([true, true, true, true]);
+});
+
+test("ponta viva OPC: ponto em ts já coberto pelo mpc.state não duplica (state manda)", () => {
+  const resp = historico("cv_1", []);
+  const vivas: AmostraViva[] = [amostraViva(10, 1.2, 1.5, true)];
+  const opc = new Map([["cv_1", [{ t: T0 + 10, v: 9.9 }]]]);
+  const [serie] = mesclarSeriesVivas(resp, vivas, ["cv_1"], opc);
+  expect(serie.t).toEqual([T0 + 10]);
+  expect(serie.v).toEqual([1.2]);
+});
+
+test("ponta viva OPC: sem pontos novos a série é idêntica à de antes", () => {
+  const resp = historico("cv_1", [{ d: 0, v: 1, sp: 1.5, auto: false }]);
+  const vivas: AmostraViva[] = [amostraViva(10, 1.2, 1.6, true)];
+  const [semOpc] = mesclarSeriesVivas(resp, vivas, ["cv_1"]);
+  const [comOpcVazio] = mesclarSeriesVivas(resp, vivas, ["cv_1"], new Map());
+  expect(comOpcVazio).toEqual(semOpc);
 });
 
 test("borda viva: mpc.state novo faz append na série sem esperar o poll", () => {

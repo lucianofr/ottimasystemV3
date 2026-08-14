@@ -604,6 +604,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get System Settings */
+        get: operations["get_system_settings_api_system_settings_get"];
+        /** Update System Settings */
+        put: operations["update_system_settings_api_system_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/certificates/app/generate": {
         parameters: {
             query?: never;
@@ -823,16 +841,37 @@ export interface components {
             name: string;
             /** Eu */
             eu: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Zero
+             * @default 0
+             */
+            zero: number;
+            /**
+             * Span
+             * @default 100
+             */
+            span: number;
             range: components["schemas"]["Range"];
             /**
              * Objective
              * @enum {string}
              */
             objective: "none" | "maximize" | "minimize";
+            /** Tag Id */
+            tag_id?: number | null;
         };
         /**
          * CvOut
          * @description Projeção de uma CV do bloco (spec §4.1-1) — sem `weight`/`tss`/`kind` (§4.1-3).
+         *
+         *     `tag_id`: tag OPC que alimenta a CV (aresta direta de um `opc_read`); `None` quando a
+         *     origem é filtro/script — o faceplate cai para a taxa do `mpc.state`. `remote_sp`: SP
+         *     vem de tag OPC (RF-614) — a escrita manual é recusada (422) e a UI desabilita o campo.
          */
         CvOut: {
             /** Id */
@@ -841,12 +880,34 @@ export interface components {
             name: string;
             /** Eu */
             eu: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Zero
+             * @default 0
+             */
+            zero: number;
+            /**
+             * Span
+             * @default 100
+             */
+            span: number;
             sp_limits: components["schemas"]["Limits"];
             /**
              * Objective
              * @enum {string}
              */
             objective: "none" | "maximize" | "minimize" | "observe_limit" | "target" | "psv";
+            /** Tag Id */
+            tag_id?: number | null;
+            /**
+             * Remote Sp
+             * @default false
+             */
+            remote_sp: boolean;
         };
         /**
          * DvOut
@@ -859,7 +920,19 @@ export interface components {
             name: string;
             /** Eu */
             eu: string;
+            /**
+             * Zero
+             * @default 0
+             */
+            zero: number;
+            /**
+             * Span
+             * @default 100
+             */
+            span: number;
             range?: components["schemas"]["Range"] | null;
+            /** Tag Id */
+            tag_id?: number | null;
         };
         /** EventOut */
         EventOut: {
@@ -912,6 +985,11 @@ export interface components {
              * @default 1500
              */
             watchdog_period_ms: number;
+            /**
+             * Watchdog Timeout S
+             * @default 10
+             */
+            watchdog_timeout_s: number;
             /** Id */
             id: number;
             /** Project Id */
@@ -956,6 +1034,11 @@ export interface components {
              * @default 1500
              */
             watchdog_period_ms: number;
+            /**
+             * Watchdog Timeout S
+             * @default 10
+             */
+            watchdog_timeout_s: number;
             /** Id */
             id: number;
             /** Project Id */
@@ -1004,6 +1087,8 @@ export interface components {
             watchdog_write_node_id?: string | null;
             /** Watchdog Period Ms */
             watchdog_period_ms?: number | null;
+            /** Watchdog Timeout S */
+            watchdog_timeout_s?: number | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1055,16 +1140,24 @@ export interface components {
         HistoryRetentionOut: {
             /** Retention Days */
             retention_days: number;
+            /** Events Retention Days */
+            events_retention_days: number;
             /**
              * Updated At
              * Format: date-time
              */
             updated_at: string;
         };
-        /** HistoryRetentionUpdate */
+        /**
+         * HistoryRetentionUpdate
+         * @description Ambos opcionais: `None` mantém o valor gravado (a página de configurações edita as
+         *     duas retenções em seções independentes).
+         */
         HistoryRetentionUpdate: {
             /** Retention Days */
-            retention_days: number;
+            retention_days?: number | null;
+            /** Events Retention Days */
+            events_retention_days?: number | null;
         };
         /** HistorySeries */
         HistorySeries: {
@@ -1223,6 +1316,10 @@ export interface components {
         /**
          * MvOut
          * @description Projeção de uma MV do bloco (spec §4.1-1) — sem `pid`/`initial_value`/`psv` (§4.1-3).
+         *
+         *     `tag_id`: tag da posição real (readback do `pid` ou da MV direta) — a operação assina
+         *     `opc.values` dela para o PV na taxa OPC (decisão F6 A-1 revertida). `zero`/`span`: faixa
+         *     de instrumento — a escala do faceplate (RF-609).
          */
         MvOut: {
             /** Id */
@@ -1231,14 +1328,31 @@ export interface components {
             name: string;
             /** Eu */
             eu: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Zero
+             * @default 0
+             */
+            zero: number;
+            /**
+             * Span
+             * @default 100
+             */
+            span: number;
             limits: components["schemas"]["Limits"];
-            /** Du Max */
-            du_max: number;
+            /** Max Rate */
+            max_rate: number;
             /**
              * Objective
              * @enum {string}
              */
             objective: "none" | "maximize" | "minimize" | "psv" | "equalize";
+            /** Tag Id */
+            tag_id?: number | null;
         };
         /**
          * PendingSecretOut
@@ -1408,6 +1522,22 @@ export interface components {
             duals: {
                 [key: string]: number;
             };
+        };
+        /** SystemSettingsOut */
+        SystemSettingsOut: {
+            /**
+             * Log Level
+             * @enum {string}
+             */
+            log_level: "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
+        };
+        /** SystemSettingsUpdate */
+        SystemSettingsUpdate: {
+            /**
+             * Log Level
+             * @enum {string}
+             */
+            log_level: "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
         };
         /** TagCreate */
         TagCreate: {
@@ -2951,6 +3081,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HistoryRetentionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_settings_api_system_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettingsOut"];
+                };
+            };
+        };
+    };
+    update_system_settings_api_system_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SystemSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettingsOut"];
                 };
             };
             /** @description Validation Error */

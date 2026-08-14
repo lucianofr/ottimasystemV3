@@ -59,36 +59,51 @@
         "constraints": [],
         "cvs": [
           {
+            "description": "",
             "eu": "",
+            "fail_action": "no_action",
+            "fail_timeout_s": 60.0,
             "id": "cv_a",
             "kind": "selfreg",
             "name": "",
             "objective": "none",
+            "priority": 1,
+            "remote_sp_tag_id": null,
             "sp_limits": {
               "max": 100.0,
               "min": 0.0
             },
+            "sp_range_pct": null,
+            "span": 100.0,
+            "track_sp": true,
+            "traj_tau_s": 0.0,
             "tss": 30.0,
-            "weight": 1.0
+            "weight": 1.0,
+            "zero": 0.0
           }
         ],
         "dvs": [],
         "mvs": [
           {
-            "du_max": 1.0,
+            "description": "",
             "du_min": 0.0,
             "eu": "",
+            "fail_action": "no_action",
             "id": "mv_a",
             "initial_value": 0.0,
             "limits": {
               "max": 100.0,
               "min": 0.0
             },
+            "local_shed_mode": null,
+            "max_rate": 1.0,
             "move_weight": 1.0,
             "name": "",
             "objective": "none",
             "pid": null,
-            "psv": null
+            "psv": null,
+            "span": 100.0,
+            "zero": 0.0
           }
         ]
       }
@@ -114,36 +129,51 @@
         "constraints": [],
         "cvs": [
           {
+            "description": "",
             "eu": "",
+            "fail_action": "no_action",
+            "fail_timeout_s": 60.0,
             "id": "cv_a",
             "kind": "selfreg",
             "name": "",
             "objective": "none",
+            "priority": 1,
+            "remote_sp_tag_id": null,
             "sp_limits": {
               "max": 100.0,
               "min": 0.0
             },
+            "sp_range_pct": null,
+            "span": 100.0,
+            "track_sp": true,
+            "traj_tau_s": 0.0,
             "tss": 30.0,
-            "weight": 1.0
+            "weight": 1.0,
+            "zero": 0.0
           }
         ],
         "dvs": [],
         "mvs": [
           {
-            "du_max": 1.0,
+            "description": "",
             "du_min": 0.0,
             "eu": "",
+            "fail_action": "no_action",
             "id": "mv_a",
             "initial_value": 0.0,
             "limits": {
               "max": 100.0,
               "min": 0.0
             },
+            "local_shed_mode": null,
+            "max_rate": 1.0,
             "move_weight": 1.0,
             "name": "",
             "objective": "none",
             "pid": null,
-            "psv": null
+            "psv": null,
+            "span": 100.0,
+            "zero": 0.0
           }
         ]
       }
@@ -167,36 +197,51 @@
         "constraints": [],
         "cvs": [
           {
+            "description": "",
             "eu": "",
+            "fail_action": "no_action",
+            "fail_timeout_s": 60.0,
             "id": "cv_a",
             "kind": "integrating",
             "name": "",
             "objective": "none",
+            "priority": 1,
+            "remote_sp_tag_id": null,
             "sp_limits": {
               "max": 100.0,
               "min": 0.0
             },
+            "sp_range_pct": null,
+            "span": 100.0,
+            "track_sp": true,
+            "traj_tau_s": 0.0,
             "tss": 30.0,
-            "weight": 1.0
+            "weight": 1.0,
+            "zero": 0.0
           }
         ],
         "dvs": [],
         "mvs": [
           {
-            "du_max": 1.0,
+            "description": "",
             "du_min": 0.0,
             "eu": "",
+            "fail_action": "no_action",
             "id": "mv_a",
             "initial_value": 0.0,
             "limits": {
               "max": 100.0,
               "min": 0.0
             },
+            "local_shed_mode": null,
+            "max_rate": 1.0,
             "move_weight": 1.0,
             "name": "",
             "objective": "none",
             "pid": null,
-            "psv": null
+            "psv": null,
+            "span": 100.0,
+            "zero": 0.0
           }
         ]
       }
@@ -222,36 +267,51 @@
         "constraints": [],
         "cvs": [
           {
+            "description": "",
             "eu": "",
+            "fail_action": "no_action",
+            "fail_timeout_s": 60.0,
             "id": "cv_a",
             "kind": "selfreg",
             "name": "",
             "objective": "none",
+            "priority": 1,
+            "remote_sp_tag_id": null,
             "sp_limits": {
               "max": 100.0,
               "min": 0.0
             },
+            "sp_range_pct": null,
+            "span": 100.0,
+            "track_sp": true,
+            "traj_tau_s": 0.0,
             "tss": 30.0,
-            "weight": 1.0
+            "weight": 1.0,
+            "zero": 0.0
           }
         ],
         "dvs": [],
         "mvs": [
           {
-            "du_max": 1.0,
+            "description": "",
             "du_min": 0.0,
             "eu": "",
+            "fail_action": "no_action",
             "id": "mv_a",
             "initial_value": 0.0,
             "limits": {
               "max": 100.0,
               "min": 0.0
             },
+            "local_shed_mode": null,
+            "max_rate": 1.0,
             "move_weight": 1.0,
             "name": "",
             "objective": "none",
             "pid": null,
-            "psv": null
+            "psv": null,
+            "span": 100.0,
+            "zero": 0.0
           }
         ]
       }
@@ -311,36 +371,51 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -409,100 +484,135 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             },
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_b",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             },
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_c",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             },
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_d",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             },
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_e",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -601,114 +711,189 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_b",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_c",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_d",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_e",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_f",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_g",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -786,62 +971,87 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [
             {
               "eu": "",
               "id": "dv_a",
-              "name": ""
+              "name": "",
+              "span": 100.0,
+              "zero": 0.0
             },
             {
               "eu": "",
               "id": "dv_b",
-              "name": ""
+              "name": "",
+              "span": 100.0,
+              "zero": 0.0
             },
             {
               "eu": "",
               "id": "dv_c",
-              "name": ""
+              "name": "",
+              "span": 100.0,
+              "zero": 0.0
             },
             {
               "eu": "",
               "id": "dv_d",
-              "name": ""
+              "name": "",
+              "span": 100.0,
+              "zero": 0.0
             },
             {
               "eu": "",
               "id": "dv_e",
-              "name": ""
+              "name": "",
+              "span": 100.0,
+              "zero": 0.0
             }
           ],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -874,36 +1084,51 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -937,49 +1162,74 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_b",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -1012,52 +1262,72 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             },
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_b",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -1090,42 +1360,59 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [
             {
               "eu": "",
               "id": "dv_a",
-              "name": ""
+              "name": "",
+              "span": 100.0,
+              "zero": 0.0
             }
           ],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -1158,36 +1445,51 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 50.0,
                 "min": 100.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -1220,36 +1522,51 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 0.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 0.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -1258,7 +1575,7 @@
         "avisos": 0,
         "erros": 1
       },
-      "regra": "numbers_mv_du_max_nao_positivo",
+      "regra": "numbers_mv_max_rate_nao_positivo",
       "ts_flow_segundos": 1.0
     },
     {
@@ -1293,49 +1610,74 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_b",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 0.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -1368,36 +1710,51 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 50.0,
                 "min": 100.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -1430,36 +1787,51 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 0.0
+              "weight": 0.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -1502,7 +1874,10 @@
         "variables": {
           "constraints": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "co_a",
               "kind": "selfreg",
               "name": "",
@@ -1512,41 +1887,58 @@
                 "high": 100.0,
                 "low": 0.0
               },
-              "tss": 0.0
+              "span": 100.0,
+              "tss": 0.0,
+              "zero": 0.0
             }
           ],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -1578,7 +1970,10 @@
         "variables": {
           "constraints": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "co_a",
               "kind": "selfreg",
               "name": "",
@@ -1588,27 +1983,34 @@
                 "high": 50.0,
                 "low": 100.0
               },
-              "tss": 30.0
+              "span": 100.0,
+              "tss": 30.0,
+              "zero": 0.0
             }
           ],
           "cvs": [],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -1641,36 +2043,51 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -1703,36 +2120,51 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 1000.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -1765,36 +2197,51 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 100.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }
@@ -2044,149 +2491,229 @@
           "constraints": [],
           "cvs": [
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_a",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_b",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_c",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_d",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_e",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             },
             {
+              "description": "",
               "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
               "id": "cv_f",
               "kind": "selfreg",
               "name": "",
               "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
               "sp_limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
               "tss": 30.0,
-              "weight": 1.0
+              "weight": 1.0,
+              "zero": 0.0
             }
           ],
           "dvs": [],
           "mvs": [
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_a",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             },
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_b",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             },
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_c",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             },
             {
-              "du_max": 1.0,
+              "description": "",
               "du_min": 0.0,
               "eu": "",
+              "fail_action": "no_action",
               "id": "mv_d",
               "initial_value": 0.0,
               "limits": {
                 "max": 100.0,
                 "min": 0.0
               },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
               "move_weight": 1.0,
               "name": "",
               "objective": "none",
               "pid": null,
-              "psv": null
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
             }
           ]
         }

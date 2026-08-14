@@ -242,7 +242,7 @@ def test_e2e_f6_06_hot_swap_mpc_malha_tfs(
 
         # Alterar apenas MPC: du_max de uma MV
         mpc_data = grafo_atual["nodes"][3]["data"]  # node mpc1
-        mpc_data["variables"]["mvs"][0]["du_max"] = DU_MAX_NOVO
+        mpc_data["variables"]["mvs"][0]["max_rate"] = DU_MAX_NOVO  # ts_mpc=1 s: EU/s == EU/ciclo
 
         # Aplicar hot-swap
         r = admin.put(f"/api/flows/{flow_id}", json={"graph_json": grafo_atual})
@@ -314,7 +314,7 @@ def test_e2e_f6_06_hot_swap_mpc_malha_tfs(
         r = admin.get(f"/api/flows/{flow_id}")
         assert r.status_code == 200
         no_mpc = next(n for n in r.json()["graph_json"]["nodes"] if n["id"] == "mpc1")
-        assert no_mpc["data"]["variables"]["mvs"][0]["du_max"] == DU_MAX_NOVO, (
+        assert no_mpc["data"]["variables"]["mvs"][0]["max_rate"] == DU_MAX_NOVO, (
             "a configuração nova não foi persistida — não houve hot-swap"
         )
     finally:

@@ -132,23 +132,46 @@ export type ObjetivoMv = "none" | "maximize" | "minimize" | "psv" | "equalize";
 export type ObjetivoCv = "none" | "maximize" | "minimize" | "observe_limit" | "target" | "psv";
 export type ObjetivoRestricao = "none" | "maximize" | "minimize";
 
+/** Ação de falha por variável (RF-613) — espelho de `MvFailAction`/`RowFailAction`:
+ *  avaliada só em REMOTO, debounce de 2 execuções; `simulate_*` (só linhas) segura o valor
+ *  previsto por até `fail_timeout_s` antes da ação final. */
+export type AcaoFalhaMv = "no_action" | "shed_local" | "manual";
+export type AcaoFalhaLinha =
+  | "no_action"
+  | "shed_local"
+  | "manual"
+  | "simulate_manual"
+  | "simulate_shed_local";
+
 /** `operating_point`/`readback_tag_id` (TD-003): o modelo do MPC é incremental — o builder
  *  alimenta cada par com `coluna - operating_point`, então `operating_point` é o ponto de
  *  linearização. Por isso a porta do bloco fica na coordenada ABSOLUTA da planta (`limits`,
- *  `du_max` e `initial_value` também), sem precisar de um bloco Script somando constantes.
+ *  `max_rate` e `initial_value` também), sem precisar de um bloco Script somando constantes.
  *  `readback_tag_id` é a posição real da MV DIRETA (sem `pid`, que já tem o seu próprio); em
  *  LOCAL a saída segue essa tag para a transferência bumpless até REMOTO.
  *
- *  `du_min` (TD-007): banda morta do atuador, mesma EU de `du_max` — quem quantiza é o
- *  worker, não o editor; aqui é só o valor de config. `move_weight`: peso multiplicativo do
- *  custo de movimento desta MV no solve. `0`/`1` reproduzem o comportamento anterior a esta
- *  tarefa (config salvo antes dela carrega com os mesmos defaults do servidor). */
+ *  `zero`/`span` (RF-609): faixa de instrumento `[zero, zero+span]` — os ganhos da matriz
+ *  são declarados %/% e o motor converte a EU por `span_linha/span_coluna`; o faceplate usa
+ *  a faixa como escala. `max_rate` (RF-604 revisado): taxa máxima em EU/s (era `du_max` em
+ *  EU/ciclo — o Δu do solve é `max_rate × Ts_mpc`).
+ *
+ *  `du_min` (TD-007): banda morta do atuador, na EU da MV — quem quantiza é o worker, não o
+ *  editor; aqui é só o valor de config. `move_weight`: peso multiplicativo do custo de
+ *  movimento desta MV no solve. `0`/`1` reproduzem o comportamento anterior a esta tarefa
+ *  (config salvo antes dela carrega com os mesmos defaults do servidor).
+ *
+ *  `fail_action` (RF-613): ação quando a MV fica indisponível em REMOTO. `local_shed_mode`:
+ *  valor escrito no `mode_cmd` em qualquer devolução ao local; `null` = `mode_values.auto`
+ *  (só com PID — o servidor valida). */
 export type VariavelMv = {
   id: string;
   name: string;
   eu: string;
+  description: string;
+  zero: number;
+  span: number;
   limits: LimitesMpc;
-  du_max: number;
+  max_rate: number;
   du_min: number;
   move_weight: number;
   initial_value: number;
@@ -159,37 +182,63 @@ export type VariavelMv = {
   /** Valor preferido da MV quando `objective === "psv"` (coordenada absoluta, mesma de
    *  `limits`); `null` fora do PSV — o servidor valida as duas direções. */
   psv: number | null;
+  fail_action: AcaoFalhaMv;
+  local_shed_mode: number | null;
 };
 
 export type VariavelCv = {
   id: string;
   name: string;
   eu: string;
+  description: string;
+  zero: number;
+  span: number;
   kind: TipoLinhaMpc;
   tss: number;
   weight: number;
   sp_limits: LimitesMpc;
+  priority: number;
   objective: ObjetivoCv;
+  /** τ da trajetória de referência exponencial até o SP (RF-611); 0 = degrau (comportamento
+   *  de sempre). */
+  traj_tau_s: number;
+  /** Fora de AUTO o SP rastreia o PV (RF-612); `true` = comportamento anterior. */
+  track_sp: boolean;
+  fail_action: AcaoFalhaLinha;
+  /** Janela da simulação `simulate_*` (RF-613), em segundos. */
+  fail_timeout_s: number;
+  /** Banda do SP no SSTO (RF-615), % do span; `null` = sem restrição. */
+  sp_range_pct: number | null;
+  /** Tag OPC-UA de SP remoto (RF-614); `null` = SP local do operador. */
+  remote_sp_tag_id: number | null;
 };
 
 export type VariavelRestricao = {
   id: string;
   name: string;
   eu: string;
+  description: string;
+  zero: number;
+  span: number;
   kind: TipoLinhaMpc;
   tss: number;
   range: FaixaMpc;
   priority: number;
   objective: ObjetivoRestricao;
+  fail_action: AcaoFalhaLinha;
+  fail_timeout_s: number;
 };
 
 /** `operating_point` da DV (TD-003): mesmo ponto de linearização das MVs — o builder alimenta
  *  o par com `coluna - operating_point`, então a porta de entrada da DV também fica na
- *  coordenada absoluta da planta, sem bloco Script somando constantes. */
+ *  coordenada absoluta da planta, sem bloco Script somando constantes. `zero`/`span`
+ *  (RF-609): faixa de instrumento — entra na conversão %/%→EU dos ganhos da DV. */
 export type VariavelDv = {
   id: string;
   name: string;
   eu: string;
+  zero: number;
+  span: number;
   range: FaixaMpc | null;
   operating_point: number;
 };

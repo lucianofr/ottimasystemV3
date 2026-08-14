@@ -45,7 +45,7 @@ def _config(
                     "name": "mv",
                     "eu": "u",
                     "limits": {"min": mv_limits[0], "max": mv_limits[1]},
-                    "du_max": 100.0,
+                    "max_rate": 100.0,
                 }
             ],
             "cvs": [
@@ -74,7 +74,8 @@ def _request(
     *, sp: float = 50.0, y: float = 20.0, u: float = 10.0, frozen_mvs: frozenset[str] = frozenset()
 ) -> SolveRequest:
     return SolveRequest(
-        y={"cv_1": y}, u_applied={"mv_1": u}, d={}, sp={"cv_1": sp}, reinit=False, frozen_mvs=frozen_mvs
+        y={"cv_1": y}, u_applied={"mv_1": u}, d={}, sp={"cv_1": sp}, reinit=False,
+        frozen_mvs=frozen_mvs,
     )
 
 

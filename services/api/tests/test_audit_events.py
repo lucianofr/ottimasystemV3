@@ -61,6 +61,8 @@ async def test_alteracao_de_retencao_emite_history_retention_changed(
         "kind": "history_retention_changed",
         "retention_days_old": 30,
         "retention_days_new": 45,
+        "events_retention_days_old": 30,
+        "events_retention_days_new": 30,
     }
 
 

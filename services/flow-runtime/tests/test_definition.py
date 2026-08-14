@@ -39,7 +39,7 @@ def mv(suffix: str, *, pid: dict | None = None) -> dict:
         "name": f"MV {suffix}",
         "eu": "m3/h",
         "limits": {"min": 0.0, "max": 100.0},
-        "du_max": 5.0,
+        "max_rate": 5.0,
         "initial_value": 0.0,
     }
     if pid is not None:

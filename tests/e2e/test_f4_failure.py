@@ -78,7 +78,7 @@ def _config_mpc_pesado() -> dict:
             "name": f"MV pesada {mv_id}",
             "eu": "%",
             "limits": dict(LIMITES_MV),
-            "du_max": DU_MAX_MV,
+            "max_rate": DU_MAX_MV,
             "initial_value": 0.0,
         }
         for mv_id in _MV_IDS_PESADO

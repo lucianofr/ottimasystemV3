@@ -45,6 +45,12 @@ MPC_STATE_PATTERN = "mpc.state.*"
 
 MPC_STATE_PREFIX = "mpc.state."
 
+OPC_VALUES_PATTERN = "opc.values.*"
+"""Terceira assinatura do hub: valores crus do opc-worker (RF-204) filtrados por tag
+(decisão F6 A-1 revertida — a operação precisa da taxa OPC, não da taxa do MPC)."""
+
+OPC_VALUES_PREFIX = "opc.values."
+
 QUEUE_MAX = 8
 """Mensagens em espera por socket. O Ts mínimo é 0,5 s (ADR-007), então 8 mensagens são ~4 s
 de folga por flow inscrito — cobre soluço de rede sem deixar um cliente travado acumular
@@ -60,6 +66,7 @@ class Subscriber:
         self._socket = socket
         self.flow_ids: set[int] = set()
         self.mpc_ids: set[tuple[int, str]] = set()
+        self.tags: set[int] = set()
         self.events: bool = False
         self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=QUEUE_MAX)
         self._task: asyncio.Task[None] | None = None
@@ -123,6 +130,9 @@ class FlowStatusHub:
         self._mpc_listener = PatternListener(
             redis_client, MPC_STATE_PATTERN, self._dispatch_mpc_state, name="api-mpc-state-hub"
         )
+        self._opc_listener = PatternListener(
+            redis_client, OPC_VALUES_PATTERN, self._dispatch_opc_values, name="api-opc-values-hub"
+        )
         self._events_listener = ChannelListener(
             redis_client, CHANNEL_EVENTS, self._dispatch_events, name="api-events-hub"
         )
@@ -136,12 +146,14 @@ class FlowStatusHub:
         """
         await self._listener.start()
         await self._mpc_listener.start()
+        await self._opc_listener.start()
         await self._events_listener.start()
 
     async def stop(self) -> None:
         """Para os laços, encerra as inscrições e fecha os sockets restantes. Nunca levanta."""
         await self._listener.stop()
         await self._mpc_listener.stop()
+        await self._opc_listener.stop()
         await self._events_listener.stop()
         subs, self._subs = self._subs, set()
         for sub in subs:
@@ -166,6 +178,24 @@ class FlowStatusHub:
         mpc_id = _mpc_id_of(channel)
         if mpc_id is not None:
             await self._fanout(channel, raw, "mpc_ids", mpc_id)
+
+    async def _dispatch_opc_values(self, channel: str, raw: str) -> None:
+        """Fanout de `opc.values.<conn_id>`: o filtro é o `tag_id` DENTRO do payload (o canal
+        é por conexão, RF-204), então o `_fanout` por id de canal não serve aqui."""
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("Payload inválido descartado no fanout de %s: %.200s", channel, raw)
+            return
+        tag_id = data.get("tag_id") if isinstance(data, dict) else None
+        if not isinstance(tag_id, int) or isinstance(tag_id, bool):
+            logger.info("opc.values sem tag_id inteiro, ignorado: %.200s", raw)
+            return
+        # `data` vai como veio do barramento: remontar arriscaria divergir do RF-204.
+        text = json.dumps({"channel": channel, "data": data})
+        for sub in self._subs:
+            if tag_id in sub.tags:
+                sub.offer(text)
 
     async def _dispatch_events(self, raw: str) -> None:
         """Fanout do canal `events`: sem id, entrega a quem ligou `sub.events` (§5, F5R-15)."""
@@ -220,6 +250,14 @@ def _flow_ids(ids: Any) -> set[int]:
     return {i for i in ids if isinstance(i, int) and not isinstance(i, bool)}
 
 
+def _tag_ids(ids: Any) -> set[int]:
+    """Mesmo formato de `_flow_ids`, para a assinatura `opc_values` (lista de tag_id)."""
+    if not isinstance(ids, list):
+        logger.info("Lista de opc_values inesperada no /ws, ignorada: %.200s", ids)
+        return set()
+    return {i for i in ids if isinstance(i, int) and not isinstance(i, bool)}
+
+
 def _mpc_ids(ids: Any) -> set[tuple[int, str]]:
     """Só pares `flow_id/block_id` bem formados (§6.2); item malformado é ignorado."""
     if not isinstance(ids, list):
@@ -268,6 +306,8 @@ def _apply_client_message(sub: Subscriber, raw: str) -> None:
                 attr_name, parse = "flow_ids", _flow_ids
             elif key == "mpc_state":
                 attr_name, parse = "mpc_ids", _mpc_ids
+            elif key == "opc_values":
+                attr_name, parse = "tags", _tag_ids
             elif key == "events":
                 _apply_events(sub, action, ids)
                 continue

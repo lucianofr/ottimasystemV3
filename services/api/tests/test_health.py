@@ -185,8 +185,10 @@ async def test_lifespan_cria_e_cancela_o_heartbeat_sem_vazar(monkeypatch, app):
 
     async with app.router.lifespan_context(app):
         tasks_novas = asyncio.all_tasks() - tasks_antes
-        assert len(tasks_novas) == 1, "lifespan deveria criar exatamente a task do heartbeat"
-        heartbeat_task = next(iter(tasks_novas))
+        assert len(tasks_novas) == 2, (
+            "lifespan deveria criar a task do heartbeat e a do watch de log level"
+        )
+        heartbeat_task = next(t for t in tasks_novas if "heartbeat" in repr(t.get_coro()))
         assert not heartbeat_task.done()
 
         await asyncio.sleep(0.05)  # alguns ciclos de HEARTBEAT_INTERVAL_S=0.01
@@ -194,8 +196,8 @@ async def test_lifespan_cria_e_cancela_o_heartbeat_sem_vazar(monkeypatch, app):
         assert app.state.redis_ok is True
         assert app.state.db_ok is True
 
-    # Saída do `async with` sem levantar: nenhum `CancelledError` escapou do shutdown. A task
-    # foi cancelada e aguardada, e não sobrou nenhuma task de heartbeat rodando.
+    # Saída do `async with` sem levantar: nenhum `CancelledError` escapou do shutdown. As tasks
+    # foram canceladas e aguardadas, e não sobrou nada rodando.
     assert heartbeat_task.done()
     assert heartbeat_task.cancelled()
     assert asyncio.all_tasks() - tasks_antes == set()

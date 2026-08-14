@@ -17,13 +17,19 @@ from typing import TYPE_CHECKING, Any
 
 from redis.asyncio import Redis
 
-from ottima_core.bus import KIND_MPC_ARM_FAILED, KIND_MPC_SHED, FlowCommand, publish_event
+from ottima_core.bus import (
+    KIND_MPC_ARM_FAILED,
+    KIND_MPC_FAIL_ACTION_TRIGGERED,
+    KIND_MPC_SHED,
+    FlowCommand,
+    publish_event,
+)
 
 from .blocks.mpc import MpcBlock
 from .definition import StagedDefinition
 from .events import mpc_block_origin
 from .mpc.host import MpcHost
-from .mpc_arming import watch_arm, write_mode_cmd
+from .mpc_arming import watch_arm, watch_fail_actions, write_mode_cmd
 from .script_pool import ScriptPool
 from .snapshot import ValueSnapshot
 
@@ -172,6 +178,7 @@ class MpcOrchestrator:
             block.pid_bindings,
             "target" if now_remote else "auto",
             source=mpc_block_origin(flow_id, block_id),
+            local_shed_modes=block.local_shed_modes,
         )
         if now_remote:
             self._start_watchdog(runtime, flow_id, block_id, block)
@@ -209,6 +216,39 @@ class MpcOrchestrator:
                 ),
             )
 
+        async def on_fail_action(var_id: str, acao: str, motivo: str) -> None:
+            # O evento sai ANTES da ação (RF-613): se a ação falhar, o rastro do disparo
+            # já existe no log de eventos.
+            await publish_event(
+                self._redis,
+                severity="warning",
+                origin=mpc_block_origin(flow_id, block_id),
+                message=(
+                    f"MPC '{block_id}': fail action de '{var_id}' disparada ({acao}; {motivo})"
+                ),
+                kind=KIND_MPC_FAIL_ACTION_TRIGGERED,
+                payload={"var_id": var_id, "action": acao, "reason": motivo},
+            )
+            if acao == "manual":
+                # Mesmo eixo do comando do operador (§4.8) — idempotente se já em MAN.
+                await block.command("mpc_mode", {"axis": "man_auto", "value": "man"}, None)
+            elif acao == "shed_local":
+                # MESMA rotina do shed global (REMOTO→LOCAL + devolução do PID +
+                # KIND_MPC_SHED), com a razão distinta no payload.
+                await self._auto_revert(
+                    runtime,
+                    flow_id,
+                    block_id,
+                    block,
+                    kind=KIND_MPC_SHED,
+                    payload={"reason": "fail_action", "var_id": var_id},
+                    severity="alarm",
+                    message=(
+                        f"MPC '{block_id}': shed para LOCAL por fail action de "
+                        f"'{var_id}' ({motivo})"
+                    ),
+                )
+
         task = asyncio.create_task(
             watch_arm(
                 block=block, snapshot=self._snapshot, on_no_confirm=on_no_confirm, on_shed=on_shed
@@ -216,14 +256,20 @@ class MpcOrchestrator:
             name=f"mpc-watchdog-{flow_id}-{block_id}",
         )
         runtime.mpc_watchdogs[block_id] = task
+        fail_task = asyncio.create_task(
+            watch_fail_actions(block=block, on_fail_action=on_fail_action),
+            name=f"mpc-fail-actions-{flow_id}-{block_id}",
+        )
+        runtime.mpc_fail_watchdogs[block_id] = fail_task
 
     async def cancel_watchdog(self, runtime: _FlowRuntime, block_id: str) -> None:
-        task = runtime.mpc_watchdogs.pop(block_id, None)
-        if task is None:
-            return
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        for mapping in (runtime.mpc_watchdogs, runtime.mpc_fail_watchdogs):
+            task = mapping.pop(block_id, None)
+            if task is None:
+                continue
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
     async def _auto_revert(
         self,
@@ -250,9 +296,19 @@ class MpcOrchestrator:
         reconferência abaixo, a escrita de `mode_cmd=auto` que vem a seguir sobrescreveria
         esse rearme fresco com um comando obsoleto — daí o segundo `if`."""
         current = asyncio.current_task()
-        if runtime.mpc_watchdogs.get(block_id) is not current:
+        if (
+            runtime.mpc_watchdogs.get(block_id) is not current
+            and runtime.mpc_fail_watchdogs.get(block_id) is not current
+        ):
             return
-        runtime.mpc_watchdogs.pop(block_id, None)
+        # A task que disparou sai do registro e a IRMÃ (arm-watchdog ou fail-watchdog) é
+        # cancelada: uma reversão só, sem o outro vigia disparar em cima de bloco já LOCAL.
+        for mapping in (runtime.mpc_watchdogs, runtime.mpc_fail_watchdogs):
+            sibling = mapping.pop(block_id, None)
+            if sibling is not None and sibling is not current:
+                sibling.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sibling
         if block.local_remote != "remote":
             return
         await block.command("mpc_mode", {"axis": "local_remote", "value": "local"}, None)
@@ -267,6 +323,7 @@ class MpcOrchestrator:
                 block.pid_bindings,
                 "auto",
                 source=mpc_block_origin(flow_id, block_id),
+                local_shed_modes=block.local_shed_modes,
             )
         except Exception:
             # O bloco já está LOCAL (o `command()` acima teve sucesso), mas o PID real pode
@@ -418,6 +475,7 @@ class MpcOrchestrator:
                     block.pid_bindings,
                     "auto",
                     source=mpc_block_origin(flow_id, block_id),
+                    local_shed_modes=block.local_shed_modes,
                 )
 
     async def shutdown_mpc(self, runtime: _FlowRuntime, *, flow_id: int) -> None:
@@ -497,6 +555,7 @@ class MpcOrchestrator:
                         old_block.pid_bindings,
                         "auto",
                         source=mpc_block_origin(flow_id, block_id),
+                        local_shed_modes=old_block.local_shed_modes,
                     )
                 if block_id in new_hosts:  # substituído (config mudou), não removido do grafo
                     (swapped_bumpless if transplantado else swapped).append(block_id)

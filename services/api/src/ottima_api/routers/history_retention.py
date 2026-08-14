@@ -45,29 +45,59 @@ async def update_history_retention(
 ) -> HistoryRetentionSettings:
     settings = await _linha(db)
     dias_antigos = settings.retention_days
-    settings.retention_days = body.retention_days
-    for hypertable in _HYPERTABLES:
-        await db.execute(text(f"SELECT remove_retention_policy('{hypertable}', if_exists => true)"))
+    dias_eventos_antigos = settings.events_retention_days
+    if body.retention_days is not None:
+        settings.retention_days = body.retention_days
+        for hypertable in _HYPERTABLES:
+            await db.execute(
+                text(f"SELECT remove_retention_policy('{hypertable}', if_exists => true)")
+            )
+            await db.execute(
+                text(f"SELECT add_retention_policy('{hypertable}', make_interval(days => :days))"),
+                {"days": body.retention_days},
+            )
+            # Sem isto, encolher a janela só valeria a partir do próximo ciclo agendado do
+            # scheduler do Timescale — o pedido é liberar espaço já.
+            await db.execute(
+                text(
+                    "SELECT drop_chunks"
+                    f"('{hypertable}', older_than => make_interval(days => :days))"
+                ),
+                {"days": body.retention_days},
+            )
+    if body.events_retention_days is not None:
+        settings.events_retention_days = body.events_retention_days
+        # `events` é hypertable mas NÃO entra em `_HYPERTABLES` (ADR-020: log de alarmes,
+        # não variável de processo) — janela própria (1–90 dias), loop próprio.
+        await db.execute(text("SELECT remove_retention_policy('events', if_exists => true)"))
         await db.execute(
-            text(f"SELECT add_retention_policy('{hypertable}', make_interval(days => :days))"),
-            {"days": body.retention_days},
+            text("SELECT add_retention_policy('events', make_interval(days => :days))"),
+            {"days": body.events_retention_days},
         )
-        # Sem isto, encolher a janela só valeria a partir do próximo ciclo agendado do
-        # scheduler do Timescale — o pedido é liberar espaço já.
         await db.execute(
-            text(f"SELECT drop_chunks('{hypertable}', older_than => make_interval(days => :days))"),
-            {"days": body.retention_days},
+            text("SELECT drop_chunks('events', older_than => make_interval(days => :days))"),
+            {"days": body.events_retention_days},
         )
     await db.commit()
     await db.refresh(settings)
-    # Auditoria (ADR-020): a mutação apaga histórico permanentemente nas 4 estruturas —
-    # sempre depois do commit, nunca antes (mesmo padrão de tags.py/projects.py).
-    await publish_event(
-        redis_client,
-        severity="info",
-        origin=f"user:{user.id}",
-        message=f"Retenção de histórico alterada de {dias_antigos} para {body.retention_days} dias",
-        kind=KIND_HISTORY_RETENTION_CHANGED,
-        payload={"retention_days_old": dias_antigos, "retention_days_new": body.retention_days},
-    )
+    # Auditoria (ADR-020): a mutação apaga histórico permanentemente — sempre depois do
+    # commit, nunca antes (mesmo padrão de tags.py/projects.py).
+    if body.retention_days is not None or body.events_retention_days is not None:
+        await publish_event(
+            redis_client,
+            severity="info",
+            origin=f"user:{user.id}",
+            message=(
+                f"Retenção de histórico alterada: variáveis {dias_antigos}→"
+                f"{settings.retention_days} dias, eventos {dias_eventos_antigos}→"
+                f"{settings.events_retention_days} dias"
+            ),
+            kind=KIND_HISTORY_RETENTION_CHANGED,
+            payload={
+                "retention_days_old": dias_antigos,
+                "retention_days_new": settings.retention_days,
+                "events_retention_days_old": dias_eventos_antigos,
+                "events_retention_days_new": settings.events_retention_days,
+            },
+        )
     return settings

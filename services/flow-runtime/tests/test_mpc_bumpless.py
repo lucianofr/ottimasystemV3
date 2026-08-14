@@ -1,7 +1,7 @@
 """Contratos de `mpc.init_bumpless` — arme/re-arme sem salto (spec F4 §3.6; TDD estrito).
 
 Lista da brief da tarefa 2.3: pós-init a predição em t=0 bate na medida (selfreg E
-integrador); a primeira MV do `make_step` dista <= `du_max` do valor vigente (os dois
+integrador); a primeira MV do `make_step` dista <= `du_max` (por ciclo) do valor vigente (os dois
 kinds); bias corrige erro de ganho do modelo (offset absorvido em regime, planta simulada
 no próprio teste).
 """
@@ -21,7 +21,7 @@ def _mv(
     id_: str,
     *,
     limits: tuple[float, float] = (0.0, 1000.0),
-    du_max: float = 5.0,
+    max_rate: float = 1.0,
     operating_point: float = 0.0,
 ) -> dict:
     return {
@@ -29,7 +29,7 @@ def _mv(
         "name": id_,
         "eu": "u",
         "limits": {"min": limits[0], "max": limits[1]},
-        "du_max": du_max,
+        "max_rate": max_rate,  # 1 EU/s x Ts_mpc=5 s = 5 EU/ciclo
         "initial_value": 0.0,
         "operating_point": operating_point,
         "pid": None,
@@ -66,7 +66,7 @@ def _par_integrating(Ki: float, theta: float) -> dict:
 
 
 def _selfreg_config(
-    *, K: float = 2.0, theta: float = 0.0, du_max: float = 5.0, operating_point: float = 0.0
+    *, K: float = 2.0, theta: float = 0.0, max_rate: float = 1.0, operating_point: float = 0.0
 ) -> MpcConfig:
     return MpcConfig.model_validate(
         {
@@ -77,7 +77,7 @@ def _selfreg_config(
                     _mv(
                         "mv_1",
                         limits=(0.0, 1000.0),
-                        du_max=du_max,
+                        max_rate=max_rate,
                         operating_point=operating_point,
                     )
                 ],
@@ -91,7 +91,7 @@ def _selfreg_config(
 
 
 def _integrating_config(
-    *, Ki: float = 0.5, theta: float = 0.0, du_max: float = 5.0, operating_point: float = 0.0
+    *, Ki: float = 0.5, theta: float = 0.0, max_rate: float = 1.0, operating_point: float = 0.0
 ) -> MpcConfig:
     return MpcConfig.model_validate(
         {
@@ -102,7 +102,7 @@ def _integrating_config(
                     _mv(
                         "mv_1",
                         limits=(0.0, 1000.0),
-                        du_max=du_max,
+                        max_rate=max_rate,
                         operating_point=operating_point,
                     )
                 ],
@@ -161,8 +161,8 @@ def test_predicao_t0_bate_na_medida_integrador():
 
 
 def test_primeira_mv_sem_salto_selfreg():
-    du_max = 5.0
-    built = build_mpc(_selfreg_config(K=2.0, du_max=du_max), ts_flow=1.0)
+    du_max = 5.0  # EU/ciclo (max_rate 1.0 x Ts_mpc=5)
+    built = build_mpc(_selfreg_config(K=2.0), ts_flow=1.0)
     u_vigente = 30.0
     # x_ss(u=30) sob K=2 -> y em regime = 60; SP = medida atual (nenhum motivo pra mexer).
     init_bumpless(built, u_now={"mv_1": u_vigente}, y_now={"cv_1": 60.0}, d_now={})
@@ -175,8 +175,8 @@ def test_primeira_mv_sem_salto_selfreg():
 
 
 def test_primeira_mv_sem_salto_integrador():
-    du_max = 5.0
-    built = build_mpc(_integrating_config(Ki=0.5, du_max=du_max), ts_flow=1.0)
+    du_max = 5.0  # EU/ciclo (max_rate 1.0 x Ts_mpc=5)
+    built = build_mpc(_integrating_config(Ki=0.5), ts_flow=1.0)
     u_vigente = 12.0
     y_medido = 77.0
     init_bumpless(built, u_now={"mv_1": u_vigente}, y_now={"cv_1": y_medido}, d_now={})
@@ -206,7 +206,7 @@ def test_bias_corrige_erro_de_ganho_do_modelo_em_regime():
     theta = 0.0
     ts_mpc = 5.0  # multiplier=5, ts_flow=1.0
 
-    built = build_mpc(_selfreg_config(K=k_model, theta=theta, du_max=1000.0), ts_flow=1.0)
+    built = build_mpc(_selfreg_config(K=k_model, theta=theta, max_rate=200.0), ts_flow=1.0)
 
     a_real = float(ca.exp(-ts_mpc / tau))
     b_real = 1.0 - a_real

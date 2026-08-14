@@ -276,22 +276,29 @@ class OpcSimServer:
         while True:
             await asyncio.sleep(VALUES_PERIOD)
             try:
-                if await self.read(NODE_CTRL_FREEZE_VALUES):
-                    continue
-                self._sim_time += VALUES_PERIOD
-                elapsed = self._sim_time
-                await self.write(
-                    NODE_SINE, 50.0 + 50.0 * math.sin(2.0 * math.pi * elapsed / SINE_PERIOD)
-                )
-                await self.write(NODE_COUNTER, int(elapsed) % COUNTER_WRAP)
-                await self.write(NODE_SQUARE, int(elapsed / SQUARE_PERIOD) % 2 == 1)
-                for source, mirror in _MIRRORS:
-                    await self.write(mirror, await self.read(source))
+                # Timeout por iteração: uma escrita interna que pendura (dispatch de
+                # notificação para sessão zumbi, visto no gate E2E) não pode matar o loop
+                # em silêncio — o scan seguinte tenta de novo.
+                await asyncio.wait_for(self._values_scan(), timeout=2.0)
+            except TimeoutError:
+                _logger.warning("opcsim: scan de valores travou; retomando no próximo")
             except (ua.UaError, OSError):
                 # Só erros esperados de comunicação/address space são tolerados. Erro de
                 # programação propaga e derruba a task: um retry silencioso a 200 ms viraria
                 # log-spam e chegaria aos testes do worker como timeout distante.
                 _logger.exception("opcsim: falha no loop de simulação de valores")
+
+    async def _values_scan(self) -> None:
+        """Uma varredura do loop de valores (sine/counter/square + espelhos)."""
+        if await self.read(NODE_CTRL_FREEZE_VALUES):
+            return
+        self._sim_time += VALUES_PERIOD
+        elapsed = self._sim_time
+        await self.write(NODE_SINE, 50.0 + 50.0 * math.sin(2.0 * math.pi * elapsed / SINE_PERIOD))
+        await self.write(NODE_COUNTER, int(elapsed) % COUNTER_WRAP)
+        await self.write(NODE_SQUARE, int(elapsed / SQUARE_PERIOD) % 2 == 1)
+        for source, mirror in _MIRRORS:
+            await self.write(mirror, await self.read(source))
 
     async def _run_watchdog_rung(self) -> None:
         """Rung do watchdog: a cada scan, `to_system := NOT(from_system)` incondicional
@@ -305,10 +312,22 @@ class OpcSimServer:
             await asyncio.sleep(RUNG_PERIOD)
             for from_node, to_node, freeze_node in _WATCHDOG_PAIRS:
                 try:
-                    if await self.read(freeze_node):
-                        # Congelado: to_system pára onde estava até o freeze sair.
-                        continue
-                    await self.write(to_node, not await self.read(from_node))
+                    # Mesmo motivo do loop de valores: rung que pendura numa escrita
+                    # interna deixaria o bit congelado para sempre e todo flow com
+                    # watchdog neste par cairia em `watchdog_dead` sem chance de voltar.
+                    await asyncio.wait_for(self._rung_scan(from_node, to_node, freeze_node), 1.0)
+                except TimeoutError:
+                    _logger.warning(
+                        "opcsim: rung do watchdog travou (%s); retomando no próximo scan",
+                        to_node,
+                    )
                 except (ua.UaError, OSError):
                     # Mesma política do loop de valores: nada de rede genérica sobre bug.
                     _logger.exception("opcsim: falha no rung do watchdog (%s)", to_node)
+
+    async def _rung_scan(self, from_node: str, to_node: str, freeze_node: str) -> None:
+        """Um scan do rung de UM par: `to_system := NOT(from_system)`, salvo congelamento."""
+        if await self.read(freeze_node):
+            # Congelado: to_system pára onde estava até o freeze sair.
+            return
+        await self.write(to_node, not await self.read(from_node))

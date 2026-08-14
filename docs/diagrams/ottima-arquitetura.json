@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "OttimaSystem — Arquitetura de Referência",
+    "subtitle": "Plataforma on-premise de APC/MPC: serviços asyncio, barramento Redis pub/sub e OPC-UA",
+    "output": "docs/diagrams/ottima-arquitetura.html",
+    "visual_preset": "blueprint",
+    "repository": {
+      "url": "https://github.com/lucianofr/ottimasystemV3.git",
+      "revision": "9d5554f3b620b2d7c9e88146ce144d9fed437f78"
+    },
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "caminho-comando",
+        "label": "Caminho do comando",
+        "focus": ["user", "frontend", "api", "redis", "flow_runtime"],
+        "note": "Operador age na UI; a API publica em flow.commands; o motor executa e publica estado."
+      },
+      {
+        "id": "dados-vivos",
+        "label": "Dados vivos da planta",
+        "focus": ["plc", "opc_worker", "redis", "api", "frontend"],
+        "note": "Leituras OPC sobem pelo barramento até faceplates, canvas e trends na UI."
+      },
+      {
+        "id": "persistencia",
+        "label": "Persistência e auditoria",
+        "focus": ["redis", "recorder", "timescale", "api"],
+        "note": "O recorder assina o barramento e grava hypertables; a API serve histórico e eventos."
+      }
+    ]
+  },
+  "components": [
+    { "id": "user", "type": "external", "label": "Engenheiro / Operador", "sublabel": "browser — RBAC admin/operador", "pos": [40, 330], "size": [140, 60] },
+    { "id": "frontend", "type": "frontend", "label": "Frontend", "sublabel": "React + Vite · React Flow · uPlot", "pos": [260, 330], "size": [150, 60], "sources": [{ "path": "frontend/src/app/router.tsx", "label": "SPA" }] },
+    { "id": "api", "type": "backend", "label": "API", "sublabel": "FastAPI :8000 · REST + WebSocket", "tag": "JWT · RBAC", "pos": [500, 330], "size": [150, 64], "sources": [{ "path": "services/api/src/ottima_api/app.py", "label": "routers + /ws" }] },
+    { "id": "redis", "type": "messagebus", "label": "Redis pub/sub", "sublabel": "barramento fire-and-forget", "pos": [820, 330], "size": [150, 60] },
+    { "id": "flow_runtime", "type": "backend", "label": "flow-runtime", "sublabel": "scan cycle por Ts · MPC (do-mpc) · SSTO · scripts · TFS", "tag": "motor", "pos": [1100, 150], "size": [210, 66], "sources": [{ "path": "services/flow-runtime/src/ottima_flow_runtime/main.py", "label": "supervisor" }] },
+    { "id": "opc_worker", "type": "backend", "label": "opc-worker", "sublabel": "único cliente OPC-UA · subscriptions · watchdog por flow", "pos": [1100, 330], "size": [200, 64], "sources": [{ "path": "services/opc-worker/src/ottima_opc_worker/main.py", "label": "sessões + watchdog" }] },
+    { "id": "recorder", "type": "backend", "label": "recorder", "sublabel": "assina o barramento e grava amostras", "pos": [1100, 520], "size": [160, 60], "sources": [{ "path": "services/recorder/src/ottima_recorder/main.py", "label": "hypertables" }] },
+    { "id": "timescale", "type": "database", "label": "PostgreSQL + TimescaleDB", "sublabel": "cadastros · Samples · MpcSamples · SstoRun · Events", "pos": [700, 640], "size": [230, 64] },
+    { "id": "plc", "type": "external", "label": "DCS / PLC", "sublabel": "servidores OPC-UA (≤5) · PIDs regulatórios", "pos": [1420, 330], "size": [160, 64] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "on-premise · Docker Compose", "wraps": ["frontend", "api", "redis", "flow_runtime", "opc_worker", "recorder", "timescale"] },
+    { "kind": "security-group", "label": "planta industrial", "wraps": ["plc"], "pad": 14 }
+  ],
+  "connections": [
+    { "from": "user", "to": "frontend", "label": "HTTP :80", "variant": "emphasis" },
+    { "from": "frontend", "to": "api", "label": "REST + /ws", "variant": "emphasis", "labelAt": [434, 322] },
+    { "from": "api", "to": "redis", "label": "flow.commands", "labelAt": [674, 322] },
+    { "from": "redis", "to": "flow_runtime", "label": "deploy · modos · SP", "labelAt": [930, 210] },
+    { "from": "flow_runtime", "to": "redis", "label": "flow.status · mpc.state", "labelAt": [920, 260] },
+    { "from": "opc_worker", "to": "redis", "label": "opc.values.<conn>", "labelAt": [1150, 465] },
+    { "from": "redis", "to": "opc_worker", "label": "opc.writes", "labelAt": [994, 404] },
+    { "from": "redis", "to": "recorder", "label": "subscribe", "labelAt": [895, 495] },
+    { "from": "opc_worker", "to": "plc", "label": "OPC-UA R/W", "variant": "emphasis" },
+    { "from": "api", "to": "timescale", "label": "SQL · histórico" },
+    { "from": "recorder", "to": "timescale", "label": "INSERT em lote" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Serviços (asyncio, sem Celery)", "items": ["api — auth/JWT, CRUD, comandos, WebSocket e histórico", "flow-runtime — até ~10 flows como tasks; solve MPC e exec() via executor", "opc-worker — único processo que fala OPC-UA; reconexão automática", "recorder — grava Samples, MpcSamples e eventos no TimescaleDB"] },
+    { "dot": "emerald", "title": "Barramento interno (Redis)", "items": ["opc.values.<conn_id> — leituras com qualidade", "opc.writes — escritas com evento de auditoria", "flow.commands — deploy, parar, modos, SP, MV manual", "flow.status / mpc.state — estado publicado, nunca eco de comando"] },
+    { "dot": "rose", "title": "Segurança operacional", "items": ["Watchdog por flow: bit congelado > timeout ⇒ flow para", "Falha sempre para o lado seguro: PLC retoma o comando", "Assume/devolve malhas de forma bumpless", "UI reflete estado publicado; toda escrita gera auditoria"] }
+  ]
+}
