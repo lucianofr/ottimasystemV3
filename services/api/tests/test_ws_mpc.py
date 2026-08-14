@@ -24,6 +24,8 @@ from fastapi import FastAPI
 from ottima_api.ws import FlowStatusHub
 from ottima_core.bus import (
     FlowStatus,
+    FuzzyState,
+    FuzzyVarState,
     MpcModes,
     MpcPrediction,
     MpcState,
@@ -31,6 +33,7 @@ from ottima_core.bus import (
     MpcVarState,
     PortValue,
     channel_flow_status,
+    channel_fuzzy_state,
     channel_mpc_state,
 )
 from ottima_core.security import create_access_token
@@ -131,6 +134,12 @@ class WSClient:
     async def unsubscribe_mpc_state(self, *ids: str) -> None:
         await self.send_json({"unsubscribe": {"mpc_state": list(ids)}})
 
+    async def subscribe_fuzzy_state(self, *ids: str) -> None:
+        await self.send_json({"subscribe": {"fuzzy_state": list(ids)}})
+
+    async def unsubscribe_fuzzy_state(self, *ids: str) -> None:
+        await self.send_json({"unsubscribe": {"fuzzy_state": list(ids)}})
+
     async def receive_json(self) -> dict[str, Any]:
         return _payload_of(await self._next(RECEIVE_TIMEOUT_S))
 
@@ -223,6 +232,18 @@ def mpc_state_json(
         vars={var_id: MpcVarState(v=v, sp=sp)},
         cost=0.0,
         prediction=MpcPrediction(ts=ts, t=[], cv=[], mv=[]),
+    ).model_dump_json()
+
+
+def fuzzy_state_json(*, v: float = 1.5) -> str:
+    """Payload `fuzzy.state.<flow_id>.<block_id>` (ADR-030), com uma única entrada
+    preenchida."""
+    return FuzzyState(
+        ts=datetime.now(UTC),
+        ok=True,
+        inputs=[FuzzyVarState(port="IN1", name="X", v=v, terms=[])],
+        rules=[],
+        outputs=[],
     ).model_dump_json()
 
 
@@ -357,6 +378,83 @@ async def test_mpc_state_malformado_e_ignorado_sem_derrubar_o_socket(
         await redis_client.publish(channel_mpc_state(1, "b1"), mpc_state_json(v=3.0))
         message = await ws.receive_json()
         assert message["data"]["vars"]["mv_x7k2"]["v"] == 3.0
+
+
+async def test_subscribe_fuzzy_state_recebe_payload_do_bloco(connect, operator_token, redis_client):
+    async with connect(operator_token) as ws:
+        await ws.ready()
+        await ws.subscribe_fuzzy_state("1/fz1")
+
+        await redis_client.publish(channel_fuzzy_state(1, "fz1"), fuzzy_state_json(v=42.5))
+
+        message = await ws.receive_json()
+        assert message["channel"] == "fuzzy.state.1.fz1"
+        assert message["data"]["inputs"][0]["v"] == 42.5
+
+
+async def test_unsubscribe_fuzzy_state_para_o_fanout_e_subscribe_retoma(
+    connect, operator_token, redis_client
+):
+    async with connect(operator_token) as ws:
+        await ws.ready()
+        await ws.subscribe_fuzzy_state("1/fz1")
+        await redis_client.publish(channel_fuzzy_state(1, "fz1"), fuzzy_state_json())
+        await ws.receive_json()
+
+        await ws.unsubscribe_fuzzy_state("1/fz1")
+        await redis_client.publish(channel_fuzzy_state(1, "fz1"), fuzzy_state_json())
+        await ws.assert_silent()
+
+        # o cano continua vivo: reassinar retoma o fanout normalmente
+        await ws.subscribe_fuzzy_state("1/fz1")
+        await redis_client.publish(channel_fuzzy_state(1, "fz1"), fuzzy_state_json(v=7.0))
+        message = await ws.receive_json()
+        assert message["data"]["inputs"][0]["v"] == 7.0
+
+
+async def test_mpc_state_e_fuzzy_state_roteiam_juntos_sem_vazar(
+    connect, operator_token, redis_client
+):
+    """Regressão do roteio: o quarto `PatternListener` do hub (`fuzzy.state.*`) não atropela
+    nem vaza no roteio de `mpc.state.*` — cada barramento segue isolado por flow/bloco
+    inscrito, no mesmo socket (ADR-030)."""
+    async with connect(operator_token) as ws:
+        await ws.ready()
+        await ws.subscribe_mpc_state("1/b1")
+        await ws.subscribe_fuzzy_state("1/fz1")
+
+        await redis_client.publish(channel_mpc_state(1, "b1"), mpc_state_json(v=99.0))
+        await redis_client.publish(channel_fuzzy_state(1, "fz1"), fuzzy_state_json(v=88.0))
+        # não inscrito em nenhum dos dois: prova que não vaza entre flows nem entre blocos
+        await redis_client.publish(channel_mpc_state(1, "outro"), mpc_state_json())
+        await redis_client.publish(channel_fuzzy_state(1, "outro"), fuzzy_state_json())
+
+        received = {}
+        for _ in range(2):
+            message = await ws.receive_json()
+            received[message["channel"]] = message["data"]
+        assert received["mpc.state.1.b1"]["vars"]["mv_x7k2"]["v"] == 99.0
+        assert received["fuzzy.state.1.fz1"]["inputs"][0]["v"] == 88.0
+        await ws.assert_silent()
+
+
+async def test_fuzzy_state_malformado_e_ignorado_sem_derrubar_o_socket(
+    connect, operator_token, redis_client
+):
+    async with connect(operator_token) as ws:
+        await ws.ready()
+        await ws.send_json(
+            {"subscribe": {"fuzzy_state": ["sem-barra", 42, None, "1/", "/fz1", "x/fz1"]}}
+        )
+        # nenhum item acima forma um par (flow_id, block_id) válido: nada alcança o socket
+        await redis_client.publish(channel_fuzzy_state(1, "fz1"), fuzzy_state_json())
+        await ws.assert_silent()
+
+        # o socket segue vivo: uma inscrição válida na sequência funciona normalmente
+        await ws.subscribe_fuzzy_state("1/fz1")
+        await redis_client.publish(channel_fuzzy_state(1, "fz1"), fuzzy_state_json(v=3.0))
+        message = await ws.receive_json()
+        assert message["data"]["inputs"][0]["v"] == 3.0
 
 
 async def test_token_invalido_fecha_com_1008(connect):

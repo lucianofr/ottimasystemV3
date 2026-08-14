@@ -51,6 +51,12 @@ OPC_VALUES_PATTERN = "opc.values.*"
 
 OPC_VALUES_PREFIX = "opc.values."
 
+FUZZY_STATE_PATTERN = "fuzzy.state.*"
+"""Quarta assinatura do hub: um só padrão cobre `fuzzy.state.<flow_id>.<block_id>` (contrato
+FUZZY OPERATE, ADR-030)."""
+
+FUZZY_STATE_PREFIX = "fuzzy.state."
+
 QUEUE_MAX = 8
 """Mensagens em espera por socket. O Ts mínimo é 0,5 s (ADR-007), então 8 mensagens são ~4 s
 de folga por flow inscrito — cobre soluço de rede sem deixar um cliente travado acumular
@@ -66,6 +72,7 @@ class Subscriber:
         self._socket = socket
         self.flow_ids: set[int] = set()
         self.mpc_ids: set[tuple[int, str]] = set()
+        self.fuzzy_ids: set[tuple[int, str]] = set()
         self.tags: set[int] = set()
         self.events: bool = False
         self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=QUEUE_MAX)
@@ -133,6 +140,12 @@ class FlowStatusHub:
         self._opc_listener = PatternListener(
             redis_client, OPC_VALUES_PATTERN, self._dispatch_opc_values, name="api-opc-values-hub"
         )
+        self._fuzzy_listener = PatternListener(
+            redis_client,
+            FUZZY_STATE_PATTERN,
+            self._dispatch_fuzzy_state,
+            name="api-fuzzy-state-hub",
+        )
         self._events_listener = ChannelListener(
             redis_client, CHANNEL_EVENTS, self._dispatch_events, name="api-events-hub"
         )
@@ -147,6 +160,7 @@ class FlowStatusHub:
         await self._listener.start()
         await self._mpc_listener.start()
         await self._opc_listener.start()
+        await self._fuzzy_listener.start()
         await self._events_listener.start()
 
     async def stop(self) -> None:
@@ -154,6 +168,7 @@ class FlowStatusHub:
         await self._listener.stop()
         await self._mpc_listener.stop()
         await self._opc_listener.stop()
+        await self._fuzzy_listener.stop()
         await self._events_listener.stop()
         subs, self._subs = self._subs, set()
         for sub in subs:
@@ -178,6 +193,11 @@ class FlowStatusHub:
         mpc_id = _mpc_id_of(channel)
         if mpc_id is not None:
             await self._fanout(channel, raw, "mpc_ids", mpc_id)
+
+    async def _dispatch_fuzzy_state(self, channel: str, raw: str) -> None:
+        fuzzy_id = _fuzzy_id_of(channel)
+        if fuzzy_id is not None:
+            await self._fanout(channel, raw, "fuzzy_ids", fuzzy_id)
 
     async def _dispatch_opc_values(self, channel: str, raw: str) -> None:
         """Fanout de `opc.values.<conn_id>`: o filtro é o `tag_id` DENTRO do payload (o canal
@@ -242,6 +262,14 @@ def _mpc_id_of(channel: str) -> tuple[int, str] | None:
     return None
 
 
+def _fuzzy_id_of(channel: str) -> tuple[int, str] | None:
+    suffix = channel.removeprefix(FUZZY_STATE_PREFIX)
+    flow_id_str, sep, block_id = suffix.partition(".")
+    if sep and flow_id_str.isdigit() and block_id:
+        return int(flow_id_str), block_id
+    return None
+
+
 def _flow_ids(ids: Any) -> set[int]:
     """Só inteiros: item de forma inesperada é ignorado, não derruba a conexão."""
     if not isinstance(ids, list):
@@ -258,10 +286,12 @@ def _tag_ids(ids: Any) -> set[int]:
     return {i for i in ids if isinstance(i, int) and not isinstance(i, bool)}
 
 
-def _mpc_ids(ids: Any) -> set[tuple[int, str]]:
-    """Só pares `flow_id/block_id` bem formados (§6.2); item malformado é ignorado."""
+def _pair_ids(ids: Any, label: str) -> set[tuple[int, str]]:
+    """Só pares `flow_id/block_id` bem formados; item malformado é ignorado. Helper comum de
+    `_mpc_ids`/`_fuzzy_ids` (mesmo formato `<flow_id>/<block_id>`, §6.2 e contrato FUZZY
+    OPERATE) — só o texto do log difere entre os dois canais."""
     if not isinstance(ids, list):
-        logger.info("Lista de mpc_state inesperada no /ws, ignorada: %.200s", ids)
+        logger.info("Lista de %s inesperada no /ws, ignorada: %.200s", label, ids)
         return set()
     parsed: set[tuple[int, str]] = set()
     for item in ids:
@@ -271,6 +301,14 @@ def _mpc_ids(ids: Any) -> set[tuple[int, str]]:
         if sep and flow_id_str.isdigit() and block_id:
             parsed.add((int(flow_id_str), block_id))
     return parsed
+
+
+def _mpc_ids(ids: Any) -> set[tuple[int, str]]:
+    return _pair_ids(ids, "mpc_state")
+
+
+def _fuzzy_ids(ids: Any) -> set[tuple[int, str]]:
+    return _pair_ids(ids, "fuzzy_state")
 
 
 def _apply_events(sub: Subscriber, action: str, value: Any) -> None:
@@ -283,8 +321,9 @@ def _apply_events(sub: Subscriber, action: str, value: Any) -> None:
 
 
 def _apply_client_message(sub: Subscriber, raw: str) -> None:
-    """Aplica `subscribe`/`unsubscribe` de `flow_status`/`mpc_state`/`events`; o resto é
-    logado e ignorado. Mensagem malformada nunca derruba o socket (§5.3/§6.2; `events` — §5).
+    """Aplica `subscribe`/`unsubscribe` de `flow_status`/`mpc_state`/`fuzzy_state`/`events`;
+    o resto é logado e ignorado. Mensagem malformada nunca derruba o socket (§5.3/§6.2;
+    `fuzzy_state` — contrato FUZZY OPERATE; `events` — §5).
     """
     try:
         message = json.loads(raw)
@@ -306,6 +345,8 @@ def _apply_client_message(sub: Subscriber, raw: str) -> None:
                 attr_name, parse = "flow_ids", _flow_ids
             elif key == "mpc_state":
                 attr_name, parse = "mpc_ids", _mpc_ids
+            elif key == "fuzzy_state":
+                attr_name, parse = "fuzzy_ids", _fuzzy_ids
             elif key == "opc_values":
                 attr_name, parse = "tags", _tag_ids
             elif key == "events":
@@ -341,7 +382,8 @@ router = APIRouter()
 @router.websocket("/ws")
 async def flow_status_ws(websocket: WebSocket, token: str | None = None) -> None:
     """Canal ao vivo do canvas: `?token=` de operador e `subscribe`/`unsubscribe` de flows,
-    blocos MPC e do canal `events` (`flow_status`/`mpc_state`/`events`)."""
+    blocos MPC, blocos Fuzzy e do canal `events` (`flow_status`/`mpc_state`/`fuzzy_state`/
+    `events`)."""
     # Aceitar antes de recusar é deliberado: fechar sem aceitar vira um 403 HTTP que o
     # cliente WS não distingue de falha de rede, e o canvas precisa saber que foi auth.
     await websocket.accept()

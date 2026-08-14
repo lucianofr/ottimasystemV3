@@ -12,6 +12,7 @@ Sucesso publica `FlowCommand{cmd: mpc_mode|mpc_sp|mpc_mv}` em `flow.commands` e 
 `mpc_mv_written`) é o runtime, ao processar o comando (spec §4.8).
 """
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Annotated, Literal
@@ -30,6 +31,7 @@ from ottima_core.flowgraph import (
     CvObjective,
     CvVar,
     FlowGraph,
+    FlowNode,
     GraphParseError,
     Horizons,
     Limits,
@@ -41,6 +43,7 @@ from ottima_core.flowgraph import (
     derive_horizons,
     parse_graph,
 )
+from ottima_core.flowgraph.introspect import FuzzyIntrospection, introspect_fll
 from ottima_core.models import Flow, Project, User
 from ottima_core.schemas.flows import MAX_BIGINT
 
@@ -163,6 +166,43 @@ class MpcNodeOut(BaseModel):
     multiplier: int
     variables: MpcVariablesOut
     horizons: Horizons
+
+
+class FuzzyPortOut(BaseModel):
+    port: str
+    name: str
+
+
+class FuzzyOutputPortOut(BaseModel):
+    port: str
+    name: str
+    eu: str | None = None
+
+
+class FuzzyNodeOut(BaseModel):
+    """Um bloco `fuzzy` projetado (ADR-030, ADR-029) — nomes de porta vêm de `introspect_fll`
+    (o frontend nunca parseia FLL). Curvas de pertinência descartadas na listagem: só a
+    página de detalhe (`GET .../{block_id}`) paga o custo completo da introspecção.
+    """
+
+    flow_id: int
+    flow_name: str
+    block_id: str
+    block_name: str  # `label` do nó; cai para o `block_id` quando o canvas não nomeou o bloco
+    inputs: list[FuzzyPortOut]
+    outputs: list[FuzzyOutputPortOut]
+
+
+class FuzzyDetailOut(BaseModel):
+    """Detalhe completo de um bloco `fuzzy` (ADR-030): introspecção com curvas de
+    pertinência, normas e texto das regras, para a página FUZZY OPERATE."""
+
+    flow_id: int
+    flow_name: str
+    block_id: str
+    block_name: str
+    output_eu: dict[str, str]
+    introspection: FuzzyIntrospection
 
 
 def _reprovado(mensagem: str) -> HTTPException:
@@ -355,9 +395,7 @@ def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
                                 limits=mv.limits,
                                 max_rate=mv.max_rate,
                                 objective=mv.objective,
-                                tag_id=(
-                                    mv.pid.readback_tag_id if mv.pid else mv.readback_tag_id
-                                ),
+                                tag_id=(mv.pid.readback_tag_id if mv.pid else mv.readback_tag_id),
                             )
                             for mv in config.variables.mvs
                         ],
@@ -433,3 +471,101 @@ async def list_mpcs(db: AsyncSession = Depends(get_db)) -> list[MpcNodeOut]:
     for flow in flows:
         saida.extend(_mpc_nodes(flow))
     return saida
+
+
+def _fuzzy_flow_and_node(flow: Flow, block_id: str) -> FlowNode:
+    """Bloco `fuzzy` tipado do flow já carregado (mesmo padrão de `_mpc_config`, sem tocar o
+    banco de novo) — 422 se o bloco não existir ou não for `fuzzy`."""
+    graph = parse_graph(flow.graph_json)
+    try:
+        node = graph.node(block_id)
+    except KeyError:
+        raise _reprovado(f"Bloco '{block_id}' não encontrado no flow") from None
+    if node.type != "fuzzy":
+        raise _reprovado(f"Bloco '{block_id}' não é um bloco Fuzzy")
+    return node
+
+
+def _fuzzy_nodes(flow: Flow) -> list[FuzzyNodeOut]:
+    """Projeta os blocos `fuzzy` de um flow (ADR-030): nomes de porta vêm de `introspect_fll`,
+    curvas descartadas. `graph_json`/FLL que não parseia é pulado com log, nunca 5xx — mesma
+    postura melhor-esforço de `_mpc_nodes`."""
+    saida: list[FuzzyNodeOut] = []
+    try:
+        graph = parse_graph(flow.graph_json)
+        for node in graph.nodes:
+            if node.type != "fuzzy":
+                continue
+            config = node.config
+            intro = introspect_fll(config.fll)
+            saida.append(
+                FuzzyNodeOut(
+                    flow_id=flow.id,
+                    flow_name=flow.name,
+                    block_id=node.id,
+                    block_name=node.label or node.id,
+                    inputs=[FuzzyPortOut(port=v.port, name=v.name) for v in intro.inputs],
+                    outputs=[
+                        FuzzyOutputPortOut(
+                            port=v.port, name=v.name, eu=config.output_eu.get(v.port)
+                        )
+                        for v in intro.outputs
+                    ],
+                )
+            )
+    except (GraphParseError, ValueError):
+        logger.warning(
+            "Flow %s ('%s') com graph_json/FLL inválido; ignorado na projeção de Fuzzy",
+            flow.id,
+            flow.name,
+        )
+        return []
+    return saida
+
+
+@router.get("/fuzzy", response_model=list[FuzzyNodeOut], dependencies=[Depends(require_operator)])
+async def list_fuzzy(db: AsyncSession = Depends(get_db)) -> list[FuzzyNodeOut]:
+    """Projeta os blocos Fuzzy de todos os flows do projeto ativo (ADR-030), mesmo escopo e
+    consulta de `GET /mpcs` (decisão A-7): sem projeto ativo, lista vazia — não há 404.
+    """
+    project_id = await db.scalar(select(Project.id).where(Project.is_active))
+    if project_id is None:
+        return []
+    flows = list(
+        await db.scalars(select(Flow).where(Flow.project_id == project_id).order_by(Flow.name))
+    )
+    # `_fuzzy_nodes` reparseia FLL (CPU-bound, O(pontos × termos) por bloco): fora do event
+    # loop, como o `get_fuzzy_detail` e como o save faz com `validate_graph` (ADR-029). Um
+    # único hop para todos os flows — `Flow.graph_json`/`name`/`id` já vieram carregados.
+    return await asyncio.to_thread(lambda: [no for flow in flows for no in _fuzzy_nodes(flow)])
+
+
+@router.get(
+    "/fuzzy/{flow_id}/{block_id}",
+    response_model=FuzzyDetailOut,
+    dependencies=[Depends(require_operator)],
+)
+async def get_fuzzy_detail(
+    flow_id: FlowId, block_id: BlockId, db: AsyncSession = Depends(get_db)
+) -> FuzzyDetailOut:
+    """Introspecção completa do bloco Fuzzy (ADR-030): curvas de pertinência, normas e regras
+    para a página de detalhe — o frontend nunca parseia FLL (ADR-029). FLL que não parseia
+    (não deveria acontecer pós-save, defesa em profundidade) vira 422 com a mensagem do
+    `ValueError` de `introspect_fll`.
+    """
+    flow = await db.get(Flow, flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail=MSG_FLOW_NAO_ENCONTRADO)
+    node = _fuzzy_flow_and_node(flow, block_id)
+    try:
+        intro = await asyncio.to_thread(introspect_fll, node.config.fll)
+    except ValueError as erro:
+        raise _reprovado(str(erro)) from erro
+    return FuzzyDetailOut(
+        flow_id=flow.id,
+        flow_name=flow.name,
+        block_id=node.id,
+        block_name=node.label or node.id,
+        output_eu=node.config.output_eu,
+        introspection=intro,
+    )

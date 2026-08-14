@@ -11,6 +11,7 @@ MAX_TAGS = 6
 MAX_WINDOW_DAYS = 31
 RAW_WINDOW_HOURS = 2
 MAX_MPC_VARS = 14  # 4 MV + 6 CV/Restrição + 4 DV (spec F5 §2.4)
+MAX_FUZZY_VARS = 16  # IN1..IN8 + OUT1..OUT8 (ADR-030, ADR-029)
 
 
 class HistorySeries(BaseModel):
@@ -47,6 +48,24 @@ class MpcHistoryResponse(BaseModel):
     start: datetime
     end: datetime
     series: list[MpcHistorySeries]
+
+
+class FuzzyHistorySeries(BaseModel):
+    """Mesma forma de `HistorySeries`, com `var_id` no lugar de `tag_id` (porta IN1..OUT8,
+    ADR-029) — sem `q`/`sp`/`auto`, que não existem em `fuzzy_samples`."""
+
+    var_id: str
+    t: list[datetime]
+    v: list[float]
+    v_min: list[float] | None = None  # só em mode="1m"
+    v_max: list[float] | None = None  # só em mode="1m"
+
+
+class FuzzyHistoryResponse(BaseModel):
+    mode: Literal["raw", "1m"]
+    start: datetime
+    end: datetime
+    series: list[FuzzyHistorySeries]
 
 
 class SstoLastOut(BaseModel):
