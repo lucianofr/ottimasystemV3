@@ -29,6 +29,10 @@ def channel_mpc_state(flow_id: int, block_id: str) -> str:
     return f"mpc.state.{flow_id}.{block_id}"
 
 
+def channel_fuzzy_state(flow_id: int, block_id: str) -> str:
+    return f"fuzzy.state.{flow_id}.{block_id}"
+
+
 class OpcValue(BaseModel):
     tag_id: int
     ts: datetime
@@ -164,6 +168,39 @@ class MpcState(BaseModel):
     cost: float
     prediction: MpcPrediction
     ssto: SstoRun | None = None
+
+
+class FuzzyTermDegree(BaseModel):
+    """Grau de um termo linguístico: μ(x) na entrada, grau agregado pós-implicação na saída."""
+
+    term: str
+    degree: float
+
+
+class FuzzyVarState(BaseModel):
+    """Estado de uma variável fuzzy numa execução. `v` é o valor crisp — `None` quando
+    não-finito (RF-542: `nan`/`inf` nunca trafegam como `NaN` no JSON do canal).
+    """
+
+    port: str  # IN1..INn / OUT1..OUTn — posicional, ordem do FLL (ADR-029)
+    name: str  # nome da variável no FLL (rótulo de UI; o frontend nunca parseia FLL)
+    v: float | None
+    terms: list[FuzzyTermDegree]
+
+
+class FuzzyState(BaseModel):
+    """Publicado em `fuzzy.state.<flow_id>.<block_id>` após execução bem-sucedida do motor,
+    com throttle na origem (ADR-030) — anima a página FUZZY OPERATE e alimenta o recorder.
+
+    `rules` traz o grau de ativação por regra na ordem de declaração do FLL (rule blocks
+    concatenados) — alinhado com `FuzzyIntrospection.rule_blocks[].rules` achatado.
+    """
+
+    ts: datetime
+    ok: bool  # `ok_entradas` do passo (RF-542)
+    inputs: list[FuzzyVarState]
+    rules: list[float]
+    outputs: list[FuzzyVarState]
 
 
 class EventMessage(BaseModel):

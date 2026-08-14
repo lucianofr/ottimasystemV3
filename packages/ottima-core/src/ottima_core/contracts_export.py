@@ -31,7 +31,7 @@ Executável como `uv run python -m ottima_core.contracts_export`.
 
 import json
 
-from ottima_core.bus import FlowStatus, MpcState, PortValue
+from ottima_core.bus import FlowStatus, FuzzyState, MpcState, PortValue
 from ottima_core.flowgraph import MAX_SCRIPT_PORTS
 from ottima_core.flowgraph.parse import MAX_FUZZY_FLL_LENGTH
 
@@ -197,7 +197,7 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
 
 # MpcVarState (tarefa 1.3) vem aninhado no schema de MpcState (`vars: dict[str, MpcVarState]`)
 # — o gerador TS achata `$defs`, dispensa entrada própria aqui.
-_WS_MODELS = (FlowStatus, PortValue, MpcState)
+_WS_MODELS = (FlowStatus, PortValue, MpcState, FuzzyState)
 
 
 def build_contracts() -> dict[str, object]:
