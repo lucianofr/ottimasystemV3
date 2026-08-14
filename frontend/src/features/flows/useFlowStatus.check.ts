@@ -28,6 +28,7 @@ const ESTADO_VAZIO: EstadoDoCanal = {
   estado: "conectando",
   flowStatus: new Map(),
   mpcStates: new Map(),
+  fuzzyStates: new Map(),
   eventos: [],
   tagValues: new Map(),
 };

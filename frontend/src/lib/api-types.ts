@@ -499,6 +499,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operate/fuzzy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Fuzzy
+         * @description Projeta os blocos Fuzzy de todos os flows do projeto ativo (ADR-030), mesmo escopo e
+         *     consulta de `GET /mpcs` (decisão A-7): sem projeto ativo, lista vazia — não há 404.
+         */
+        get: operations["list_fuzzy_api_operate_fuzzy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operate/fuzzy/{flow_id}/{block_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fuzzy Detail
+         * @description Introspecção completa do bloco Fuzzy (ADR-030): curvas de pertinência, normas e regras
+         *     para a página de detalhe — o frontend nunca parseia FLL (ADR-029). FLL que não parseia
+         *     (não deveria acontecer pós-save, defesa em profundidade) vira 422 com a mensagem do
+         *     `ValueError` de `introspect_fll`.
+         */
+        get: operations["get_fuzzy_detail_api_operate_fuzzy__flow_id___block_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/events": {
         parameters: {
             query?: never;
@@ -555,6 +599,30 @@ export interface paths {
          *     inexistente ou não-`mpc`) — mesma ordem de `operate.py::_mpc_config`.
          */
         get: operations["get_history_mpc_api_history_mpc_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/history/fuzzy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get History Fuzzy
+         * @description Histórico do bloco Fuzzy (ADR-030): uma série por var_id pedida, sempre.
+         *
+         *     Validação de forma (`var_ids`/janela) roda antes de tocar o banco; só então o flow é
+         *     carregado (404 se inexistente) e o bloco validado contra o `graph_json` (422 se
+         *     inexistente ou não-`fuzzy`) — mesma ordem de `get_history_mpc`.
+         */
+        get: operations["get_history_fuzzy_api_history_fuzzy_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1089,6 +1157,162 @@ export interface components {
             watchdog_period_ms?: number | null;
             /** Watchdog Timeout S */
             watchdog_timeout_s?: number | null;
+        };
+        /**
+         * FuzzyDetailOut
+         * @description Detalhe completo de um bloco `fuzzy` (ADR-030): introspecção com curvas de
+         *     pertinência, normas e texto das regras, para a página FUZZY OPERATE.
+         */
+        FuzzyDetailOut: {
+            /** Flow Id */
+            flow_id: number;
+            /** Flow Name */
+            flow_name: string;
+            /** Block Id */
+            block_id: string;
+            /** Block Name */
+            block_name: string;
+            /** Output Eu */
+            output_eu: {
+                [key: string]: string;
+            };
+            introspection: components["schemas"]["FuzzyIntrospection"];
+        };
+        /** FuzzyHistoryResponse */
+        FuzzyHistoryResponse: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "raw" | "1m";
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Series */
+            series: components["schemas"]["FuzzyHistorySeries"][];
+        };
+        /**
+         * FuzzyHistorySeries
+         * @description Mesma forma de `HistorySeries`, com `var_id` no lugar de `tag_id` (porta IN1..OUT8,
+         *     ADR-029) — sem `q`/`sp`/`auto`, que não existem em `fuzzy_samples`.
+         */
+        FuzzyHistorySeries: {
+            /** Var Id */
+            var_id: string;
+            /** T */
+            t: string[];
+            /** V */
+            v: number[];
+            /** V Min */
+            v_min?: number[] | null;
+            /** V Max */
+            v_max?: number[] | null;
+        };
+        /** FuzzyIntrospection */
+        FuzzyIntrospection: {
+            /** Name */
+            name: string;
+            /** Inputs */
+            inputs: components["schemas"]["FuzzyVariableOut"][];
+            /** Outputs */
+            outputs: components["schemas"]["FuzzyVariableOut"][];
+            /** Rule Blocks */
+            rule_blocks: components["schemas"]["FuzzyRuleBlockOut"][];
+        };
+        /**
+         * FuzzyNodeOut
+         * @description Um bloco `fuzzy` projetado (ADR-030, ADR-029) — nomes de porta vêm de `introspect_fll`
+         *     (o frontend nunca parseia FLL). Curvas de pertinência descartadas na listagem: só a
+         *     página de detalhe (`GET .../{block_id}`) paga o custo completo da introspecção.
+         */
+        FuzzyNodeOut: {
+            /** Flow Id */
+            flow_id: number;
+            /** Flow Name */
+            flow_name: string;
+            /** Block Id */
+            block_id: string;
+            /** Block Name */
+            block_name: string;
+            /** Inputs */
+            inputs: components["schemas"]["FuzzyPortOut"][];
+            /** Outputs */
+            outputs: components["schemas"]["FuzzyOutputPortOut"][];
+        };
+        /** FuzzyOutputPortOut */
+        FuzzyOutputPortOut: {
+            /** Port */
+            port: string;
+            /** Name */
+            name: string;
+            /** Eu */
+            eu?: string | null;
+        };
+        /** FuzzyPortOut */
+        FuzzyPortOut: {
+            /** Port */
+            port: string;
+            /** Name */
+            name: string;
+        };
+        /** FuzzyRuleBlockOut */
+        FuzzyRuleBlockOut: {
+            /** Name */
+            name: string;
+            /** Conjunction */
+            conjunction?: string | null;
+            /** Disjunction */
+            disjunction?: string | null;
+            /** Implication */
+            implication?: string | null;
+            /** Activation */
+            activation?: string | null;
+            /** Rules */
+            rules: string[];
+        };
+        /** FuzzyTermOut */
+        FuzzyTermOut: {
+            /** Name */
+            name: string;
+            /** Kind */
+            kind: string;
+            /** Y */
+            y: number[];
+        };
+        /** FuzzyVariableOut */
+        FuzzyVariableOut: {
+            /** Port */
+            port: string;
+            /** Name */
+            name: string;
+            /** Minimum */
+            minimum: number;
+            /** Maximum */
+            maximum: number;
+            /** X */
+            x: number[];
+            /** Terms */
+            terms: components["schemas"]["FuzzyTermOut"][];
+            /** Defuzzifier */
+            defuzzifier?: string | null;
+            /** Resolution */
+            resolution?: number | null;
+            /** Aggregation */
+            aggregation?: string | null;
+            /** Default Value */
+            default_value?: number | null;
+            /**
+             * Lock Previous
+             * @default false
+             */
+            lock_previous: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2906,6 +3130,58 @@ export interface operations {
             };
         };
     };
+    list_fuzzy_api_operate_fuzzy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FuzzyNodeOut"][];
+                };
+            };
+        };
+    };
+    get_fuzzy_detail_api_operate_fuzzy__flow_id___block_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FuzzyDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_events_api_events_get: {
         parameters: {
             query?: {
@@ -2996,6 +3272,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MpcHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_history_fuzzy_api_history_fuzzy_get: {
+        parameters: {
+            query: {
+                flow_id: number;
+                block_id: string;
+                var_ids: string;
+                start?: string | null;
+                end?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FuzzyHistoryResponse"];
                 };
             };
             /** @description Validation Error */

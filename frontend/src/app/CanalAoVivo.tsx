@@ -11,6 +11,7 @@ import {
 
 import { api, ApiError, getToken, type EventOut, type FlowDetail } from "../lib/api";
 import type { MpcState } from "../lib/contracts.gen";
+import type { FuzzyState } from "../features/fuzzy/types";
 import {
   atrasoReconexao,
   deveReconectar,
@@ -50,7 +51,12 @@ import { chaveMpc, resolverAlarmes, type CondicaoAtiva } from "./alarmes";
 
 /** O que uma página quer ver no canal. `mpc_state` já na forma de id do wire
  *  (`flowId/blockId`, spec F4 §6.2). Campo ausente = a página não quer nada daquele tipo. */
-export type Interesse = { flow_status?: number[]; mpc_state?: string[]; opc_values?: number[] };
+export type Interesse = {
+  flow_status?: number[];
+  mpc_state?: string[];
+  fuzzy_state?: string[];
+  opc_values?: number[];
+};
 
 /** Leitura crua de uma tag vinda do `opc.values.<conn_id>` (RF-204): o PV do faceplate na
  *  taxa OPC, não na taxa do MPC (decisão F6 A-1 revertida). `ok` = quality 0 (bom). */
@@ -70,6 +76,7 @@ export interface EstadoDoCanal {
   estado: EstadoConexaoCanal;
   flowStatus: ReadonlyMap<number, FlowStatus>;
   mpcStates: ReadonlyMap<string, MpcState>;
+  fuzzyStates: ReadonlyMap<string, FuzzyState>;
   eventos: readonly EventMessage[];
   /** Últimas leituras `opc.values` por tag, publicadas em lote a cada FLUSH_OPC_MS —
    *  coalescência para não renderizar 1x por mensagem a 4 Hz × N tags. */
@@ -88,6 +95,7 @@ const ESTADO_INICIAL: EstadoDoCanal = {
   estado: "conectando",
   flowStatus: new Map(),
   mpcStates: new Map(),
+  fuzzyStates: new Map(),
   eventos: [],
   tagValues: new Map(),
 };
@@ -105,6 +113,7 @@ export const FLUSH_OPC_MS = 250;
 export interface DeltaInteresse {
   flow_status: readonly number[];
   mpc_state: readonly string[];
+  fuzzy_state: readonly string[];
   opc_values: readonly number[];
 }
 
@@ -135,22 +144,26 @@ function ajustarContagem<T>(mapa: Map<T, number>, ids: readonly T[], passo: 1 | 
 export function criarRegistroInteresses(): RegistroInteresses {
   const flowRefs = new Map<number, number>();
   const mpcRefs = new Map<string, number>();
+  const fuzzyRefs = new Map<string, number>();
   const tagRefs = new Map<number, number>();
 
   return {
     adicionar: (interesse) => ({
       flow_status: ajustarContagem(flowRefs, interesse.flow_status ?? [], 1),
       mpc_state: ajustarContagem(mpcRefs, interesse.mpc_state ?? [], 1),
+      fuzzy_state: ajustarContagem(fuzzyRefs, interesse.fuzzy_state ?? [], 1),
       opc_values: ajustarContagem(tagRefs, interesse.opc_values ?? [], 1),
     }),
     remover: (interesse) => ({
       flow_status: ajustarContagem(flowRefs, interesse.flow_status ?? [], -1),
       mpc_state: ajustarContagem(mpcRefs, interesse.mpc_state ?? [], -1),
+      fuzzy_state: ajustarContagem(fuzzyRefs, interesse.fuzzy_state ?? [], -1),
       opc_values: ajustarContagem(tagRefs, interesse.opc_values ?? [], -1),
     }),
     agregado: () => ({
       flow_status: [...flowRefs.keys()],
       mpc_state: [...mpcRefs.keys()],
+      fuzzy_state: [...fuzzyRefs.keys()],
       opc_values: [...tagRefs.keys()],
     }),
   };
@@ -163,6 +176,7 @@ export function criarRegistroInteresses(): RegistroInteresses {
 interface CorpoAssinatura {
   flow_status?: readonly number[];
   mpc_state?: readonly string[];
+  fuzzy_state?: readonly string[];
   opc_values?: readonly number[];
   events?: true;
 }
@@ -180,6 +194,7 @@ export function comandoAssinatura(
     const canal: Record<string, unknown> = {};
     if (dados.flow_status?.length) canal.flow_status = dados.flow_status;
     if (dados.mpc_state?.length) canal.mpc_state = dados.mpc_state;
+    if (dados.fuzzy_state?.length) canal.fuzzy_state = dados.fuzzy_state;
     if (dados.opc_values?.length) canal.opc_values = dados.opc_values;
     if (dados.events) canal.events = true;
     if (Object.keys(canal).length > 0) quadro[acao] = canal;
@@ -203,6 +218,12 @@ export interface MensagemMpcState {
   state: MpcState;
 }
 
+export interface MensagemFuzzyState {
+  canal: "fuzzy_state";
+  chave: string;
+  state: FuzzyState;
+}
+
 export interface MensagemEvento {
   canal: "events";
   evento: EventMessage;
@@ -219,10 +240,16 @@ export interface MensagemOpcValues {
   ok: boolean;
 }
 
-export type MensagemCanal = MensagemFlowStatus | MensagemMpcState | MensagemEvento | MensagemOpcValues;
+export type MensagemCanal =
+  | MensagemFlowStatus
+  | MensagemMpcState
+  | MensagemFuzzyState
+  | MensagemEvento
+  | MensagemOpcValues;
 
 const PREFIXO_FLOW_STATUS = "flow.status.";
 const PREFIXO_MPC_STATE = "mpc.state.";
+const PREFIXO_FUZZY_STATE = "fuzzy.state.";
 const PREFIXO_OPC_VALUES = "opc.values.";
 const CANAL_EVENTS = "events";
 
@@ -245,6 +272,14 @@ function lerMpcState(data: Record<string, unknown>): MpcState | null {
   if (objeto(data.status) === null) return null;
   if (objeto(data.vars) === null) return null;
   return data as unknown as MpcState;
+}
+
+/** Espelho de `lerMpcState`: validação leve, o barramento é a fonte da verdade. */
+function lerFuzzyState(data: Record<string, unknown>): FuzzyState | null {
+  if (typeof data.ts !== "string") return null;
+  if (typeof data.ok !== "boolean") return null;
+  if (!Array.isArray(data.inputs) || !Array.isArray(data.outputs) || !Array.isArray(data.rules)) return null;
+  return data as unknown as FuzzyState;
 }
 
 function lerEvento(data: Record<string, unknown>): EventMessage | null {
@@ -309,6 +344,17 @@ export function analisarMensagemCanal(raw: string): MensagemCanal | null {
     return state === null ? null : { canal: "mpc_state", chave: `${flowIdStr}/${blockId}`, state };
   }
 
+  if (canal.startsWith(PREFIXO_FUZZY_STATE)) {
+    const sufixo = canal.slice(PREFIXO_FUZZY_STATE.length);
+    const ponto = sufixo.indexOf(".");
+    if (ponto <= 0) return null;
+    const flowIdStr = sufixo.slice(0, ponto);
+    const blockId = sufixo.slice(ponto + 1);
+    if (!/^\d+$/.test(flowIdStr) || blockId.length === 0) return null;
+    const state = lerFuzzyState(data);
+    return state === null ? null : { canal: "fuzzy_state", chave: `${flowIdStr}/${blockId}`, state };
+  }
+
   if (canal.startsWith(PREFIXO_OPC_VALUES)) {
     // O sufixo é o conn_id — o filtro por tag acontece no servidor (`ws.py`), aqui o que
     // interessa é o payload; envelope sem payload de forma exata é descartado.
@@ -344,6 +390,11 @@ function reduzir(atual: EstadoDoCanal, mensagem: MensagemCanal): EstadoDoCanal {
         ssto: mensagem.state.ssto ?? anterior?.ssto ?? null,
       });
       return { ...atual, mpcStates };
+    }
+    case "fuzzy_state": {
+      const fuzzyStates = new Map(atual.fuzzyStates);
+      fuzzyStates.set(mensagem.chave, mensagem.state);
+      return { ...atual, fuzzyStates };
     }
     case "events": {
       const eventos = [mensagem.evento, ...atual.eventos].slice(0, TETO_EVENTOS);
@@ -403,9 +454,9 @@ export function abrirCanalSessao(
     }
     if (socket === null) return;
     if (socket.readyState === WebSocket.OPEN) {
-      const { flow_status, mpc_state, opc_values } = agregado();
+      const { flow_status, mpc_state, fuzzy_state, opc_values } = agregado();
       const comando = comandoAssinatura({
-        unsubscribe: { flow_status, mpc_state, opc_values, events: true },
+        unsubscribe: { flow_status, mpc_state, fuzzy_state, opc_values, events: true },
       });
       if (comando !== null) socket.send(comando);
     }
@@ -428,9 +479,9 @@ export function abrirCanalSessao(
     ws.onopen = () => {
       if (!ativo) return;
       tentativa = 0;
-      const { flow_status, mpc_state, opc_values } = agregado();
+      const { flow_status, mpc_state, fuzzy_state, opc_values } = agregado();
       const comando = comandoAssinatura({
-        subscribe: { flow_status, mpc_state, opc_values, events: true },
+        subscribe: { flow_status, mpc_state, fuzzy_state, opc_values, events: true },
       });
       if (comando !== null) ws.send(comando);
       aplicar((atual) => ({ ...atual, estado: "aberto" }));

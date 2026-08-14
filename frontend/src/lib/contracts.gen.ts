@@ -253,3 +253,23 @@ export interface MpcState {
   prediction: MpcPrediction;
   ssto: SstoRun | null;
 }
+
+export interface FuzzyTermDegree {
+  term: string;
+  degree: number;
+}
+
+export interface FuzzyVarState {
+  port: string;
+  name: string;
+  v: number | null;
+  terms: FuzzyTermDegree[];
+}
+
+export interface FuzzyState {
+  ts: string;
+  ok: boolean;
+  inputs: FuzzyVarState[];
+  rules: number[];
+  outputs: FuzzyVarState[];
+}

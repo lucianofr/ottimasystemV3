@@ -7,6 +7,7 @@ import { ConnectionsPage } from "../features/connections/ConnectionsPage";
 import { EventsPage } from "../features/events/EventsPage";
 import { FlowEditorPage } from "../features/flows/FlowEditorPage";
 import { FlowsPage } from "../features/flows/FlowsPage";
+import { FuzzyOperatePage } from "../features/fuzzy/FuzzyOperatePage";
 import { OperatePage } from "../features/operate/OperatePage";
 import { OperateSelectorPage } from "../features/operate/OperateSelectorPage";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
@@ -31,6 +32,7 @@ export function App() {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/operacao" element={<OperateSelectorPage />} />
                 <Route path="/operacao/:flowId/:blockId" element={<OperatePage />} />
+                <Route path="/operacao/fuzzy" element={<FuzzyOperatePage />} />
                 <Route path="/eventos" element={<EventsPage />} />
                 <Route path="/engenharia/projetos" element={<ProjectsPage />} />
                 <Route path="/engenharia/conexoes" element={<ConnectionsPage />} />

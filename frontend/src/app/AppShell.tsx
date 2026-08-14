@@ -11,6 +11,7 @@ import { CanalAoVivoProvider } from "./CanalAoVivo";
    a ocultação de mutações é a tarefa 6.5. */
 const NAV_OPERACAO = [
   { rotulo: "Operação", para: "/operacao", testid: "nav-operacao" },
+  { rotulo: "Fuzzy", para: "/operacao/fuzzy", testid: "nav-fuzzy" },
   { rotulo: "Eventos", para: "/eventos", testid: "nav-eventos" },
 ] as const;
 
