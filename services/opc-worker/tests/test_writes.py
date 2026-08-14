@@ -639,6 +639,146 @@ async def test_dois_flows_na_mesma_conexao_watchdog_de_um_nao_trava_o_outro(
         await runtime.stop()
 
 
+async def test_escrita_travada_na_conexao_a_nao_atrasa_a_conexao_b(
+    redis_client: Redis, sim, monkeypatch
+):
+    """Isolamento entre conexões no consumo de `opc.writes`.
+
+    A topologia de produção é UM consumidor para todas as conexões: uma escrita travada
+    no servidor da conexão A não pode atrasar a escrita da conexão B publicada logo
+    depois. Dentro de cada conexão a ordem de chegada segue garantida (fila por conexão).
+    """
+    sim_b = OpcSimServer(port=free_port())
+    await sim_b.start()
+    try:
+        config_a = make_config(sim.endpoint, conn_id=8)
+        config_b = make_config(sim_b.endpoint, conn_id=9)
+        runtime_a = ConnectionRuntime(
+            config_a,
+            redis_client,
+            ConnectionSnapshot(name=config_a.name),
+            backoff_initial_s=TEST_BACKOFF_INITIAL_S,
+            backoff_max_s=TEST_BACKOFF_MAX_S,
+            watchdog_freeze_threshold_s=TEST_FREEZE_THRESHOLD_S,
+        )
+        runtime_b = ConnectionRuntime(
+            config_b,
+            redis_client,
+            ConnectionSnapshot(name=config_b.name),
+            backoff_initial_s=TEST_BACKOFF_INITIAL_S,
+            backoff_max_s=TEST_BACKOFF_MAX_S,
+            watchdog_freeze_threshold_s=TEST_FREEZE_THRESHOLD_S,
+        )
+        flow_b = FLOW_ID + 1
+        await runtime_a.set_flow_watchdogs({FLOW_ID: make_watchdog()})
+        await runtime_b.set_flow_watchdogs({flow_b: make_watchdog(flow_id=flow_b)})
+        consumer = WriteConsumer(redis_client, {8: runtime_a, 9: runtime_b})
+        await runtime_a.start()
+        await runtime_b.start()
+        await consumer.start()
+        try:
+            await await_until(
+                lambda: runtime_a.state is ConnectionState.UP
+                and runtime_a.snapshot.flow_watchdog_alive.get(FLOW_ID, False)
+            )
+            await await_until(
+                lambda: runtime_b.state is ConnectionState.UP
+                and runtime_b.snapshot.flow_watchdog_alive.get(flow_b, False)
+            )
+
+            # A escrita no node de A trava para sempre: servidor lento/travado.
+            original_write = Node.write_value
+            hung = asyncio.Event()
+
+            async def write_value(self, *args, **kwargs):
+                if self.nodeid.to_string() == NODE_W_FLOAT:
+                    await hung.wait()
+                return await original_write(self, *args, **kwargs)
+
+            monkeypatch.setattr(Node, "write_value", write_value)
+
+            await publicar(redis_client, tag_id=TAG_FLOAT, value=61.5, conn_id=8)
+            await publicar(redis_client, tag_id=TAG_INT, value=7.0, conn_id=9, flow_id=flow_b)
+
+            # B tem que chegar ao servidor mesmo com A pendurada na primeira escrita.
+            await esperar_valor(sim_b, NODE_MIRROR_INT, 7)
+            assert await sim.read(NODE_W_FLOAT) == 0.0, "escrita de A nunca chegou"
+        finally:
+            await consumer.stop()
+            await runtime_a.stop()
+            await runtime_b.stop()
+    finally:
+        await sim_b.stop()
+
+
+async def test_fila_de_conexao_removida_e_recusada_e_nao_descartada(
+    redis_client: Redis, sim, monkeypatch
+):
+    """Conexão que sai do mapping com fila cheia: o que sobrou é RECUSADO com evento.
+
+    A fila por conexão não pode virar buraco de auditoria (RF-205) — escrita enfileirada
+    atrás de uma travada, cuja conexão o supervisor derruba no meio, sai como
+    `unknown_connection`, e a task se aposenta só depois de drenar tudo.
+    """
+    config = make_config(sim.endpoint, conn_id=8)
+    snapshot = ConnectionSnapshot(name=config.name)
+    runtime = ConnectionRuntime(
+        config,
+        redis_client,
+        snapshot,
+        backoff_initial_s=TEST_BACKOFF_INITIAL_S,
+        backoff_max_s=TEST_BACKOFF_MAX_S,
+        watchdog_freeze_threshold_s=TEST_FREEZE_THRESHOLD_S,
+    )
+    await runtime.set_flow_watchdogs({FLOW_ID: make_watchdog()})
+    runtimes: dict[int, ConnectionRuntime] = {8: runtime}
+    consumer = WriteConsumer(redis_client, runtimes)
+    await runtime.start()
+    await consumer.start()
+    try:
+        async with collecting(redis_client, CHANNEL_EVENTS) as ev:
+            await await_until(
+                lambda: runtime.state is ConnectionState.UP
+                and snapshot.flow_watchdog_alive.get(FLOW_ID, False)
+            )
+
+            entrou = asyncio.Event()
+            liberar = asyncio.Event()
+            original_write = Node.write_value
+
+            async def write_value(self, *args, **kwargs):
+                if self.nodeid.to_string() == NODE_W_FLOAT:
+                    entrou.set()
+                    await liberar.wait()
+                return await original_write(self, *args, **kwargs)
+
+            monkeypatch.setattr(Node, "write_value", write_value)
+
+            # A 1ª escrita trava a task da conexão; a 2ª fica enfileirada atrás dela.
+            await publicar(redis_client, tag_id=TAG_FLOAT, value=1.5, conn_id=8)
+            await asyncio.wait_for(entrou.wait(), timeout=AWAIT_TIMEOUT_S)
+            await publicar(redis_client, tag_id=TAG_INT, value=5.0, conn_id=8)
+            await await_until(lambda: consumer._conn_queues[8].qsize() == 1)
+
+            # O supervisor derruba a conexão no meio do atraso e a travada é liberada.
+            runtimes.pop(8)
+            liberar.set()
+
+            await await_until(
+                lambda: any(
+                    e["payload"]["tag_id"] == TAG_INT
+                    and e["payload"]["reason"] == "unknown_connection"
+                    for e in of_kind(ev, KIND_WRITE_REJECTED)
+                )
+            )
+            # Drenou tudo antes de se aposentar: nada de fila órfã nem task viva.
+            await await_until(lambda: 8 not in consumer._conn_queues)
+            assert 8 not in consumer._conn_tasks
+    finally:
+        await consumer.stop()
+        await runtime.stop()
+
+
 def test_coercao_por_variant_type():
     assert coerce_value(7.9, ua.VariantType.Int32) == 8
     assert coerce_value(-7.9, ua.VariantType.Int16) == -8

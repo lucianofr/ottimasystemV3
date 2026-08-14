@@ -139,6 +139,11 @@ class WriteConsumer:
         self._pubsub: PubSub | None = None
         self._blocked: dict[int, _BlockedPeriod] = {}
         self._rejected: dict[int, _RejectMemory] = {}
+        # Fila e task próprias por conexão (FIFO dentro dela): uma escrita travada no
+        # servidor de uma conexão não pode atrasar a escrita de outra. Conexão
+        # desconhecida não ganha fila — o payload vem do canal e o conn_id é arbitrário.
+        self._conn_queues: dict[int, asyncio.Queue[OpcWrite]] = {}
+        self._conn_tasks: dict[int, asyncio.Task[None]] = {}
 
     async def start(self) -> None:
         """Assina o canal e cria a task de consumo; retorna já. Idempotente.
@@ -162,13 +167,38 @@ class WriteConsumer:
         self._task = asyncio.create_task(self._consume(), name="opc-writes")
 
     async def stop(self) -> None:
-        """Cancela a task, a inscrição e os avisos pendentes. Idempotente."""
+        """Cancela a task, a inscrição, as filas por conexão e os avisos pendentes.
+
+        Idempotente. A lista de tasks é fotografada antes do laço: `_cancel` tem `await`, e
+        durante ele uma task-irmã pode se aposentar e mexer em `_conn_tasks` — iterar a
+        view viva quebraria o desmonte com "dictionary changed size during iteration".
+        """
         task, self._task = self._task, None
         if task is not None and not task.done():
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
-        for period in self._blocked.values():
+        # Ordem obrigatória: as tasks por conexão são as PRODUTORAS de período bloqueado
+        # (`_block` cria task de aviso). Cancelá-las depois de limpar `_blocked` deixaria
+        # um `opc-write-blocked-*` órfão publicando aviso já depois do desmonte.
+        for task in list(self._conn_tasks.values()):
+            await _cancel(task)
+        self._conn_tasks.clear()
+        # Contado DEPOIS do cancelamento: com as tasks mortas ninguém mais enfileira, e o
+        # que restar na fila é descarte do desmonte. Não vai ao canal de eventos — os
+        # kinds/reasons são fechados pela spec §7.3 — mas não pode sumir do registro.
+        descartadas = {
+            conn_id: fila.qsize()
+            for conn_id, fila in self._conn_queues.items()
+            if fila.qsize()
+        }
+        self._conn_queues.clear()
+        if descartadas:
+            partes = ", ".join(f"conexão {cid}: {qtd}" for cid, qtd in descartadas.items())
+            logger.warning(
+                "Escritas enfileiradas descartadas no desmonte do consumidor: %s", partes
+            )
+        for period in list(self._blocked.values()):
             await _cancel(period.task)
         self._blocked.clear()
         await self._drop_pubsub()
@@ -413,13 +443,68 @@ class WriteConsumer:
             await asyncio.sleep(RESUBSCRIBE_RETRY_S)
 
     async def _dispatch(self, data: str | bytes) -> None:
-        """Valida o payload e roda o pipeline; nada daqui escapa para o laço."""
+        """Valida o payload e roteia para a fila da conexão; nada escapa para o laço.
+
+        Cada conexão tem task e fila FIFO próprias: o pipeline (§4.2) roda NELAS, nunca
+        aqui. O laço do canal não pode ficar preso numa escrita — uma escrita travada no
+        servidor da conexão A atrasaria a da conexão B; a ordem de chegada dentro de
+        cada conexão segue garantida pela fila (antes era o próprio laço quem garantia).
+        Conexão desconhecida não ganha fila: o `conn_id` vem do canal e o descarte é imediato.
+        """
         try:
             write = OpcWrite.model_validate_json(data)
         except Exception:
             # Sem conexão conhecida não há a quem atribuir o evento (spec §4.2).
             logger.warning("Payload inválido descartado no canal %s", CHANNEL_OPC_WRITES)
             return
+        if write.conn_id not in self._runtimes:
+            await self._run(write)
+            return
+        self._enqueue(write)
+
+    def _enqueue(self, write: OpcWrite) -> None:
+        """Coloca a escrita na fila da conexão, criando fila e task quando faltarem.
+
+        O mapping de runtimes é vivo: conexão que o supervisor derruba pode estar com
+        escritas enfileiradas — a task drena o que resta contra o runtime ausente
+        (recusa honesta de `unknown_connection`) e encerra sozinha quando a fila esvazia.
+
+        A task é conferida VIVA a cada escrita, não só na criação da fila: uma task morta
+        (hoje só por `BaseException`, que `_run` não engole) deixaria a fila crescendo sem
+        consumidor nenhum — escrita aceita, nunca executada e sem evento, o pior desfecho
+        possível. Recriar sobre a MESMA fila preserva a ordem do que já estava esperando.
+        """
+        queue = self._conn_queues.get(write.conn_id)
+        if queue is None:
+            queue = asyncio.Queue()
+            self._conn_queues[write.conn_id] = queue
+        queue.put_nowait(write)
+        task = self._conn_tasks.get(write.conn_id)
+        if task is None or task.done():
+            self._conn_tasks[write.conn_id] = asyncio.create_task(
+                self._connection_loop(write.conn_id, queue),
+                name=f"opc-writes-conn-{write.conn_id}",
+            )
+
+    async def _connection_loop(self, conn_id: int, queue: asyncio.Queue[OpcWrite]) -> None:
+        """Processa a fila da conexão em ordem de chegada; encerra quando não há mais o
+        que atender (conexão fora do mapping E fila vazia).
+
+        A aposentadoria é atômica de propósito: entre o `empty()` e os `pop()` não há
+        `await`, então `_enqueue` não pode intercalar e enfileirar numa fila que este
+        laço acabou de descartar (o que perderia a escrita em silêncio).
+        """
+        while True:
+            write = await queue.get()
+            await self._run(write)
+            if conn_id in self._runtimes or not queue.empty():
+                continue
+            self._conn_queues.pop(conn_id, None)
+            self._conn_tasks.pop(conn_id, None)
+            return
+
+    async def _run(self, write: OpcWrite) -> None:
+        """Executa o pipeline de uma escrita; a exceção não pode matar a task da fila."""
         try:
             await self.handle(write)
         except asyncio.CancelledError:

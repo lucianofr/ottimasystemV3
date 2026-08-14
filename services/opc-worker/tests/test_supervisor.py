@@ -949,3 +949,54 @@ async def test_reconcile_direto_e_idempotente(
         assert runtime.snapshot.session_up_since == subiu_em
     finally:
         await supervisor.stop()
+
+
+async def test_conexao_pendurada_no_connect_nao_atrasa_a_subida_das_outras(
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    sim: OpcSimServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reconciliação não serializa conexões (ADR-006, RF-204).
+
+    Uma conexão pendurada no `connect` (servidor que aceita o TCP e nunca responde) não
+    pode atrasar a subida nem a cadência de leitura das irmãs: `_spawn` só cria a task,
+    quem espera o servidor é o laço de cada conexão.
+    """
+    from ottima_opc_worker import connection as connection_module
+
+    endpoint_travado = "opc.tcp://127.0.0.1:1/ottima/travado/"
+    real_build_client = connection_module.build_client
+    conectando = asyncio.Event()
+
+    def build_travando(config: ConnectionConfig):
+        client = real_build_client(config)
+        if config.endpoint != endpoint_travado:
+            return client
+
+        async def connect_travado(**_kwargs) -> None:
+            conectando.set()
+            await asyncio.sleep(3600)
+
+        client.connect = connect_travado
+        return client
+
+    monkeypatch.setattr(connection_module, "build_client", build_travando)
+
+    project_id = await create_project(session_factory)
+    travada_id = await create_connection(
+        session_factory, project_id, endpoint_travado, name="Travada"
+    )
+    boa_id = await create_connection(session_factory, project_id, sim.endpoint, name="Boa")
+    await create_tag(session_factory, boa_id, name="Temp", node_id=NODE_SINE)
+    state = WorkerState()
+    supervisor = make_supervisor(session_factory, redis_client, state)
+
+    async with started(supervisor):
+        await asyncio.wait_for(conectando.wait(), timeout=HINT_TIMEOUT_S)
+        async with collecting(redis_client, channel_opc_values(boa_id)) as valores:
+            await wait_up(supervisor, boa_id)
+            await await_until(lambda: len(valores) >= 3)
+
+        assert supervisor.runtimes[travada_id].state is ConnectionState.CONNECTING
+        assert state.connections[boa_id].state is ConnectionState.UP

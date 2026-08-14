@@ -21,8 +21,13 @@ from cryptography.fernet import Fernet
 from redis.asyncio import Redis
 from worker_test_helpers import await_until, collecting
 
-from opcsim import NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM, OpcSimServer, free_port
-from ottima_core.bus import CHANNEL_EVENTS, KIND_COMM_FAILURE, KIND_COMM_RESTORED
+from opcsim import NODE_SINE, NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM, OpcSimServer, free_port
+from ottima_core.bus import (
+    CHANNEL_EVENTS,
+    KIND_COMM_FAILURE,
+    KIND_COMM_RESTORED,
+    channel_opc_values,
+)
 from ottima_core.security import encrypt_secret
 from ottima_opc_worker.connection import ConnectionRuntime, backoff_delay
 from ottima_opc_worker.state import (
@@ -441,3 +446,49 @@ async def test_fail_concorrente_aborta_o_connect_em_voo(
             assert clientes[0].uaclient.state is UaClientState.DISCONNECTED
             assert len(of_kind(events, KIND_COMM_FAILURE)) == 1
             assert of_kind(events, KIND_COMM_RESTORED) == []
+
+
+async def test_conexao_pendurada_no_connect_nao_atrasa_a_leitura_da_outra(
+    sim: OpcSimServer, redis_client: Redis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Isolamento de leitura entre conexões (ADR-006, RF-204).
+
+    Conexão A pendurada no `connect` (servidor que aceita o TCP e nunca responde) não
+    pode segurar a cadência de publicação da conexão B em `opc.values.<B>`: cada conexão
+    tem task própria e o atraso de uma é `await` dela, não do processo.
+    """
+    from ottima_opc_worker import connection as connection_module
+
+    endpoint_travado = f"opc.tcp://127.0.0.1:{free_port()}/ottima/opcsim/"
+    real_build_client = connection_module.build_client
+    conectando = asyncio.Event()
+
+    def build_travando(config: ConnectionConfig) -> Client:
+        client = real_build_client(config)
+        if config.endpoint != endpoint_travado:
+            return client
+
+        async def connect_travado(**_kwargs) -> None:
+            conectando.set()
+            await asyncio.sleep(3600)
+
+        client.connect = connect_travado
+        return client
+
+    monkeypatch.setattr(connection_module, "build_client", build_travando)
+
+    tag = TagConfig(id=1, name="Vazão", node_id=NODE_SINE, direction="r", data_type="float")
+    config_a = make_config(endpoint_travado, conn_id=41)
+    config_b = replace(make_config(sim.endpoint, conn_id=42), tags=(tag,))
+    runtime_a = make_runtime(config_a, redis_client, ConnectionSnapshot(name="Forno A"))
+    runtime_b = make_runtime(config_b, redis_client, ConnectionSnapshot(name="Forno B"))
+    async with collecting(redis_client, channel_opc_values(42)) as valores:
+        async with running(runtime_a), running(runtime_b):
+            await asyncio.wait_for(conectando.wait(), timeout=5.0)
+            # Cadência de B durante a trava de A: 3 amostras é mais de uma janela de
+            # publicação (250 ms), então não passa por acaso num único datachange.
+            await await_until(lambda: len(valores) >= 3)
+
+            assert runtime_a.state is ConnectionState.CONNECTING, "A segue pendurada"
+            assert runtime_b.state is ConnectionState.UP
+            assert {valor["tag_id"] for valor in valores} == {1}
