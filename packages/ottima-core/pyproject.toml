@@ -13,6 +13,9 @@ dependencies = [
   "redis>=5.2",
   "pwdlib[argon2]>=0.2",
   "pyjwt>=2.10",
+  # Motor de inferência do bloco Fuzzy (RF-541): validação de CONTEÚDO do FLL roda em
+  # `flowgraph.validate.validate_graph` no save, via import lazy (ADR-029).
+  "pyfuzzylite>=8.0,<9",
 ]
 
 [build-system]

@@ -6,6 +6,10 @@ dependencies = []
 
 [tool.uv]
 package = false
+# pyfuzzylite 8.x declara numpy<2.0 (poetry "^1.20"), mas o próprio repo mantém a
+# regra NPY201 ativa (compatível com numpy 2) e o workspace exige numpy>=2.5 (ADR-029):
+# o override substitui o pin declarativo atrasado da lib.
+override-dependencies = ["numpy>=2.5"]
 
 [tool.uv.workspace]
 members = ["packages/*", "services/*", "tests/opcsim"]

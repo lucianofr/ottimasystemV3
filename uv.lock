@@ -17,6 +17,7 @@ members = [
     "ottima-recorder",
     "ottima-workspace",
 ]
+overrides = [{ name = "numpy", specifier = ">=2.5" }]
 
 [[package]]
 name = "aiosqlite"
@@ -638,6 +639,7 @@ dependencies = [
     { name = "pwdlib", extra = ["argon2"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyfuzzylite" },
     { name = "pyjwt" },
     { name = "redis" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -651,6 +653,7 @@ requires-dist = [
     { name = "pwdlib", extras = ["argon2"], specifier = ">=0.2" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
+    { name = "pyfuzzylite", specifier = ">=8.0,<9" },
     { name = "pyjwt", specifier = ">=2.10" },
     { name = "redis", specifier = ">=5.2" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36" },
@@ -666,6 +669,7 @@ dependencies = [
     { name = "numpy" },
     { name = "osqp" },
     { name = "ottima-core" },
+    { name = "pyfuzzylite" },
     { name = "scipy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -677,6 +681,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.5" },
     { name = "osqp", specifier = ">=1.0" },
     { name = "ottima-core", editable = "packages/ottima-core" },
+    { name = "pyfuzzylite", specifier = ">=8.0,<9" },
     { name = "scipy", specifier = ">=1.14" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
@@ -889,6 +894,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/5c/b5/8f48e906c3e0205276e8bd8cb7512217a87b2685304d64be27cad5b3019f/pydantic_settings-2.14.2.tar.gz", hash = "sha256:c19dd64b19097f1de80184f0cc7b0272a13ae6e170cbf240a3e27e381ed14a5f", size = 237700, upload-time = "2026-06-19T13:44:56.324Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/77/c1/6e422f34e569cf8e18df68d1939c81c099d2b61e4f7d9621c8a77560799c/pydantic_settings-2.14.2-py3-none-any.whl", hash = "sha256:a20c97b37910b6550d5ea50fbcc2d4187defe58cd57070b73863d069419c9440", size = 61715, upload-time = "2026-06-19T13:44:55.02Z" },
+]
+
+[[package]]
+name = "pyfuzzylite"
+version = "8.0.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/48/f8/4d283f9a943a8ccdc11a6d908ed1d26d941dc41c5f3d8ba972daea8dcd6b/pyfuzzylite-8.0.6.tar.gz", hash = "sha256:69b28241f283fd2ef1b359f3530b752ecbbf7e5908518d452ecf2f2e71c6599f", size = 688008, upload-time = "2025-09-14T21:34:19.571Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/39/60/664e2158caddc1a168fbf232cca134f2d35b37f34cfb7c0257b101c385f9/pyfuzzylite-8.0.6-py3-none-any.whl", hash = "sha256:4c8276357dbea495c6ef36d5e273829b5695f7c4212e53b805898b5e86dfbb34", size = 699787, upload-time = "2025-09-14T21:34:17.669Z" },
 ]
 
 [[package]]
