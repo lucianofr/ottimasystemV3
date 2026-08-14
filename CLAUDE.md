@@ -110,7 +110,7 @@ OTTIMA_E2E=1 bash deploy/smoke.sh                   # L1 — stack, retenção, 
 # deixa o flow no mapa como stopped. Re-rodar o L1 depois da L2 da vermelho falso; nesse caso
 # `docker compose ... restart flow-runtime` antes.
 E2E_ADMIN_USERNAME=$(grep -m1 '^OTTIMA_ADMIN_USERNAME=' deploy/.env|cut -d= -f2-) E2E_ADMIN_PASSWORD=$(grep -m1 '^OTTIMA_ADMIN_PASSWORD=' deploy/.env|cut -d= -f2-) uv run pytest -m e2e tests/e2e -v
-                                                     # L2 — 42 cenários (5 F1 + 9 F2 + 10 F3 + 10 F4 + 7 F5 + 1 fuzzy)
+                                                     # L2 — 43 cenários (5 F1 + 9 F2 + 10 F3 + 10 F4 + 7 F5 + 2 fuzzy)
 # tests/e2e/test_api_e2e.py (F1) lê credenciais só de os.environ (default ""), nunca de
 # deploy/.env: a bateria completa exige o env inline acima (não basta o deploy/.env preenchido).
 # F4: POST /api/operate/{flow_id}/{block_id}/mode|sp|mv publica FlowCommand (202); o runtime
@@ -122,10 +122,17 @@ E2E_ADMIN_USERNAME=$(grep -m1 '^OTTIMA_ADMIN_USERNAME=' deploy/.env|cut -d= -f2-
 # e OTTIMA_MPC_QUEUE_MAX (default 100000, teto do buffer de mpc_samples no recorder).
 # Telas da F5b (operador; admin herda): /operacao (seletor; 1 MPC redireciona direto),
 # /operacao/:flowId/:blockId (faceplate principal + faceplates de variável + trend com
-# predição) e /eventos. Nav do shell em dois grupos: Operação · Eventos | engenharia.
+# predição) e /eventos. Nav do shell em dois grupos: Operação · Fuzzy · Eventos | engenharia.
+# FUZZY OPERATE (ADR-030): /operacao/fuzzy (combobox `?flow=&bloco=`) desenha funções de
+# pertinência, normas, regras com grau e trend das portas do bloco. Backend novo:
+# canal `fuzzy.state.<flow_id>.<block_id>` (throttle 0,25 s na origem, publicado pelo
+# FuzzyBlock), hypertable `fuzzy_samples`/CAgg 1m (migration 0010, mesma retenção das demais
+# variáveis), `GET /api/operate/fuzzy[/{flow_id}/{block_id}]`, `GET /api/history/fuzzy` e a
+# chave `fuzzy_state` no /ws. Curvas de pertinência são amostradas no servidor
+# (`flowgraph/introspect.py`, 101 pontos) — o frontend nunca parseia FLL (ADR-005/029).
 # Grupo engenharia com 5 itens (F6b acrescentou a rota `/engenharia/projetos`, com
 # "Projetos" no início do grupo): Projetos, Conexões, Tags, Flows, Trend.
-# data-testid: operate-*, faceplate-*, eventos-*, home-* (o roteiro L3 depende deles).
+# data-testid: operate-*, faceplate-*, fuzzy-*, eventos-*, home-* (o roteiro L3 depende deles).
 # Ambiente do L3: `uv run python scripts/setup-l3.py` (idempotente) cria projeto ativo,
 # conexão opcsim-l3, flow MPC↔TFS deployado e o usuário operador_e2e.
 cd frontend && npm run e2e                          # regressão Playwright da F1 (specs novas não)
