@@ -7,12 +7,14 @@ resolver a integral do defuzzificador à mão.
 """
 
 import math
+from collections.abc import Awaitable, Callable
 
 import pytest
 
+from ottima_core.bus import FuzzyState
 from ottima_core.contracts_export import FUZZY_DEFAULT_FLL
 from ottima_flow_runtime.blocks.base import PortSample
-from ottima_flow_runtime.blocks.fuzzy import FuzzyBlock
+from ottima_flow_runtime.blocks.fuzzy import FUZZY_STATE_MIN_INTERVAL_S, FuzzyBlock
 
 IDENTIDADE_FLL = """Engine: identidade
 InputVariable: X
@@ -127,8 +129,23 @@ Mamdani sem `defuzzifier`."""
 INVALIDO_FLL = "isto não é FuzzyLite Language nem de longe\n=== !!! ==="
 
 
-def bloco(fll: str, *, n_inputs: int = 1, n_outputs: int = 1, block_id: str = "fz1") -> FuzzyBlock:
-    return FuzzyBlock(block_id, fll=fll, n_inputs=n_inputs, n_outputs=n_outputs)
+def bloco(
+    fll: str,
+    *,
+    n_inputs: int = 1,
+    n_outputs: int = 1,
+    block_id: str = "fz1",
+    publish: Callable[[FuzzyState], Awaitable[None]] | None = None,
+    state_min_interval_s: float = FUZZY_STATE_MIN_INTERVAL_S,
+) -> FuzzyBlock:
+    return FuzzyBlock(
+        block_id,
+        fll=fll,
+        n_inputs=n_inputs,
+        n_outputs=n_outputs,
+        publish=publish,
+        state_min_interval_s=state_min_interval_s,
+    )
 
 
 async def passo(block: FuzzyBlock, valor: float | None, *, ok: bool = True) -> PortSample:
@@ -275,6 +292,148 @@ async def test_j_saida_infinita_e_tratada_como_nao_finita(monkeypatch):
     saida = await passo(block, 5.0)
     assert saida.v is None  # nenhum scan bom anterior — nada para reter
     assert saida.ok is False
+
+
+# --------------------------------------------------------------------------------------
+# (k)..(r) publish de FuzzyState (fatia 2 FUZZY OPERATE, ADR-030): hand-calc, throttle,
+# e os mesmos gates de publicação de saídas (cold start / exceção nunca publicam).
+# --------------------------------------------------------------------------------------
+
+
+async def test_k_publish_recebe_fuzzystate_com_hand_calc():
+    """Em X=5.0 (IDENTIDADE_FLL) `low`/`high` empatam em 0.5 por simetria (mesmo hand-calc
+    de (a)) — dá pra conferir nome/porta/grau de entrada, regra e saída num só passo."""
+    estados: list[FuzzyState] = []
+
+    async def publish(state: FuzzyState) -> None:
+        estados.append(state)
+
+    block = bloco(IDENTIDADE_FLL, publish=publish)
+    await passo(block, 5.0)
+
+    assert len(estados) == 1
+    estado = estados[0]
+    assert estado.ok is True
+
+    entrada = estado.inputs[0]
+    assert entrada.port == "IN1"
+    assert entrada.name == "X"
+    assert entrada.v == pytest.approx(5.0)
+    graus_in = {t.term: t.degree for t in entrada.terms}
+    assert graus_in == pytest.approx({"low": 0.5, "high": 0.5}, abs=1e-6)
+
+    assert estado.rules == pytest.approx([0.5, 0.5], abs=1e-6)
+
+    saida = estado.outputs[0]
+    assert saida.port == "OUT1"
+    assert saida.name == "Y"
+    assert saida.v == pytest.approx(5.0, abs=0.05)
+    graus_out = {t.term: t.degree for t in saida.terms}
+    assert graus_out == pytest.approx({"low": 0.5, "high": 0.5}, abs=1e-6)
+
+
+async def test_l_throttle_grande_publica_uma_vez_em_dois_passos():
+    contagem = 0
+
+    async def publish(state: FuzzyState) -> None:
+        nonlocal contagem
+        contagem += 1
+
+    block = bloco(IDENTIDADE_FLL, publish=publish, state_min_interval_s=1000.0)
+    await passo(block, 5.0)
+    await passo(block, 6.0)
+    assert contagem == 1
+
+
+async def test_m_throttle_zero_publica_em_todo_passo():
+    contagem = 0
+
+    async def publish(state: FuzzyState) -> None:
+        nonlocal contagem
+        contagem += 1
+
+    block = bloco(IDENTIDADE_FLL, publish=publish, state_min_interval_s=0.0)
+    await passo(block, 5.0)
+    await passo(block, 6.0)
+    assert contagem == 2
+
+
+async def test_n_excecao_em_process_nao_publica(monkeypatch):
+    estados: list[FuzzyState] = []
+
+    async def publish(state: FuzzyState) -> None:
+        estados.append(state)
+
+    block = bloco(IDENTIDADE_FLL, publish=publish)
+    await passo(block, 5.0)
+    assert len(estados) == 1
+
+    def _explode() -> None:
+        raise RuntimeError("falha simulada do motor fuzzy")
+
+    monkeypatch.setattr(block._engine, "process", _explode)
+    await passo(block, 7.0)
+    assert len(estados) == 1  # passo com exceção não publica
+
+
+async def test_o_cold_start_nao_publica():
+    estados: list[FuzzyState] = []
+
+    async def publish(state: FuzzyState) -> None:
+        estados.append(state)
+
+    block = bloco(IDENTIDADE_FLL, publish=publish)
+    await passo(block, None)
+    assert estados == []
+
+
+async def test_p_sem_publish_nada_quebra():
+    saida = await passo(bloco(IDENTIDADE_FLL), 5.0)
+    assert saida.ok is True
+
+
+async def test_q_saida_nao_finita_vira_v_none_no_estado():
+    estados: list[FuzzyState] = []
+
+    async def publish(state: FuzzyState) -> None:
+        estados.append(state)
+
+    block = bloco(SEM_COBERTURA_FLL, publish=publish)
+    await passo(block, 1.0)  # fora de [4,6]: default:nan, mas entrada ok
+
+    assert len(estados) == 1
+    estado = estados[0]
+    assert estado.ok is True  # `ok` reflete só `ok_entradas`, não a finitude da saída
+    assert estado.outputs[0].v is None
+
+
+async def test_r_entrada_nao_finita_marca_ok_false_mas_publica():
+    estados: list[FuzzyState] = []
+
+    async def publish(state: FuzzyState) -> None:
+        estados.append(state)
+
+    block = bloco(IDENTIDADE_FLL, publish=publish)
+    await passo(block, float("nan"), ok=True)
+
+    assert len(estados) == 1
+    estado = estados[0]
+    assert estado.ok is False
+    graus_in = {t.term: t.degree for t in estado.inputs[0].terms}
+    assert graus_in == {"low": 0.0, "high": 0.0}  # μ(nan) sanitizado
+
+
+async def test_s_falha_no_publish_nao_derruba_a_varredura():
+    """Telemetria não derruba laço de controle: Redis fora do ar no `publish` mantém a
+    varredura devolvendo as saídas do motor, como o `flow.status` faz no scheduler."""
+
+    async def publish(state: FuzzyState) -> None:
+        raise RuntimeError("redis fora do ar")
+
+    saida = await passo(bloco(IDENTIDADE_FLL, publish=publish), 5.0)
+
+    assert saida.v == pytest.approx(5.0, abs=0.05)
+    assert saida.ok is True
 
 
 # --------------------------------------------------------------------------------------

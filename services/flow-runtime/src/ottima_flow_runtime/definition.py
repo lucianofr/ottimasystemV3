@@ -27,7 +27,15 @@ from typing import Any
 
 from redis.asyncio import Redis
 
-from ottima_core.bus import CHANNEL_OPC_WRITES, MpcState, OpcWrite, channel_mpc_state, publish_event
+from ottima_core.bus import (
+    CHANNEL_OPC_WRITES,
+    FuzzyState,
+    MpcState,
+    OpcWrite,
+    channel_fuzzy_state,
+    channel_mpc_state,
+    publish_event,
+)
 from ottima_core.flowgraph import FlowGraph, FlowNode, MpcConfig, TagRef
 
 from .blocks.base import Block
@@ -234,9 +242,7 @@ def _instantiate(
             process_noise=config.process_noise,
         )
     if node.type == "fuzzy":
-        return FuzzyBlock(
-            node.id, fll=config.fll, n_inputs=config.n_inputs, n_outputs=config.n_outputs
-        )
+        return _instantiate_fuzzy(node, flow_id=flow_id, redis_client=redis_client)
     return TfsBlock(node.id, matrix=config.matrix, ts_seconds=ts_seconds)
 
 
@@ -272,6 +278,22 @@ def _instantiate_mpc(
         write_opc=write_opc,
         emit_event=emit_event,
         escreve_sem_watchdog=escreve_sem_watchdog,
+    )
+
+
+def _instantiate_fuzzy(node: FlowNode, *, flow_id: int, redis_client: Redis) -> FuzzyBlock:
+    config: Any = node.config
+    channel = channel_fuzzy_state(flow_id, node.id)
+
+    async def publish(state: FuzzyState) -> None:
+        await redis_client.publish(channel, state.model_dump_json())
+
+    return FuzzyBlock(
+        node.id,
+        fll=config.fll,
+        n_inputs=config.n_inputs,
+        n_outputs=config.n_outputs,
+        publish=publish,
     )
 
 
@@ -319,4 +341,3 @@ def _mpc_pid_tag_ids(node: FlowNode) -> Iterator[int]:
         yield mv.pid.readback_tag_id
         if mv.pid.mode_read_tag_id is not None:
             yield mv.pid.mode_read_tag_id
-

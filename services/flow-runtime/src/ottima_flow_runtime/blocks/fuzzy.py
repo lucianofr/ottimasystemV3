@@ -17,19 +17,46 @@ duas.
 interno do `Engine`, não deste bloco) — `reset()` chama `engine.restart()`, que limpa esse
 estado junto com as entradas, então a mesma sequência de varreduras depois de um reset nunca
 enxerga o valor travado antes dele (RF-543).
+
+`publish` (opcional) publica um `FuzzyState` em `fuzzy.state.<flow_id>.<block_id>` (ADR-030)
+após CADA `process()` bem-sucedido — cold input e exceção nunca publicam. Throttle na origem
+(`FUZZY_STATE_MIN_INTERVAL_S`) via `time.monotonic()`: a primeira publicação depois da
+construção ou de `reset()` sempre passa, as seguintes só depois do intervalo mínimo. Sem
+`publish`, o bloco se comporta exatamente como antes desta feature.
 """
 
 import logging
 import math
-from collections.abc import Mapping
-from datetime import datetime
+import time
+from collections.abc import Awaitable, Callable, Mapping
+from datetime import UTC, datetime
 
 import fuzzylite as fl
 import numpy as np
 
+from ottima_core.bus import FuzzyState, FuzzyTermDegree, FuzzyVarState
+
 from .base import Block, PortSample, has_cold_input, null_outputs
 
 logger = logging.getLogger(__name__)
+
+FUZZY_STATE_MIN_INTERVAL_S = 0.25
+"""Throttle mínimo entre publicações de `FuzzyState` por bloco (ADR-030) — a varredura roda
+em ms, a UI/recorder não precisam de mais que 4 quadros/s."""
+
+
+def _grau(x: object) -> float:
+    """Sanitiza um grau (μ de termo, ativação de regra, grau agregado de saída): shape
+    escalar ou array (1,) da `fuzzylite`/numpy vira float Python; não-finito vira 0.0 —
+    nunca nan/inf num canal publicado (RF-542)."""
+    valor = float(np.asarray(x).reshape(-1)[-1])
+    return valor if math.isfinite(valor) else 0.0
+
+
+def _valor_crisp(valor: float) -> float | None:
+    """Sanitiza um valor crisp: não-finito vira `None` (RF-542, nan/inf nunca trafegam como
+    `NaN` no JSON do canal)."""
+    return valor if math.isfinite(valor) else None
 
 
 class FuzzyBlock(Block):
@@ -41,8 +68,20 @@ class FuzzyBlock(Block):
     propósito pelo isolamento de sandbox, ADR-018).
     """
 
-    def __init__(self, block_id: str, *, fll: str, n_inputs: int, n_outputs: int) -> None:
+    def __init__(
+        self,
+        block_id: str,
+        *,
+        fll: str,
+        n_inputs: int,
+        n_outputs: int,
+        publish: Callable[[FuzzyState], Awaitable[None]] | None = None,
+        state_min_interval_s: float = FUZZY_STATE_MIN_INTERVAL_S,
+    ) -> None:
         super().__init__(block_id)
+        self._publish = publish
+        self._state_min_interval_s = state_min_interval_s
+        self._last_publish_mono: float | None = None
         where = f"bloco '{block_id}' (fuzzy)"
         self._input_ports = tuple(f"IN{i}" for i in range(1, n_inputs + 1))
         self._output_ports = tuple(f"OUT{i}" for i in range(1, n_outputs + 1))
@@ -128,7 +167,11 @@ class FuzzyBlock(Block):
             }
             return dict(self._last_outputs)
 
+        # O gate do throttle vem ANTES de montar qualquer estado: nas varreduras descartadas
+        # não se paga `activation_degree`/`membership` por termo (ADR-030, custo sub-ms).
+        publicar = self._deve_publicar()
         outputs: dict[str, PortSample] = {}
+        output_states: list[FuzzyVarState] = []
         for port, variable in zip(self._output_ports, self._engine.output_variables, strict=True):
             # `OutputVariable.value` pode vir como float ou array numpy shape (1,) depois do
             # defuzzify — normaliza para escalar Python nos dois casos.
@@ -139,8 +182,84 @@ class FuzzyBlock(Block):
                 # RF-542: nunca nan/inf com ok=True — retém o último valor finito DAQUELA
                 # porta (None antes do primeiro bom).
                 outputs[port] = PortSample(self._last_outputs[port].v, False)
+            if publicar:
+                output_states.append(
+                    FuzzyVarState(
+                        port=port,
+                        name=variable.name,
+                        v=_valor_crisp(value),
+                        terms=[
+                            FuzzyTermDegree(
+                                term=term.name,
+                                degree=_grau(variable.fuzzy.activation_degree(term)),
+                            )
+                            for term in variable.terms
+                        ],
+                    )
+                )
         self._last_outputs = outputs
+
+        if publicar:
+            assert self._publish is not None  # `_deve_publicar` já garantiu
+            await self._publicar_estado(self._publish, ts, ok_entradas, output_states)
+
         return dict(outputs)
+
+    def _deve_publicar(self) -> bool:
+        """Throttle na origem (ADR-030): a primeira publicação depois da construção ou de
+        `reset()` sempre passa, as seguintes só depois de `_state_min_interval_s` desde a
+        última (dedupe local, sem estado no Redis). Marca o instante ao liberar."""
+        if self._publish is None:
+            return False
+        agora = time.monotonic()
+        if (
+            self._last_publish_mono is not None
+            and agora - self._last_publish_mono < self._state_min_interval_s
+        ):
+            return False
+        self._last_publish_mono = agora
+        return True
+
+    async def _publicar_estado(
+        self,
+        publish: Callable[[FuzzyState], Awaitable[None]],
+        ts: datetime | None,
+        ok_entradas: bool,
+        output_states: list[FuzzyVarState],
+    ) -> None:
+        """Monta e publica o quadro em `fuzzy.state.<flow_id>.<block_id>` (ADR-030)."""
+        inputs = [
+            FuzzyVarState(
+                port=port,
+                name=variable.name,
+                v=_valor_crisp(float(variable.value)),
+                terms=[
+                    FuzzyTermDegree(term=term.name, degree=_grau(term.membership(variable.value)))
+                    for term in variable.terms
+                ],
+            )
+            for port, variable in zip(self._input_ports, self._engine.input_variables, strict=True)
+        ]
+        rules = [
+            _grau(rule.activation_degree) for rb in self._engine.rule_blocks for rule in rb.rules
+        ]
+        state = FuzzyState(
+            ts=ts or datetime.now(UTC),
+            ok=ok_entradas,
+            inputs=inputs,
+            rules=rules,
+            outputs=output_states,
+        )
+        try:
+            await publish(state)
+        except Exception:
+            # Telemetria não derruba laço de controle: uma falha do Redis aqui subiria por
+            # `step()` → `_scan()` → `_handle_loop_failure` e levaria o flow inteiro a
+            # `failed` (mesma postura do `flow.status` em `scheduler.py`).
+            logger.exception(
+                "Bloco fuzzy '%s': falha ao publicar o estado do motor (varredura segue)",
+                self.block_id,
+            )
 
     def reset(self) -> None:
         # `Engine.restart()` zera entradas, recarrega as regras e limpa `previous_value` de
@@ -148,3 +267,4 @@ class FuzzyBlock(Block):
         # reset.
         self._engine.restart()
         self._last_outputs = null_outputs(self._output_ports)
+        self._last_publish_mono = None
