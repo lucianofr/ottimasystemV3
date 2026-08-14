@@ -236,6 +236,11 @@ function CamposFuzzy({
           declarados no FLL deve casar com Entradas/Saídas, na mesma ordem de declaração. Tab
           insere quatro espaços; Esc fecha o modal.
         </p>
+        <p className="text-[10px] text-fg-muted">
+          Atenção: o vínculo é pela ORDEM de declaração, não pelo nome — os nomes das
+          variáveis no FLL são livres. Reordenar as declarações sem ajustar as conexões do
+          flow muda silenciosamente qual variável cada porta IN/OUT alimenta.
+        </p>
       </div>
     </div>
   );
