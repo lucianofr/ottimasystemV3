@@ -32,6 +32,7 @@ from ottima_core.flowgraph import FlowGraph, FlowNode, MpcConfig, TagRef
 
 from .blocks.base import Block
 from .blocks.first_order import FirstOrderBlock
+from .blocks.fuzzy import FuzzyBlock
 from .blocks.kalman import KalmanBlock
 from .blocks.mpc import MpcBlock
 from .blocks.opc_read import OpcReadBlock
@@ -231,6 +232,10 @@ def _instantiate(
             node.id,
             measurement_noise=config.measurement_noise,
             process_noise=config.process_noise,
+        )
+    if node.type == "fuzzy":
+        return FuzzyBlock(
+            node.id, fll=config.fll, n_inputs=config.n_inputs, n_outputs=config.n_outputs
         )
     return TfsBlock(node.id, matrix=config.matrix, ts_seconds=ts_seconds)
 
