@@ -9,6 +9,7 @@ from ottima_core.models.system_settings import SystemSettings
 from ottima_core.models.tag import Tag
 from ottima_core.models.timeseries import (
     events_table,
+    fuzzy_samples_table,
     mpc_samples_table,
     samples_table,
     ssto_runs_table,
@@ -28,5 +29,6 @@ __all__ = [
     "samples_table",
     "events_table",
     "mpc_samples_table",
+    "fuzzy_samples_table",
     "ssto_runs_table",
 ]

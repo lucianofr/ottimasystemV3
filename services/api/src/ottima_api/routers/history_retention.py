@@ -19,7 +19,14 @@ from ottima_core.schemas.history_retention import HistoryRetentionOut, HistoryRe
 router = APIRouter()
 
 # Hypertables de variável de processo (brutas + seus continuous aggregates de 1 min).
-_HYPERTABLES = ("samples", "samples_1m", "mpc_samples", "mpc_samples_1m")
+_HYPERTABLES = (
+    "samples",
+    "samples_1m",
+    "mpc_samples",
+    "mpc_samples_1m",
+    "fuzzy_samples",
+    "fuzzy_samples_1m",
+)
 
 
 async def _linha(db: AsyncSession) -> HistoryRetentionSettings:

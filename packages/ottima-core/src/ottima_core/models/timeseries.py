@@ -80,3 +80,13 @@ mpc_samples_table = Table(
     Column("sp", Double, nullable=True),
     Column("auto", Boolean, nullable=False),
 )
+
+fuzzy_samples_table = Table(
+    "fuzzy_samples",
+    TIMESERIES_METADATA,
+    Column("ts", DateTime(timezone=True), nullable=False),
+    Column("flow_id", BigInteger, nullable=False),
+    Column("block_id", Text, nullable=False),
+    Column("var_id", Text, nullable=False),
+    Column("v", Double, nullable=False),
+)

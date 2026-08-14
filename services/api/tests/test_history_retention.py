@@ -1,5 +1,5 @@
 """Retenção configurável de histórico de variáveis (ADR-003 revisado): RBAC, limites 1-120,
-reprogramação das 4 estruturas de variável (samples/samples_1m/mpc_samples/mpc_samples_1m) sem
+reprogramação das estruturas de variável (samples/mpc_samples/fuzzy_samples + CAggs 1m) sem
 tocar `events` (ADR-020), e liberação imediata de espaço via drop_chunks."""
 
 from datetime import UTC, datetime, timedelta
@@ -45,14 +45,12 @@ async def test_put_exige_admin_403_para_operador(client, operator_headers):
 
 async def test_put_valida_limites_1_a_120(client, admin_headers):
     fora = [
-        await client.put(PATH, json={"retention_days": v}, headers=admin_headers)
-        for v in (0, 121)
+        await client.put(PATH, json={"retention_days": v}, headers=admin_headers) for v in (0, 121)
     ]
     assert [r.status_code for r in fora] == [422, 422]
 
     dentro = [
-        await client.put(PATH, json={"retention_days": v}, headers=admin_headers)
-        for v in (1, 120)
+        await client.put(PATH, json={"retention_days": v}, headers=admin_headers) for v in (1, 120)
     ]
     assert [r.status_code for r in dentro] == [200, 200]
 
@@ -64,7 +62,7 @@ async def test_put_persiste_o_novo_valor(client, admin_headers):
     assert (await client.get(PATH, headers=admin_headers)).json()["retention_days"] == 45
 
 
-async def test_put_reprograma_as_4_estruturas_de_variavel_sem_tocar_events(
+async def test_put_reprograma_as_estruturas_de_variavel_sem_tocar_events(
     client, admin_headers, db_session
 ):
     antes = await _drop_after_por_estrutura(db_session)
@@ -74,7 +72,14 @@ async def test_put_reprograma_as_4_estruturas_de_variavel_sem_tocar_events(
     assert r.status_code == 200
 
     depois = await _drop_after_por_estrutura(db_session)
-    for estrutura in ("samples", "samples_1m", "mpc_samples", "mpc_samples_1m"):
+    for estrutura in (
+        "samples",
+        "samples_1m",
+        "mpc_samples",
+        "mpc_samples_1m",
+        "fuzzy_samples",
+        "fuzzy_samples_1m",
+    ):
         assert depois[estrutura] == timedelta(days=45), estrutura
     # events (ADR-020) continua com a política original: log de alarmes, não variável.
     assert depois["events"] == timedelta(days=30)

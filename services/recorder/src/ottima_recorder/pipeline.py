@@ -20,18 +20,26 @@ from ottima_core.bus import (
     CHANNEL_EVENTS,
     KIND_RECORDER_BACKPRESSURE,
     EventMessage,
+    FuzzyState,
     MpcState,
     OpcValue,
     publish_event,
 )
 from ottima_core.config import get_settings
-from ottima_core.models import events_table, mpc_samples_table, samples_table, ssto_runs_table
+from ottima_core.models import (
+    events_table,
+    fuzzy_samples_table,
+    mpc_samples_table,
+    samples_table,
+    ssto_runs_table,
+)
 from ottima_core.pubsub import ChannelListener, PatternListener
 
 logger = logging.getLogger(__name__)
 
 VALUES_PATTERN = "opc.values.*"
 MPC_STATE_PATTERN = "mpc.state.*"
+FUZZY_STATE_PATTERN = "fuzzy.state.*"
 FLUSH_INTERVAL_S = 1.0
 # Gatilhos de ciclo: buffer com esse tanto de linhas não espera o intervalo para gravar.
 SAMPLES_FLUSH_ROWS = 1000
@@ -42,6 +50,8 @@ EVENTS_QUEUE_MAX = 10_000
 # Uma linha por EXECUÇÃO do SSTO (ADR-027 §11), não por variável: no pior caso (Ts_mpc de
 # 0,5 s) são ~7 mil linhas por hora de banco fora do ar, então o teto de eventos serve.
 SSTO_QUEUE_MAX = 10_000
+# Mesma ordem de grandeza de samples: um bloco fuzzy publica um quadro por varredura.
+FUZZY_QUEUE_MAX = 100_000
 RETRY_INITIAL_S = 1.0
 RETRY_MAX_S = 30.0
 MAX_BIND_PARAMS = 32_000  # asyncpg aceita no máximo 32767 parâmetros por statement
@@ -75,14 +85,14 @@ class _DropOldestBuffer:
 
 
 class RecorderPipeline:
-    """Barramento → hypertables. Único escritor de `samples`/`events`/`mpc_samples`
-    (spec F2 §6, F5 §2.3).
+    """Barramento → hypertables. Único escritor de `samples`/`events`/`mpc_samples`/
+    `fuzzy_samples` (spec F2 §6, F5 §2.3, ADR-030).
 
-    Três assinaturas independentes (`opc.values.*`, `events` e `mpc.state.*`), cada uma no
-    seu próprio `PatternListener`/`ChannelListener` do laço resiliente compartilhado — os
-    três tipos de dado têm buffers, tetos e contadores de descarte próprios (spec §6.4),
-    então nada aqui depende de ordem entre canal e padrão: uma conexão a menos era só
-    economia, não contrato.
+    Quatro assinaturas independentes (`opc.values.*`, `events`, `mpc.state.*` e
+    `fuzzy.state.*`), cada uma no seu próprio `PatternListener`/`ChannelListener` do laço
+    resiliente compartilhado — os quatro tipos de dado têm buffers, tetos e contadores de
+    descarte próprios (spec §6.4), então nada aqui depende de ordem entre canal e padrão:
+    uma conexão a menos era só economia, não contrato.
     """
 
     def __init__(
@@ -96,6 +106,7 @@ class RecorderPipeline:
         events_queue_max: int = EVENTS_QUEUE_MAX,
         mpc_queue_max: int | None = None,
         ssto_queue_max: int = SSTO_QUEUE_MAX,
+        fuzzy_queue_max: int = FUZZY_QUEUE_MAX,
     ) -> None:
         self._redis = redis_client
         self._session_factory = session_factory
@@ -108,6 +119,7 @@ class RecorderPipeline:
             mpc_queue_max if mpc_queue_max is not None else get_settings().mpc_queue_max
         )
         self._ssto = _DropOldestBuffer(ssto_queue_max)
+        self._fuzzy = _DropOldestBuffer(fuzzy_queue_max)
         self._malformed_total = 0
         self._dropped_reported = 0
         self._flush_failures = 0
@@ -122,6 +134,9 @@ class RecorderPipeline:
         )
         self._mpc_listener = PatternListener(
             redis_client, MPC_STATE_PATTERN, self._on_mpc_state, name="recorder-mpc"
+        )
+        self._fuzzy_listener = PatternListener(
+            redis_client, FUZZY_STATE_PATTERN, self._on_fuzzy_state, name="recorder-fuzzy"
         )
         self._flush_task: asyncio.Task[None] | None = None
 
@@ -142,9 +157,21 @@ class RecorderPipeline:
         return len(self._ssto)
 
     @property
+    def buffered_fuzzy_samples(self) -> int:
+        return len(self._fuzzy)
+
+    @property
     def dropped_total(self) -> int:
-        """Samples + eventos + mpc_samples + ssto_runs descartados por overflow; nunca zera."""
-        return self._samples.dropped + self._events.dropped + self._mpc.dropped + self._ssto.dropped
+        """Samples+eventos+mpc_samples+ssto_runs+fuzzy_samples descartados por overflow;
+        nunca zera.
+        """
+        return (
+            self._samples.dropped
+            + self._events.dropped
+            + self._mpc.dropped
+            + self._ssto.dropped
+            + self._fuzzy.dropped
+        )
 
     @property
     def malformed_total(self) -> int:
@@ -169,6 +196,7 @@ class RecorderPipeline:
             await self._events_listener.start()
             await self._samples_listener.start()
             await self._mpc_listener.start()
+            await self._fuzzy_listener.start()
         except BaseException:
             # Uma das assinaturas falhou depois de outra já ter subido: sem este desmonte
             # cruzado, a que deu certo ficaria pendurada no servidor — não há laço de fundo
@@ -176,6 +204,7 @@ class RecorderPipeline:
             await self._events_listener.stop()
             await self._samples_listener.stop()
             await self._mpc_listener.stop()
+            await self._fuzzy_listener.stop()
             raise
         self._flush_task = asyncio.create_task(self._flush_loop())
 
@@ -198,6 +227,7 @@ class RecorderPipeline:
         await self._events_listener.stop()
         await self._samples_listener.stop()
         await self._mpc_listener.stop()
+        await self._fuzzy_listener.stop()
         try:
             await self.flush()
         except Exception:
@@ -206,7 +236,7 @@ class RecorderPipeline:
             logger.exception("Desmonte do recorder: flush final falhou; lote perdido")
 
     async def flush(self) -> None:
-        """Um ciclo de gravação: eventos, ssto_runs, samples, mpc_samples.
+        """Um ciclo de gravação: eventos, ssto_runs, samples, mpc_samples, fuzzy_samples.
 
         Auditoria tem prioridade (spec §6.3) — e o registro do SSTO (ADR-027 §11) é
         auditoria, não telemetria: vai logo depois dos eventos, à frente do dado cíclico.
@@ -218,6 +248,7 @@ class RecorderPipeline:
             and not len(self._samples)
             and not len(self._mpc)
             and not len(self._ssto)
+            and not len(self._fuzzy)
         ):
             return
         try:
@@ -225,6 +256,7 @@ class RecorderPipeline:
             await self._write_buffer(ssto_runs_table, self._ssto)
             await self._write_buffer(samples_table, self._samples)
             await self._write_buffer(mpc_samples_table, self._mpc)
+            await self._write_buffer(fuzzy_samples_table, self._fuzzy)
         except Exception:
             self._db_ok = False
             self._flush_failures += 1
@@ -332,6 +364,37 @@ class RecorderPipeline:
                 self._ssto.dropped,
             )
 
+    def ingest_fuzzy_state(self, channel: str, raw: str) -> None:
+        """Parse e enfileira um estado fuzzy; payload inválido é descartado com log.
+
+        Uma linha por entrada/saída com `v` não-nulo (RF-542: `nan`/`inf` viram `None` na
+        origem e não geram linha); `var_id` é a porta (`IN1..INn`/`OUT1..OUTn`, ADR-029) —
+        `flow_id`/`block_id` saem do nome do canal (`fuzzy.state.<flow_id>.<block_id>`),
+        `ts` do payload.
+        """
+        state = self._parse(FuzzyState, raw)
+        if state is None:
+            return
+        flow_id_raw, block_id = channel.removeprefix("fuzzy.state.").split(".", 1)
+        for var in (*state.inputs, *state.outputs):
+            if var.v is None:
+                continue
+            overflow = self._fuzzy.append(
+                {
+                    "ts": state.ts,
+                    "flow_id": int(flow_id_raw),
+                    "block_id": block_id,
+                    "var_id": var.port,
+                    "v": var.v,
+                }
+            )
+            if overflow:
+                # Dado cíclico do fuzzy: fresco vale mais que velho, mesmo raciocínio de samples.
+                logger.warning(
+                    "Buffer de fuzzy_samples cheio: amostra mais antiga descartada (total %d)",
+                    self._fuzzy.dropped,
+                )
+
     async def _on_sample(self, channel: str, raw: str) -> None:
         self.ingest_sample(raw)
 
@@ -340,6 +403,9 @@ class RecorderPipeline:
 
     async def _on_mpc_state(self, channel: str, raw: str) -> None:
         self.ingest_mpc_state(channel, raw)
+
+    async def _on_fuzzy_state(self, channel: str, raw: str) -> None:
+        self.ingest_fuzzy_state(channel, raw)
 
     async def _flush_loop(self) -> None:
         """Flush a cada `flush_interval_s`, quando um buffer enche ou no backoff do retry."""
