@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { PORT_CONTRACTS } from "../../lib/contracts.gen";
 import {
   avisosInversao,
   compactarExecOrder,
@@ -13,7 +14,7 @@ import {
   motivoRecusa,
   paraGraphJson,
   podarArestasDoBloco,
-  podarOutputEuScript,
+  podarOutputEu,
   proximaPosicaoNaGrade,
   proximoExecOrder,
   tipoPorta,
@@ -52,6 +53,15 @@ function script(id: string, ordem: number, entradas = 1, saidas = 1): BlocoNode 
     type: "script",
     position: POS,
     data: { exec_order: ordem, label: "", n_inputs: entradas, n_outputs: saidas, code: "", output_eu: {} },
+  };
+}
+
+function fuzzy(id: string, ordem: number, entradas = 1, saidas = 4): BlocoNode {
+  return {
+    id,
+    type: "fuzzy",
+    position: POS,
+    data: { exec_order: ordem, label: "", n_inputs: entradas, n_outputs: saidas, fll: "", output_eu: {} },
   };
 }
 
@@ -210,6 +220,25 @@ test("as portas do Script acompanham n_inputs/n_outputs, inclusive em zero", () 
   expect(handlesSaida(script("s", 1, 0, 0))).toEqual([]);
 });
 
+test("as portas do Fuzzy acompanham n_inputs/n_outputs (RF-541)", () => {
+  expect(handlesEntrada(fuzzy("f", 1, 2, 3))).toEqual(["IN1", "IN2"]);
+  expect(handlesSaida(fuzzy("f", 1, 2, 3))).toEqual(["OUT1", "OUT2", "OUT3"]);
+});
+
+test("criarBloco('fuzzy', ...) nasce com os defaults do contrato, nunca literal local (RF-541, ADR-029)", () => {
+  const no = criarBloco("fuzzy", "f", POS, 1);
+  if (no.type !== "fuzzy") throw new Error("tipo preservado");
+  if (!PORT_CONTRACTS.fuzzy.dynamic) throw new Error("contrato do fuzzy deveria ser dinâmico");
+  expect(no.data).toEqual({
+    exec_order: 1,
+    label: "",
+    n_inputs: PORT_CONTRACTS.fuzzy.default_counts.n_inputs,
+    n_outputs: PORT_CONTRACTS.fuzzy.default_counts.n_outputs,
+    fll: PORT_CONTRACTS.fuzzy.default_fll,
+    output_eu: {},
+  });
+});
+
 test("tipo da porta herda a tag; sem tag configurada o tipo é desconhecido", () => {
   expect(tipoPorta(leitura("r", 1, 10), TAGS)).toBe("num");
   expect(tipoPorta(leitura("r", 1, 11), TAGS)).toBe("bool");
@@ -218,6 +247,7 @@ test("tipo da porta herda a tag; sem tag configurada o tipo é desconhecido", ()
   expect(tipoPorta(leitura("r", 1, 999), TAGS)).toBe("desconhecido");
   expect(tipoPorta(script("s", 1), TAGS)).toBe("bivalente");
   expect(tipoPorta(tfs("t", 1), TAGS)).toBe("num");
+  expect(tipoPorta(fuzzy("f", 1), TAGS)).toBe("num");
 });
 
 // --------------------------------------------------------------------------------------
@@ -404,6 +434,7 @@ test("data sai com exatamente as chaves do contrato, uma lista por tipo", () => 
     criarBloco("script", "s", POS, 3),
     criarBloco("tfs", "t", POS, 4),
     criarBloco("mpc", "m", POS, 5),
+    criarBloco("fuzzy", "f", POS, 6),
   ];
   const chaves = paraGraphJson(nodes, []).nodes.map((no) => Object.keys(no.data).sort());
   expect(chaves).toEqual([
@@ -412,6 +443,7 @@ test("data sai com exatamente as chaves do contrato, uma lista por tipo", () => 
     ["code", "exec_order", "label", "n_inputs", "n_outputs", "output_eu"],
     ["exec_order", "label", "matrix", "output_eu"],
     ["exec_order", "label", "models", "multiplier", "name", "variables"],
+    ["exec_order", "fll", "label", "n_inputs", "n_outputs", "output_eu"],
   ]);
 });
 
@@ -459,7 +491,7 @@ test("ida e volta pelo graph_json preserva o grafo", () => {
   expect(volta.edges).toEqual(edges);
 });
 
-test("ida e volta pelo graph_json preserva output_eu do Script e do TFS (spec §4.1)", () => {
+test("ida e volta pelo graph_json preserva output_eu do Script, TFS e Fuzzy (spec §4.1, RF-541)", () => {
   const nodes: BlocoNode[] = [
     {
       id: "s",
@@ -473,9 +505,36 @@ test("ida e volta pelo graph_json preserva output_eu do Script e do TFS (spec §
       position: { x: 300, y: 20 },
       data: { exec_order: 2, label: "", matrix: matrizPadrao(), output_eu: { y1: "C" } },
     },
+    {
+      id: "f",
+      type: "fuzzy",
+      position: { x: 600, y: 20 },
+      data: {
+        exec_order: 3,
+        label: "",
+        n_inputs: 1,
+        n_outputs: 2,
+        fll: "Engine: teste\n",
+        output_eu: { OUT1: "%" },
+      },
+    },
   ];
   const volta = deGraphJson(JSON.parse(JSON.stringify(paraGraphJson(nodes, []))));
   expect(volta.nodes).toEqual(nodes);
+});
+
+test("nó Fuzzy salvo sem fll/output_eu carrega com o default do contrato e {} (compatibilidade retroativa, RF-541)", () => {
+  if (!PORT_CONTRACTS.fuzzy.dynamic) throw new Error("contrato do fuzzy deveria ser dinâmico");
+  const grafo = deGraphJson({
+    nodes: [
+      { id: "f", type: "fuzzy", position: POS, data: { exec_order: 1, label: "", n_inputs: 1, n_outputs: 4 } },
+    ],
+    edges: [],
+  });
+  const f = grafo.nodes.find((no) => no.id === "f");
+  if (f?.type !== "fuzzy") throw new Error("tipo preservado");
+  expect(f.data.fll).toBe(PORT_CONTRACTS.fuzzy.default_fll);
+  expect(f.data.output_eu).toEqual({});
 });
 
 test("nó Script/TFS salvo antes da F6, sem output_eu, carrega com {} (compatibilidade retroativa)", () => {
@@ -661,22 +720,29 @@ test("reconfigurar sem mexer nas portas não derruba nada", () => {
 });
 
 // --------------------------------------------------------------------------------------
-// Poda de output_eu ao reduzir n_outputs (spec §4.1-6)
+// Poda de output_eu ao reduzir n_outputs (spec §4.1-6, RF-541 para o Fuzzy)
 // --------------------------------------------------------------------------------------
 
 test("reduzir n_outputs de 3 para 2 descarta a EU de OUT3 (servidor recusaria com 422)", () => {
-  expect(podarOutputEuScript({ OUT1: "t/h", OUT2: "bar", OUT3: "C" }, 2)).toEqual({
+  expect(podarOutputEu("OUT", { OUT1: "t/h", OUT2: "bar", OUT3: "C" }, 2)).toEqual({
     OUT1: "t/h",
     OUT2: "bar",
   });
 });
 
 test("aumentar n_outputs preserva as EUs existentes sem inventar a da porta nova", () => {
-  expect(podarOutputEuScript({ OUT1: "t/h" }, 3)).toEqual({ OUT1: "t/h" });
+  expect(podarOutputEu("OUT", { OUT1: "t/h" }, 3)).toEqual({ OUT1: "t/h" });
 });
 
 test("zerar n_outputs descarta toda EU do Script", () => {
-  expect(podarOutputEuScript({ OUT1: "t/h", OUT2: "bar" }, 0)).toEqual({});
+  expect(podarOutputEu("OUT", { OUT1: "t/h", OUT2: "bar" }, 0)).toEqual({});
+});
+
+test("reduzir n_outputs do Fuzzy de 4 para 2 descarta a EU de OUT3/OUT4", () => {
+  expect(podarOutputEu("OUT", { OUT1: "t/h", OUT2: "bar", OUT3: "C", OUT4: "%" }, 2)).toEqual({
+    OUT1: "t/h",
+    OUT2: "bar",
+  });
 });
 
 // --------------------------------------------------------------------------------------

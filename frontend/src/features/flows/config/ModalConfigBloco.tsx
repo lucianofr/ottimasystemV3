@@ -7,13 +7,16 @@ import { Select } from "../../../components/ui/select";
 import type { TagOut } from "../../../lib/api";
 import { ROTULO_TIPO } from "../../tags/useTags";
 import {
+  MAX_FLL_LENGTH,
+  MAX_PORTAS_FUZZY,
   MAX_PORTAS_SCRIPT,
-  podarOutputEuScript,
+  podarOutputEu,
   portasScript,
   ROTULO_BLOCO,
   type BlocoNode,
   type DadosTfs,
   type NoEscrita,
+  type NoFuzzy,
   type NoLeitura,
   type NoMpc,
   type NoScript,
@@ -23,6 +26,7 @@ import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
 import { CamposTfs } from "./CamposTfs";
 
 const OPCOES_PORTAS = Array.from({ length: MAX_PORTAS_SCRIPT + 1 }, (_, i) => i);
+const OPCOES_PORTAS_FUZZY = Array.from({ length: MAX_PORTAS_FUZZY }, (_, i) => i + 1);
 
 function CamposTag({
   dados,
@@ -156,6 +160,87 @@ function CamposScript({
   );
 }
 
+function CamposFuzzy({
+  dados,
+  nOutputs,
+  aoMudarNOutputs,
+}: {
+  dados: NoFuzzy["data"];
+  nOutputs: number;
+  aoMudarNOutputs: (n_outputs: number) => void;
+}) {
+  const portasEu = portasScript("OUT", nOutputs);
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label htmlFor="n_inputs">Entradas (IN1..INn)</Label>
+          <Select id="n_inputs" name="n_inputs" data-testid="config-n-inputs" defaultValue={dados.n_inputs}>
+            {OPCOES_PORTAS_FUZZY.map((quantidade) => (
+              <option key={quantidade} value={quantidade}>
+                {quantidade}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="n_outputs">Saídas (OUT1..OUTn)</Label>
+          <Select
+            id="n_outputs"
+            name="n_outputs"
+            data-testid="config-n-outputs"
+            value={nOutputs}
+            onChange={(evento) => aoMudarNOutputs(Number(evento.target.value))}
+          >
+            {OPCOES_PORTAS_FUZZY.map((quantidade) => (
+              <option key={quantidade} value={quantidade}>
+                {quantidade}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
+      {portasEu.length > 0 && (
+        <div className="grid grid-cols-2 gap-3">
+          {portasEu.map((porta) => (
+            <div key={porta} className="space-y-1">
+              <Label htmlFor={`output_eu_${porta}`}>{porta} · EU</Label>
+              <Input
+                id={`output_eu_${porta}`}
+                name={`output_eu_${porta}`}
+                data-testid={`config-output-eu-${porta}`}
+                defaultValue={dados.output_eu[porta] ?? ""}
+                placeholder="ex.: t/h"
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-1">
+        <Label htmlFor="fll">FLL (FuzzyLite Language)</Label>
+        <textarea
+          id="fll"
+          name="fll"
+          data-testid="config-fll"
+          rows={12}
+          spellCheck={false}
+          maxLength={MAX_FLL_LENGTH}
+          defaultValue={dados.fll}
+          onKeyDown={indentarComTab}
+          className="w-full rounded-sm border border-border bg-well p-2 font-mono text-xs leading-relaxed text-fg focus-visible:outline-2 focus-visible:outline-accent"
+        />
+        <p className="text-[10px] text-fg-muted">
+          Motor FuzzyLite (Mamdani ou Tsukamoto). O número de InputVariable/OutputVariable
+          declarados no FLL deve casar com Entradas/Saídas, na mesma ordem de declaração. Tab
+          insere quatro espaços; Esc fecha o modal.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /** MPC tem modal dedicado (`mpc/MpcModal.tsx`, tarefa 4.2); FlowEditorPage nunca passa um
  *  nó MPC para cá. */
 type NoGenerico = Exclude<BlocoNode, NoMpc>;
@@ -189,6 +274,7 @@ export function ModalConfigBloco({
   const dialogo = useRef<HTMLDialogElement>(null);
   const [matrizTfs, setMatrizTfs] = useState<DadosTfs | null>(no.type === "tfs" ? no.data : null);
   const [nOutputsScript, setNOutputsScript] = useState(no.type === "script" ? no.data.n_outputs : 0);
+  const [nOutputsFuzzy, setNOutputsFuzzy] = useState(no.type === "fuzzy" ? no.data.n_outputs : 0);
 
   // `main.tsx` monta sob <StrictMode>: em dev o efeito roda duas vezes e `showModal()` num
   // <dialog> já aberto levanta InvalidStateError, que sem error boundary derruba a árvore.
@@ -222,8 +308,31 @@ export function ModalConfigBloco({
               n_inputs: inteiroDoCampo(campos.get("n_inputs"), 0, 0, MAX_PORTAS_SCRIPT),
               n_outputs,
               code: String(campos.get("code") ?? ""),
-              output_eu: podarOutputEuScript(
+              output_eu: podarOutputEu(
+                "OUT",
                 outputEuDoFormulario(campos, portasScript("OUT", MAX_PORTAS_SCRIPT)),
+                n_outputs,
+              ),
+            },
+          },
+          execOrder,
+        );
+        break;
+      }
+      case "fuzzy": {
+        const n_outputs = inteiroDoCampo(campos.get("n_outputs"), 0, 1, MAX_PORTAS_FUZZY);
+        onAplicar(
+          {
+            ...no,
+            data: {
+              ...no.data,
+              label,
+              n_inputs: inteiroDoCampo(campos.get("n_inputs"), 0, 1, MAX_PORTAS_FUZZY),
+              n_outputs,
+              fll: String(campos.get("fll") ?? ""),
+              output_eu: podarOutputEu(
+                "OUT",
+                outputEuDoFormulario(campos, portasScript("OUT", MAX_PORTAS_FUZZY)),
                 n_outputs,
               ),
             },
@@ -336,6 +445,9 @@ export function ModalConfigBloco({
           )}
           {no.type === "first_order" && <CamposFiltroPrimeiraOrdem dados={no.data} />}
           {no.type === "kalman" && <CamposFiltroKalman dados={no.data} />}
+          {no.type === "fuzzy" && (
+            <CamposFuzzy dados={no.data} nOutputs={nOutputsFuzzy} aoMudarNOutputs={setNOutputsFuzzy} />
+          )}
         </fieldset>
 
         <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">

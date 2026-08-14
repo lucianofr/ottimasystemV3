@@ -13,6 +13,7 @@ const DESCRICAO: Record<TipoBloco, string> = {
   kalman: "Estima o valor verdadeiro de um sinal ruidoso",
   tfs: "Matriz 2x2 de funções de transferência (SOPDT/IOPDT)",
   mpc: "Controle preditivo multivariável — portas dinâmicas conforme o config",
+  fuzzy: "Controlador fuzzy (FLL)",
 };
 
 interface Props {
@@ -46,7 +47,7 @@ function ItemPaleta({ tipo, onAdicionar }: { tipo: TipoBloco; onAdicionar: Props
   );
 }
 
-/** Paleta de 7 blocos (RF-301): o MPC entra em operação na F4 (decisão A-1) igual aos
+/** Paleta de 8 blocos (RF-301): o MPC entra em operação na F4 (decisão A-1) igual aos
  *  demais — arrastável, sem badge de fase pendente (spec F4 §7.1). */
 export function FlowPalette({ onAdicionar }: Props) {
   return (

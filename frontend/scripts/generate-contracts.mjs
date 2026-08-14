@@ -109,7 +109,16 @@ export interface ContratoPortaDinamica {
   rules: RegraPortaDinamica[];
 }
 
-export type ContratoPorta = ContratoPortaFixa | ContratoPortaDinamica;
+/** Contrato dinâmico que também define o default de criação do bloco na paleta
+ * (bloco "fuzzy", ADR-029): "default_fll" é a string FLL canônica e "default_counts"
+ * as contagens iniciais de portas — fonte única, o frontend nunca duplica o texto. */
+export interface ContratoPortaDinamicaComDefault extends ContratoPortaDinamica {
+  default_fll: string;
+  default_counts: { n_inputs: number; n_outputs: number };
+  max_fll_length: number;
+}
+
+export type ContratoPorta = ContratoPortaFixa | ContratoPortaDinamica | ContratoPortaDinamicaComDefault;
 `.trim();
 
 function tabelaPortContracts(portContracts) {

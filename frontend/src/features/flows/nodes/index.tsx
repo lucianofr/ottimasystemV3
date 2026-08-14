@@ -8,6 +8,7 @@ import {
   portasScript,
   type NoEscrita,
   type NoFirstOrder,
+  type NoFuzzy as NoFuzzyData,
   type NoKalman,
   type NoLeitura,
   type NoMpc as NoMpcData,
@@ -254,6 +255,33 @@ export function NoMpc({ id, data, selected }: NodeProps<NoMpcData>) {
   );
 }
 
+/** Controlador Fuzzy (RF-541, ADR-029): portas via `portasScript`, EU por porta de saída
+ *  como o Script (§4.1, §6.4). O resumo mostra a contagem de portas e o tamanho do FLL —
+ *  validação do conteúdo (engine pronto, contagem de variáveis) é do save (spec §validação
+ *  FLL), não do canvas. */
+export function NoFuzzy({ id, data, selected }: NodeProps<NoFuzzyData>) {
+  const linhas = data.fll === "" ? 0 : data.fll.split("\n").length;
+  return (
+    <BlocoChapa
+      tipo="fuzzy"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasScript("IN", data.n_inputs))}
+      saidas={portasComEu(portasScript("OUT", data.n_outputs), data.output_eu)}
+      blockId={id}
+    >
+      <div className="space-y-0.5">
+        <LinhaResumo
+          rotulo="Portas"
+          valor={`${String(data.n_inputs)} entrada(s) · ${String(data.n_outputs)} saída(s)`}
+        />
+        <LinhaResumo rotulo="FLL" valor={`${String(linhas)} linha(s)`} />
+      </div>
+    </BlocoChapa>
+  );
+}
+
 /** Referência estável: `nodeTypes` novo a cada render faz o React Flow remontar os nós. */
 export const TIPOS_DE_NO: NodeTypes = {
   opc_read: NoLeituraOpc,
@@ -263,4 +291,5 @@ export const TIPOS_DE_NO: NodeTypes = {
   kalman: NoFiltroKalman,
   tfs: NoTfsMatriz,
   mpc: NoMpc,
+  fuzzy: NoFuzzy,
 };

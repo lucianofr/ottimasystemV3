@@ -28,6 +28,7 @@ export const TIPOS_BLOCO = [
   "kalman",
   "tfs",
   "mpc",
+  "fuzzy",
 ] as const;
 export type TipoBloco = (typeof TIPOS_BLOCO)[number];
 
@@ -43,6 +44,26 @@ if (!contratoScript.dynamic) throw new Error("contrato do script deveria ser din
  *  fonte única com `flowgraph.py` (minor 0.2, plano F4a: fecha a cópia local duplicada). */
 export const MAX_PORTAS_SCRIPT = tetoDoContrato(contratoScript.rules[0]);
 
+/** Forma do contrato do bloco Fuzzy após a regeneração (`contracts_export.py::PORT_CONTRACTS`,
+ *  ADR-029): estende o contrato dinâmico padrão com o FLL e as contagens padrão que o
+ *  servidor define, para `criarBloco`/`lerNo` nunca duplicarem esse literal aqui. */
+type ContratoFuzzy = ContratoPortaDinamica & {
+  default_fll: string;
+  default_counts: { n_inputs: number; n_outputs: number };
+  max_fll_length: number;
+};
+
+const contratoFuzzy = PORT_CONTRACTS.fuzzy as ContratoFuzzy;
+if (!contratoFuzzy.dynamic) throw new Error("contrato do fuzzy deveria ser dinâmico");
+
+/** Teto de portas do bloco Fuzzy — do contrato gerado (RF-541), mesma fonte única que
+ *  `MAX_PORTAS_SCRIPT`. */
+export const MAX_PORTAS_FUZZY = tetoDoContrato(contratoFuzzy.rules[0]);
+
+/** Teto do texto FLL colado (FUZZY-SEC-02) — espelho de `MAX_FUZZY_FLL_LENGTH` no
+ *  contrato, mesma fonte única: o backend reprova acima deste tamanho. */
+export const MAX_FLL_LENGTH = contratoFuzzy.max_fll_length;
+
 export const ROTULO_BLOCO: Record<TipoBloco, string> = {
   opc_read: "Leitura OPC",
   opc_write: "Escrita OPC",
@@ -51,6 +72,7 @@ export const ROTULO_BLOCO: Record<TipoBloco, string> = {
   kalman: "Filtro Kalman",
   tfs: "TFS",
   mpc: "MPC",
+  fuzzy: "Fuzzy",
 };
 
 /** Defaults dos blocos de filtro (ADR-026), compartilhados por `criarBloco` e `lerNo`: o
@@ -71,6 +93,15 @@ export type DadosScript = DadosBase & {
   n_inputs: number;
   n_outputs: number;
   code: string;
+  output_eu: Record<string, string>;
+};
+
+/** `n_inputs`/`n_outputs` mapeiam posicionalmente às `InputVariable`/`OutputVariable`
+ *  declaradas no `fll`, na ordem de declaração (RF-541, ADR-029). */
+export type DadosFuzzy = DadosBase & {
+  fll: string;
+  n_inputs: number;
+  n_outputs: number;
   output_eu: Record<string, string>;
 };
 
@@ -271,7 +302,8 @@ export type DadosBloco =
   | DadosTfs
   | DadosMpc
   | DadosFirstOrder
-  | DadosKalman;
+  | DadosKalman
+  | DadosFuzzy;
 
 /** `type` é opcional em `Node`; aqui ele é o discriminante e nunca falta. */
 type Bloco<D extends Record<string, unknown>, T extends TipoBloco> = Node<D, T> & { type: T };
@@ -283,8 +315,17 @@ export type NoTfs = Bloco<DadosTfs, "tfs">;
 export type NoMpc = Bloco<DadosMpc, "mpc">;
 export type NoFirstOrder = Bloco<DadosFirstOrder, "first_order">;
 export type NoKalman = Bloco<DadosKalman, "kalman">;
+export type NoFuzzy = Bloco<DadosFuzzy, "fuzzy">;
 
-export type BlocoNode = NoLeitura | NoEscrita | NoScript | NoTfs | NoMpc | NoFirstOrder | NoKalman;
+export type BlocoNode =
+  | NoLeitura
+  | NoEscrita
+  | NoScript
+  | NoTfs
+  | NoMpc
+  | NoFirstOrder
+  | NoKalman
+  | NoFuzzy;
 
 /** Toda aresta do editor nasce de um par de handles resolvidos; `null` nunca chega ao save. */
 export type BlocoEdge = Omit<Edge, "sourceHandle" | "targetHandle"> & {
@@ -318,6 +359,7 @@ export function portasFixas(tipo: TipoBloco, direcao: DirecaoPorta): string[] {
  *  esquerda, saída = MVs à direita, na ordem do config; handle = id estável da variável. */
 export function handlesEntrada(no: BlocoNode): string[] {
   if (no.type === "script") return portasScript("IN", no.data.n_inputs);
+  if (no.type === "fuzzy") return portasScript("IN", no.data.n_inputs);
   if (no.type === "mpc") {
     const { cvs, constraints, dvs } = no.data.variables;
     return [...cvs, ...constraints, ...dvs].map((variavel) => variavel.id);
@@ -327,6 +369,7 @@ export function handlesEntrada(no: BlocoNode): string[] {
 
 export function handlesSaida(no: BlocoNode): string[] {
   if (no.type === "script") return portasScript("OUT", no.data.n_outputs);
+  if (no.type === "fuzzy") return portasScript("OUT", no.data.n_outputs);
   if (no.type === "mpc") return no.data.variables.mvs.map((mv) => mv.id);
   return portasFixas(no.type, "output");
 }
@@ -350,6 +393,7 @@ export function tipoPorta(no: BlocoNode, tags: MapaTags): TipoPorta {
   if (no.type === "tfs") return "num";
   if (no.type === "mpc") return "num";
   if (no.type === "first_order" || no.type === "kalman") return "num";
+  if (no.type === "fuzzy") return "num";
   if (no.data.tag_id === null) return "desconhecido";
   const dado = tags.get(no.data.tag_id);
   if (dado === undefined) return "desconhecido";
@@ -486,6 +530,8 @@ export function comDados(no: BlocoNode, mudanca: Partial<DadosBase>): BlocoNode 
       return { ...no, data: { ...no.data, ...mudanca } };
     case "kalman":
       return { ...no, data: { ...no.data, ...mudanca } };
+    case "fuzzy":
+      return { ...no, data: { ...no.data, ...mudanca } };
   }
 }
 
@@ -522,14 +568,17 @@ export function podarArestasDoBloco(edges: readonly BlocoEdge[], no: BlocoNode):
   });
 }
 
-/** Poda as EUs de portas que a nova contagem de saídas do Script não tem mais (spec §4.1-6):
- *  reduzir n_outputs sem descartar a chave sobrando seria 422 no save (`parse.py`
- *  `ScriptConfig._valida_output_eu` rejeita 'output_eu' referenciando porta inexistente). */
-export function podarOutputEuScript(
+/** Poda as EUs de portas que a nova contagem de saídas não tem mais (spec §4.1-6, RF-541):
+ *  reduzir a contagem sem descartar a chave sobrando seria 422 no save (`parse.py`
+ *  `_valida_output_eu` rejeita 'output_eu' referenciando porta inexistente). Paramétrico em
+ *  prefixo+contagem: Script e Fuzzy compartilham a mesma regra de poda em vez de duas
+ *  funções quase idênticas. */
+export function podarOutputEu(
+  prefixo: "IN" | "OUT",
   output_eu: Record<string, string>,
-  n_outputs: number,
+  quantidade: number,
 ): Record<string, string> {
-  const validas = new Set(portasScript("OUT", n_outputs));
+  const validas = new Set(portasScript(prefixo, quantidade));
   return Object.fromEntries(Object.entries(output_eu).filter(([porta]) => validas.has(porta)));
 }
 
@@ -537,8 +586,8 @@ export function podarOutputEuScript(
  * EU herdada por uma porta de ENTRADA (spec §4.1-5): a porta em si não declara EU — segue a
  * aresta que chega em `handle` do nó `no`, acha a porta de SAÍDA de origem, e devolve a EU
  * que essa porta declara em `output_eu_por_no` (mapa nó → `output_eu` do bloco, só populado
- * para Script/TFS). `null` quando não há aresta chegando, ou a origem não declara EU para
- * aquela porta (chave ausente ou `''`, mesmo default de `Tag.eu`).
+ * para Script/TFS/Fuzzy). `null` quando não há aresta chegando, ou a origem não declara EU
+ * para aquela porta (chave ausente ou `''`, mesmo default de `Tag.eu`).
  *
  * Resolve só UM nível — decisão desta tarefa. Recursar mais um hop (a origem ela mesma
  * herdando de mais um nó atrás) não tem leitura correta aqui: Script não tem mapeamento
@@ -682,6 +731,20 @@ export function criarBloco(
       return { id, type: "first_order", position, data: { exec_order, label: "", ...PADRAO_FIRST_ORDER } };
     case "kalman":
       return { id, type: "kalman", position, data: { exec_order, label: "", ...PADRAO_KALMAN } };
+    case "fuzzy":
+      return {
+        id,
+        type: "fuzzy",
+        position,
+        data: {
+          exec_order,
+          label: "",
+          n_inputs: contratoFuzzy.default_counts.n_inputs,
+          n_outputs: contratoFuzzy.default_counts.n_outputs,
+          fll: contratoFuzzy.default_fll,
+          output_eu: {},
+        },
+      };
   }
 }
 
@@ -869,6 +932,20 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           label,
           measurement_noise: numero(dados.measurement_noise, PADRAO_KALMAN.measurement_noise),
           process_noise: numero(dados.process_noise, PADRAO_KALMAN.process_noise),
+        },
+      };
+    case "fuzzy":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          n_inputs: inteiro(dados.n_inputs, 0, 0, MAX_PORTAS_FUZZY),
+          n_outputs: inteiro(dados.n_outputs, 0, 0, MAX_PORTAS_FUZZY),
+          fll: texto(dados.fll, contratoFuzzy.default_fll),
+          output_eu: lerOutputEu(dados.output_eu),
         },
       };
   }
