@@ -86,6 +86,7 @@ def validate_graph(
     _check_tags(graph.nodes, tags, errors)
     _check_tfs_delay(graph.nodes, ts_seconds, errors)
     _check_script_code(graph.nodes, errors)
+    _check_fuzzy_nodes(graph.nodes, errors)
 
     linked = _check_edge_endpoints(graph.edges, by_id, errors)
     resolved = _check_handles(linked, by_id, mpc_configs, errors)
@@ -105,6 +106,8 @@ def _output_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[
         return ("out",)
     if node.type == "script":
         return tuple(f"OUT{i}" for i in range(1, node.config.n_outputs + 1))
+    if node.type == "fuzzy":
+        return tuple(f"OUT{i}" for i in range(1, node.config.n_outputs + 1))
     if node.type == "tfs":
         return ("y1", "y2")
     if node.type == "mpc":
@@ -121,6 +124,8 @@ def _input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[s
     if node.type == "opc_write":
         return ("in",)
     if node.type == "script":
+        return tuple(f"IN{i}" for i in range(1, node.config.n_inputs + 1))
+    if node.type == "fuzzy":
         return tuple(f"IN{i}" for i in range(1, node.config.n_inputs + 1))
     if node.type == "tfs":
         return ("u1", "u2")
@@ -248,6 +253,67 @@ def _check_script_code(nodes: list[FlowNode], errors: list[str]) -> None:
                 break
 
 
+# --------------------------------------------------------------------------------------
+# Bloco `fuzzy` — validação de CONTEÚDO do FLL (RF-541, ADR-029)
+# --------------------------------------------------------------------------------------
+
+
+def _check_fuzzy_nodes(nodes: list[FlowNode], errors: list[str]) -> None:
+    for node in nodes:
+        if node.type == "fuzzy":
+            _valida_fuzzy(node, errors)
+
+
+def _valida_fuzzy(node: FlowNode, errors: list[str]) -> None:
+    """Conteúdo do FLL do bloco Fuzzy (RF-541): `parse_graph` só garante a FORMA (`fll` é
+    uma string) — aqui se confere que o texto é FuzzyLite Language válido, que o número de
+    variáveis declaradas no FLL bate com `n_inputs`/`n_outputs` da config, e que o motor
+    monta pronto (`Engine.is_ready`).
+
+    Import lazy: `fuzzylite` só entra em memória neste caminho de validação de conteúdo, não
+    em todo `import ottima_core` — mesmo motivo por trás de `casadi`/`do-mpc` (bloco `mpc`)
+    morarem só em `services/flow-runtime` (ADR-029).
+    """
+    import fuzzylite as fl
+
+    where = f"nó '{node.id}' (fuzzy)"
+    config = node.config
+    try:
+        engine = fl.FllImporter().from_string(config.fll)
+    except Exception as erro:
+        errors.append(f"{where}: FLL inválido — {erro}")
+        return
+
+    n_inputs = len(engine.input_variables)
+    if n_inputs != config.n_inputs:
+        errors.append(
+            f"{where}: FLL declara {n_inputs} variável(is) de entrada; a config espera "
+            f"n_inputs={config.n_inputs}"
+        )
+    n_outputs = len(engine.output_variables)
+    if n_outputs != config.n_outputs:
+        errors.append(
+            f"{where}: FLL declara {n_outputs} variável(is) de saída; a config espera "
+            f"n_outputs={config.n_outputs}"
+        )
+
+    engine_errors: list[str] = []
+    if not engine.is_ready(engine_errors):
+        detalhe = "; ".join(str(item) for item in engine_errors)
+        errors.append(f"{where}: motor fuzzy não está pronto — {detalhe}")
+
+    # Defuzzificadores integrais (Centroid etc.) alocam um array de `resolution` pontos a
+    # cada process() — sem teto, um FLL `defuzzifier: Centroid 50000000` trava o event loop
+    # do flow-runtime inteiro a cada varredura (ADR-004, FUZZY-SEC-01).
+    for variable in engine.output_variables:
+        defuzzifier = variable.defuzzifier
+        if isinstance(defuzzifier, fl.IntegralDefuzzifier) and defuzzifier.resolution > 10_000:
+            errors.append(
+                f"{where}: defuzzifier '{variable.name}' com resolution "
+                f"{defuzzifier.resolution} excede o teto de 10000"
+            )
+
+
 def _check_edge_endpoints(
     edges: list[FlowEdge], by_id: dict[str, FlowNode], errors: list[str]
 ) -> list[FlowEdge]:
@@ -327,7 +393,8 @@ def _port_kind(node: FlowNode, tags: Mapping[int, TagRef]) -> PortKind | None:
         if tag is None:
             return None
         return "bool" if tag.data_type == "bool" else "num"
-    # Portas do TFS, do MPC (spec §2.1-5) e dos blocos de filtro (ADR-026): todas numéricas.
+    # Portas do TFS, do MPC (spec §2.1-5), do Fuzzy (RF-541) e dos blocos de filtro
+    # (ADR-026): todas numéricas.
     return "num"
 
 
@@ -691,8 +758,14 @@ def _check_mpc_tags(
         # leitura (o MPC nunca escreve nela).
         if cv_var.remote_sp_tag_id is not None:
             _check_mv_tag(
-                node, cv_var.id, "CV", "remote_sp_tag_id", cv_var.remote_sp_tag_id, "r",
-                tags, errors,
+                node,
+                cv_var.id,
+                "CV",
+                "remote_sp_tag_id",
+                cv_var.remote_sp_tag_id,
+                "r",
+                tags,
+                errors,
             )
 
 

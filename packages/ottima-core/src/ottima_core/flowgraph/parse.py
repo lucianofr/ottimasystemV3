@@ -11,11 +11,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-NodeType = Literal["opc_read", "opc_write", "script", "tfs", "mpc", "first_order", "kalman"]
+NodeType = Literal[
+    "opc_read", "opc_write", "script", "fuzzy", "tfs", "mpc", "first_order", "kalman"
+]
 NODE_TYPES: tuple[str, ...] = (
     "opc_read",
     "opc_write",
     "script",
+    "fuzzy",
     "tfs",
     "mpc",
     "first_order",
@@ -23,11 +26,15 @@ NODE_TYPES: tuple[str, ...] = (
 )
 
 MAX_SCRIPT_PORTS = 8  # spec §3.3
+# Teto do texto FLL (RF-541, ADR-029): exports reais do QtFuzzyLite ficam na casa dos KB;
+# o teto protege o parse/is_ready e limita o número de regras/termos processados (FUZZY-SEC).
+MAX_FUZZY_FLL_LENGTH = 200_000
 
 _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
     "opc_read": ("tag_id",),
     "opc_write": ("tag_id",),
     "script": ("n_inputs", "n_outputs", "code", "output_eu"),
+    "fuzzy": ("fll", "n_inputs", "n_outputs", "output_eu"),
     "tfs": ("matrix", "output_eu"),
     # `economics` é opcional (ADR-027 §9): `_parse_mpc_config` só repassa as chaves
     # presentes, então config salva antes do SSTO continua parseando.
@@ -81,6 +88,36 @@ class ScriptConfig(BaseModel):
     def _valida_output_eu(self) -> "ScriptConfig":
         """Chave de `output_eu` só existe se houver a porta correspondente (spec §4.1) —
         depende de `n_outputs`, por isso model_validator e não field_validator."""
+        validas = {f"OUT{i}" for i in range(1, self.n_outputs + 1)}
+        invalidas = sorted(set(self.output_eu) - validas)
+        if invalidas:
+            raise ValueError(
+                f"'output_eu' referencia porta(s) inexistente(s) para n_outputs="
+                f"{self.n_outputs}: {', '.join(invalidas)}"
+            )
+        return self
+
+
+class FuzzyConfig(BaseModel):
+    """Bloco Fuzzy (RF-541): motor de inferência definido em FLL (FuzzyLite Language).
+
+    `fll` chega como texto cru — `parse_graph` nunca valida o CONTEÚDO do FLL (só forma,
+    mesmo padrão do `mpc`, ver comentário de `MpcRawConfig`); a validação semântica roda em
+    `validate_graph` via import lazy de `fuzzylite` (ADR-029).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    fll: str = Field(max_length=MAX_FUZZY_FLL_LENGTH)
+    n_inputs: int = Field(ge=1, le=MAX_SCRIPT_PORTS)
+    n_outputs: int = Field(ge=1, le=MAX_SCRIPT_PORTS)
+    output_eu: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _valida_output_eu(self) -> "FuzzyConfig":
+        """Chave de `output_eu` só existe se houver a porta correspondente — depende de
+        `n_outputs`, por isso model_validator e não field_validator (mesmo padrão do
+        `ScriptConfig`)."""
         validas = {f"OUT{i}" for i in range(1, self.n_outputs + 1)}
         invalidas = sorted(set(self.output_eu) - validas)
         if invalidas:
@@ -171,7 +208,15 @@ class MpcRawConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-NodeConfig = TagConfig | ScriptConfig | TfsConfig | MpcRawConfig | FirstOrderConfig | KalmanConfig
+NodeConfig = (
+    TagConfig
+    | ScriptConfig
+    | FuzzyConfig
+    | TfsConfig
+    | MpcRawConfig
+    | FirstOrderConfig
+    | KalmanConfig
+)
 
 
 class FlowNode(BaseModel):
@@ -348,6 +393,8 @@ def _parse_config(where: str, node_type: str, data: dict, errors: list[str]) -> 
         return TagConfig(tag_id=tag_id)
     if node_type == "script":
         return _parse_script_config(where, data, errors)
+    if node_type == "fuzzy":
+        return _parse_fuzzy_config(where, data, errors)
     if node_type == "mpc":
         return _parse_mpc_config(data)
     if node_type in _FILTER_KEYS:
@@ -431,6 +478,50 @@ def _parse_script_config(where: str, data: dict, errors: list[str]) -> ScriptCon
             n_inputs=counts["n_inputs"],
             n_outputs=counts["n_outputs"],
             code=code,
+            output_eu=output_eu,
+        )
+    except ValidationError as erro:
+        errors.append(f"{where}: {erro.errors()[0]['ctx']['error']}")
+        return None
+
+
+def _parse_fuzzy_config(where: str, data: dict, errors: list[str]) -> FuzzyConfig | None:
+    """Config do bloco Fuzzy (RF-541): mesma validação manual de `_parse_script_config`, mas
+    a contagem de portas é 1..`MAX_SCRIPT_PORTS` (nunca 0 — um motor sem entrada ou saída não
+    tem sentido) e `code` vira `fll`. Aqui só se valida a FORMA (string) do FLL; o CONTEÚDO
+    (sintaxe FuzzyLite, contagem de variáveis, `is_ready()`) é `validate.py::_valida_fuzzy`,
+    com import lazy de `fuzzylite` (ADR-029).
+    """
+    counts: dict[str, int] = {}
+    for field in ("n_inputs", "n_outputs"):
+        value = data.get(field)
+        if not _is_int(value) or not 1 <= value <= MAX_SCRIPT_PORTS:
+            errors.append(
+                f"{where}: '{field}' é obrigatório e deve ser um inteiro entre 1 e "
+                f"{MAX_SCRIPT_PORTS}"
+            )
+        else:
+            counts[field] = value
+
+    fll = data.get("fll")
+    if not isinstance(fll, str):
+        errors.append(f"{where}: 'fll' é obrigatório e deve ser uma string")
+        return None
+    if len(fll) > MAX_FUZZY_FLL_LENGTH:
+        errors.append(
+            f"{where}: 'fll' excede o teto de {MAX_FUZZY_FLL_LENGTH} caracteres "
+            f"({len(fll)} enviados)"
+        )
+        return None
+
+    output_eu = _parse_output_eu(where, data, errors)
+    if len(counts) != 2 or output_eu is None:
+        return None
+    try:
+        return FuzzyConfig(
+            fll=fll,
+            n_inputs=counts["n_inputs"],
+            n_outputs=counts["n_outputs"],
             output_eu=output_eu,
         )
     except ValidationError as erro:
