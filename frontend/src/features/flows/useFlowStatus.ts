@@ -41,6 +41,25 @@ export const ROTULO_ESTADO: Record<EstadoFlow, string> = {
   failed: "Falha",
 };
 
+/** Textos do estado da conexão enquanto se espera a primeira varredura ou a recuperação
+ *  (§5.3): sem replay, entre assinar e a varredura seguinte não há valor nenhum a mostrar. */
+export const ROTULO_CONEXAO: Record<Exclude<EstadoConexao, "sessao_invalida">, string> = {
+  conectando: "Conectando ao canal ao vivo…",
+  aberta: "Aguardando dado da varredura",
+  reconectando: "Reconectando ao canal ao vivo…",
+};
+
+/** O que o cabeçalho mostra enquanto não chega estado publicado. Flow **não comandado**
+ *  (desejado `stopped`) nunca "aguarda varredura": nada vai varrer — o rótulo diz que está
+ *  parado. Com comando pendente, a espera da conexão é o feedback honesto de pendência. */
+export function rotuloDeEspera(
+  conexao: Exclude<EstadoConexao, "sessao_invalida">,
+  desejado: "running" | "stopped",
+): string {
+  if (desejado === "stopped") return "Flow parado";
+  return ROTULO_CONEXAO[conexao];
+}
+
 const SEM_PORTS: PortsPorBloco = {};
 
 // --------------------------------------------------------------------------------------

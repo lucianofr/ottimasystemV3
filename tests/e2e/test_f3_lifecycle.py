@@ -228,8 +228,16 @@ def test_e2e_f3_08_project_activated_para_tudo_e_boot_fica_parado(
         )
         assert parada["state"] == "stopped"
 
-    # RF-306/ADR-017: o runtime materializou a parada e não tocou o banco. `desired_state`
-    # continua 'running' — é exibição, e é justamente o que o boot não pode auto-aplicar.
+    # RF-306/ADR-017: o runtime materializou a parada e não tocou o banco; quem alinha o
+    # `desired_state` ao efeito é a própria ativação (API, mesma transação).
+    for flow_id in (primeiro, segundo):
+        assert admin.get(f"/api/flows/{flow_id}").json()["desired_state"] == "stopped"
+
+    # Rearma o desejado ANTES do restart para o boot-parado seguir discriminável (RF-104):
+    # o projeto não é mais o ativo, então o runtime recusa o deploy (project_inactive) e só
+    # o banco muda — exatamente o estado que o boot não pode auto-aplicar (ADR-017).
+    for flow_id in (primeiro, segundo):
+        deploy(admin, flow_id)
     for flow_id in (primeiro, segundo):
         assert admin.get(f"/api/flows/{flow_id}").json()["desired_state"] == "running"
 
@@ -246,7 +254,7 @@ def test_e2e_f3_08_project_activated_para_tudo_e_boot_fica_parado(
         assert ocioso == [], f"flow {flow_id} varrendo depois do restart: {ocioso}"
     print(
         f"\nE2E-F3-08: project_activated parou {len(paradas)} flows; após o restart "
-        f"health.flows={saude['flows']} com desired_state='running' no banco"
+        f"health.flows={saude['flows']} apesar de desired_state='running' no banco"
     )
 
     # Devolve a ativação ao projeto do módulo: os cenários seguintes precisam dele ativo.

@@ -246,7 +246,7 @@ Estrutura: `frontend/src/features/flows/` (FlowsPage, FlowEditorPage, `nodes/` c
 | E2E-F3-05 | `exec_order` invertido ⇒ atraso determinístico de 1 varredura no valor escrito + `warnings[]` no save | RF-401 · ADR-024 |
 | E2E-F3-06 | Script busy-loop ⇒ `script_timeout`, saídas mantidas, flow segue; exceção ⇒ `script_error` c/ traceback | RF-514 |
 | E2E-F3-07 | **RF-207:** congelar watchdog ⇒ flow da conexão `failed(comm_failure)`; flow Script+TFS puro segue; descongelar ⇒ **não** volta sozinho; deploy manual retoma | RF-207 · ADR-009/017 |
-| E2E-F3-08 | `project_activated` para tudo; restart do runtime ⇒ tudo `stopped` apesar de `desired_state=running` (boot parado) | RF-101/104 |
+| E2E-F3-08 | `project_activated` para tudo e a ativação zera `desired_state` (mesma transação); cenário rearma o desejado via `/deploy` e restart do runtime ⇒ tudo `stopped` apesar de `desired_state=running` (boot parado) | RF-101/104 |
 | E2E-F3-09 | WS: subscribe ⇒ `flow.status` com `ports`; token inválido rejeitado | RF-305 |
 | E2E-F3-10 | Script em erro desde a 1ª varredura ⇒ saídas `null` ⇒ `write_suppressed`, espelho não muda | §3.0/§3.2 |
 

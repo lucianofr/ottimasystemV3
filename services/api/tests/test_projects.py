@@ -88,3 +88,60 @@ async def test_reativar_o_projeto_ja_ativo_nao_publica_evento(client, admin_head
     assert r.status_code == 200
     assert r.json()["is_active"] is True
     assert await eventos() == []
+
+
+async def test_ativacao_zera_desired_state_dos_flows(client, admin_headers):
+    """Ativar um projeto zera o estado desejado de **todos** os flows: após a troca, nada
+    pode ficar "Rodando — aguardando confirmação" de projeto que não é o ativo, e nenhum
+    flow pode ser auto-ativado por retomada/reconciliação a partir de um `desired_state`
+    órfão (ADR-017: boot parado, comando manual sempre vence). O runtime já para a
+    execução (`flow_stopped`/`project_activated`); a ativação alinha o desejado ao efeito.
+    """
+    a = await _criar(client, admin_headers, "Origem")
+    b = await _criar(client, admin_headers, "Destino")
+    flows = []
+    for pid, nome in ((a["id"], "F-A"), (b["id"], "F-B")):
+        r = await client.post(
+            "/api/flows",
+            json={"project_id": pid, "name": nome, "ts_seconds": 1},
+            headers=admin_headers,
+        )
+        assert r.status_code == 201, r.text
+        flows.append(r.json()["id"])
+        # /deploy grava desired_state=running (intenção); o runtime de teste não sobe nada.
+        d = await client.post(f"/api/flows/{flows[-1]}/deploy", headers=admin_headers)
+        assert d.status_code == 202, d.text
+
+    r = await client.post(f"/api/projects/{b['id']}/activate", headers=admin_headers)
+    assert r.status_code == 200, r.text
+
+    detalhe = (await client.get(f"/api/flows/{flows[0]}", headers=admin_headers)).json()
+    assert detalhe["desired_state"] == "stopped"  # flow do projeto anterior: parou de fato
+    detalhe = (await client.get(f"/api/flows/{flows[1]}", headers=admin_headers)).json()
+    assert detalhe["desired_state"] == "stopped"  # nem o do projeto novo auto-ativa
+
+
+async def test_reativar_o_projeto_ativo_nao_zera_desired_state(client, admin_headers):
+    """Reativar o projeto que já é o ativo não é transição: o evento não sai e o runtime não
+    para nada — logo o desejado também não pode ser zerado, senão um clique redundante deixa
+    a planta em operação "Parado — aguardando confirmação" para sempre e desarma em
+    silêncio a retomada automática (TD-005/ADR-025), que exige `desired_state` 'running'.
+    """
+    p = await _criar(client, admin_headers, "Vigente")
+    r = await client.post(
+        "/api/flows",
+        json={"project_id": p["id"], "name": "F", "ts_seconds": 1},
+        headers=admin_headers,
+    )
+    assert r.status_code == 201, r.text
+    flow_id = r.json()["id"]
+    r = await client.post(f"/api/projects/{p['id']}/activate", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    d = await client.post(f"/api/flows/{flow_id}/deploy", headers=admin_headers)
+    assert d.status_code == 202, d.text
+
+    r = await client.post(f"/api/projects/{p['id']}/activate", headers=admin_headers)
+    assert r.status_code == 200, r.text
+
+    detalhe = (await client.get(f"/api/flows/{flow_id}", headers=admin_headers)).json()
+    assert detalhe["desired_state"] == "running"  # clique redundante não muda nada

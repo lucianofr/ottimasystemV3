@@ -293,7 +293,7 @@ SELECT add_retention_policy('samples_1m', INTERVAL '1 month');  -- histórico >1
 |---|---|---|---|
 | `/api/users` | GET, POST, GET/{id}, PATCH/{id}, DELETE/{id} | admin | §5.5; `PATCH` cobre troca de senha e `is_active` (RF-002) |
 | `/api/projects` | GET, POST, GET/{id}, PATCH/{id}, DELETE/{id} | GET: operator · resto: admin | RF-101. `DELETE` de projeto **ativo** ⇒ `409` (desativar antes; CASCADE remove conexões/tags/flows) **[NOVA — implementação]** |
-| `/api/projects/{id}/activate` | POST | admin | Transação: desativa o atual, ativa o alvo; índice parcial (§3.1) garante unicidade (ADR-017). Na F1 apenas persiste; a partir da F3 encadeia o encerramento da execução do projeto anterior (RF-101) — gancho registrado |
+| `/api/projects/{id}/activate` | POST | admin | Transação: desativa o atual, ativa o alvo; índice parcial (§3.1) garante unicidade (ADR-017). Na F1 apenas persiste; a partir da F3 encadeia o encerramento da execução do projeto anterior (RF-101) — gancho registrado — **e, na transição real, zera `desired_state` de todo flow para `'stopped'` na mesma transação (RF-306/ADR-017): após a troca nenhum flow fica comandado "rodando" de projeto inativo; reativar o projeto já ativo não toca o desejado** |
 | `/api/connections` | GET (`?project_id=`), POST, GET/{id}, PATCH/{id}, DELETE/{id} | GET: operator · resto: admin | RF-201. **≤5 por projeto** ⇒ `409`; senha write-only (§5.4); coerência policy/mode/auth no schema (§3.1) |
 | `/api/tags` | GET (`?connection_id=&direction=`), POST, GET/{id}, PATCH/{id}, DELETE/{id} | GET: operator · resto: admin | RF-203; browse do address space fica na F2+ |
 | `/api/health` | GET | público | `{status, service, version}` (RNF-07) |

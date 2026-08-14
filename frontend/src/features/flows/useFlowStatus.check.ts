@@ -12,7 +12,12 @@ import {
   type FlowStatus,
   type PortsPorBloco,
 } from "./canalPrimitivos";
-import { formatarNumero, formatarValorPorta, selecionarCanvas } from "./useFlowStatus";
+import {
+  formatarNumero,
+  formatarValorPorta,
+  rotuloDeEspera,
+  selecionarCanvas,
+} from "./useFlowStatus";
 
 /** O `Location` do browser tem muito mais superfície do que a URL do WS precisa. */
 function origem(protocol: string, host: string): Location {
@@ -167,4 +172,19 @@ test("flow sem mensagem no canal com outros flows assinados continua sem status"
   const flowStatus = new Map<number, FlowStatus>([[7, STATUS]]);
 
   expect(selecionarCanvas({ ...ESTADO_VAZIO, flowStatus }, 12).status).toBeNull();
+});
+
+// ----------------------------------------------------------------------------------------
+// Rótulo de espera do cabeçalho do editor: flow não comandado não "aguarda varredura"
+// ----------------------------------------------------------------------------------------
+
+test("flow não comandado (desejado parado, sem estado publicado) é 'Flow parado'", () => {
+  expect(rotuloDeEspera("aberta", "stopped")).toBe("Flow parado");
+  expect(rotuloDeEspera("conectando", "stopped")).toBe("Flow parado");
+});
+
+test("comando pendente mantém a espera da conexão: o operador comandou e aguarda", () => {
+  expect(rotuloDeEspera("aberta", "running")).toBe("Aguardando dado da varredura");
+  expect(rotuloDeEspera("conectando", "running")).toBe("Conectando ao canal ao vivo…");
+  expect(rotuloDeEspera("reconectando", "running")).toBe("Reconectando ao canal ao vivo…");
 });

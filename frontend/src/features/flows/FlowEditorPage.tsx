@@ -60,10 +60,11 @@ import { ContextoTags, ContextoTsFlow, ContextoValores, type ValoresAoVivo } fro
 import { formatarTs, useComandarFlow, useFlow, useSaveFlow } from "./useFlows";
 import {
   formatarNumero,
+  ROTULO_CONEXAO,
   ROTULO_ESTADO,
+  rotuloDeEspera,
   useFlowStatus,
   type CanvasAoVivo,
-  type EstadoConexao,
   type EstadoFlow,
 } from "./useFlowStatus";
 
@@ -149,19 +150,15 @@ function LampadaWatchdog({ vivo }: { vivo: boolean | undefined }) {
     </span>
   );
 }
-/** Sem replay (§5.3): entre assinar e a varredura seguinte não há valor nenhum a mostrar. */
-const AGUARDO: Record<Exclude<EstadoConexao, "sessao_invalida">, string> = {
-  conectando: "Conectando ao canal ao vivo…",
-  aberta: "Aguardando dado da varredura",
-  reconectando: "Reconectando ao canal ao vivo…",
-};
-
 /** Cabeçalho ao vivo (RF-305, spec §6.2): estado publicado, varredura, overruns e watchdog. */
 function CabecalhoAoVivo({
   aoVivo,
+  desejado,
   watchdogVivo,
 }: {
   aoVivo: CanvasAoVivo;
+  /** `desired_state` do flow: sem comando, o cabeçalho diz "Flow parado", não "aguarda". */
+  desejado: "running" | "stopped";
   watchdogVivo: boolean | undefined;
 }) {
   if (aoVivo.conexao === "sessao_invalida") {
@@ -175,7 +172,7 @@ function CabecalhoAoVivo({
     return (
       <div data-testid="canvas-vivo" className="flex items-center gap-3 text-xs text-fg-muted">
         <LampadaWatchdog vivo={watchdogVivo} />
-        <span>{AGUARDO[aoVivo.conexao]}</span>
+        <span>{rotuloDeEspera(aoVivo.conexao, desejado)}</span>
       </div>
     );
   }
@@ -191,7 +188,7 @@ function CabecalhoAoVivo({
         Overruns <span className="process-value text-fg">{aoVivo.status.overruns}</span>
       </span>
       {aoVivo.conexao !== "aberta" && (
-        <span className="text-warn-fg">{AGUARDO[aoVivo.conexao]}</span>
+        <span className="text-warn-fg">{ROTULO_CONEXAO[aoVivo.conexao]}</span>
       )}
     </div>
   );
@@ -631,7 +628,11 @@ function Editor({ flowId }: { flowId: number }) {
             )}
           </div>
           <div className="flex items-center gap-3">
-            <CabecalhoAoVivo aoVivo={aoVivo} watchdogVivo={watchdogVivo} />
+            <CabecalhoAoVivo
+              aoVivo={aoVivo}
+              desejado={flow.data?.desired_state ?? "stopped"}
+              watchdogVivo={watchdogVivo}
+            />
             <BotaoModo modo={modoEfetivo} onMudar={setModo} />
             {podeMutar && modoEfetivo === "edit" && (
               <Button

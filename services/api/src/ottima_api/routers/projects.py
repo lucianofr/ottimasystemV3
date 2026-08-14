@@ -154,6 +154,17 @@ async def activate_project(
     # Um único commit no fim: o índice parcial rejeitaria o estado intermediário com 2 ativos
     await db.execute(update(Project).where(Project.is_active).values(is_active=False))
     project.is_active = True
+    # Transição real: o runtime para toda execução na troca (§2.2-8, RF-101); aqui o
+    # desejado é alinhado ao efeito na mesma transação — após ativar, nenhum flow fica
+    # "Rodando — aguardando confirmação" de projeto que não é o ativo, nem pode ser
+    # auto-ativado por retomada a partir de um `desired_state` órfão (ADR-017). Reativar o
+    # ativo não é transição (sem evento, o runtime não para nada) e não toca o desejado:
+    # um clique redundante não desarma a retomada automática (TD-005/ADR-025) nem mente
+    # "parado" para a planta em operação.
+    if not ja_era_o_ativo:
+        await db.execute(
+            update(Flow).where(Flow.desired_state == "running").values(desired_state="stopped")
+        )
     await db.commit()
     await db.refresh(project)
     if ja_era_o_ativo:
