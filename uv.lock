@@ -11,6 +11,7 @@ resolution-markers = [
 members = [
     "opcsim",
     "ottima-api",
+    "ottima-calc-worker",
     "ottima-core",
     "ottima-flow-runtime",
     "ottima-opc-worker",
@@ -629,6 +630,23 @@ requires-dist = [
 ]
 
 [[package]]
+name = "ottima-calc-worker"
+version = "0.1.0"
+source = { editable = "services/calc-worker" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "ottima-core" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "ottima-core", editable = "packages/ottima-core" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+]
+
+[[package]]
 name = "ottima-core"
 version = "0.1.0"
 source = { editable = "packages/ottima-core" }
@@ -636,6 +654,7 @@ dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
     { name = "cryptography" },
+    { name = "numpy" },
     { name = "pwdlib", extra = ["argon2"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -650,6 +669,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.14" },
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "cryptography", specifier = ">=43.0" },
+    { name = "numpy", specifier = ">=2.5" },
     { name = "pwdlib", extras = ["argon2"], specifier = ">=0.2" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },

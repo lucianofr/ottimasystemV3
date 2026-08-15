@@ -9,20 +9,21 @@ set -a; source .env; set +a
 PORT="${OTTIMA_HTTP_PORT:-80}"
 BASE="http://localhost:${PORT}"
 
-# Sem OTTIMA_E2E o comportamento é o da F1: 7 serviços, uma porta publicada (ADR-023).
+# Sem OTTIMA_E2E o comportamento é o da F1: 8 serviços, uma porta publicada (ADR-023).
+# O calc-worker (ADR-033) entrou nos dois modos: soma 1 em cada contagem.
 E2E="${OTTIMA_E2E:-0}"
 COMPOSE=(docker compose)
-ESPERADOS=7
+ESPERADOS=8
 if [ "${E2E}" = "1" ]; then
   COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.e2e.yml)
-  ESPERADOS=8
+  ESPERADOS=9
   # O diretório do bind-mount precisa existir ANTES do up: criado pelo daemon ele viria
   # como root e o opcsim, que roda sem privilégio, não gravaria o certificado do boot.
   mkdir -p e2e-certs
 fi
 
 # --remove-orphans: sem ele, um opcsim deixado por uma rodada e2e anterior sobrevive ao
-# `down` do modo produção, entra na contagem do `ps` e quebra o aceite de 7 serviços.
+# `down` do modo produção, entra na contagem do `ps` e quebra o aceite de 8 serviços.
 "${COMPOSE[@]}" up -d --build --remove-orphans
 
 echo "aguardando os ${ESPERADOS} serviços ficarem healthy..."
@@ -47,7 +48,7 @@ assert "db_ok" in corpo, corpo
 '
 
 echo "E2E-01b: healths internos dos workers..."
-for svc in "opc-worker:8001" "flow-runtime:8002" "recorder:8003"; do
+for svc in "opc-worker:8001" "flow-runtime:8002" "recorder:8003" "calc-worker:8004"; do
   nome="${svc%%:*}"; porta="${svc##*:}"
   "${COMPOSE[@]}" exec -T "${nome}" python -c "import urllib.request; assert urllib.request.urlopen('http://localhost:${porta}/health', timeout=3).status == 200"
 done
@@ -58,11 +59,11 @@ TOKEN=$(curl -fsS -X POST "${BASE}/api/auth/login" -H 'Content-Type: application
   | python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])')
 curl -fsS -H "Authorization: Bearer ${TOKEN}" "${BASE}/api/auth/me" | grep -q '"role"'
 
-echo "E2E-03: GET /api/health/workers com os 3 workers up:true (F5R-09)..."
+echo "E2E-03: GET /api/health/workers com os 4 workers up:true (F5R-09, ADR-033)..."
 curl -fsS -H "Authorization: Bearer ${TOKEN}" "${BASE}/api/health/workers" | python3 -c '
 import json, sys
 corpo = json.load(sys.stdin)
-for nome in ("opc_worker", "flow_runtime", "recorder"):
+for nome in ("opc_worker", "flow_runtime", "recorder", "calc_worker"):
     assert corpo[nome]["up"] is True, corpo
 '
 

@@ -131,6 +131,37 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  calc-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+      args:
+        PACKAGE: ottima-calc-worker
+    command: ["uvicorn", "ottima_calc_worker.main:app", "--host", "0.0.0.0", "--port", "8004"]
+    # RNF-04/ADR-018: mesmo raciocínio do flow-runtime — este processo executa código de
+    # script fornecido pelo usuário (tags calculadas), então não recebe o `.env` inteiro via
+    # `env_file`; só as variáveis abaixo, sem OTTIMA_SECRET_KEY nem OTTIMA_FERNET_KEY.
+    environment:
+      OTTIMA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
+      OTTIMA_REDIS_URL: redis://redis:6379/0
+      OTTIMA_LOG_LEVEL: ${OTTIMA_LOG_LEVEL:-INFO}
+      OTTIMA_CALC_POOL_SIZE: ${OTTIMA_CALC_POOL_SIZE:-4}
+    # Sem volume `certs`: tags calculadas nunca falam OPC-UA, só leem o barramento/banco.
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8004/health',timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
   frontend:
     build:
       context: ../frontend
