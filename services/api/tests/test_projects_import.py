@@ -11,7 +11,15 @@ fixture de `test_projects_export.py` — cada suíte é auto-contida).
 
 from sqlalchemy import func, select
 
-from ottima_core.models import Flow, OpcConnection, Project, Tag
+from ottima_core.models import (
+    CalculatedTag,
+    CalculatedTagInput,
+    Flow,
+    OpcConnection,
+    Project,
+    Tag,
+)
+from ottima_core.schemas.calculated_tags import MAX_CALC_INPUTS
 
 IMPORT = "/api/projects/import"
 
@@ -120,6 +128,23 @@ def _tag_bundle(connection: str, name: str, *, direction: str = "r") -> dict:
         "node_id": f"ns=2;s={name}",
         "direction": direction,
         "data_type": "float",
+    }
+
+
+def _tag_calc_bundle(
+    name: str,
+    *,
+    period_seconds: int = 5,
+    code: str = "OUT = 1.0",
+    input_tags: list[dict] | None = None,
+) -> dict:
+    return {
+        "name": name,
+        "direction": "r",
+        "data_type": "float",
+        "period_seconds": period_seconds,
+        "code": code,
+        "input_tags": input_tags or [],
     }
 
 
@@ -316,6 +341,71 @@ async def test_nome_duplicado_no_bundle_422_camada3_sem_integrity_error(
     r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
     assert r.status_code == 422, r.text  # nunca 500 (TST-04)
     assert "duplicada" in r.json()["detail"]
+    assert await _contagens(db_session) == antes
+
+
+async def test_tag_calculada_com_input_tags_irresolvel_422_camada3(
+    client, admin_headers, db_session
+):
+    antes = await _contagens(db_session)
+    bundle = _bundle(
+        tags=[_tag_calc_bundle("CALC-1", input_tags=[{"connection": None, "tag": "fantasma"}])]
+    )
+    r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
+    assert r.status_code == 422, r.text  # nunca 500, e nada inserido antes de detectar
+    assert r.json()["detail"].startswith("Import recusado")
+    assert await _contagens(db_session) == antes
+
+
+async def test_ciclo_entre_tags_calculadas_round_trip_com_sucesso(
+    client, admin_headers, db_session
+):
+    """ADR-033 D5: ciclo entre tags calculadas é seguro (last-value, sem deadlock) — o
+    import não pode recusar uma configuração que a própria API viva aceita."""
+    bundle = _bundle(
+        tags=[
+            _tag_calc_bundle("CALC-A", input_tags=[{"connection": None, "tag": "CALC-B"}]),
+            _tag_calc_bundle("CALC-B", input_tags=[{"connection": None, "tag": "CALC-A"}]),
+        ]
+    )
+    r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
+    assert r.status_code == 201, r.text
+    novo_pid = r.json()["project"]["id"]
+
+    linhas = await db_session.execute(
+        select(Tag.name).where(Tag.project_id == novo_pid, Tag.connection_id.is_(None))
+    )
+    assert {nome for (nome,) in linhas} == {"CALC-A", "CALC-B"}
+
+
+async def test_tag_calculada_com_script_dunder_422_camada3_sem_insercao(
+    client, admin_headers, db_session
+):
+    """Achado crítico da revisão de fase 5: o import persistia código sem NENHUMA das
+    quatro checagens que o CRUD sempre impôs — inclusive a fuga clássica de sandbox."""
+    antes = await _contagens(db_session)
+    bundle = _bundle(
+        tags=[_tag_calc_bundle("CALC-1", code="OUT = ().__class__.__base__.__subclasses__()")]
+    )
+    r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
+    assert r.status_code == 422, r.text
+    assert "dunder" in r.json()["detail"].lower()
+    assert await _contagens(db_session) == antes
+
+
+async def test_tag_calculada_acima_do_teto_de_entradas_422_camada3_sem_insercao(
+    client, admin_headers, db_session
+):
+    antes = await _contagens(db_session)
+    tags_origem = [_tag_bundle("gw1", f"TT-{i}") for i in range(MAX_CALC_INPUTS + 1)]
+    entradas = [{"connection": "gw1", "tag": f"TT-{i}"} for i in range(MAX_CALC_INPUTS + 1)]
+    bundle = _bundle(
+        connections=[_conexao_bundle("gw1")],
+        tags=[*tags_origem, _tag_calc_bundle("CALC-1", code="OUT = 1.0", input_tags=entradas)],
+    )
+    r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
+    assert r.status_code == 422, r.text
+    assert str(MAX_CALC_INPUTS) in r.json()["detail"]
     assert await _contagens(db_session) == antes
 
 

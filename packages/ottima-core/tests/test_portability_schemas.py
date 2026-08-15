@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from ottima_core.portability.schemas import (
     SCHEMA_VERSION,
+    BundleCalcInputRef,
     BundleConnection,
     BundleFlow,
     BundleProject,
@@ -15,6 +16,7 @@ from ottima_core.portability.schemas import (
     BundleTagRef,
     ProjectBundle,
 )
+from ottima_core.schemas.calculated_tags import MAX_CALC_SCRIPT_LENGTH
 
 # Contrato verbatim da spec §2.1-4: exemplo normativo de conexão com auth_mode
 # "user_password", usuário presente e SEM senha (o bundle nunca carrega senha).
@@ -43,6 +45,9 @@ def test_bundle_connection_rejeita_campo_fora_da_fronteira(campo_extra):
     with pytest.raises(ValidationError) as exc_info:
         BundleConnection(**CONEXAO_NORMATIVA, **{campo_extra: "x"})
     assert any(e["type"] == "extra_forbidden" for e in exc_info.value.errors())
+
+
+    conexao = BundleConnection(name="gw1", endpoint="opc.tcp://10.0.0.5:4840")
 
 
 @pytest.mark.parametrize("campo_extra", ["connection_id", "id"])
@@ -209,4 +214,85 @@ def test_project_bundle_rejeita_campo_fora_da_fronteira():
             flows=[],
             created_at="2026-08-07T21:40:00Z",
         )
+    assert any(e["type"] == "extra_forbidden" for e in exc_info.value.errors())
+
+
+def test_bundle_tag_opc_com_campo_de_tag_calculada_reprova():
+    # XOR (RF-208, ADR-033 D6): connection+node_id (OPC) não pode conviver com period_seconds.
+    with pytest.raises(ValidationError):
+        BundleTag(
+            connection="gateway-1",
+            name="TT-101",
+            node_id="ns=2;s=TT101",
+            direction="r",
+            data_type="float",
+            period_seconds=5,
+        )
+
+
+def test_bundle_tag_calculada_valida_e_aceita():
+    tag = BundleTag(
+        name="CALC-1",
+        direction="r",
+        data_type="float",
+        period_seconds=5,
+        code="OUT = IN1 * 2",
+        input_tags=[BundleCalcInputRef(connection="gateway-1", tag="TT-101")],
+    )
+    assert tag.connection is None
+    assert tag.node_id is None
+    assert tag.input_tags == [BundleCalcInputRef(connection="gateway-1", tag="TT-101")]
+
+
+def test_bundle_tag_code_acima_do_teto_reprova():
+    with pytest.raises(ValidationError):
+        BundleTag(
+            name="CALC-1",
+            direction="r",
+            data_type="float",
+            period_seconds=5,
+            code="x" * (MAX_CALC_SCRIPT_LENGTH + 1),
+            input_tags=[],
+        )
+
+
+def test_bundle_tag_calculada_sem_entradas_e_valida():
+    tag = BundleTag(
+        name="CALC-1",
+        direction="r",
+        data_type="float",
+        period_seconds=5,
+        code="OUT = 1.0",
+        input_tags=[],
+    )
+    assert tag.input_tags == []
+
+
+def test_bundle_tag_nem_opc_nem_calculada_reprova():
+    # connection presente mas node_id ausente: não é OPC completa nem calculada.
+    with pytest.raises(ValidationError):
+        BundleTag(connection="gateway-1", name="TT-101", direction="r", data_type="float")
+
+
+def test_bundle_tag_calculada_com_campo_ausente_reprova():
+    # period_seconds e code presentes, mas input_tags ausente: XOR exige os três juntos.
+    with pytest.raises(ValidationError):
+        BundleTag(
+            name="CALC-1",
+            direction="r",
+            data_type="float",
+            period_seconds=5,
+            code="OUT = 1.0",
+        )
+
+
+def test_bundle_calc_input_ref_aceita_connection_none_para_referenciar_outra_calculada():
+    ref = BundleCalcInputRef(connection=None, tag="CALC-A")
+    assert ref.connection is None
+    assert ref.tag == "CALC-A"
+
+
+def test_bundle_calc_input_ref_rejeita_campo_fora_da_fronteira():
+    with pytest.raises(ValidationError) as exc_info:
+        BundleCalcInputRef(connection="gateway-1", tag="TT-101", tag_id=1)
     assert any(e["type"] == "extra_forbidden" for e in exc_info.value.errors())

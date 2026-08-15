@@ -8,13 +8,21 @@ nunca persistidas — nenhuma dependência de banco/Redis/disco.
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from ottima_core.models import Flow, OpcConnection, Project, Tag
+from ottima_core.models import (
+    CalculatedTag,
+    CalculatedTagInput,
+    Flow,
+    OpcConnection,
+    Project,
+    Tag,
+)
 from ottima_core.portability.bundle import (
     montar_bundle,
     problemas_de_coerencia_interna,
     ref_por_id,
 )
 from ottima_core.portability.schemas import (
+    BundleCalcInputRef,
     BundleConnection,
     BundleFlow,
     BundleProject,
@@ -22,6 +30,7 @@ from ottima_core.portability.schemas import (
     ProjectBundle,
 )
 from ottima_core.portability.tag_ref import grafo_para_banco
+from ottima_core.schemas.calculated_tags import MAX_CALC_INPUTS
 
 EXPORTED_AT = datetime(2026, 8, 7, 21, 40, tzinfo=UTC)
 
@@ -56,6 +65,42 @@ def _tag(**over: object) -> Tag:
     }
     dados.update(over)
     return Tag(**dados)
+
+
+def _tag_calculada(**over: object) -> Tag:
+    dados: dict[str, object] = {
+        "id": 601,
+        "connection_id": None,
+        "project_id": 10,
+        "name": "CALC-1",
+        "node_id": None,
+        "direction": "r",
+        "data_type": "float",
+        "eu": "",
+        "description": "",
+    }
+    dados.update(over)
+    return Tag(**dados)
+
+
+def _calc_spec(**over: object) -> CalculatedTag:
+    dados: dict[str, object] = {
+        "tag_id": 601,
+        "code": "OUT = IN1 * 2",
+        "period_seconds": 5,
+    }
+    dados.update(over)
+    return CalculatedTag(**dados)
+
+
+def _calc_input(**over: object) -> CalculatedTagInput:
+    dados: dict[str, object] = {
+        "calc_tag_id": 601,
+        "position": 1,
+        "source_tag_id": 501,
+    }
+    dados.update(over)
+    return CalculatedTagInput(**dados)
 
 
 def _flow(**over: object) -> Flow:
@@ -183,6 +228,102 @@ class TestMontarBundle:
         assert bundle.flows[0].watchdog_read_node_id == "ns=2;s=WD_R"
         assert bundle.flows[0].watchdog_write_node_id == "ns=2;s=WD_W"
         assert bundle.flows[0].watchdog_period_ms == 2000
+
+
+class TestMontarBundleTagsCalculadas:
+    """D6 (ADR-033): sem esta fatia `nome_da_conexao[tag.connection_id]` daria `KeyError`
+    assim que uma tag calculada (`connection_id IS NULL`) chegasse ao export."""
+
+    def test_tag_calculada_projetada_com_campos_proprios_e_sem_connection(self) -> None:
+        gw = _conexao(id=1, name="gateway-1")
+        tag_opc = _tag(id=501, connection_id=1, name="TT-101")
+        tag_calc = _tag_calculada(id=601, name="CALC-1")
+        spec = _calc_spec(tag_id=601, code="OUT = IN1 * 2", period_seconds=5)
+        entrada = _calc_input(calc_tag_id=601, position=1, source_tag_id=501)
+
+        bundle = montar_bundle(
+            project=_projeto(),
+            connections=[gw],
+            tags=[tag_opc, tag_calc],
+            calculated_tags=[spec],
+            calculated_tag_inputs=[entrada],
+            flows=[],
+            exported_at=EXPORTED_AT,
+        )
+
+        bundle_calc = next(t for t in bundle.tags if t.name == "CALC-1")
+        assert bundle_calc.connection is None
+        assert bundle_calc.node_id is None
+        assert bundle_calc.period_seconds == 5
+        assert bundle_calc.code == "OUT = IN1 * 2"
+        assert bundle_calc.input_tags == [BundleCalcInputRef(connection="gateway-1", tag="TT-101")]
+
+    def test_tags_opc_vem_antes_das_calculadas_e_calculadas_ordenadas_por_name(self) -> None:
+        gw = _conexao(id=1, name="gateway-1")
+        tag_opc = _tag(id=501, connection_id=1, name="zzz-opc")
+        tag_calc_zulu = _tag_calculada(id=602, name="zzz-calc")
+        tag_calc_alpha = _tag_calculada(id=601, name="aaa-calc")
+
+        bundle = montar_bundle(
+            project=_projeto(),
+            connections=[gw],
+            tags=[tag_calc_zulu, tag_opc, tag_calc_alpha],
+            calculated_tags=[_calc_spec(tag_id=601), _calc_spec(tag_id=602)],
+            calculated_tag_inputs=[],
+            flows=[],
+            exported_at=EXPORTED_AT,
+        )
+
+        assert [t.name for t in bundle.tags] == ["zzz-opc", "aaa-calc", "zzz-calc"]
+
+    def test_tag_calculada_sem_entradas_produz_input_tags_vazia(self) -> None:
+        tag_calc = _tag_calculada(id=601, name="CALC-1")
+
+        bundle = montar_bundle(
+            project=_projeto(),
+            connections=[],
+            tags=[tag_calc],
+            calculated_tags=[_calc_spec(tag_id=601)],
+            calculated_tag_inputs=[],
+            flows=[],
+            exported_at=EXPORTED_AT,
+        )
+
+        assert bundle.tags[0].input_tags == []
+
+    def test_projeto_so_com_tags_calculadas_nao_da_keyerror(self) -> None:
+        tag_calc = _tag_calculada(id=601, name="CALC-1")
+
+        bundle = montar_bundle(
+            project=_projeto(),
+            connections=[],
+            tags=[tag_calc],
+            calculated_tags=[_calc_spec(tag_id=601)],
+            calculated_tag_inputs=[],
+            flows=[],
+            exported_at=EXPORTED_AT,
+        )
+
+        assert bundle.connections == []
+        assert bundle.tags[0].name == "CALC-1"
+
+    def test_tag_calculada_pode_referenciar_outra_calculada(self) -> None:
+        tag_a = _tag_calculada(id=601, name="CALC-A")
+        tag_b = _tag_calculada(id=602, name="CALC-B")
+        entrada = _calc_input(calc_tag_id=602, position=1, source_tag_id=601)
+
+        bundle = montar_bundle(
+            project=_projeto(),
+            connections=[],
+            tags=[tag_a, tag_b],
+            calculated_tags=[_calc_spec(tag_id=601), _calc_spec(tag_id=602)],
+            calculated_tag_inputs=[entrada],
+            flows=[],
+            exported_at=EXPORTED_AT,
+        )
+
+        calc_b = next(t for t in bundle.tags if t.name == "CALC-B")
+        assert calc_b.input_tags == [BundleCalcInputRef(connection=None, tag="CALC-A")]
 
 
 class TestRoundTripPorConexao:
@@ -490,3 +631,233 @@ class TestProblemasDeCoerenciaInterna:
             == problemas_de_coerencia_interna(bundle_b)
             == []
         )
+
+    def test_tag_calculada_com_input_ref_ausente_no_bundle_e_problema(self) -> None:
+        bundle = _bundle_minimo(
+            tags=[
+                BundleTag(
+                    name="CALC-1",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=5,
+                    code="OUT = IN1",
+                    input_tags=[BundleCalcInputRef(connection=None, tag="fantasma")],
+                )
+            ]
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("CALC-1" in p and "fantasma" in p for p in problemas)
+
+    def test_ciclo_entre_duas_tags_calculadas_agora_e_permitido(self) -> None:
+        """ADR-033 D5: ciclo entre calculadas é seguro (last-value, sem deadlock) — o
+        import não pode recusar uma configuração que a própria API viva aceita."""
+        bundle = _bundle_minimo(
+            tags=[
+                BundleTag(
+                    name="CALC-A",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=5,
+                    code="OUT = IN1",
+                    input_tags=[BundleCalcInputRef(connection=None, tag="CALC-B")],
+                ),
+                BundleTag(
+                    name="CALC-B",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=5,
+                    code="OUT = IN1",
+                    input_tags=[BundleCalcInputRef(connection=None, tag="CALC-A")],
+                ),
+            ]
+        )
+        assert problemas_de_coerencia_interna(bundle) == []
+
+    def test_tag_calculada_duplicada_no_bundle_e_problema(self) -> None:
+        bundle = _bundle_minimo(
+            tags=[
+                BundleTag(
+                    name="CALC-1",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=5,
+                    code="OUT = 1.0",
+                    input_tags=[],
+                ),
+                BundleTag(
+                    name="CALC-1",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=10,
+                    code="OUT = 2.0",
+                    input_tags=[],
+                ),
+            ]
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("CALC-1" in p and "duplicad" in p for p in problemas)
+
+    def test_tag_calculada_que_referencia_tag_opc_existente_nao_e_problema(self) -> None:
+        bundle = _bundle_minimo(
+            connections=[BundleConnection(name="gateway-1", endpoint="opc.tcp://a")],
+            tags=[
+                BundleTag(
+                    connection="gateway-1",
+                    name="TT-101",
+                    node_id="a",
+                    direction="r",
+                    data_type="float",
+                ),
+                BundleTag(
+                    name="CALC-1",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=5,
+                    code="OUT = IN1",
+                    input_tags=[BundleCalcInputRef(connection="gateway-1", tag="TT-101")],
+                ),
+            ],
+        )
+        assert problemas_de_coerencia_interna(bundle) == []
+
+    def test_tag_calculada_com_script_dunder_e_problema(self) -> None:
+        """Achado crítico da revisão de fase 5: o import não rodava NENHUMA validação de
+        conteúdo de script — um bundle com a fuga clássica de sandbox persistia."""
+        bundle = _bundle_minimo(
+            tags=[
+                BundleTag(
+                    name="CALC-1",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=5,
+                    code="OUT = ().__class__.__base__.__subclasses__()",
+                    input_tags=[],
+                )
+            ]
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("CALC-1" in p and "dunder" in p.lower() for p in problemas)
+
+    def test_tag_calculada_com_erro_de_sintaxe_no_script_e_problema(self) -> None:
+        bundle = _bundle_minimo(
+            tags=[
+                BundleTag(
+                    name="CALC-1",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=5,
+                    code="OUT = (",
+                    input_tags=[],
+                )
+            ]
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("CALC-1" in p and "sintaxe" in p.lower() for p in problemas)
+
+    def test_tag_calculada_com_script_sem_atribuir_out_e_problema(self) -> None:
+        bundle = _bundle_minimo(
+            tags=[
+                BundleTag(
+                    name="CALC-1",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=5,
+                    code="x = 1",
+                    input_tags=[],
+                )
+            ]
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("CALC-1" in p and "OUT" in p for p in problemas)
+
+    def test_tag_calculada_com_in_fora_do_alcance_no_script_e_problema(self) -> None:
+        bundle = _bundle_minimo(
+            tags=[
+                BundleTag(
+                    name="CALC-1",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=5,
+                    code="OUT = IN3",
+                    input_tags=[],
+                )
+            ]
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("CALC-1" in p and "IN3" in p for p in problemas)
+
+    def test_tag_calculada_com_mais_entradas_que_o_teto_e_problema(self) -> None:
+        conexao = BundleConnection(name="gateway-1", endpoint="opc.tcp://a")
+        tags_origem = [
+            BundleTag(
+                connection="gateway-1",
+                name=f"TT-{i}",
+                node_id=f"ns=2;s=TT{i}",
+                direction="r",
+                data_type="float",
+            )
+            for i in range(MAX_CALC_INPUTS + 1)
+        ]
+        entradas = [
+            BundleCalcInputRef(connection="gateway-1", tag=f"TT-{i}")
+            for i in range(MAX_CALC_INPUTS + 1)
+        ]
+        bundle = _bundle_minimo(
+            connections=[conexao],
+            tags=[
+                *tags_origem,
+                BundleTag(
+                    name="CALC-1",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=5,
+                    code="OUT = 1.0",
+                    input_tags=entradas,
+                ),
+            ],
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("CALC-1" in p and str(MAX_CALC_INPUTS) in p for p in problemas)
+
+    def test_tag_calculada_que_referencia_a_si_mesma_e_problema(self) -> None:
+        bundle = _bundle_minimo(
+            tags=[
+                BundleTag(
+                    name="CALC-1",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=5,
+                    code="OUT = 1.0",
+                    input_tags=[BundleCalcInputRef(connection=None, tag="CALC-1")],
+                )
+            ]
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("CALC-1" in p and "si mesma" in p for p in problemas)
+
+    def test_tag_calculada_com_entrada_repetida_e_problema(self) -> None:
+        bundle = _bundle_minimo(
+            connections=[BundleConnection(name="gateway-1", endpoint="opc.tcp://a")],
+            tags=[
+                BundleTag(
+                    connection="gateway-1",
+                    name="TT-101",
+                    node_id="a",
+                    direction="r",
+                    data_type="float",
+                ),
+                BundleTag(
+                    name="CALC-1",
+                    direction="r",
+                    data_type="float",
+                    period_seconds=5,
+                    code="OUT = IN1 + IN2",
+                    input_tags=[
+                        BundleCalcInputRef(connection="gateway-1", tag="TT-101"),
+                        BundleCalcInputRef(connection="gateway-1", tag="TT-101"),
+                    ],
+                ),
+            ],
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("CALC-1" in p and "TT-101" in p and "repet" in p for p in problemas)

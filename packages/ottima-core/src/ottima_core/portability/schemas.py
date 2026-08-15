@@ -8,8 +8,9 @@ espelho dos schemas `Create`/`Out` que expõem estado interno do banco.
 from datetime import datetime
 from typing import Final, Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ottima_core.schemas.calculated_tags import MAX_CALC_SCRIPT_LENGTH, PeriodSeconds
 from ottima_core.schemas.connections import (
     AuthMode,
     SecurityMode,
@@ -29,6 +30,17 @@ class BundleTagRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     connection: str
+    tag: str
+
+
+class BundleCalcInputRef(BaseModel):
+    """Referência de entrada de tag calculada (RF-208, ADR-033 D6): mesma convenção de
+    `BundleTagRef` — nome, nunca id — mas `connection` pode ser `None` quando a entrada é
+    ela própria outra tag calculada, que não pertence a conexão nenhuma."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    connection: str | None
     tag: str
 
 
@@ -63,13 +75,41 @@ class BundleConnection(BaseModel):
 class BundleTag(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    connection: str
+    connection: str | None = None
     name: str
-    node_id: str
+    node_id: str | None = None
     direction: Direction
     data_type: DataType
     eu: str = ""
     description: str = ""
+    period_seconds: PeriodSeconds | None = None
+    code: str | None = Field(default=None, max_length=MAX_CALC_SCRIPT_LENGTH)
+    input_tags: list[BundleCalcInputRef] | None = None
+
+    @model_validator(mode="after")
+    def _coerencia(self) -> "BundleTag":
+        """XOR que o banco já impõe via `ck_tags_owner` (ADR-033): ou é uma tag OPC
+        (`connection` + `node_id`, sem nenhum campo de tag calculada) ou é uma tag
+        calculada (sem `connection`/`node_id`, com os três campos de tag calculada —
+        `input_tags` pode ser lista vazia, uma tag calculada sem entradas é válida, mas
+        não pode estar ausente)."""
+        eh_opc = self.connection is not None and self.node_id is not None
+        eh_calculada = self.connection is None and self.node_id is None
+        campos_calc_ausentes = (
+            self.period_seconds is None and self.code is None and self.input_tags is None
+        )
+        campos_calc_completos = (
+            self.period_seconds is not None
+            and self.code is not None
+            and self.input_tags is not None
+        )
+        if not ((eh_opc and campos_calc_ausentes) or (eh_calculada and campos_calc_completos)):
+            raise ValueError(
+                f"tag '{self.name}': deve ser OPC (connection e node_id, sem campos de tag "
+                "calculada) ou calculada (sem connection/node_id, com period_seconds, code "
+                "e input_tags)"
+            )
+        return self
 
 
 class BundleFlow(BaseModel):

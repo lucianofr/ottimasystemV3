@@ -31,7 +31,15 @@ from ottima_core.flowgraph import (
     parse_graph,
     validate_graph,
 )
-from ottima_core.models import Flow, OpcConnection, Project, Tag, User
+from ottima_core.models import (
+    CalculatedTag,
+    CalculatedTagInput,
+    Flow,
+    OpcConnection,
+    Project,
+    Tag,
+    User,
+)
 from ottima_core.portability import (
     SCHEMA_VERSION,
     ProjectBundle,
@@ -197,15 +205,34 @@ async def export_project(
     connections = list(
         await db.scalars(select(OpcConnection).where(OpcConnection.project_id == project_id))
     )
-    # Tags pelas conexões do projeto, nunca por uma consulta independente: `ref_por_id`
+    # Tags OPC pelas conexões do projeto, nunca por uma consulta independente: `ref_por_id`
     # (ottima_core.portability.bundle) indexa por `connection.id` e propaga `KeyError` se
     # alguma tag carregada apontar para uma conexão fora deste conjunto (revisão da 1.3) —
     # o join garante que toda tag aqui pertence a uma das `connections` acima.
-    tags = list(
+    tags_opc = list(
         await db.scalars(
             select(Tag)
             .join(OpcConnection, Tag.connection_id == OpcConnection.id)
             .where(OpcConnection.project_id == project_id)
+        )
+    )
+    # Tag calculada não corre o mesmo risco (revisão da 1.3, comentário acima): sua dona é o
+    # próprio projeto (`project_id`, `ck_tags_owner`), não uma conexão — filtrar direto por
+    # `Tag.project_id` já é o mesmo isolamento que o join acima dá às OPC. Quatro consultas
+    # fixas (tags calculadas, `calculated_tags`, `calculated_tag_inputs`), nunca uma por tag.
+    tags_calculadas = list(await db.scalars(select(Tag).where(Tag.project_id == project_id)))
+    calculated_tags = list(
+        await db.scalars(
+            select(CalculatedTag)
+            .join(Tag, CalculatedTag.tag_id == Tag.id)
+            .where(Tag.project_id == project_id)
+        )
+    )
+    calculated_tag_inputs = list(
+        await db.scalars(
+            select(CalculatedTagInput)
+            .join(Tag, CalculatedTagInput.calc_tag_id == Tag.id)
+            .where(Tag.project_id == project_id)
         )
     )
     flows = list(await db.scalars(select(Flow).where(Flow.project_id == project_id)))
@@ -213,7 +240,9 @@ async def export_project(
         bundle = montar_bundle(
             project=project,
             connections=connections,
-            tags=tags,
+            tags=[*tags_opc, *tags_calculadas],
+            calculated_tags=calculated_tags,
+            calculated_tag_inputs=calculated_tag_inputs,
             flows=flows,
             exported_at=datetime.now(UTC),
         )
@@ -376,8 +405,10 @@ async def import_project(
         conexoes_por_nome[bc.name] = conn
     await db.flush()  # ids das conexões, para o `connection_id` das tags abaixo
 
-    tags_por_ref: dict[tuple[str, str], Tag] = {}
+    tags_por_ref: dict[tuple[str | None, str], Tag] = {}
     for bt in bundle.tags:
+        if bt.connection is None:
+            continue  # tag calculada: bloco abaixo, depois que toda tag OPC já tem id
         tag = Tag(
             connection_id=conexoes_por_nome[bt.connection].id,
             name=bt.name,
@@ -389,14 +420,64 @@ async def import_project(
         )
         db.add(tag)
         tags_por_ref[(bt.connection, bt.name)] = tag
-    await db.flush()  # ids das tags — só agora o mapa (connection, tag) -> id existe (§2.2-5)
+    await db.flush()  # ids das tags OPC — o mapa (connection, tag) -> id existe para elas
+
+    # Tags calculadas (RF-208, ADR-033 D6): `Tag` de todas primeiro (nenhuma depende de outra
+    # calculada para existir), só então `CalculatedTag` (FK em `tag.id`, já conhecido nesse
+    # ponto) e por último `CalculatedTagInput` — dessa forma uma calculada pode referenciar
+    # outra calculada em `input_tags` em qualquer ordem dentro do bundle, sem topological
+    # sort: quando o terceiro bloco roda, toda tag (OPC ou calculada) já está em
+    # `tags_por_ref` com id definitivo. A camada 3 (`problemas_de_coerencia_interna`, já
+    # rodada acima) garantiu que toda referência resolve e que não há ciclo — nenhuma das
+    # duas falhas é alcançável aqui.
+    tags_calculadas_bundle = [bt for bt in bundle.tags if bt.connection is None]
+    for bt in tags_calculadas_bundle:
+        tag = Tag(
+            project_id=project.id,
+            name=bt.name,
+            direction=bt.direction,
+            data_type=bt.data_type,
+            eu=bt.eu,
+            description=bt.description,
+        )
+        db.add(tag)
+        tags_por_ref[(None, bt.name)] = tag
+    if tags_calculadas_bundle:
+        await db.flush()  # ids das tags calculadas, para o `tag_id` de CalculatedTag abaixo
+
+    for bt in tags_calculadas_bundle:
+        db.add(
+            CalculatedTag(
+                tag_id=tags_por_ref[(None, bt.name)].id,
+                code=bt.code,
+                period_seconds=bt.period_seconds,
+            )
+        )
+    if tags_calculadas_bundle:
+        await db.flush()  # ids de CalculatedTag, para o `calc_tag_id` de CalculatedTagInput
+
+    for bt in tags_calculadas_bundle:
+        for posicao, ref in enumerate(bt.input_tags or [], start=1):
+            db.add(
+                CalculatedTagInput(
+                    calc_tag_id=tags_por_ref[(None, bt.name)].id,
+                    position=posicao,
+                    source_tag_id=tags_por_ref[(ref.connection, ref.tag)].id,
+                )
+            )
+    if tags_calculadas_bundle:
+        await db.flush()
 
     id_por_ref = {ref: tag.id for ref, tag in tags_por_ref.items()}
+    # Tag calculada nunca aparece num grafo (D5, ADR-033): `validate_graph` só precisa saber
+    # das OPC, e `TagRef.conn_id` é `int` obrigatório — incluir as calculadas aqui quebraria
+    # a construção (`connection_id` delas é sempre `None`).
     tags_para_validacao = {
         tag.id: TagRef(
             id=tag.id, conn_id=tag.connection_id, direction=tag.direction, data_type=tag.data_type
         )
         for tag in tags_por_ref.values()
+        if tag.connection_id is not None
     }
 
     # Camada 4 (§3.2-4): `parse_graph` + `validate_graph` por flow, com o mapa de tags

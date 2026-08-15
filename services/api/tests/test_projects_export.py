@@ -10,7 +10,7 @@ router -> `montar_bundle` -> resposta.
 
 from collections.abc import Iterator
 
-from ottima_core.models import Flow, OpcConnection
+from ottima_core.models import CalculatedTag, CalculatedTagInput, Flow, OpcConnection, Tag
 
 
 async def _projeto(client, headers, name: str) -> int:
@@ -267,3 +267,48 @@ async def test_grafo_com_tag_que_nao_resolve_e_422_agregado(client, admin_header
     r = await client.get(f"/api/projects/{pid}/export", headers=admin_headers)
     assert r.status_code == 422, r.text
     assert r.json()["detail"].startswith("Export recusado")
+
+
+async def test_export_projeto_so_com_tags_calculadas_200(client, admin_headers, db_session):
+    """D6 (ADR-033): sem esta fatia, o INNER JOIN com `opc_connections` omitia a tag
+    calculada em silêncio (nunca 500, só um export incompleto)."""
+    pid = await _projeto(client, admin_headers, "SoCalculadas")
+    tag = Tag(project_id=pid, name="CALC-1", direction="r", data_type="float")
+    db_session.add(tag)
+    await db_session.flush()
+    db_session.add(CalculatedTag(tag_id=tag.id, code="OUT = 1.0", period_seconds=5))
+    await db_session.commit()
+
+    r = await client.get(f"/api/projects/{pid}/export", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["connections"] == []
+    (bt,) = body["tags"]
+    assert bt["name"] == "CALC-1"
+    assert bt["connection"] is None
+    assert bt["node_id"] is None
+    assert bt["period_seconds"] == 5
+    assert bt["code"] == "OUT = 1.0"
+    assert bt["input_tags"] == []
+
+
+async def test_export_tag_calculada_com_entradas_ordenadas_e_tag_opc_antes(
+    client, admin_headers, db_session
+):
+    pid = await _projeto(client, admin_headers, "ComEntradas")
+    gw = await _conexao(client, admin_headers, pid, "gw1")
+    tag_opc = await _tag(client, admin_headers, gw, "TT-101")
+
+    tag_calc = Tag(project_id=pid, name="CALC-1", direction="r", data_type="float")
+    db_session.add(tag_calc)
+    await db_session.flush()
+    db_session.add(CalculatedTag(tag_id=tag_calc.id, code="OUT = IN1 * 2", period_seconds=5))
+    db_session.add(CalculatedTagInput(calc_tag_id=tag_calc.id, position=1, source_tag_id=tag_opc))
+    await db_session.commit()
+
+    r = await client.get(f"/api/projects/{pid}/export", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [t["name"] for t in body["tags"]] == ["TT-101", "CALC-1"]
+    calc = body["tags"][1]
+    assert calc["input_tags"] == [{"connection": "gw1", "tag": "TT-101"}]
