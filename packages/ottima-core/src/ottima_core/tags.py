@@ -14,6 +14,10 @@ async def project_tags(session: AsyncSession, project_id: int) -> dict[int, TagR
     """
     stmt = (
         select(Tag.id, Tag.connection_id, Tag.direction, Tag.data_type)
+        # INNER JOIN é a fronteira do v1 (ADR-033 D5): tag calculada tem `connection_id`
+        # NULL e nunca casa aqui, então nunca vira `TagRef` — de propósito, não bug. Trocar
+        # por LEFT JOIN quebraria `TagRef.conn_id: int` (obrigatório) no primeiro projeto
+        # com tag calculada.
         .join(OpcConnection, OpcConnection.id == Tag.connection_id)
         .where(OpcConnection.project_id == project_id)
     )

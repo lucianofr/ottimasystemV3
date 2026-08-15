@@ -70,6 +70,7 @@ from ottima_core.flowgraph.validate import (
     PortKind,
     TagRef,
     ValidationResult,
+    check_script_code,
     validate_graph,
 )
 
@@ -117,6 +118,7 @@ __all__ = [
     "TfsConfig",
     "TfsElement",
     "ValidationResult",
+    "check_script_code",
     "derive_horizons",
     "economics_config_hash",
     "gain_model_hash",

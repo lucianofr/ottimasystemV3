@@ -7,7 +7,7 @@ Núcleo puro — nada de SQLAlchemy nem de `services/` aqui: o chamador traduz l
 
 import ast
 import math
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError
@@ -223,38 +223,104 @@ def _check_tfs_delay(nodes: list[FlowNode], ts_seconds: float, errors: list[str]
                     )
 
 
+_INJECTED_MUTABLE_ATTRS = frozenset({"math", "numpy", "np"})
+"""Nomes injetados no escopo do script (`ottima_core.script_pool._run_script`) cujo objeto é
+COMPARTILHADO entre execuções seguintes no mesmo worker reusado (processo de vida longa,
+ADR-018). `state` fica de fora de propósito — é o único dos quatro que o contrato do script
+espera que seja mutado."""
+
+
 def _is_dunder(identifier: str) -> bool:
     return identifier.startswith("__") and identifier.endswith("__")
 
 
-def _check_script_code(nodes: list[FlowNode], errors: list[str]) -> None:
-    """TD-001 (defesa em profundidade, ADR-018): nenhum nome dunder no código do Script.
+def _identificadores_do_no(node: ast.AST) -> Iterator[str]:
+    """Todo nome que este nó da AST introduz ou referencia — cobre não só `ast.Name`/
+    `ast.Attribute` (leitura/escrita de variável, checagem original) como também os pontos
+    de BINDING que ela deixava passar: parâmetro de função, alias de `import`, nome de
+    `except`, nome de `def`/`class` e `global`/`nonlocal`. Hoje nenhum deles é alcançável
+    sem `__import__` (fora do escopo de `ALLOWED_BUILTINS`) — defesa em profundidade para o
+    dia em que a lista ganhar algo com reflexão (`vars`, `dir`, ...), não uma vulnerabilidade
+    ativa agora."""
+    if isinstance(node, ast.Name):
+        yield node.id
+    elif isinstance(node, ast.Attribute):
+        yield node.attr
+    elif isinstance(node, ast.arg):
+        yield node.arg
+    elif isinstance(node, ast.alias):
+        yield node.name
+        if node.asname is not None:
+            yield node.asname
+    elif isinstance(node, ast.ExceptHandler):
+        if node.name is not None:
+            yield node.name
+    elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        yield node.name
+    elif isinstance(node, ast.Global | ast.Nonlocal):
+        yield from node.names
 
-    `ALLOWED_BUILTINS` (ottima_flow_runtime.script_pool) já tira `__import__` do escopo de
-    execução, mas literais de linguagem (`()`, `[]`, ...) continuam alcançáveis e, a partir
-    deles, `().__class__.__mro__[...].__subclasses__()` é a fuga clássica de sandbox restrito
-    — nem `ast.Name` nem `ast.Attribute` com identificador dunder precisam de `import` para
-    isso. Sintaxe inválida não é problema desta checagem (`_run_script` já reporta o erro em
-    runtime); aqui só se percorre uma AST que compilou.
+
+def _nome_raiz_da_cadeia(node: ast.expr) -> str | None:
+    """Desce a cadeia de `ast.Attribute` até o `ast.Name` da base — `math.a.b = 1` tem base
+    `math`, mesma checagem de `math.pi = 3`."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _reatribui_modulo_injetado(node: ast.AST) -> str | None:
+    """`math.pi = 3`/`numpy.foo = ...` corrompe o worker do `ScriptPool` para todo job
+    seguinte que o reusar — processo de vida longa (ADR-018), não um por execução. `state`
+    fica de fora: é o único módulo injetado que o script tem contrato de mutar
+    (`ottima_core.script_pool`). Residual conhecido, não fechado por esta checagem: uma
+    CHAMADA que muda estado global sem passar por `Store` aqui (ex.: `numpy.seterr(...)`) —
+    registrado no modelo de ameaça do ADR-033."""
+    if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
+        raiz = _nome_raiz_da_cadeia(node)
+        if raiz in _INJECTED_MUTABLE_ATTRS:
+            return raiz
+    return None
+
+
+def check_script_code(code: str) -> str | None:
+    """TD-001 (defesa em profundidade, ADR-018): nenhum nome dunder no código do usuário, e
+    nenhuma reatribuição de atributo dos módulos injetados (`math`/`numpy`/`np`).
+
+    `ALLOWED_BUILTINS` (`ottima_core.script_pool`) já tira `__import__` do escopo de execução,
+    mas literais de linguagem (`()`, `[]`, ...) continuam alcançáveis e, a partir deles,
+    `().__class__.__mro__[...].__subclasses__()` é a fuga clássica de sandbox restrito — nem
+    `ast.Name` nem `ast.Attribute` com identificador dunder precisam de `import` para isso.
+    Sintaxe inválida não é problema desta checagem (`_run_script` já reporta o erro em runtime);
+    aqui só se percorre uma AST que compilou.
+
+    Devolve `None` quando o código passa, ou a mensagem pt-BR do motivo. Compartilhado entre a
+    validação de grafo (bloco Script) e o save de tag calculada (ADR-033).
     """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return None
+    for sub in ast.walk(tree):
+        for identifier in _identificadores_do_no(sub):
+            if _is_dunder(identifier):
+                return "código não pode acessar nomes dunder"
+        modulo = _reatribui_modulo_injetado(sub)
+        if modulo is not None:
+            return (
+                f"código não pode reatribuir atributo de '{modulo}' "
+                "(módulo compartilhado entre execuções)"
+            )
+    return None
+
+
+def _check_script_code(nodes: list[FlowNode], errors: list[str]) -> None:
     for node in nodes:
         if node.type != "script":
             continue
-        try:
-            tree = ast.parse(node.config.code)
-        except SyntaxError:
-            continue
-        for sub in ast.walk(tree):
-            identifier = None
-            if isinstance(sub, ast.Name):
-                identifier = sub.id
-            elif isinstance(sub, ast.Attribute):
-                identifier = sub.attr
-            if identifier is not None and _is_dunder(identifier):
-                errors.append(
-                    f"nó '{node.id}' (script): código de Script não pode acessar nomes dunder"
-                )
-                break
+        motivo = check_script_code(node.config.code)
+        if motivo is not None:
+            errors.append(f"nó '{node.id}' (script): {motivo}")
 
 
 # --------------------------------------------------------------------------------------

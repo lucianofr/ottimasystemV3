@@ -7,6 +7,8 @@ def test_metadata_tem_todas_as_tabelas_relacionais():
         "projects",
         "opc_connections",
         "tags",
+        "calculated_tags",
+        "calculated_tag_inputs",
         "flows",
         "history_retention_settings",
         "system_settings",

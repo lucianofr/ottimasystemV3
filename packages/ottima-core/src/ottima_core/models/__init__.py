@@ -1,6 +1,7 @@
 """Modelos relacionais do OttimaSystem (DDL: spec F1 §3.1)."""
 
 from ottima_core.models.base import Base, TimestampMixin
+from ottima_core.models.calculated_tag import CalculatedTag, CalculatedTagInput
 from ottima_core.models.connection import OpcConnection
 from ottima_core.models.flow import Flow
 from ottima_core.models.history_retention import HistoryRetentionSettings
@@ -23,6 +24,8 @@ __all__ = [
     "Project",
     "OpcConnection",
     "Tag",
+    "CalculatedTag",
+    "CalculatedTagInput",
     "Flow",
     "HistoryRetentionSettings",
     "SystemSettings",

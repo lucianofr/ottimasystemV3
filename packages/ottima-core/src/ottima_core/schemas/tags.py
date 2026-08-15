@@ -32,9 +32,10 @@ class TagOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    connection_id: int
+    connection_id: int | None
     name: str
-    node_id: str
+    node_id: str | None
+    project_id: int | None
     direction: Direction
     data_type: DataType
     eu: str

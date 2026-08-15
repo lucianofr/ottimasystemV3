@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 CHANNEL_OPC_WRITES = "opc.writes"
 CHANNEL_FLOW_COMMANDS = "flow.commands"
 CHANNEL_EVENTS = "events"
+CHANNEL_CALC_VALUES = "calc.values"
+"""Valores de tags calculadas (ADR-033). Canal fixo, sem sufixo: o produtor é um só
+(`calc-worker`) e nenhum consumidor filtra por origem — todos casam por `tag_id` no payload.
+Reusa `OpcValue` verbatim, então recorder e `/ws` gravam e distribuem sem tradução."""
 
 
 def channel_opc_values(conn_id: int) -> str:
@@ -274,6 +278,17 @@ KIND_HISTORY_RETENTION_CHANGED = "history_retention_changed"  # severity "info"
 
 # Nível de log dos serviços alterado em runtime (RF-805).
 KIND_SYSTEM_LOG_LEVEL_CHANGED = "system_log_level_changed"  # severity "info"
+
+# Tags calculadas (ADR-033). Os três primeiros são auditoria da API (origin `user:<id>`); os
+# três últimos são do `calc-worker` (origin `tag:<tag_id>`) e seguem a mesma política de latch
+# do bloco Script: publica na TRANSIÇÃO de estado, não a cada período, senão uma tag de 1 s em
+# falha afogaria o log de eventos (ADR-020).
+KIND_CALC_TAG_CREATED = "calc_tag_created"  # severity "info"
+KIND_CALC_TAG_UPDATED = "calc_tag_updated"  # severity "info"
+KIND_CALC_TAG_DELETED = "calc_tag_deleted"  # severity "info"
+KIND_CALC_TAG_TIMEOUT = "calc_tag_timeout"  # severity "alarm"
+KIND_CALC_TAG_ERROR = "calc_tag_error"  # severity "alarm"
+KIND_CALC_TAG_RECOVERED = "calc_tag_recovered"  # severity "info"
 
 
 async def publish_event(
