@@ -134,6 +134,29 @@ function pluginLinhaAgora(agoraRef: { current: number | null }, tema: TemaTrend)
   };
 }
 
+/** Recorte em X que o operador arrastou no gráfico; `null` = a janela da tela manda. */
+type ZoomX = readonly [number, number];
+
+/** Zoom manual em X. O eixo x desta tela tem `range` próprio (a janela precisa incluir o
+ *  horizonte da predição, o que a extensão dos dados não daria), e o uPlot chama esse `range`
+ *  também no zoom por arrasto — devolver a janela da tela ali é o que engolia o recorte pedido.
+ *  O `setSelect` dispara ANTES do `setScale` do zoom (uPlot `mouseUp`), então guardar o recorte
+ *  aqui faz o `range` já responder com ele. Guardado em ref, e não dentro da instância, para
+ *  sobreviver à recriação do gráfico (trocar o eixo Y, ligar/desligar pena, editar faixa). */
+function pluginZoomX(aoRecortar: (faixa: ZoomX) => void): uPlot.Plugin {
+  return {
+    hooks: {
+      setSelect: (u: uPlot) => {
+        if (u.select.width <= 0) return;
+        aoRecortar([
+          u.posToVal(u.select.left, "x"),
+          u.posToVal(u.select.left + u.select.width, "x"),
+        ]);
+      },
+    },
+  };
+}
+
 /** Paleta resolvida do trend de operação — mesmo padrão de `lerTemaTrend` (`getComputedStyle`
  *  sobre `document.documentElement`), mas com a paleta PRÓPRIA de 8 posições
  *  (`TOKENS_PENA_OPERACAO`, `trendOperacao.ts`), não a de 6 do trend de engenharia
@@ -339,6 +362,8 @@ function construirOpcoesOperacao(
   agoraDivisorRef: { current: number | null },
   semPredicaoRef: { current: boolean },
   rangeXRef: { current: readonly [number, number] },
+  zoomXRef: { current: ZoomX | null },
+  aoZoom: (faixa: ZoomX | null) => void,
   escalasY: uPlot.Scales,
   eixoYChave: string,
   eixoYCor: string,
@@ -349,19 +374,39 @@ function construirOpcoesOperacao(
     width: largura,
     height: altura,
     legend: { show: false },
-    cursor: { y: false, points: { show: false } },
+    cursor: {
+      y: false,
+      points: { show: false },
+      // Duplo-clique é o reset de zoom do uPlot (`autoScaleX`): o recorte precisa cair ANTES,
+      // senão o `range` abaixo devolveria o recorte velho e o reset não resetaria nada. Do bind
+      // default do uPlot (`filtBtn0`) só o filtro de botão principal é replicado — o alvo não,
+      // porque o retângulo de seleção fica por cima do `.u-over` e resetar por ele é o esperado.
+      bind: {
+        dblclick: (_u, _alvo, padrao) => (evento) => {
+          if (evento.button !== 0) return null;
+          aoZoom(null);
+          return padrao(evento);
+        },
+      },
+    },
     series: colunas.series,
     bands: colunas.bands,
     // `x` é dinâmico (tarefa 2.2, `calcularRangeXOperacao`): a função é reavaliada a cada
-    // re-range do uPlot, então lê `rangeXRef.current` sempre fresco sem recriar a instância.
+    // re-range do uPlot, então lê as refs sempre frescas sem recriar a instância. O zoom
+    // manual do operador tem precedência sobre a janela da tela enquanto existir. O `as` é só
+    // interoperabilidade: `Range.MinMax` do uPlot é tupla mutável e ele nunca escreve nela.
     // As escalas Y (tarefa 2.3) vêm prontas de `construirEscalasUplot`, uma por variável.
     scales: {
-      x: { range: (): uPlot.Range.MinMax => rangeXRef.current as [number, number] },
+      x: {
+        range: (): uPlot.Range.MinMax =>
+          (zoomXRef.current ?? rangeXRef.current) as [number, number],
+      },
       ...escalasY,
     },
     plugins: [
       pluginLinhaAgora(agoraDivisorRef, tema),
       pluginSecaoFutura(agoraDivisorRef, semPredicaoRef, tema),
+      pluginZoomX(aoZoom),
     ],
     axes: [
       {
@@ -657,6 +702,16 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   const colunasAtuais = useRef(colunas);
   colunasAtuais.current = colunas;
 
+  // Zoom manual em X (arrasto no gráfico): estado porque a tela precisa avisar que a vista
+  // parou de seguir o relógio, e ref porque o `range` do eixo x roda DENTRO do `setScale` do
+  // próprio zoom — esperar o re-render do React devolveria a janela velha e comeria o recorte.
+  const [zoomX, setZoomX] = useState<ZoomX | null>(null);
+  const zoomXRef = useRef<ZoomX | null>(null);
+  function aplicarZoomX(faixa: ZoomX | null): void {
+    zoomXRef.current = faixa;
+    setZoomX(faixa);
+  }
+
   const idsEstrutura = defaults.filter((pena) => ligadas.has(pena.id)).map((pena) => pena.id);
   const escalaAssinatura = idsEstrutura
     .map((id) => {
@@ -679,6 +734,8 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
         agoraDivisorRef,
         semPredicaoRef,
         rangeXRef,
+        zoomXRef,
+        aplicarZoomX,
         escalasUplot.scales,
         eixoYChave,
         eixoYCor,
@@ -696,17 +753,19 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
       instancia.destroy();
       grafico.current = null;
     };
+    // Só a `estrutura` recria a instância: tudo o mais que entra em `construirOpcoesOperacao`
+    // é estável entre renders (refs e o setter do zoom, que `aplicarZoomX` só fecha por cima).
+    // Nunca passe daqui um valor reativo sem colocá-lo na `estrutura` — ele congelaria no
+    // fechamento da instância criada aqui.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estrutura, colunas === null]);
 
   useEffect(() => {
     const instancia = grafico.current;
     if (!instancia || !colunas) return;
-    const x = instancia.data[0];
-    const zoomado =
-      x.length > 0 &&
-      ((instancia.scales.x.min ?? 0) > x[0] || (instancia.scales.x.max ?? 0) < x[x.length - 1]);
-    instancia.setData(colunas.dados, !zoomado);
+    // Com zoom manual o dado novo entra sem re-ranger: re-ranger devolveria a janela da tela
+    // e apagaria o recorte que o operador está olhando.
+    instancia.setData(colunas.dados, zoomXRef.current === null);
   }, [colunas]);
 
   // Tique de 1 s da linha "agora" (B-5): ao vivo e sem zoom manual, re-ancora no relógio de
@@ -717,11 +776,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     const id = window.setInterval(() => {
       const instancia = grafico.current;
       if (!instancia || !janelaDeslizante.aoVivo) return;
-      const x = instancia.data[0];
-      const zoomado =
-        x.length > 0 &&
-        ((instancia.scales.x.min ?? 0) > x[0] || (instancia.scales.x.max ?? 0) < x[x.length - 1]);
-      if (zoomado) return;
+      if (zoomXRef.current !== null) return;
       agoraDivisorRef.current = Date.now() / 1000;
       rangeXRef.current = calcularRangeXOperacao({
         fimEpochS: janelaDeslizante.fimEpochS,
@@ -736,12 +791,13 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     };
   }, [janelaDeslizante.aoVivo, janelaDeslizante.fimEpochS, janelaSegundos, horizonteFuturoS]);
 
-  /** Reset layout (tarefa 2.4): volta ao vivo E limpa o zoom manual do uPlot no mesmo clique
-   *  — sem o `setData(dados, true)` explícito, um zoom/pan em andamento sobreviveria ao
-   *  `reset()` do hook (o efeito de dados acima preserva zoom por design). Completo (B-6):
-   *  zera também as escalas Y por variável — e remove a preferência persistida, senão o
-   *  próximo reload ressuscitaria a escala que o reset acabou de apagar. */
+  /** Reset layout (tarefa 2.4): volta ao vivo, solta o zoom manual e re-ranger no mesmo clique
+   *  — sem o `setData(dados, true)` explícito, o recorte sobreviveria ao `reset()` do hook (o
+   *  efeito de dados acima preserva zoom por design). Completo (B-6): zera também as escalas Y
+   *  por variável — e remove a preferência persistida, senão o próximo reload ressuscitaria a
+   *  escala que o reset acabou de apagar. */
   function aoClicarReset(): void {
+    aplicarZoomX(null);
     janelaDeslizante.reset();
     limparEscalas(chaveEscalasStorage);
     setEscalasPorVar({});
@@ -757,17 +813,25 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="plaqueta text-xs text-fg-muted">Trend</h2>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Largura da janela, deslizar e reset re-miram o eixo x: o recorte do operador era
+              um pedaço da janela ANTERIOR, mantê-lo ignoraria o comando que ele acabou de dar. */}
           <JanelaTempo
             prefixoTestid="operate"
             segundos={janelaSegundos}
-            onChange={setJanelaSegundos}
+            onChange={(segundos) => {
+              aplicarZoomX(null);
+              setJanelaSegundos(segundos);
+            }}
           />
           <Button
             type="button"
             variant="outline"
             size="sm"
             data-testid="operate-janela-voltar"
-            onClick={janelaDeslizante.voltar}
+            onClick={() => {
+              aplicarZoomX(null);
+              janelaDeslizante.voltar();
+            }}
           >
             {"<"}
           </Button>
@@ -777,7 +841,10 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
             size="sm"
             data-testid="operate-janela-avancar"
             disabled={janelaDeslizante.aoVivo}
-            onClick={janelaDeslizante.avancar}
+            onClick={() => {
+              aplicarZoomX(null);
+              janelaDeslizante.avancar();
+            }}
           >
             {">"}
           </Button>
@@ -826,6 +893,14 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
             </p>
           )}
         </div>
+      )}
+
+      {/* Fora do poço: `text-warn-fg` é escuro por design (superfície clara) e sumiria contra o
+          fundo do gráfico — dentro do poço só entra texto em `text-well-chart-fg`. */}
+      {zoomX !== null && (
+        <p role="status" data-testid="operate-trend-zoom" className="text-xs text-warn-fg">
+          Zoom manual — a vista não segue o tempo. Duplo-clique ou Reset layout para voltar
+        </p>
       )}
 
       <LegendaOperacao

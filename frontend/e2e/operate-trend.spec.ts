@@ -393,4 +393,97 @@ test.describe("Tela de Operação", () => {
     await expect(eixoY(linhaMv)).toBeVisible();
     await expect(eixoY(linhaCv)).toHaveCount(0);
   });
+
+  test("PW-OP-11: zoom manual em X sobrevive à troca do eixo Y e volta no duplo-clique", async ({
+    page,
+  }) => {
+    // `.u-over` é a camada de interação do uPlot (o canvas inclui os eixos, e `page.mouse` não
+    // rola a página sozinho como o `click` de um locator faz).
+    const tela = page.getByTestId("operate-trend-chart").locator(".u-over");
+    await expect(tela).toBeVisible();
+    await tela.scrollIntoViewIfNeeded();
+    const caixa = await tela.boundingBox();
+    if (caixa === null) throw new Error("área de interação do trend sem caixa delimitadora");
+    const meioY = caixa.y + caixa.height / 2;
+
+    // Janela REALMENTE aplicada pelo uPlot. O aviso na tela sai do estado do React, então
+    // sozinho ele não prova nada sobre o eixo: o defeito original era exatamente o `range` do
+    // eixo x devolver a janela inteira enquanto o resto da tela achava que havia zoom. O eixo
+    // é desenhado no canvas, sem superfície no DOM — daí ler a instância pela fibra do React.
+    const janelaAplicadaS = async (): Promise<number> =>
+      page.evaluate(() => {
+        // Fibra do React e instância do uPlot não têm tipo público: navegação campo a campo,
+        // com guarda em cada passo (o `as` existe só para indexar por nome).
+        const campo = (valor: unknown, nome: string): unknown =>
+          valor !== null && typeof valor === "object" && nome in valor
+            ? (valor as Record<string, unknown>)[nome]
+            : null;
+
+        const janelaDoGrafico = (valor: unknown): number | null => {
+          if (!Array.isArray(campo(valor, "series"))) return null;
+          const x = campo(campo(valor, "scales"), "x");
+          const min = campo(x, "min");
+          const max = campo(x, "max");
+          return typeof min === "number" && typeof max === "number" ? Math.round(max - min) : null;
+        };
+
+        let no: Element | null = document.querySelector(
+          '[data-testid="operate-trend-chart"] .u-wrap',
+        );
+        let fibra: unknown = null;
+        while (no !== null && fibra === null) {
+          const chave = Object.keys(no).find((nome) => nome.startsWith("__reactFiber$"));
+          if (chave === undefined) no = no.parentElement;
+          else fibra = (no as unknown as Record<string, unknown>)[chave];
+        }
+
+        for (let f = fibra, nivel = 0; f !== null && nivel < 40; f = campo(f, "return"), nivel++) {
+          for (
+            let gancho = campo(f, "memoizedState"), i = 0;
+            gancho !== null && i < 40;
+            gancho = campo(gancho, "next"), i++
+          ) {
+            const janela = janelaDoGrafico(campo(campo(gancho, "memoizedState"), "current"));
+            if (janela !== null) return janela;
+          }
+        }
+        throw new Error("instância do uPlot não encontrada na fibra do React");
+      });
+
+    // Sem zoom a vista segue o relógio: janela cheia (30 min + horizonte) e nenhum aviso.
+    await expect(page.getByTestId("operate-trend-zoom")).toHaveCount(0);
+    const janelaCheia = await janelaAplicadaS();
+    expect(janelaCheia).toBeGreaterThan(JANELA_PADRAO_S);
+
+    // Arrastar sobre o gráfico recorta a janela. Antes, o `range` do eixo x devolvia sempre a
+    // janela da tela — o uPlot pedia o recorte e recebia a janela inteira de volta, então o
+    // arrasto não fazia absolutamente nada.
+    await page.mouse.move(caixa.x + caixa.width * 0.4, meioY);
+    await page.mouse.down();
+    await page.mouse.move(caixa.x + caixa.width * 0.65, meioY, { steps: 12 });
+    await page.mouse.up();
+    await expect(page.getByTestId("operate-trend-zoom")).toBeVisible();
+    const janelaZoom = await janelaAplicadaS();
+    expect(janelaZoom).toBeLessThan(janelaCheia / 2);
+
+    // O ponto do cenário: trocar o eixo Y recria a instância do uPlot, e o recorte do operador
+    // não pode ir junto — o zoom mora numa ref da tela, não dentro da instância.
+    await page
+      .locator('[data-testid="operate-trend-legend-item"][data-var-id="cv_1"]')
+      .getByText(/Nivel/)
+      .click();
+    await expect(page.getByTestId("operate-trend-zoom")).toBeVisible();
+    expect(await janelaAplicadaS()).toBe(janelaZoom);
+
+    // Dado novo do polling (5 s) entra sem re-ranger: o recorte não pode piscar de volta para
+    // a janela cheia embaixo do operador.
+    await page.waitForTimeout(6000);
+    await expect(page.getByTestId("operate-trend-zoom")).toBeVisible();
+    expect(await janelaAplicadaS()).toBe(janelaZoom);
+
+    // Duplo-clique é o reset do próprio uPlot: a vista volta a seguir o tempo.
+    await tela.dblclick();
+    await expect(page.getByTestId("operate-trend-zoom")).toHaveCount(0);
+    expect(await janelaAplicadaS()).toBe(janelaCheia);
+  });
 });
