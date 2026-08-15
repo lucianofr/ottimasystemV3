@@ -353,4 +353,44 @@ test.describe("Tela de Operação", () => {
         Date.parse(ultima.searchParams.get("start") ?? "")) / 1000;
     expect(Math.round(janelaS)).toBe(120);
   });
+
+  test("PW-OP-10: clicar na linha da legenda traz o eixo Y para a variável, sem alternar a pena", async ({
+    page,
+  }) => {
+    const linha = (varId: string) =>
+      page.locator(`[data-testid="operate-trend-legend-item"][data-var-id="${varId}"]`);
+    const linhaCv = linha("cv_1");
+    const linhaMv = linha("mv_1");
+    // "Eixo Y" é o rótulo visível de quem é dona do único eixo desenhado — o próprio indicador
+    // que o operador olha, então é nele que a asserção mora (não num atributo só de teste).
+    const eixoY = (linhaVar: typeof linhaCv) => linhaVar.getByText("Eixo Y", { exact: true });
+
+    // Estado inicial: a CV nasce ligada (com o eixo) e a MV nasce desligada (opt-in, brief 5.3).
+    await expect(eixoY(linhaCv)).toBeVisible();
+    await expect(eixoY(linhaMv)).toHaveCount(0);
+
+    // Ligar a MV pelo checkbox leva o eixo com ela — comportamento de antes, preservado.
+    await linhaMv.getByRole("checkbox").first().check();
+    await expect(eixoY(linhaMv)).toBeVisible();
+    await expect(eixoY(linhaCv)).toHaveCount(0);
+
+    // O ponto do cenário: clicar na LINHA da CV traz o eixo Y de volta para ela e não mexe em
+    // pena nenhuma. Antes, o clique no nome alternava a pena — desmarcar e marcar era o ÚNICO
+    // jeito de mover o eixo, e ainda apagava a variável do gráfico no caminho.
+    await linhaCv.getByText(/Nivel/).click();
+    await expect(eixoY(linhaCv)).toBeVisible();
+    await expect(eixoY(linhaMv)).toHaveCount(0);
+    await expect(linhaCv.getByRole("checkbox").first()).toBeChecked();
+    await expect(linhaMv.getByRole("checkbox").first()).toBeChecked();
+
+    // Linha de pena desligada: o eixo pertence a quem está desenhado, então o clique liga a
+    // pena pelo mesmo caminho do checkbox (respeita o teto) e leva o eixo junto — clique nenhum
+    // na linha desliga pena.
+    await linhaMv.getByRole("checkbox").first().uncheck();
+    await expect(eixoY(linhaCv)).toBeVisible();
+    await linhaMv.getByText(/Abertura/).click();
+    await expect(linhaMv.getByRole("checkbox").first()).toBeChecked();
+    await expect(eixoY(linhaMv)).toBeVisible();
+    await expect(eixoY(linhaCv)).toHaveCount(0);
+  });
 });

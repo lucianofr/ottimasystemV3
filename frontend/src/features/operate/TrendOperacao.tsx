@@ -592,6 +592,21 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     setAviso(null);
   }
 
+  /** Clique na linha da legenda: a variável clicada passa a ser dona do único eixo Y visível.
+   *  Pena desligada não pode ser foco — o eixo pertence a quem está desenhado —, então a linha
+   *  liga a pena pelo mesmo caminho do checkbox, que já respeita o teto e leva o foco com ela.
+   *  Nenhum clique na linha desliga pena nenhuma: mover o eixo nunca apaga uma variável. */
+  function focarPena(pena: PenaLegenda): void {
+    if (ligadas.has(pena.id)) {
+      setFoco(pena.id);
+      // O aviso do teto é de uma tentativa de ligar pena, não do eixo: sem limpar aqui, ele
+      // ficaria pendurado na tela enquanto o operador só troca de eixo, descrevendo outra ação.
+      setAviso(null);
+      return;
+    }
+    alternarPena(pena);
+  }
+
   // Teto do carry-forward do eixo compartilhado: a cadência do histórico é Ts_mpc no modo bruto
   // e o bucket de 1 min no agregado (`GET /api/history/mpc`), então o modo entra no cálculo.
   const tetoCarryS = tetoCarryForwardOperacaoS(
@@ -821,6 +836,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
         foco={foco}
         escalas={escalasPorVar}
         onAlternarPena={alternarPena}
+        onFocarPena={focarPena}
         onMudarEscala={mudarEscala}
       />
 
