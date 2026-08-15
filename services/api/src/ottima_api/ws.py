@@ -27,7 +27,7 @@ from fastapi import APIRouter, WebSocket
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ottima_core.bus import CHANNEL_EVENTS
+from ottima_core.bus import CHANNEL_CALC_VALUES, CHANNEL_EVENTS
 from ottima_core.config import Settings
 from ottima_core.models import User
 from ottima_core.pubsub import ChannelListener, PatternListener
@@ -140,6 +140,14 @@ class FlowStatusHub:
         self._opc_listener = PatternListener(
             redis_client, OPC_VALUES_PATTERN, self._dispatch_opc_values, name="api-opc-values-hub"
         )
+        # Tag calculada publica no mesmo formato `OpcValue`, canal fixo (ADR-033): reusa
+        # `_dispatch_opc_values` — o filtro por `tag_id` no payload já cobre os dois casos.
+        self._calc_listener = ChannelListener(
+            redis_client,
+            CHANNEL_CALC_VALUES,
+            self._dispatch_calc_values,
+            name="api-calc-values-hub",
+        )
         self._fuzzy_listener = PatternListener(
             redis_client,
             FUZZY_STATE_PATTERN,
@@ -160,6 +168,7 @@ class FlowStatusHub:
         await self._listener.start()
         await self._mpc_listener.start()
         await self._opc_listener.start()
+        await self._calc_listener.start()
         await self._fuzzy_listener.start()
         await self._events_listener.start()
 
@@ -168,6 +177,7 @@ class FlowStatusHub:
         await self._listener.stop()
         await self._mpc_listener.stop()
         await self._opc_listener.stop()
+        await self._calc_listener.stop()
         await self._fuzzy_listener.stop()
         await self._events_listener.stop()
         subs, self._subs = self._subs, set()
@@ -198,6 +208,11 @@ class FlowStatusHub:
         fuzzy_id = _fuzzy_id_of(channel)
         if fuzzy_id is not None:
             await self._fanout(channel, raw, "fuzzy_ids", fuzzy_id)
+
+    async def _dispatch_calc_values(self, raw: str) -> None:
+        """`ChannelListener` entrega só `data` (canal fixo `calc.values`, ADR-033): reusa o
+        mesmo fanout por `tag_id` do payload, carimbando o canal literal no envelope."""
+        await self._dispatch_opc_values(CHANNEL_CALC_VALUES, raw)
 
     async def _dispatch_opc_values(self, channel: str, raw: str) -> None:
         """Fanout de `opc.values.<conn_id>`: o filtro é o `tag_id` DENTRO do payload (o canal

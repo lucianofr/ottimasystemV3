@@ -12,6 +12,7 @@ from sqlalchemy import Table, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ottima_core.bus import (
+    CHANNEL_CALC_VALUES,
     KIND_COMM_FAILURE,
     KIND_PROJECT_ACTIVATED,
     KIND_TAG_CREATED,
@@ -295,6 +296,35 @@ async def test_padrao_casa_multiplas_conexoes(redis_client, session_factory, mak
         rows = (await session.execute(select(samples_table).order_by(samples_table.c.tag_id))).all()
 
     assert [(r.tag_id, r.value) for r in rows] == [(11, 1.0), (22, 2.0)]
+
+
+async def test_calc_values_publicado_grava_em_samples(redis_client, session_factory, make_pipeline):
+    """Tag calculada (ADR-033) publica no canal fixo `calc.values`, mesmo formato `OpcValue`:
+    reusa `_on_sample` e a hypertable `samples`, sem tabela nem buffer novos."""
+    await make_pipeline(session_factory)
+    valor = sample(77, value=3.5)
+    await redis_client.publish(CHANNEL_CALC_VALUES, valor.model_dump_json())
+
+    await wait_rows(session_factory, samples_table, 1)
+    async with session_factory() as session:
+        row = (await session.execute(select(samples_table))).one()
+
+    assert (row.tag_id, row.value) == (valor.tag_id, valor.value)
+
+
+async def test_calc_values_malformado_nao_derruba_o_pipeline(
+    redis_client, session_factory, make_pipeline
+):
+    await make_pipeline(session_factory)
+    await redis_client.publish(CHANNEL_CALC_VALUES, "{lixo")
+
+    valida = sample(78, value=9.0)
+    await redis_client.publish(CHANNEL_CALC_VALUES, valida.model_dump_json())
+    await wait_rows(session_factory, samples_table, 1)
+
+    async with session_factory() as session:
+        row = (await session.execute(select(samples_table))).one()
+    assert (row.tag_id, row.value) == (valida.tag_id, valida.value)
 
 
 async def test_stop_faz_flush_final_e_e_idempotente(redis_client, session_factory, make_pipeline):

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     health_url_opc_worker: str = "http://opc-worker:8001/health"
     health_url_flow_runtime: str = "http://flow-runtime:8002/health"
     health_url_recorder: str = "http://recorder:8003/health"
+    health_url_calc_worker: str = "http://calc-worker:8004/health"
+    # tamanho do pool de processos do ScriptPool das tags calculadas (spec tags-calculadas)
+    calc_pool_size: int = 4
 
 
 @lru_cache

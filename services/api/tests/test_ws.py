@@ -15,7 +15,13 @@ import pytest
 from fastapi import FastAPI
 
 from ottima_api.ws import QUEUE_MAX, FlowStatusHub
-from ottima_core.bus import FlowStatus, PortValue, channel_flow_status
+from ottima_core.bus import (
+    CHANNEL_CALC_VALUES,
+    FlowStatus,
+    OpcValue,
+    PortValue,
+    channel_flow_status,
+)
 from ottima_core.security import create_access_token
 
 RECEIVE_TIMEOUT_S = 5.0
@@ -460,3 +466,34 @@ async def test_cliente_lento_nao_bloqueia_os_demais(connect, operator_token, red
         assert 0 < len(atrasadas) <= QUEUE_MAX + 1
         assert len(atrasadas) < publicadas
         assert atrasadas[-1] == float(publicadas - 1)
+
+
+async def test_calc_values_chega_para_quem_assina_opc_values(connect, operator_token, redis_client):
+    """Tag calculada (ADR-033) publica no canal fixo `calc.values`, mesmo `OpcValue` do
+    opc-worker: quem já assina `opc_values` recebe sem mudança de protocolo no cliente."""
+    async with connect(operator_token) as ws:
+        await ws.ready()
+        await ws.send_json({"subscribe": {"opc_values": [42]}})
+
+        valor = OpcValue(tag_id=42, ts=datetime.now(UTC), value=7.5, quality=0)
+        await redis_client.publish(CHANNEL_CALC_VALUES, valor.model_dump_json())
+
+        message = await ws.receive_json()
+        assert message["channel"] == "calc.values"
+        assert message["data"]["tag_id"] == 42
+
+
+async def test_calc_values_de_tag_nao_assinada_nao_vaza(connect, operator_token, redis_client):
+    async with connect(operator_token) as ws:
+        await ws.ready()
+        await ws.send_json({"subscribe": {"opc_values": [1]}})
+
+        outra = OpcValue(tag_id=99, ts=datetime.now(UTC), value=1.0, quality=0)
+        await redis_client.publish(CHANNEL_CALC_VALUES, outra.model_dump_json())
+        await ws.assert_silent()
+
+        # o cano segue vivo: uma tag assinada continua chegando
+        nossa = OpcValue(tag_id=1, ts=datetime.now(UTC), value=2.0, quality=0)
+        await redis_client.publish(CHANNEL_CALC_VALUES, nossa.model_dump_json())
+        message = await ws.receive_json()
+        assert message["data"]["tag_id"] == 1

@@ -99,11 +99,17 @@ def _fetch_worker_health(url: str) -> dict:
 
 @router.get("/health/workers", dependencies=[Depends(require_operator)])
 async def health_workers(settings: Settings = Depends(get_app_settings)) -> dict:
-    """Agrega os 3 workers em paralelo, 1 thread cada (F5R-09: urllib stdlib, sem httpx em
+    """Agrega os 4 workers em paralelo, 1 thread cada (F5R-09: urllib stdlib, sem httpx em
     produção)."""
-    opc_worker, flow_runtime, recorder = await asyncio.gather(
+    opc_worker, flow_runtime, recorder, calc_worker = await asyncio.gather(
         asyncio.to_thread(_fetch_worker_health, settings.health_url_opc_worker),
         asyncio.to_thread(_fetch_worker_health, settings.health_url_flow_runtime),
         asyncio.to_thread(_fetch_worker_health, settings.health_url_recorder),
+        asyncio.to_thread(_fetch_worker_health, settings.health_url_calc_worker),
     )
-    return {"opc_worker": opc_worker, "flow_runtime": flow_runtime, "recorder": recorder}
+    return {
+        "opc_worker": opc_worker,
+        "flow_runtime": flow_runtime,
+        "recorder": recorder,
+        "calc_worker": calc_worker,
+    }

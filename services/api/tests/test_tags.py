@@ -94,3 +94,30 @@ async def test_patch_e_delete(client, admin_headers):
     r = await client.patch(f"/api/tags/{t['id']}", json={"eu": "bar"}, headers=admin_headers)
     assert r.status_code == 200 and r.json()["eu"] == "bar"
     assert (await client.delete(f"/api/tags/{t['id']}", headers=admin_headers)).status_code == 204
+
+
+async def _tag_calculada(client, headers) -> int:
+    p = (await client.post("/api/projects", json={"name": "TagsCalcProj"}, headers=headers)).json()
+    r = await client.post(
+        "/api/calculated-tags",
+        json={"project_id": p["id"], "name": "CALC-1", "period_seconds": 5, "code": "OUT = 1.0"},
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+async def test_patch_delete_404_para_tag_calculada_mas_list_ainda_a_lista(client, admin_headers):
+    """Achado da revisão de fase 5: PATCH/DELETE de `/api/tags/{id}` bypassavam a validação
+    de tag calculada e publicavam KIND_TAG_* em vez de KIND_CALC_TAG_* — o CRUD dela é
+    `/api/calculated-tags` (ADR-033). A listagem continua incluindo calculadas: a tela
+    Tags e o seletor do Trend dependem disso."""
+    tag_id = await _tag_calculada(client, admin_headers)
+
+    r = await client.patch(f"/api/tags/{tag_id}", json={"eu": "kg"}, headers=admin_headers)
+    assert r.status_code == 404
+    r = await client.delete(f"/api/tags/{tag_id}", headers=admin_headers)
+    assert r.status_code == 404
+
+    listagem = (await client.get("/api/tags", headers=admin_headers)).json()
+    assert any(t["id"] == tag_id for t in listagem)

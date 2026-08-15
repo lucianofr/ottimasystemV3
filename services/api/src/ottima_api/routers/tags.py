@@ -21,6 +21,20 @@ async def _carregar(db: AsyncSession, tag_id: int) -> Tag:
     return tag
 
 
+async def _carregar_opc(db: AsyncSession, tag_id: int) -> Tag:
+    """PATCH/DELETE são só para tag OPC — tag calculada tem CRUD próprio em
+    `/api/calculated-tags` (ADR-033), que valida script e publica KIND_CALC_TAG_*; sem
+    este filtro, esta rota mutaria a linha de `tags` de uma calculada sem nenhuma das
+    duas coisas, e deixaria `data_type` fugir de `float` (achado da revisão de fase 5).
+    `GET /api/tags/{tag_id}` e a listagem continuam sem filtro — leitura não corrompe
+    nada, e a tela Tags/o seletor do Trend dependem da listagem incluir as calculadas."""
+    stmt = select(Tag).where(Tag.id == tag_id, Tag.connection_id.is_not(None))
+    tag = await db.scalar(stmt)
+    if tag is None:
+        raise HTTPException(status_code=404, detail="Tag não encontrada")
+    return tag
+
+
 async def _publicar(redis_client: Redis, user: User, tag: Tag, kind: str, acao: str) -> None:
     """Auditoria da mutação (ADR-020) — sempre depois do commit, nunca antes."""
     await publish_event(
@@ -82,7 +96,7 @@ async def update_tag(
     user: User = Depends(require_admin),
     redis_client: Redis = Depends(get_redis),
 ) -> Tag:
-    tag = await _carregar(db, tag_id)
+    tag = await _carregar_opc(db, tag_id)
     for campo, valor in body.model_dump(exclude_unset=True).items():
         setattr(tag, campo, valor)
     try:
@@ -102,11 +116,17 @@ async def delete_tag(
     user: User = Depends(require_admin),
     redis_client: Redis = Depends(get_redis),
 ) -> None:
-    tag = await _carregar(db, tag_id)
+    tag = await _carregar_opc(db, tag_id)
     # Identidade capturada antes do delete: depois o objeto não é mais legível
     conn_id, name = tag.connection_id, tag.name
     await db.delete(tag)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409, detail="Tag é entrada de uma tag calculada e não pode ser removida"
+        ) from None
     await publish_event(
         redis_client,
         severity="info",

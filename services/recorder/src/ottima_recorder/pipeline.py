@@ -17,6 +17,7 @@ from sqlalchemy import Table, insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ottima_core.bus import (
+    CHANNEL_CALC_VALUES,
     CHANNEL_EVENTS,
     KIND_RECORDER_BACKPRESSURE,
     EventMessage,
@@ -88,9 +89,9 @@ class RecorderPipeline:
     """Barramento → hypertables. Único escritor de `samples`/`events`/`mpc_samples`/
     `fuzzy_samples` (spec F2 §6, F5 §2.3, ADR-030).
 
-    Quatro assinaturas independentes (`opc.values.*`, `events`, `mpc.state.*` e
+    Cinco assinaturas independentes (`opc.values.*`, `calc.values`, `events`, `mpc.state.*` e
     `fuzzy.state.*`), cada uma no seu próprio `PatternListener`/`ChannelListener` do laço
-    resiliente compartilhado — os quatro tipos de dado têm buffers, tetos e contadores de
+    resiliente compartilhado — os cinco tipos de dado têm buffers, tetos e contadores de
     descarte próprios (spec §6.4), então nada aqui depende de ordem entre canal e padrão:
     uma conexão a menos era só economia, não contrato.
     """
@@ -131,6 +132,11 @@ class RecorderPipeline:
         )
         self._samples_listener = PatternListener(
             redis_client, VALUES_PATTERN, self._on_sample, name="recorder-samples"
+        )
+        # Tag calculada publica no mesmo formato `OpcValue`, canal fixo (ADR-033): reusa
+        # `_on_sample` e `_samples` — mesma hypertable, sem buffer/tabela novos.
+        self._calc_listener = ChannelListener(
+            redis_client, CHANNEL_CALC_VALUES, self._on_calc_sample, name="recorder-calc-values"
         )
         self._mpc_listener = PatternListener(
             redis_client, MPC_STATE_PATTERN, self._on_mpc_state, name="recorder-mpc"
@@ -195,6 +201,7 @@ class RecorderPipeline:
         try:
             await self._events_listener.start()
             await self._samples_listener.start()
+            await self._calc_listener.start()
             await self._mpc_listener.start()
             await self._fuzzy_listener.start()
         except BaseException:
@@ -203,6 +210,7 @@ class RecorderPipeline:
             # ainda rodando para reassiná-la ou fechá-la sozinha.
             await self._events_listener.stop()
             await self._samples_listener.stop()
+            await self._calc_listener.stop()
             await self._mpc_listener.stop()
             await self._fuzzy_listener.stop()
             raise
@@ -226,6 +234,7 @@ class RecorderPipeline:
                 logger.exception("Desmonte do recorder: task de flush terminou com erro")
         await self._events_listener.stop()
         await self._samples_listener.stop()
+        await self._calc_listener.stop()
         await self._mpc_listener.stop()
         await self._fuzzy_listener.stop()
         try:
@@ -396,6 +405,11 @@ class RecorderPipeline:
                 )
 
     async def _on_sample(self, channel: str, raw: str) -> None:
+        self.ingest_sample(raw)
+
+    async def _on_calc_sample(self, raw: str) -> None:
+        """`ChannelListener` entrega só `data` (canal fixo, sem sufixo) — `ingest_sample` já
+        ignora o canal, então é o mesmo parse de `_on_sample`."""
         self.ingest_sample(raw)
 
     async def _on_event(self, raw: str) -> None:

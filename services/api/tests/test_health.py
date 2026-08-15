@@ -257,18 +257,20 @@ def _monkeypatch_urlopen(monkeypatch, respostas: dict[str, object]) -> None:
     monkeypatch.setattr(health_module.urllib.request, "urlopen", _fake_urlopen)
 
 
-async def test_workers_agrega_os_tres_sempre_200(
+async def test_workers_agrega_os_quatro_sempre_200(
     client, operator_headers, monkeypatch, test_settings
 ):
     corpo_opc = {"status": "ok", "service": "opc-worker", "version": "0.1.0", "connections": {}}
     corpo_flow = {"status": "ok", "service": "flow-runtime", "version": "0.1.0"}
     corpo_rec = {"status": "degraded", "service": "recorder", "version": "0.1.0"}
+    corpo_calc = {"status": "ok", "service": "calc-worker", "version": "0.1.0", "tags": {}}
     _monkeypatch_urlopen(
         monkeypatch,
         {
             test_settings.health_url_opc_worker: corpo_opc,
             test_settings.health_url_flow_runtime: corpo_flow,
             test_settings.health_url_recorder: corpo_rec,
+            test_settings.health_url_calc_worker: corpo_calc,
         },
     )
 
@@ -279,6 +281,7 @@ async def test_workers_agrega_os_tres_sempre_200(
     assert body["opc_worker"] == {"up": True, **corpo_opc}
     assert body["flow_runtime"] == {"up": True, **corpo_flow}
     assert body["recorder"] == {"up": True, **corpo_rec}
+    assert body["calc_worker"] == {"up": True, **corpo_calc}
 
 
 async def test_workers_erro_e_timeout_viram_up_false_sem_derrubar_o_200(
@@ -291,6 +294,7 @@ async def test_workers_erro_e_timeout_viram_up_false_sem_derrubar_o_200(
             test_settings.health_url_opc_worker: corpo_opc,
             test_settings.health_url_flow_runtime: urllib.error.URLError("conexão recusada"),
             test_settings.health_url_recorder: TimeoutError("tempo esgotado"),
+            test_settings.health_url_calc_worker: urllib.error.URLError("conexão recusada"),
         },
     )
 
@@ -301,6 +305,7 @@ async def test_workers_erro_e_timeout_viram_up_false_sem_derrubar_o_200(
     assert body["opc_worker"] == {"up": True, **corpo_opc}
     assert body["flow_runtime"] == {"up": False}
     assert body["recorder"] == {"up": False}
+    assert body["calc_worker"] == {"up": False}
 
 
 async def test_workers_corpo_json_nao_objeto_vira_up_false_sem_derrubar_o_200(
@@ -316,6 +321,7 @@ async def test_workers_corpo_json_nao_objeto_vira_up_false_sem_derrubar_o_200(
             test_settings.health_url_opc_worker: corpo_opc,
             test_settings.health_url_flow_runtime: [1, 2, 3],
             test_settings.health_url_recorder: "ok",
+            test_settings.health_url_calc_worker: False,
         },
     )
 
@@ -326,6 +332,7 @@ async def test_workers_corpo_json_nao_objeto_vira_up_false_sem_derrubar_o_200(
     assert body["opc_worker"] == {"up": True, **corpo_opc}
     assert body["flow_runtime"] == {"up": False}
     assert body["recorder"] == {"up": False}
+    assert body["calc_worker"] == {"up": False}
 
 
 async def test_workers_anonimo_401(client):
