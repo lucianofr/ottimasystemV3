@@ -135,7 +135,7 @@ def test_session_key_ignora_tags_e_tags_key_ordena_por_id() -> None:
 
 def test_to_health_tem_as_chaves_da_spec_em_ordem() -> None:
     momento = datetime(2026, 8, 3, 12, 0, tzinfo=UTC)
-    snapshot = ConnectionSnapshot(name="Forno 1", session_up_since=momento, tags_subscribed=3)
+    snapshot = ConnectionSnapshot(name="Forno 1", session_up_since=momento, tags_polled=3)
     health = snapshot.to_health()
     assert list(health) == [
         "name",
@@ -143,8 +143,8 @@ def test_to_health_tem_as_chaves_da_spec_em_ordem() -> None:
         "flow_watchdog_alive",
         "session_up_since",
         "last_publish_ts",
-        "tags_subscribed",
-        "monitored_errors",
+        "tags_polled",
+        "read_errors",
         "write_errors",
     ]
     assert health["state"] == "connecting"

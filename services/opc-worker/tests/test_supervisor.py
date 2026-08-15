@@ -489,10 +489,10 @@ async def test_cria_conexao_e_o_runtime_nasce(
         assert state.connections[conn_id].state is ConnectionState.UP
 
 
-async def test_tag_nova_recria_apenas_a_subscription(
+async def test_tag_nova_recria_apenas_o_poller(
     session_factory: async_sessionmaker[AsyncSession], redis_client: Redis, sim: OpcSimServer
 ) -> None:
-    """Mudança só de tags ⇒ subscription nova, sessão preservada (spec §2.2-1)."""
+    """Mudança só de tags ⇒ poller novo, sessão preservada (spec §2.2-1)."""
     project_id = await create_project(session_factory)
     conn_id = await create_connection(session_factory, project_id, sim.endpoint)
     await create_tag(session_factory, conn_id, name="Nível", node_id=NODE_STATIC)
@@ -502,7 +502,7 @@ async def test_tag_nova_recria_apenas_a_subscription(
     async with started(supervisor):
         await wait_up(supervisor, conn_id)
         runtime = supervisor.runtimes[conn_id]
-        await await_until(lambda: runtime.snapshot.tags_subscribed == 1)
+        await await_until(lambda: runtime.snapshot.tags_polled == 1)
         subiu_em = runtime.snapshot.session_up_since
 
         async with collecting(redis_client, channel_opc_values(conn_id)) as valores:
@@ -511,7 +511,7 @@ async def test_tag_nova_recria_apenas_a_subscription(
 
         assert supervisor.runtimes[conn_id] is runtime, "a sessão não deveria ter sido recriada"
         assert runtime.snapshot.session_up_since == subiu_em
-        assert runtime.snapshot.tags_subscribed == 2
+        assert runtime.snapshot.tags_polled == 2
 
 
 async def test_campo_da_conexao_recria_a_sessao(
@@ -537,6 +537,36 @@ async def test_campo_da_conexao_recria_a_sessao(
         assert novo.snapshot.session_up_since != subiu_em
         assert state.connections[conn_id] is novo.snapshot
         assert antigo.state is not ConnectionState.UP or antigo.client is None
+
+
+async def test_periodo_de_varredura_nao_recria_a_sessao(
+    session_factory: async_sessionmaker[AsyncSession], redis_client: Redis, sim: OpcSimServer
+) -> None:
+    """Mudança só em `polling_period_ms` ⇒ poller retimado, sessão preservada (ADR-032).
+
+    O campo fica fora da `session_key` de propósito: mudar a varredura de uma conexão em
+    produção não pode custar uma reconexão ao PLC.
+    """
+    project_id = await create_project(session_factory)
+    conn_id = await create_connection(session_factory, project_id, sim.endpoint)
+    await create_tag(session_factory, conn_id, name="Nível", node_id=NODE_STATIC)
+    state = WorkerState()
+    supervisor = make_supervisor(session_factory, redis_client, state)
+
+    async with started(supervisor):
+        await wait_up(supervisor, conn_id)
+        runtime = supervisor.runtimes[conn_id]
+        await await_until(lambda: runtime.snapshot.tags_polled == 1)
+        subiu_em = runtime.snapshot.session_up_since
+
+        await update_connection(session_factory, conn_id, polling_period_ms=300)
+        await await_until(lambda: runtime.config.polling_period_ms == 300)
+
+        assert supervisor.runtimes[conn_id] is runtime, "a sessão não deveria ter sido recriada"
+        assert runtime.snapshot.session_up_since == subiu_em
+        poller = runtime.poller
+        assert poller is not None
+        assert poller.period_s == 0.3
 
 
 async def test_falha_pendente_atravessa_a_troca_de_sessao(

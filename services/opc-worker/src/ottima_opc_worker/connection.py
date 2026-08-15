@@ -19,6 +19,7 @@ from redis.asyncio import Redis
 from ottima_core.bus import KIND_COMM_FAILURE, KIND_COMM_RESTORED, publish_event
 
 from .heartbeat import HEARTBEAT_INTERVAL_S, ValueHeartbeat
+from .polling import ValuePoller
 from .security import (
     SECURITY_POLICY_NONE,
     FailureReason,
@@ -33,7 +34,6 @@ from .state import (
     FlowWatchdogConfig,
     TagConfig,
 )
-from .subscriptions import ValueSubscription
 from .watchdog import WatchdogTask
 
 logger = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ class ConnectionRuntime:
         # Sessão aberta com o gancho de subida já executado: garante que on_session_down
         # rode uma vez só, mesmo com stop() repetido.
         self._session_open = False
-        self._subscription: ValueSubscription | None = None
+        self._poller: ValuePoller | None = None
         self._flow_watchdogs: dict[int, WatchdogTask] = {}
         self._desired_flow_watchdogs: dict[int, FlowWatchdogConfig] = {}
         self._flow_failure_pending: dict[int, bool] = {}
@@ -165,9 +165,9 @@ class ConnectionRuntime:
         return self._gate_generation
 
     @property
-    def subscription(self) -> ValueSubscription | None:
-        """Subscription de valores viva; None fora de `up`."""
-        return self._subscription
+    def poller(self) -> ValuePoller | None:
+        """Poller de valores vivo; None fora de `up`."""
+        return self._poller
 
     @property
     def flow_watchdogs(self) -> Mapping[int, WatchdogTask]:
@@ -207,9 +207,9 @@ class ConnectionRuntime:
         await self._close_session()
 
     async def on_session_up(self) -> None:
-        """Gancho pós-connect, antes de marcar `up`: sobe subscription e watchdog.
+        """Gancho pós-connect, antes de marcar `up`: sobe poller e watchdog.
 
-        Falha ao criar a subscription inteira é falha de sessão, não de tag: emite
+        Falha ao subir o poller inteiro é falha de sessão, não de tag: emite
         `comm_failure` com `session_lost` e devolve a exceção ao supervisor, que fecha o
         cliente e reconecta em backoff.
         """
@@ -217,7 +217,7 @@ class ConnectionRuntime:
         if client is None:
             return
         try:
-            await self._replace_subscription(client)
+            await self._replace_poller(client)
         except Exception as exc:
             await self.fail("session_lost", describe_exception(exc))
             raise
@@ -225,7 +225,7 @@ class ConnectionRuntime:
         await self._reconcile_flow_watchdogs(client)
 
     async def on_session_down(self) -> None:
-        """Gancho simétrico, ao sair de `up`: derruba watchdogs de flow e subscription.
+        """Gancho simétrico, ao sair de `up`: derruba watchdogs de flow e poller.
 
         Preserva as chaves de `flow_watchdog_alive` (só zera o valor): a config ainda é
         desejada, e um flow com watchdog configurado que perde a sessão deve virar
@@ -238,9 +238,9 @@ class ConnectionRuntime:
         self._flow_watchdogs.clear()
         for flow_id in self._snapshot.flow_watchdog_alive:
             self._snapshot.flow_watchdog_alive[flow_id] = False
-        subscription, self._subscription = self._subscription, None
-        if subscription is not None:
-            await subscription.stop()
+        poller, self._poller = self._poller, None
+        if poller is not None:
+            await poller.stop()
         # O cache é da sessão: um servidor reconfigurado entre duas sessões pode ter
         # trocado o DataType do node. Limpar aqui, e não num caminho novo, é o que mantém
         # este gancho o único ponto de desmonte da sessão.
@@ -297,7 +297,7 @@ class ConnectionRuntime:
         """Atualiza os watchdogs de flow desta conexão (ADR-009 revisado: chamado pelo
         supervisor a cada mudança na tabela `flows`, independente de `session_key`).
 
-        Nunca derruba a sessão nem as subscriptions: um flow ligando/desligando o próprio
+        Nunca derruba a sessão nem o poller: um flow ligando/desligando o próprio
         watchdog não pode arrastar os outros flows que também usam esta conexão — é
         exatamente o isolamento que motivou mover o watchdog da conexão para o flow.
         """
@@ -412,7 +412,7 @@ class ConnectionRuntime:
         if self._state is not ConnectionState.UP or client is None:
             return
         try:
-            await self._replace_subscription(client)
+            await self._replace_poller(client)
         except Exception as exc:
             await self.fail("session_lost", describe_exception(exc))
             return
@@ -425,14 +425,40 @@ class ConnectionRuntime:
         # que a spec manda não usar quando o servidor sabe responder.
         await self.load_write_types()
 
-    async def _replace_subscription(self, client: Client) -> None:
-        """Para a subscription atual (se houver) e sobe outra com a configuração corrente."""
-        old, self._subscription = self._subscription, None
+    async def apply_polling_period(self, polling_period_ms: int) -> None:
+        """Retima o ciclo SEM derrubar a sessão (reconciliação, tarefa 1.4).
+
+        `polling_period_ms` fica fora da `session_key` justamente para chegar aqui: mudar a
+        varredura de 1 s para 2 s não pode custar uma reconexão ao PLC. Fora de `up` apenas
+        guarda a configuração nova: a próxima subida a usa.
+        """
+        self._config = replace(self._config, polling_period_ms=polling_period_ms)
+        client = self._client
+        if self._state is not ConnectionState.UP or client is None:
+            return
+        try:
+            await self._replace_poller(client)
+        except Exception as exc:
+            await self.fail("session_lost", describe_exception(exc))
+
+    async def _replace_poller(self, client: Client) -> None:
+        """Para o poller atual (se houver) e sobe outro com a configuração corrente."""
+        old, self._poller = self._poller, None
         if old is not None:
             await old.stop()
-        subscription = ValueSubscription(self._config, client, self._redis, self._snapshot)
-        await subscription.start()
-        self._subscription = subscription
+        poller = ValuePoller(
+            self._config,
+            client,
+            self._redis,
+            self._snapshot,
+            on_hard_failure=self._on_poll_failure,
+        )
+        await poller.start()
+        self._poller = poller
+
+    async def _on_poll_failure(self, detail: str) -> None:
+        """Ciclo de leitura que falha em bloco é sessão morta — mesma rota do watchdog."""
+        await self.fail("session_lost", detail)
 
     async def fail(self, reason: FailureReason, detail: str) -> None:
         """Leva a conexão a `failed`: rajada bad, alarme e só então queda da sessão.

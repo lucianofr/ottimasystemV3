@@ -28,7 +28,7 @@ from .state import ConnectionSnapshot, FlowWatchdogConfig
 logger = logging.getLogger(__name__)
 
 def _describe(exc: Exception) -> str:
-    """Detalhe curto para o payload do evento, no mesmo idioma de `subscriptions.py`.
+    """Detalhe curto para o payload do evento, no mesmo idioma de `polling.py`.
 
     Fica aqui, e não em `connection.py`: aquele módulo importa este, o inverso seria ciclo.
     """

@@ -103,3 +103,65 @@ async def test_papeis_e_filtro(client, admin_headers, operator_headers):
             headers=operator_headers,
         )
     ).status_code == 403
+
+
+async def test_polling_period_ms_default_1000_ao_omitir(client, admin_headers):
+    pid = await _projeto(client, admin_headers, "PollingDefault")
+    r = await client.post(
+        "/api/connections", json={**BASE, "project_id": pid}, headers=admin_headers
+    )
+    assert r.status_code == 201
+    assert r.json()["polling_period_ms"] == 1000
+
+
+async def test_polling_period_ms_expoe_valor_custom_no_out(client, admin_headers):
+    pid = await _projeto(client, admin_headers, "PollingCustom")
+    r = await client.post(
+        "/api/connections",
+        json={**BASE, "project_id": pid, "polling_period_ms": 2500},
+        headers=admin_headers,
+    )
+    assert r.status_code == 201
+    assert r.json()["polling_period_ms"] == 2500
+
+
+async def test_polling_period_ms_99_e_60001_rejeitados_com_422(client, admin_headers):
+    pid = await _projeto(client, admin_headers, "PollingForaDaFaixa")
+    for periodo in (99, 60001):
+        r = await client.post(
+            "/api/connections",
+            json={**BASE, "project_id": pid, "name": f"c{periodo}", "polling_period_ms": periodo},
+            headers=admin_headers,
+        )
+        assert r.status_code == 422
+
+
+async def test_polling_period_ms_100_e_60000_aceitos_com_200(client, admin_headers):
+    pid = await _projeto(client, admin_headers, "PollingNaFaixa")
+    for periodo in (100, 60000):
+        r = await client.post(
+            "/api/connections",
+            json={**BASE, "project_id": pid, "name": f"c{periodo}", "polling_period_ms": periodo},
+            headers=admin_headers,
+        )
+        assert r.status_code == 201
+        assert r.json()["polling_period_ms"] == periodo
+
+
+async def test_patch_altera_apenas_polling_period_ms(client, admin_headers):
+    pid = await _projeto(client, admin_headers, "PollingPatch")
+    created = (
+        await client.post(
+            "/api/connections", json={**BASE, "project_id": pid}, headers=admin_headers
+        )
+    ).json()
+    r = await client.patch(
+        f"/api/connections/{created['id']}",
+        json={"polling_period_ms": 5000},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["polling_period_ms"] == 5000
+    assert body["name"] == created["name"]
+    assert body["endpoint"] == created["endpoint"]

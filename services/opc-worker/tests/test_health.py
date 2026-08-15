@@ -21,8 +21,8 @@ CHAVES_DA_CONEXAO = {
     "flow_watchdog_alive",
     "session_up_since",
     "last_publish_ts",
-    "tags_subscribed",
-    "monitored_errors",
+    "tags_polled",
+    "read_errors",
     "write_errors",
 }
 
@@ -92,14 +92,14 @@ def state_com_duas_conexoes() -> WorkerState:
                 flow_watchdog_alive={101: True},
                 session_up_since=SESSAO_DESDE,
                 last_publish_ts=ULTIMA_PUBLICACAO,
-                tags_subscribed=4,
+                tags_polled=4,
             ),
             2: ConnectionSnapshot(
                 name="Forno 2",
                 state=ConnectionState.FAILED,
                 flow_watchdog_alive={202: False},
-                tags_subscribed=0,
-                monitored_errors=3,
+                tags_polled=0,
+                read_errors=3,
                 write_errors=1,
             ),
         }
@@ -149,8 +149,8 @@ async def test_health_expoe_exatamente_as_chaves_da_spec():
         assert set(saude) == CHAVES_DA_CONEXAO
     assert body["connections"]["1"]["name"] == "Forno 1"
     assert body["connections"]["1"]["state"] == "up"
-    assert body["connections"]["1"]["tags_subscribed"] == 4
-    assert body["connections"]["2"]["monitored_errors"] == 3
+    assert body["connections"]["1"]["tags_polled"] == 4
+    assert body["connections"]["2"]["read_errors"] == 3
     assert body["connections"]["2"]["write_errors"] == 1
 
 

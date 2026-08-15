@@ -8,6 +8,7 @@ tempo real.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -19,16 +20,17 @@ from worker_test_helpers import await_until, collecting
 from opcsim import NODE_SINE, NODE_STATIC, NODE_W_FLOAT, OpcSimServer, free_port
 from ottima_core.bus import channel_opc_values
 from ottima_opc_worker import heartbeat as heartbeat_module
-from ottima_opc_worker import subscriptions
+from ottima_opc_worker import polling
 from ottima_opc_worker.connection import ConnectionRuntime
 from ottima_opc_worker.heartbeat import ValueHeartbeat
+from ottima_opc_worker.polling import QUALITY_BAD, QUALITY_GOOD
 from ottima_opc_worker.state import (
     ConnectionConfig,
     ConnectionSnapshot,
     ConnectionState,
     TagConfig,
+    TagSnapshot,
 )
-from ottima_opc_worker.subscriptions import QUALITY_BAD, QUALITY_GOOD
 
 CONN_ID = 9
 # Janela para provar que algo NÃO acontece; cobre várias batidas do heartbeat de teste.
@@ -159,7 +161,7 @@ async def test_tag_estatica_e_republicada_com_ts_novo(
 async def test_tag_que_muda_nao_e_republicada_pelo_heartbeat(
     sim: OpcSimServer, redis_client: Redis, heartbeat_tags: list[int]
 ) -> None:
-    """Report-by-exception: com a subscription entregando a 250 ms, o heartbeat cala."""
+    """Com o poller entregando a cada varredura, o heartbeat cala (§2.2-6, ADR-032)."""
     config = make_config(sim.endpoint, tags=(TAG_SINE,))
     snapshot = ConnectionSnapshot(name=config.name)
     runtime = make_runtime(config, redis_client, snapshot, heartbeat_interval_s=SLACK_INTERVAL_S)
@@ -169,7 +171,7 @@ async def test_tag_que_muda_nao_e_republicada_pelo_heartbeat(
                 lambda: runtime.state is ConnectionState.UP and bool(of_tag(values, TAG_SINE.id))
             )
             # A batida anterior à sessão publica bad (tag sem valor conhecido): só conta o
-            # que o heartbeat faz depois que a subscription começou a entregar.
+            # que o heartbeat faz depois que o poller começou a entregar.
             heartbeat_tags.clear()
             observadas = len(of_tag(values, TAG_SINE.id))
             await await_until(lambda: len(of_tag(values, TAG_SINE.id)) >= observadas + 8)
@@ -187,8 +189,12 @@ async def test_burst_bad_publica_na_hora_fora_da_janela(
     async with collect_values(redis_client) as values:
         async with running(runtime):
             await await_until(lambda: all(of_tag(values, tag.id) for tag in (TAG_STATIC, TAG_SINE)))
-            # Congela as variáveis para que só a rajada produza publicações daqui em diante.
-            await sim.set_freeze_values(True)
+            # Sob polling o ciclo publica a cada varredura, mudando o opcsim ou não: congelar
+            # as variáveis não isola mais a rajada (ADR-032). Quem precisa sair de cena é o
+            # poller; o heartbeat, que é o objeto do ensaio, segue de pé.
+            poller = runtime.poller
+            assert poller is not None
+            await poller.stop()
             await asyncio.sleep(QUIET_WINDOW_S)
             antes = len(values)
             ultimos = {tag_id: snap.value for tag_id, snap in snapshot.last_values.items()}
@@ -203,21 +209,54 @@ async def test_burst_bad_publica_na_hora_fora_da_janela(
     assert {item["tag_id"]: item["value"] for item in rajada} == ultimos
 
 
-async def test_tag_de_escrita_nunca_entra_no_heartbeat(
+async def test_tag_de_escrita_sem_leitura_conhecida_fica_fora_do_heartbeat(
     redis_client: Redis, heartbeat_tags: list[int]
 ) -> None:
-    """Heartbeat é dado de processo lido; tag `w` não tem série própria (spec §2.2-4)."""
+    """Tag `w` só tem série se o node dela for legível — e aqui a conexão nunca subiu.
+
+    Sem leitura conhecida no espelho, a tag `w` não entra na batida: publicar 0.0 sob bad
+    para um node possivelmente write-only inventaria uma série que não existe, e a tela
+    mostraria "Ruim 0" onde o honesto é travessão. Tag `r` mantém o comportamento antigo
+    (entra mesmo sem leitura) — a série dela é obrigatória por cadastro.
+    """
     config = make_config("opc.tcp://127.0.0.1:1/x", tags=(TAG_STATIC, TAG_WRITE))
     snapshot = ConnectionSnapshot(name=config.name, state=ConnectionState.FAILED)
     hb = ValueHeartbeat(config, redis_client, snapshot, interval_s=FAST_INTERVAL_S)
     async with collect_values(redis_client) as values:
         async with beating(hb):
-            await await_until(lambda: len(of_tag(values, TAG_STATIC.id)) >= 2)
-            await hb.burst_bad()
+            await await_until(lambda: bool(of_tag(values, TAG_STATIC.id)))
             await asyncio.sleep(QUIET_WINDOW_S)
 
     assert set(heartbeat_tags) == {TAG_STATIC.id}
     assert of_tag(values, TAG_WRITE.id) == []
+
+
+async def test_tag_de_escrita_ja_lida_entra_no_heartbeat_e_na_rajada(
+    redis_client: Redis,
+) -> None:
+    """Tag `w` com leitura no espelho tem série viva: em falha ela vira bad como as demais.
+
+    Sem isso, a conexão cair deixaria o último comando bom congelado na tela para sempre —
+    o mesmo modo de falha perigoso que o travessão do socket caído evita no frontend.
+    """
+    config = make_config("opc.tcp://127.0.0.1:1/x", tags=(TAG_WRITE,))
+    snapshot = ConnectionSnapshot(name=config.name, state=ConnectionState.FAILED)
+    # Espelho como o `publish_value` o deixaria depois de uma leitura boa da tag `w`.
+    snapshot.last_values[TAG_WRITE.id] = TagSnapshot(
+        ts=RELOGIO_PARA_TRAS,
+        value=52.0,
+        quality=QUALITY_GOOD,
+        published_at=RELOGIO_PARA_TRAS,
+        published_monotonic=time.monotonic() - IDLE_INTERVAL_S,
+    )
+    hb = ValueHeartbeat(config, redis_client, snapshot, interval_s=FAST_INTERVAL_S)
+    async with collect_values(redis_client) as values:
+        await hb.burst_bad()
+        await await_until(lambda: bool(of_tag(values, TAG_WRITE.id)))
+
+    rajada = of_tag(values, TAG_WRITE.id)
+    assert rajada[0]["quality"] == QUALITY_BAD
+    assert rajada[0]["value"] == 52.0
 
 
 # --- heartbeat com a conexão em falha -----------------------------------------------
@@ -295,7 +334,7 @@ async def test_republica_com_o_relogio_de_parede_andando_para_tras(
         def now(tz: object = None) -> datetime:
             return RELOGIO_PARA_TRAS
 
-    monkeypatch.setattr(subscriptions, "datetime", _RelogioTravado)
+    monkeypatch.setattr(polling, "datetime", _RelogioTravado)
 
     config = make_config("opc.tcp://127.0.0.1:1/x", tags=(TAG_STATIC,))
     snapshot = ConnectionSnapshot(name=config.name, state=ConnectionState.FAILED)

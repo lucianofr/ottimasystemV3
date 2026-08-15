@@ -32,6 +32,7 @@ class _ConnectionFields(BaseModel):
     auth_mode: AuthMode = "anonymous"
     auth_username: str | None = None
     server_cert_file: str | None = None
+    polling_period_ms: int = Field(default=1000, ge=100, le=60000)
 
 
 class ConnectionCreate(_ConnectionFields):
@@ -60,6 +61,7 @@ class ConnectionUpdate(BaseModel):
     auth_username: str | None = None
     auth_password: str | None = None  # None = manter a senha atual
     server_cert_file: str | None = None
+    polling_period_ms: int | None = Field(default=None, ge=100, le=60000)
 
 
 class ConnectionOut(_ConnectionFields):

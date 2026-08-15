@@ -57,6 +57,7 @@ def _to_out(conn: OpcConnection) -> ConnectionOut:
         auth_mode=conn.auth_mode,
         auth_username=conn.auth_username,
         server_cert_file=conn.server_cert_file,
+        polling_period_ms=conn.polling_period_ms,
         has_password=conn.auth_password_enc is not None,
         created_at=conn.created_at,
         updated_at=conn.updated_at,
@@ -165,6 +166,7 @@ async def create_connection(
             else None
         ),
         server_cert_file=body.server_cert_file,
+        polling_period_ms=body.polling_period_ms,
     )
     db.add(conn)
     try:

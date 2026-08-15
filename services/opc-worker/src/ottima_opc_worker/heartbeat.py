@@ -15,8 +15,8 @@ from dataclasses import replace
 
 from redis.asyncio import Redis
 
+from .polling import QUALITY_BAD, publish_value
 from .state import ConnectionConfig, ConnectionSnapshot, ConnectionState, TagConfig
-from .subscriptions import QUALITY_BAD, publish_value
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +56,12 @@ class ValueHeartbeat:
                 await task
 
     async def burst_bad(self) -> None:
-        """Rajada imediata de quality=2 para TODAS as tags `r` da conexão.
+        """Rajada imediata de quality=2 para TODAS as tags com série da conexão.
 
         Chamada na transição para `failed` (a ligação é da tarefa 2.2). Sem dedupe: duas
         chamadas publicam duas rajadas — o dado cíclico quer o ponto.
         """
-        for tag in self._read_tags():
+        for tag in self._series_tags():
             await self._republish(tag, quality=QUALITY_BAD)
 
     def apply_tags(self, tags: tuple[TagConfig, ...]) -> None:
@@ -83,7 +83,7 @@ class ValueHeartbeat:
         # industrial não pode travar a republicação (o `ts` do payload segue sendo parede).
         now = time.monotonic()
         session_up = self._snapshot.state is ConnectionState.UP
-        for tag in self._read_tags():
+        for tag in self._series_tags():
             last = self._snapshot.last_values.get(tag.id)
             # Tag que nunca publicou conta como publicada há muito tempo: entra na batida.
             if last is not None and now - last.published_monotonic < self._interval_s:
@@ -105,5 +105,17 @@ class ValueHeartbeat:
             quality=quality,
         )
 
-    def _read_tags(self) -> Iterator[TagConfig]:
-        return (tag for tag in self._config.tags if tag.direction == "r")
+    def _series_tags(self) -> Iterator[TagConfig]:
+        """Tags com série própria em `opc.values`.
+
+        Tag `r` sempre: a série dela é obrigatória por cadastro, e uma que nunca publicou
+        precisa aparecer como bad em vez de emudecer. Tag `w` só depois de uma leitura boa —
+        antes disso o node pode ser write-only (fora do ciclo, `polling.py`), e publicar
+        0.0 sob bad inventaria série inexistente: quem consome mostraria "ruim 0" onde o
+        honesto é "sem dado".
+        """
+        return (
+            tag
+            for tag in self._config.tags
+            if tag.direction == "r" or tag.id in self._snapshot.last_values
+        )

@@ -29,6 +29,11 @@ class TagConfig:
     data_type: Literal["float", "int", "bool"]
 
 
+# Default do `opc_connections.polling_period_ms` (DDL: migration 0011). Vale para
+# `ConnectionConfig` montado à mão nos testes — em produção o valor vem sempre do banco.
+DEFAULT_POLLING_PERIOD_MS = 1000
+
+
 @dataclass(frozen=True, slots=True)
 class ConnectionConfig:
     """Configuração de uma conexão OPC-UA, tal como o worker a enxerga."""
@@ -44,15 +49,22 @@ class ConnectionConfig:
     auth_password_enc: str | None  # token Fernet — NUNCA logado, NUNCA em snapshot
     server_cert_file: str | None
     tags: tuple[TagConfig, ...]
+    polling_period_ms: int = DEFAULT_POLLING_PERIOD_MS
 
     @property
     def session_key(self) -> tuple:
-        """Tudo que exige recriar a sessão asyncua quando muda (tarefa 1.4)."""
-        return tuple(getattr(self, f.name) for f in fields(self) if f.name != "tags")
+        """Tudo que exige recriar a sessão asyncua quando muda (tarefa 1.4).
+
+        Fora daqui, de propósito: `tags` (recria só o poller) e `polling_period_ms` (só
+        retima o ciclo). Derrubar a sessão do PLC porque o operador mudou a varredura de
+        1 s para 2 s seria interrupção de aquisição sem causa.
+        """
+        fora = {"tags", "polling_period_ms"}
+        return tuple(getattr(self, f.name) for f in fields(self) if f.name not in fora)
 
     @property
     def tags_key(self) -> tuple:
-        """Conjunto de tags em ordem estável: muda ⇒ recria só a subscription (tarefa 1.4)."""
+        """Conjunto de tags em ordem estável: muda ⇒ recria só o poller (tarefa 1.4)."""
         return tuple(sorted(self.tags, key=lambda tag: tag.id))
 
 
@@ -96,8 +108,8 @@ class ConnectionSnapshot:
     revisado); ausente = flow sem watchdog, escrita sempre recusada (`no_watchdog`)."""
     session_up_since: datetime | None = None
     last_publish_ts: datetime | None = None
-    tags_subscribed: int = 0
-    monitored_errors: int = 0
+    tags_polled: int = 0
+    read_errors: int = 0
     write_errors: int = 0
     last_values: dict[int, TagSnapshot] = field(default_factory=dict)
 
@@ -113,8 +125,8 @@ class ConnectionSnapshot:
             "flow_watchdog_alive": dict(self.flow_watchdog_alive),
             "session_up_since": _iso_utc(self.session_up_since),
             "last_publish_ts": _iso_utc(self.last_publish_ts),
-            "tags_subscribed": self.tags_subscribed,
-            "monitored_errors": self.monitored_errors,
+            "tags_polled": self.tags_polled,
+            "read_errors": self.read_errors,
             "write_errors": self.write_errors,
         }
 

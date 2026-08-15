@@ -223,6 +223,7 @@ def _to_config(connection: OpcConnection, tags: tuple[TagConfig, ...]) -> Connec
         auth_password_enc=connection.auth_password_enc,
         server_cert_file=connection.server_cert_file,
         tags=tags,
+        polling_period_ms=connection.polling_period_ms,
     )
 
 
@@ -344,8 +345,12 @@ class Supervisor:
                 )
                 continue
             if runtime.config.tags_key != config.tags_key:
-                # Só o conjunto de tags mudou: troca a subscription sem derrubar a sessão.
+                # Só o conjunto de tags mudou: troca o poller sem derrubar a sessão.
                 await runtime.apply_tags(config.tags)
+            if runtime.config.polling_period_ms != config.polling_period_ms:
+                # Idem para o período: ele fica fora da `session_key` de propósito —
+                # retimar a varredura não pode custar uma reconexão ao PLC (ADR-032).
+                await runtime.apply_polling_period(config.polling_period_ms)
             # Watchdog de flow é independente de session_key/tags_key (ADR-009 revisado:
             # um flow liga/desliga o próprio watchdog sem que nada mude na conexão) —
             # reconcilia sempre, mesmo quando os dois ramos acima não dispararam.

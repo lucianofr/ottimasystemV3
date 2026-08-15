@@ -26,7 +26,7 @@ from opcsim import (
     NODE_COUNTER,
     NODE_SINE,
     NODE_STATIC,
-    NODE_W_FLOAT,
+    NODE_W_ONLY,
     NODE_WD_FROM_SYSTEM,
     NODE_WD_TO_SYSTEM,
     OpcSimServer,
@@ -40,6 +40,7 @@ from ottima_core.bus import (
 )
 from ottima_opc_worker import connection as connection_module
 from ottima_opc_worker.connection import ConnectionRuntime
+from ottima_opc_worker.polling import QUALITY_BAD
 from ottima_opc_worker.state import (
     ConnectionConfig,
     ConnectionSnapshot,
@@ -47,7 +48,6 @@ from ottima_opc_worker.state import (
     FlowWatchdogConfig,
     TagConfig,
 )
-from ottima_opc_worker.subscriptions import QUALITY_BAD
 
 CONN_ID = 11
 FLOW_ID = 601
@@ -82,12 +82,16 @@ TAG_COUNTER = TagConfig(id=102, name="Ciclos", node_id=NODE_COUNTER, direction="
 TAG_STATIC = TagConfig(
     id=103, name="Nível fixo", node_id=NODE_STATIC, direction="r", data_type="float"
 )
-# Tag de escrita: a rajada é só das tags `r`, e este é o contraexemplo que prova isso.
-TAG_WRITE = TagConfig(
-    id=104, name="Setpoint", node_id=NODE_W_FLOAT, direction="w", data_type="float"
+# Contraexemplo da rajada: tag SEM série. Precisa ser write-only (comando que o servidor
+# declara ilegível), não uma tag `w` qualquer — desde que o worker assina todo node legível,
+# uma tag `w` sobre node legível TEM série e entra na rajada como qualquer outra. Com
+# `NODE_W_FLOAT` aqui o ensaio viraria corrida: a rajada incluiria a tag ou não, conforme a
+# primeira notificação dela ter chegado antes da queda.
+TAG_WRITE_ONLY = TagConfig(
+    id=104, name="Comando cego", node_id=NODE_W_ONLY, direction="w", data_type="float"
 )
-TAGS = (TAG_SINE, TAG_COUNTER, TAG_STATIC, TAG_WRITE)
-READ_TAG_IDS = frozenset({TAG_SINE.id, TAG_COUNTER.id, TAG_STATIC.id})
+TAGS = (TAG_SINE, TAG_COUNTER, TAG_STATIC, TAG_WRITE_ONLY)
+SERIES_TAG_IDS = frozenset({TAG_SINE.id, TAG_COUNTER.id, TAG_STATIC.id})
 
 BusTrail = list[tuple[str, dict]]
 
@@ -305,7 +309,7 @@ async def test_falha_dura_alarma_quase_imediatamente(
 
     assert decorrido < 2.0, f"falha dura demorou {decorrido:.3f}s"
     assert alarme["payload"]["reason"] == "session_lost"
-    assert bad_tag_ids_before(trail, posicao) == set(READ_TAG_IDS)
+    assert bad_tag_ids_before(trail, posicao) == set(SERIES_TAG_IDS)
 
 
 async def test_fail_concorrente_produz_um_alarme_e_uma_rajada(redis_client: Redis) -> None:
@@ -319,13 +323,13 @@ async def test_fail_concorrente_produz_um_alarme_e_uma_rajada(redis_client: Redi
             runtime.fail("session_lost", "primeira"),
             runtime.fail("watchdog_timeout", "segunda"),
         )
-        await await_until(lambda: len(bad_values(trail)) == len(READ_TAG_IDS))
+        await await_until(lambda: len(bad_values(trail)) == len(SERIES_TAG_IDS))
         await await_until(lambda: len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1)
         await asyncio.sleep(QUIET_WINDOW_S / 3)
 
         assert len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1
         assert Counter(message["tag_id"] for message in bad_values(trail)) == dict.fromkeys(
-            READ_TAG_IDS, 1
+            SERIES_TAG_IDS, 1
         )
 
 
@@ -370,13 +374,13 @@ async def test_heartbeat_segue_publicando_bad_durante_a_falha(
             await await_until(lambda: runtime.state is ConnectionState.UP)
             await sim.stop()
             await await_until(lambda: len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1)
-            await await_until(lambda: len(bad_values(trail)) >= len(READ_TAG_IDS))
+            await await_until(lambda: len(bad_values(trail)) >= len(SERIES_TAG_IDS))
             apos_rajada = len(bad_values(trail))
-            await await_until(lambda: len(bad_values(trail)) >= apos_rajada + len(READ_TAG_IDS))
+            await await_until(lambda: len(bad_values(trail)) >= apos_rajada + len(SERIES_TAG_IDS))
 
             assert runtime.state is ConnectionState.FAILED
             batidas = Counter(message["tag_id"] for message in bad_values(trail)[apos_rajada:])
-            assert set(batidas) == set(READ_TAG_IDS)
+            assert set(batidas) == set(SERIES_TAG_IDS)
 
 
 @pytest.mark.parametrize("falha_antes_do_watchdog", [True, False])
@@ -439,7 +443,7 @@ async def test_tentativa_superada_nao_deixa_watchdog_orfao(
             assert runtime.state is ConnectionState.FAILED
             assert watchdog_tasks(FLOW_ID) == [], "sobrou task de watchdog órfã"
             assert runtime.flow_watchdogs == {}
-            assert runtime.subscription is None
+            assert runtime.poller is None
             # Sem ninguém escrevendo em `from_system`, o rung do opcsim para de alternar.
             await assert_bit_estavel(sim, NODE_WD_FROM_SYSTEM, SLOW_PERIOD_MS / 1000 * 1.5)
 
@@ -528,7 +532,7 @@ async def test_sem_watchdog_a_volta_da_sessao_restaura(redis_client: Redis) -> N
             await sim.stop()
             await await_until(lambda: len(events_of_kind(trail, KIND_COMM_FAILURE)) == 1)
             assert bad_tag_ids_before(trail, index_of_first(trail, KIND_COMM_FAILURE)) == set(
-                READ_TAG_IDS
+                SERIES_TAG_IDS
             )
 
             sim = OpcSimServer(port=porta)

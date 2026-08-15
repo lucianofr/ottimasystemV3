@@ -5,6 +5,7 @@ from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
     Identity,
+    Integer,
     Text,
     UniqueConstraint,
     text,
@@ -33,6 +34,9 @@ class OpcConnection(TimestampMixin, Base):
     auth_username: Mapped[str | None] = mapped_column(Text)
     auth_password_enc: Mapped[str | None] = mapped_column(Text)  # token Fernet — nunca em response
     server_cert_file: Mapped[str | None] = mapped_column(Text)  # arquivo no volume certs
+    polling_period_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1000")
+    )
 
     __table_args__ = (
         UniqueConstraint("project_id", "name", name="uq_opc_connections_project_name"),
@@ -50,5 +54,8 @@ class OpcConnection(TimestampMixin, Base):
             "(security_policy = 'none' AND security_mode = 'none')"
             " OR (security_policy <> 'none' AND security_mode <> 'none')",
             name="ck_opc_connections_policy_mode",
+        ),
+        CheckConstraint(
+            "polling_period_ms BETWEEN 100 AND 60000", name="ck_opc_connections_polling_period"
         ),
     )

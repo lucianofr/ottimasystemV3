@@ -47,6 +47,14 @@ NODE_STATIC = "ns=2;s=sim.float.static"
 NODE_W_FLOAT = "ns=2;s=sim.w.float"
 NODE_W_INT = "ns=2;s=sim.w.int"
 NODE_W_BOOL = "ns=2;s=sim.w.bool"
+NODE_W_ONLY = "ns=2;s=sim.w.only"
+"""Tag gravável e declarada NÃO legível (AccessLevel sem CurrentRead). Existe para provar que
+uma tag `direction='w'` apontada a um nó write-only não vira erro de configuração no worker:
+nem todo comando de PLC/gateway é legível, e assinar o que não se pode ler é falha esperada.
+
+Atenção: o servidor do asyncua NÃO impõe o AccessLevel — uma leitura direta aqui devolve
+`Good`. O nó é um contraexemplo do ATRIBUTO DECLARADO, que é justamente o que o worker
+consulta antes de assinar (`_declares_read_access`)."""
 NODE_MIRROR_FLOAT = "ns=2;s=sim.mirror.float"
 NODE_MIRROR_INT = "ns=2;s=sim.mirror.int"
 NODE_MIRROR_BOOL = "ns=2;s=sim.mirror.bool"
@@ -89,7 +97,11 @@ _NODES: tuple[tuple[str, str, Any, ua.VariantType, bool], ...] = (
     (NODE_WD_TO_SYSTEM_2, "wd_to_system_2", False, ua.VariantType.Boolean, False),
     (NODE_CTRL_FREEZE_WATCHDOG_2, "freeze_watchdog_2", False, ua.VariantType.Boolean, True),
     (NODE_CTRL_FREEZE_VALUES, "freeze_values", False, ua.VariantType.Boolean, True),
+    (NODE_W_ONLY, "w_only", 0.0, ua.VariantType.Double, True),
 )
+
+# Nós que perdem o CurrentRead depois de criados: graváveis, ilegíveis.
+_WRITE_ONLY: frozenset[str] = frozenset({NODE_W_ONLY})
 
 # (from_system, to_system, freeze) — um trio por par de watchdog simulado; o rung trata
 # os dois de forma idêntica e independente (ADR-009 revisado: watchdog é por flow, uma
@@ -270,6 +282,12 @@ class OpcSimServer:
             )
             if writable:
                 await node.set_writable()
+            if node_id in _WRITE_ONLY:
+                # Os dois atributos: o cliente valida o UserAccessLevel, o servidor o AccessLevel.
+                await node.unset_attr_bit(ua.AttributeIds.AccessLevel, ua.AccessLevel.CurrentRead)
+                await node.unset_attr_bit(
+                    ua.AttributeIds.UserAccessLevel, ua.AccessLevel.CurrentRead
+                )
             self._nodes[node_id] = node
 
     async def _run_values_loop(self) -> None:
