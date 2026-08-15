@@ -129,6 +129,7 @@ def montar_bundle(
                 security_mode=c.security_mode,
                 auth_mode=c.auth_mode,
                 auth_username=c.auth_username,
+                polling_period_ms=c.polling_period_ms,
             )
             for c in conexoes_ordenadas
         ],

@@ -236,6 +236,107 @@ async def test_import_201_round_trip_tags_novas_com_ids_diferentes(
     assert "tag_ref" not in no_leitura["data"]
 
 
+async def test_import_round_trip_tags_calculadas_com_dependencia_entre_si(
+    client, admin_headers, db_session
+):
+    """D6 (ADR-033): tag calculada segue no export/import com `period_seconds`/`code` e as
+    entradas ordenadas — inclusive quando uma calculada lê outra calculada."""
+    pid = await _projeto(client, admin_headers, "OrigemCalc")
+    gw = await _conexao(client, admin_headers, pid, "gw1")
+    tag_opc = await _tag(client, admin_headers, gw, "TT-101")
+
+    tag_a = Tag(project_id=pid, name="CALC-A", direction="r", data_type="float")
+    db_session.add(tag_a)
+    await db_session.flush()
+    db_session.add(CalculatedTag(tag_id=tag_a.id, code="OUT = IN1 * 2", period_seconds=5))
+    db_session.add(CalculatedTagInput(calc_tag_id=tag_a.id, position=1, source_tag_id=tag_opc))
+
+    tag_b = Tag(project_id=pid, name="CALC-B", direction="r", data_type="float")
+    db_session.add(tag_b)
+    await db_session.flush()
+    db_session.add(CalculatedTag(tag_id=tag_b.id, code="OUT = IN1 + 1", period_seconds=10))
+    db_session.add(CalculatedTagInput(calc_tag_id=tag_b.id, position=1, source_tag_id=tag_a.id))
+    await db_session.commit()
+
+    r = await client.get(f"/api/projects/{pid}/export", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    bundle = r.json()
+
+    r = await client.post(
+        IMPORT, json={"name": "DestinoCalc", "bundle": bundle}, headers=admin_headers
+    )
+    assert r.status_code == 201, r.text
+    novo_pid = r.json()["project"]["id"]
+    assert novo_pid != pid
+
+    linhas = await db_session.execute(
+        select(Tag.id, Tag.name).where(Tag.project_id == novo_pid, Tag.connection_id.is_(None))
+    )
+    ids_novos = {name: tag_id for tag_id, name in linhas}
+    assert ids_novos["CALC-A"] != tag_a.id
+    assert ids_novos["CALC-B"] != tag_b.id
+
+    spec_a = await db_session.get(CalculatedTag, ids_novos["CALC-A"])
+    spec_b = await db_session.get(CalculatedTag, ids_novos["CALC-B"])
+    assert (spec_a.code, spec_a.period_seconds) == ("OUT = IN1 * 2", 5)
+    assert (spec_b.code, spec_b.period_seconds) == ("OUT = IN1 + 1", 10)
+
+    (entrada_a,) = await db_session.scalars(
+        select(CalculatedTagInput).where(CalculatedTagInput.calc_tag_id == ids_novos["CALC-A"])
+    )
+    assert entrada_a.position == 1
+
+    tag_opc_novo = await db_session.scalar(
+        select(Tag.id)
+        .join(OpcConnection, Tag.connection_id == OpcConnection.id)
+        .where(OpcConnection.project_id == novo_pid, Tag.name == "TT-101")
+    )
+    assert entrada_a.source_tag_id == tag_opc_novo
+
+    (entrada_b,) = await db_session.scalars(
+        select(CalculatedTagInput).where(CalculatedTagInput.calc_tag_id == ids_novos["CALC-B"])
+    )
+    assert entrada_b.source_tag_id == ids_novos["CALC-A"]
+
+
+async def test_import_round_trip_preserva_polling_period_ms(client, admin_headers, db_session):
+    pid = await _projeto(client, admin_headers, "OrigemPolling")
+    await _conexao(client, admin_headers, pid, "gw1", polling_period_ms=7500)
+
+    r = await client.get(f"/api/projects/{pid}/export", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    bundle = r.json()
+    assert bundle["connections"][0]["polling_period_ms"] == 7500
+
+    r = await client.post(
+        IMPORT, json={"name": "DestinoPolling", "bundle": bundle}, headers=admin_headers
+    )
+    assert r.status_code == 201, r.text
+    novo_pid = r.json()["project"]["id"]
+
+    conn = await db_session.scalar(
+        select(OpcConnection).where(OpcConnection.project_id == novo_pid)
+    )
+    assert conn.polling_period_ms == 7500
+
+
+async def test_import_bundle_sem_polling_period_ms_usa_default_1000(
+    client, admin_headers, db_session
+):
+    bundle = _bundle(connections=[_conexao_bundle("gw1")])
+
+    r = await client.post(
+        IMPORT, json={"name": "DestinoSemPolling", "bundle": bundle}, headers=admin_headers
+    )
+    assert r.status_code == 201, r.text
+    novo_pid = r.json()["project"]["id"]
+
+    conn = await db_session.scalar(
+        select(OpcConnection).where(OpcConnection.project_id == novo_pid)
+    )
+    assert conn.polling_period_ms == 1000
+
+
 async def test_corpo_acima_de_4_mib_413_sem_materializar(client, admin_headers, db_session):
     antes = await _contagens(db_session)
     chunk = 65536

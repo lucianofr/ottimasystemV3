@@ -47,6 +47,7 @@ def _conexao(**over: object) -> OpcConnection:
         "auth_username": None,
         "auth_password_enc": None,
         "server_cert_file": None,
+        "polling_period_ms": 1000,
     }
     dados.update(over)
     return OpcConnection(**dados)
@@ -182,6 +183,7 @@ class TestMontarBundle:
             auth_username="ottima",
             auth_password_enc="cifrado-nao-deve-aparecer",
             server_cert_file="certs/gateway-1.pem",
+            polling_period_ms=5000,
         )
 
         bundle = montar_bundle(
@@ -195,6 +197,7 @@ class TestMontarBundle:
             security_mode="sign_and_encrypt",
             auth_mode="user_password",
             auth_username="ottima",
+            polling_period_ms=5000,
         )
         assert not hasattr(bundle.connections[0], "auth_password_enc")
         assert not hasattr(bundle.connections[0], "server_cert_file")

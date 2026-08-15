@@ -400,6 +400,7 @@ async def import_project(
             security_mode=bc.security_mode,
             auth_mode=bc.auth_mode,
             auth_username=bc.auth_username,
+            polling_period_ms=bc.polling_period_ms,
         )
         db.add(conn)
         conexoes_por_nome[bc.name] = conn

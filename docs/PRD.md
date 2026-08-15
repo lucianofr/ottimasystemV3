@@ -63,7 +63,7 @@ frontend (React+Vite) ⇄ api (FastAPI: REST + WebSocket)
 | Serviço | Responsabilidade | ADRs |
 |---|---|---|
 | **api** | REST (auth, CRUD, comandos), WebSocket (valores, estado MPC, eventos), consulta de histórico | 001 |
-| **opc-worker** | Único processo que fala OPC-UA: sessões, subscriptions → publica leituras; consome `opc.writes`; opera watchdog | 002, 006, 009, 021 |
+| **opc-worker** | Único processo que fala OPC-UA: sessões, polling cíclico → publica leituras; consome `opc.writes`; opera watchdog | 002, 006, 009, 021, 032 |
 | **flow-runtime** | Interpreta e executa flows (scan cycle); MPC (do-mpc), scripts, TFS; **SSTO** (alvos de regime permanente, no mesmo ciclo do MPC); publica estado/predições; recebe comandos | 004–007, 013, 014, 016, 018, 019, 022, 026, 027 |
 | **recorder** | Assina o barramento e grava amostras na hypertable | 003 |
 | **redis / db** | Barramento fire-and-forget / persistência única (cadastros + hypertables) | 002, 003 |

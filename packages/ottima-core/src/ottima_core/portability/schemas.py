@@ -60,6 +60,7 @@ class BundleConnection(BaseModel):
     security_mode: SecurityMode = "none"
     auth_mode: AuthMode = "anonymous"
     auth_username: str | None = None
+    polling_period_ms: int = 1000
 
     @model_validator(mode="after")
     def _coerencia(self) -> "BundleConnection":

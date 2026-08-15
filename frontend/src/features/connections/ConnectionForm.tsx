@@ -25,6 +25,7 @@ interface Valores {
   auth_mode: AuthMode;
   auth_username: string;
   auth_password: string;
+  polling_period_ms: string;
 }
 
 function valoresIniciais(conexao: ConnectionOut | null): Valores {
@@ -36,6 +37,7 @@ function valoresIniciais(conexao: ConnectionOut | null): Valores {
     auth_mode: conexao?.auth_mode ?? "anonymous",
     auth_username: conexao?.auth_username ?? "",
     auth_password: "",
+    polling_period_ms: String(conexao?.polling_period_ms ?? 1000),
   };
 }
 
@@ -54,6 +56,10 @@ function validar(v: Valores, senhaJaDefinida: boolean): string[] {
       erros.push("Autenticação usuário/senha exige usuário e senha");
     }
   }
+  const periodo = Number(v.polling_period_ms);
+  if (!Number.isInteger(periodo) || periodo < 100 || periodo > 60000) {
+    erros.push("Período de varredura deve ser um inteiro entre 100 e 60000 ms");
+  }
   return erros;
 }
 
@@ -66,6 +72,7 @@ function corpoComum(v: Valores) {
     security_mode: v.security_mode,
     auth_mode: v.auth_mode,
     auth_username: v.auth_mode === "user_password" ? v.auth_username.trim() : null,
+    polling_period_ms: Number(v.polling_period_ms),
   };
 }
 
@@ -154,6 +161,21 @@ export function ConnectionForm({ conexao, projectId, onClose }: Props) {
               value={v.endpoint}
               onChange={(e) => mudar("endpoint", e.target.value)}
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="conn-polling-period">Período de varredura (ms)</Label>
+            <Input
+              id="conn-polling-period"
+              data-testid="conn-polling-period"
+              type="number"
+              min={100}
+              max={60000}
+              value={v.polling_period_ms}
+              onChange={(e) => mudar("polling_period_ms", e.target.value)}
+            />
+            <p className="text-xs text-fg-muted">
+              Intervalo entre leituras das tags desta conexão.
+            </p>
           </div>
         </div>
 

@@ -47,7 +47,9 @@ def test_bundle_connection_rejeita_campo_fora_da_fronteira(campo_extra):
     assert any(e["type"] == "extra_forbidden" for e in exc_info.value.errors())
 
 
+def test_bundle_connection_polling_period_ms_default_e_1000():
     conexao = BundleConnection(name="gw1", endpoint="opc.tcp://10.0.0.5:4840")
+    assert conexao.polling_period_ms == 1000
 
 
 @pytest.mark.parametrize("campo_extra", ["connection_id", "id"])

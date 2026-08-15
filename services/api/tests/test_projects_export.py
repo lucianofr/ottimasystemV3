@@ -123,7 +123,7 @@ def _chaves_proibidas(valor: object, *, dentro_do_grafo: bool = False) -> Iterat
 async def test_export_200_bundle_valido_e_content_disposition(client, admin_headers):
     """2 conexões, tag homônima entre elas (TST-01), flow com grafo read->write."""
     pid = await _projeto(client, admin_headers, "Planta C-101")
-    gw1 = await _conexao(client, admin_headers, pid, "gw1")
+    gw1 = await _conexao(client, admin_headers, pid, "gw1", polling_period_ms=2500)
     gw2 = await _conexao(client, admin_headers, pid, "gw2")
     tag_r = await _tag(client, admin_headers, gw1, "TT-101")
     tag_w = await _tag(client, admin_headers, gw1, "FV-101", direction="w")
@@ -138,6 +138,10 @@ async def test_export_200_bundle_valido_e_content_disposition(client, admin_head
     assert body["schema_version"] == 1
     assert body["project"] == {"name": "Planta C-101", "description": ""}
     assert [c["name"] for c in body["connections"]] == ["gw1", "gw2"]
+    assert [(c["name"], c["polling_period_ms"]) for c in body["connections"]] == [
+        ("gw1", 2500),
+        ("gw2", 1000),
+    ]
     assert [(t["connection"], t["name"]) for t in body["tags"]] == [
         ("gw1", "FV-101"),
         ("gw1", "TT-101"),

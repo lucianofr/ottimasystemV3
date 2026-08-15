@@ -68,6 +68,7 @@ function conexao(id: number, name: string): ConnectionOut {
     security_policy: "none",
     security_mode: "none",
     auth_mode: "anonymous",
+    polling_period_ms: 1000,
     id,
     project_id: 1,
     has_password: false,
