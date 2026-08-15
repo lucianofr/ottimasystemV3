@@ -11,10 +11,12 @@ import {
   alinharNoEixo,
   atribuirCoresPenas,
   dividirSpPorAuto,
+  emendarPlanoNoDivisor,
   mesclarSeriesVivas,
   montarOverlayPrevisao,
   selecionarPenasDefault,
   tetoCarryForwardOperacaoS,
+  ultimoCarimboHistorico,
   type AmostraViva,
 } from "./trendOperacao";
 import { chaveHistoricoOperacao } from "./useHistoryMpc";
@@ -122,6 +124,68 @@ test("teto do carry-forward escala com a cadência: Ts_mpc no raw, bucket de 1 m
   expect(tetoCarryForwardOperacaoS("raw", 60)).toBe(120);
   // No `1m` o bucket é de 60 s: um teto de Ts_mpc gaparia toda série agregada saudável.
   expect(tetoCarryForwardOperacaoS("1m", 1)).toBe(120);
+});
+
+test("carry-forward para na fronteira do passado: carimbo da predição nunca recebe medição repetida", () => {
+  // eixoX = 3 carimbos de histórico (0, 5, 10) + 2 carimbos só da predição (15, 20). A pena
+  // amostrou em 0 e 10; 15 e 20 estão dentro do teto de 10 s, então sem o limite o carry-forward
+  // desenharia a medição de 10 na seção futura — reta sólida atravessando a linha do "agora".
+  const eixoX = [0, 5, 10, 15, 20].map((d) => T0 + d);
+  const coluna = alinharNoEixo(eixoX, [T0, T0 + 10], [1, 2], 10, T0 + 10);
+
+  expect(coluna).toEqual([1, 1, 2, null, null]);
+});
+
+test("último carimbo histórico é o mais novo entre as penas — a esparsa ainda alcança a ponta densa", () => {
+  const densa = { id: "cv_1", t: [T0, T0 + 4, T0 + 8], v: [1, 2, 3], sp: [], auto: [] };
+  const esparsa = { id: "mv_1", t: [T0 + 2], v: [9], sp: [], auto: [] };
+
+  expect(ultimoCarimboHistorico([esparsa, densa])).toBe(T0 + 8);
+  // Sem histórico nenhum nada de medido desenha (a predição não passa por este limite).
+  expect(ultimoCarimboHistorico([])).toBe(Number.NEGATIVE_INFINITY);
+});
+
+test("predição entra só nos seus próprios carimbos: teto 0 não repete o plano em carimbo alheio", () => {
+  // T0+2 é carimbo da ponta viva OPC de outra pena, entre dois pontos do plano: repetir o valor
+  // do plano ali viraria degrau numa pena de CV, que é reta entre pontos (§3.3 só a MV é degrau).
+  const eixoX = [T0, T0 + 2, T0 + 5, T0 + 10];
+
+  expect(alinharNoEixo(eixoX, [T0, T0 + 5, T0 + 10], [10, 20, 30], 0)).toEqual([10, null, 20, 30]);
+});
+
+test("emenda: o trecho já decorrido do plano sai de cena e o tracejado começa no fim do sólido (DESIGN §Overview)", () => {
+  // Ts_mpc = 5 s. O quadro que publica o plano já avançou pelo menos uma fronteira além do
+  // dispatch que o produziu (`prediction.ts = _dispatch_ts`, `blocks/mpc.py`; `t[0] = 0`,
+  // `test_mpc_worker.py`), então `tAbs[0]` cai ATRÁS da ponta viva. A âncora não se move (§3.5,
+  // F5R-01): quem muda é só o desenho — a predição "continua" na linha-cursor, tinta molhada na
+  // ponta, não traço voltando por cima do que já secou.
+  const plano = emendarPlanoNoDivisor([T0 + 5, T0 + 10, T0 + 15], [2, 4, 6], T0 + 12, false);
+
+  // Começa exatamente no divisor (fim do sólido): sem sobreposição e sem buraco na emenda.
+  expect(plano.t).toEqual([T0 + 12, T0 + 15]);
+  // Reta entre os pontos que cercam o divisor (CV é trajetória contínua): 4 + (6-4) × 2/5.
+  expect(plano.v[0]).toBeCloseTo(4.8, 10);
+});
+
+test("emenda de MV é degrau, não reta: o valor no divisor é o do próximo ponto (§3.3, align -1)", () => {
+  // `mv[k]` vale no intervalo que TERMINA em `tAbs[k]`: interpolar ali moveria a quina do degrau.
+  const plano = emendarPlanoNoDivisor([T0 + 5, T0 + 10, T0 + 15], [30, 45, 60], T0 + 12, true);
+
+  expect(plano.t).toEqual([T0 + 12, T0 + 15]);
+  expect(plano.v).toEqual([60, 60]);
+});
+
+test("emenda: plano inteiro no futuro passa intacto; plano inteiro decorrido não desenha", () => {
+  const tAbs = [T0 + 20, T0 + 25];
+  expect(emendarPlanoNoDivisor(tAbs, [1, 2], T0 + 10, false)).toEqual({ t: tAbs, v: [1, 2] });
+  // Sem histórico nenhum o divisor é -Infinity: nada a recortar, o plano desenha inteiro.
+  expect(emendarPlanoNoDivisor(tAbs, [1, 2], Number.NEGATIVE_INFINITY, false).t).toEqual(tAbs);
+  // Quadro velho (plano todo atrás da ponta viva): nada a desenhar, e nunca uma reta esticada.
+  expect(emendarPlanoNoDivisor(tAbs, [1, 2], T0 + 30, false)).toEqual({ t: [], v: [] });
+});
+
+test("emenda: linha de CV ausente no quadro (comprimento incompatível) não desenha nada", () => {
+  expect(emendarPlanoNoDivisor([T0 + 5, T0 + 10], [], T0 + 7, false)).toEqual({ t: [], v: [] });
 });
 
 test("borda viva: mpc.state novo faz append na série sem esperar o poll", () => {

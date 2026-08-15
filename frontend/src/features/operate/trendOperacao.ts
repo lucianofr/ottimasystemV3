@@ -132,6 +132,26 @@ export function tetoCarryForwardOperacaoS(
 }
 
 /**
+ * Fronteira entre o passado e a seção futura: o carimbo mais novo que alguma pena de fato
+ * amostrou. O eixo x do gráfico é a união dos carimbos das penas COM os da predição
+ * (`montarColunas` em `TrendOperacao.tsx`), então o carry-forward de `alinharNoEixo` tem um
+ * limite a respeitar aqui: repetir a última medição num carimbo do horizonte desenharia
+ * medição onde não houve medição — a pena sólida atravessa a linha do "agora" e termina à
+ * direita de onde a tracejada começa (a emenda "tinta que ainda não secou" quebra nas duas
+ * pontas). O limite é o carimbo mais novo de TODAS as penas, não o de cada uma: é isso que
+ * mantém a pena esparsa alcançando a ponta densa de quem tem tag OPC (`alinharNoEixo`).
+ */
+export function ultimoCarimboHistorico(series: readonly SerieOperacao[]): number {
+  let ultimo = Number.NEGATIVE_INFINITY;
+  for (const serie of series) {
+    // `t` é crescente por construção (ver `SerieOperacao`): o último elemento é o mais novo.
+    const carimbo = serie.t[serie.t.length - 1];
+    if (carimbo !== undefined && carimbo > ultimo) ultimo = carimbo;
+  }
+  return ultimo;
+}
+
+/**
  * Coluna de uma pena no eixo x compartilhado do uPlot (união dos carimbos de todas as penas,
  * `montarColunas` em `TrendOperacao.tsx`).
  *
@@ -140,9 +160,12 @@ export function tetoCarryForwardOperacaoS(
  * MPC — e a predição só vive no horizonte. Nos instantes em que a pena não amostrou ela repete
  * o último valor conhecido, que é o que o valor fez de fato no processo: sem isso a pena mais
  * esparsa fica com um `null` entre cada par de carimbos alheios, vira trecho de 1 ponto e não
- * desenha nada (`spanGaps: false`, sem marcador). Duas coisas cortam a repetição e as duas
- * viram gap: `null` na própria série (SP dividido por `auto`, ponto sem valor) e silêncio além
- * de `tetoS` (`tetoCarryForwardOperacaoS`) — flow parado, recorder fora do ar.
+ * desenha nada (`spanGaps: false`, sem marcador). Três coisas cortam a repetição e as três
+ * viram gap: `null` na própria série (SP dividido por `auto`, ponto sem valor), silêncio além
+ * de `tetoS` (`tetoCarryForwardOperacaoS`) — flow parado, recorder fora do ar — e carimbo além
+ * de `limiteS`, a fronteira do passado (`ultimoCarimboHistorico`): pena medida não entra na
+ * seção futura. `tetoS = 0` desliga a repetição por inteiro, que é como a própria predição
+ * entra (só nos seus carimbos, o traço entre eles é do `spanGaps` do uPlot).
  *
  * Mesma regra do trend de engenharia (`montarMatriz` em `useHistory.ts`), aqui por coluna
  * porque o eixo já vem montado (histórico + horizonte da predição). `eixoX` crescente é
@@ -154,6 +177,7 @@ export function alinharNoEixo(
   t: readonly number[],
   valores: readonly (number | null | undefined)[],
   tetoS: number,
+  limiteS = Number.POSITIVE_INFINITY,
 ): (number | null)[] {
   const porT = new Map(t.map((ts, i) => [ts, valores[i] ?? null]));
   let atual: number | null = null;
@@ -164,6 +188,7 @@ export function alinharNoEixo(
       atual = amostra;
       ultimaAmostra = ts;
     }
+    if (ts > limiteS) return null;
     return ts - ultimaAmostra > tetoS ? null : atual;
   });
 }
@@ -201,6 +226,50 @@ export function montarOverlayPrevisao(prediction: MpcPrediction): OverlayPrevisa
   const ancoraSegundos = Date.parse(prediction.ts) / 1000;
   const tAbs = prediction.t.map((deslocamentoS) => ancoraSegundos + deslocamentoS);
   return { tAbs, agora: tAbs[0], cv: prediction.cv, mv: prediction.mv };
+}
+
+/**
+ * Recorte de apresentação do plano na emenda com o traço sólido (DESIGN §Overview, assinatura
+ * "tinta que ainda não secou": o histórico é traço sólido, a linha-cursor marca "agora" e a
+ * predição CONTINUA dali — tinta molhada na ponta, não traço voltando por cima do que já secou).
+ *
+ * O plano publicado num quadro foi despachado pelo menos uma fronteira antes (`prediction.ts =
+ * _dispatch_ts` em `blocks/mpc.py`, spec §3.5/F5R-01) e `t[0] = 0`, então `tAbs[0]` cai ATRÁS da
+ * ponta viva: desenhado inteiro, o tracejado começa antes do fim do sólido e volta por cima do
+ * histórico. Aqui nada se move no tempo — a âncora continua sendo `prediction.ts` e cada ponto
+ * mantém seu instante absoluto (re-ancorar adiantaria o horizonte em 1×Ts_mpc, o que F5R-01
+ * proíbe): só o trecho JÁ DECORRIDO sai de cena, e entra um ponto no próprio divisor para o
+ * tracejado começar exatamente onde o sólido termina — sem sobreposição e sem buraco.
+ *
+ * `degrau` (MVs, §3.3 `align: -1`): o valor no divisor é o do PRÓXIMO ponto, que é o degrau
+ * vigente no intervalo que termina nele — interpolar reta ali moveria a quina do degrau. CVs e
+ * Restrições são trajetória contínua: reta entre os dois pontos que cercam o divisor.
+ */
+export function emendarPlanoNoDivisor(
+  tAbs: readonly number[],
+  valores: readonly number[],
+  divisorS: number,
+  degrau: boolean,
+): { readonly t: readonly number[]; readonly v: readonly number[] } {
+  // Linha ausente no quadro (`overlay.cv[i] ?? []`) ou fora de passo com o vetor de tempo: sem
+  // par (t, v) não há plano para desenhar — nunca meia pena.
+  if (valores.length !== tAbs.length) return { t: [], v: [] };
+  const primeiroFuturo = tAbs.findIndex((ts) => ts > divisorS);
+  if (primeiroFuturo === 0) return { t: tAbs, v: valores };
+  // `-1`: todo o plano já decorreu (quadro velho, relógio adiantado) — nada a desenhar.
+  if (primeiroFuturo < 0) return { t: [], v: [] };
+  const anterior = tAbs[primeiroFuturo - 1];
+  const passo = tAbs[primeiroFuturo] - anterior;
+  const fracao = passo > 0 ? (divisorS - anterior) / passo : 1;
+  const vAnterior = valores[primeiroFuturo - 1];
+  const vProximo = valores[primeiroFuturo];
+  return {
+    t: [divisorS, ...tAbs.slice(primeiroFuturo)],
+    v: [
+      degrau ? vProximo : vAnterior + (vProximo - vAnterior) * fracao,
+      ...valores.slice(primeiroFuturo),
+    ],
+  };
 }
 
 export interface DivisaoSp {

@@ -28,10 +28,12 @@ import {
   alinharNoEixo,
   atribuirCoresPenas,
   dividirSpPorAuto,
+  emendarPlanoNoDivisor,
   mesclarSeriesVivas,
   montarOverlayPrevisao,
   selecionarPenasDefault,
   tetoCarryForwardOperacaoS,
+  ultimoCarimboHistorico,
   type AmostraViva,
   type OverlayPrevisao,
   type PenaLegenda,
@@ -194,24 +196,45 @@ function montarColunas(
     (a, b) => a - b,
   );
 
-  // Cada pena tem carimbos próprios: nos instantes das outras ela repete o último valor
-  // conhecido, com gap além de `tetoCarryS` (ver `alinharNoEixo`).
-  function remapear(t: readonly number[], valores: readonly (number | null)[]): (number | null)[] {
-    return alinharNoEixo(eixoX, t, valores, tetoCarryS);
-  }
+  // Fronteira do passado: `eixoX` inclui os carimbos do horizonte, então o carry-forward de
+  // `alinharNoEixo` precisa parar aqui — repetir a última medição dentro da seção futura
+  // desenhava a pena sólida atravessando a linha do "agora" e terminando à direita de onde a
+  // tracejada começa (até 2×Ts_mpc adiante, o teto do carry).
+  const limiteHistoricoS = ultimoCarimboHistorico(seriesHistoricas);
 
   const dados: (number | null)[][] = [];
   const series: uPlot.Series[] = [{ label: "Tempo" }];
   const bands: uPlot.Band[] = [];
 
-  function pushSerie(
-    t: readonly number[],
-    valores: readonly (number | null)[],
-    opts: Omit<uPlot.Series, "label"> & { label: string },
-  ): number {
-    dados.push(remapear(t, valores));
+  type OpcoesSerie = Omit<uPlot.Series, "label"> & { label: string };
+
+  function pushColuna(coluna: (number | null)[], opts: OpcoesSerie): number {
+    dados.push(coluna);
     series.push(opts);
     return series.length - 1;
+  }
+
+  /** Pena medida: nos instantes das outras penas repete o último valor conhecido, com gap além
+   *  de `tetoCarryS` e nada além da fronteira do passado (ver `alinharNoEixo`). */
+  function pushHistorico(
+    t: readonly number[],
+    valores: readonly (number | null)[],
+    opts: OpcoesSerie,
+  ): number {
+    return pushColuna(alinharNoEixo(eixoX, t, valores, tetoCarryS, limiteHistoricoS), opts);
+  }
+
+  /** Pena de predição. Duas coisas, as duas de apresentação (a âncora do plano segue sendo
+   *  `prediction.ts`, F5R-01): o trecho já decorrido sai de cena e o traço começa no fim do
+   *  sólido (`emendarPlanoNoDivisor`), e o alinhamento é exato nos carimbos do plano
+   *  (`tetoS = 0`) — repetir o valor num carimbo alheio viraria degrau numa pena de CV (reta
+   *  entre pontos, §3.3) e deslocaria a quina do degrau da MV para fora da fronteira de Ts_mpc,
+   *  que é justo o que `align: -1` garante. `spanGaps` liga os pontos do plano por cima dos
+   *  carimbos alheios entre eles; a série não tem buraco por construção (o plano vem inteiro no
+   *  quadro). */
+  function pushPrevisao(valores: readonly number[], degrau: boolean, opts: OpcoesSerie): number {
+    const plano = emendarPlanoNoDivisor(overlay.tAbs, valores, limiteHistoricoS, degrau);
+    return pushColuna(alinharNoEixo(eixoX, plano.t, plano.v, 0), { ...opts, spanGaps: true });
   }
 
   // CVs (PV + SP) — linhas de `overlay.cv` = CVs na ordem do config, depois Restrições
@@ -224,7 +247,7 @@ function montarColunas(
     const historica = porId.get(cv.id) ?? SERIE_VAZIA(cv.id);
     const cor = cores.get(cv.id) ?? corPadrao;
     const scale = chaveEscala(cv.id);
-    pushSerie(historica.t, historica.v, {
+    pushHistorico(historica.t, historica.v, {
       label: `${cv.name} PV`,
       stroke: cor,
       width: 1.5,
@@ -232,7 +255,7 @@ function montarColunas(
       points: { show: false },
       scale,
     });
-    pushSerie(overlay.tAbs, overlay.cv[indiceLinha] ?? [], {
+    pushPrevisao(overlay.cv[indiceLinha] ?? [], false, {
       label: `${cv.name} previsto`,
       stroke: tracoComFade(cor, overlay.agora),
       width: 1.5,
@@ -241,14 +264,14 @@ function montarColunas(
       scale,
     });
     const divisao = dividirSpPorAuto(historica.sp, historica.auto);
-    pushSerie(historica.t, divisao.comandado, {
+    pushHistorico(historica.t, divisao.comandado, {
       label: `${cv.name} SP`,
       stroke: tema.accent,
       width: 1.5,
       points: { show: false },
       scale,
     });
-    pushSerie(historica.t, divisao.rastreado, {
+    pushHistorico(historica.t, divisao.rastreado, {
       label: `${cv.name} SP rastreado`,
       stroke: corDessaturada(tema.accent, tema.texto),
       width: 1.5,
@@ -266,7 +289,7 @@ function montarColunas(
     const historica = porId.get(restricao.id) ?? SERIE_VAZIA(restricao.id);
     const cor = cores.get(restricao.id) ?? corPadrao;
     const scale = chaveEscala(restricao.id);
-    pushSerie(historica.t, historica.v, {
+    pushHistorico(historica.t, historica.v, {
       label: `${restricao.name} PV`,
       stroke: cor,
       width: 1.5,
@@ -274,7 +297,7 @@ function montarColunas(
       points: { show: false },
       scale,
     });
-    pushSerie(overlay.tAbs, overlay.cv[indiceLinha] ?? [], {
+    pushPrevisao(overlay.cv[indiceLinha] ?? [], false, {
       label: `${restricao.name} previsto`,
       stroke: tracoComFade(cor, overlay.agora),
       width: 1.5,
@@ -282,8 +305,9 @@ function montarColunas(
       points: { show: false },
       scale,
     });
-    const idxLow = pushSerie(
-      eixoX,
+    // A faixa da Restrição não expira em "agora": a banda atravessa o horizonte inteira, então
+    // entra por `pushColuna` — sem carry-forward para repetir e sem fronteira para cortar.
+    const idxLow = pushColuna(
       eixoX.map(() => restricao.range.low),
       {
         label: `${restricao.name} mín.`,
@@ -293,8 +317,7 @@ function montarColunas(
         scale,
       },
     );
-    const idxHigh = pushSerie(
-      eixoX,
+    const idxHigh = pushColuna(
       eixoX.map(() => restricao.range.high),
       {
         label: `${restricao.name} máx.`,
@@ -314,7 +337,7 @@ function montarColunas(
     const historica = porId.get(mv.id) ?? SERIE_VAZIA(mv.id);
     const cor = cores.get(mv.id) ?? corPadrao;
     const scale = chaveEscala(mv.id);
-    pushSerie(historica.t, historica.v, {
+    pushHistorico(historica.t, historica.v, {
       label: `${mv.name} PV`,
       stroke: cor,
       width: 1.5,
@@ -322,7 +345,7 @@ function montarColunas(
       points: { show: false },
       scale,
     });
-    pushSerie(overlay.tAbs, overlay.mv[indiceMv] ?? [], {
+    pushPrevisao(overlay.mv[indiceMv] ?? [], true, {
       label: `${mv.name} previsto`,
       stroke: corClara(cor),
       width: 1.5,
@@ -341,7 +364,7 @@ function montarColunas(
     if (!ligadas.has(dv.id)) return;
     const historica = porId.get(dv.id) ?? SERIE_VAZIA(dv.id);
     const cor = cores.get(dv.id) ?? corPadrao;
-    pushSerie(historica.t, historica.v, {
+    pushHistorico(historica.t, historica.v, {
       label: `${dv.name} PV`,
       stroke: cor,
       width: 1.5,
