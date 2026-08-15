@@ -201,7 +201,9 @@ test("canal fora do vocabulário, sufixo não numérico ou payload inválido sã
 });
 
 // `opc.values.<conn_id>` deixou de ser descartado (decisão F6 A-1 revertida): o envelope vira
-// mensagem `opc_values` com o payload cru do RF-204; `ok` espelha quality === 0.
+// mensagem `opc_values` com o payload cru do RF-204. `quality` vai INTEIRA (0/1/2 do
+// barramento, `bus.py:39-40`) porque a coluna Quality da tela de Tags distingue Incerta de
+// Ruim; `ok` fica como atalho de "quality === 0" para quem só plota (trend).
 test("opc.values.<conn> vira mensagem opc_values com o payload cru do RF-204", () => {
   const msg = analisarMensagemCanal(
     envelope("opc.values.3", { tag_id: 42, ts: "2026-08-04T12:00:00Z", value: 51.2, quality: 0 }),
@@ -212,7 +214,25 @@ test("opc.values.<conn> vira mensagem opc_values com o payload cru do RF-204", (
     tagId: 42,
     v: 51.2,
     ts: "2026-08-04T12:00:00Z",
+    quality: 0,
     ok: true,
+  });
+});
+
+// O caso que separa `quality` de `ok`: uncertain (1) não é bom, mas também não é ruim — a
+// tela de Tags mostra "Incerta" e o `ok` sozinho não distinguiria de "Ruim".
+test("opc.values com quality uncertain preserva o 1 e marca ok false", () => {
+  const msg = analisarMensagemCanal(
+    envelope("opc.values.3", { tag_id: 42, ts: "2026-08-04T12:00:00Z", value: 51.2, quality: 1 }),
+  );
+
+  expect(msg).toEqual({
+    canal: "opc_values",
+    tagId: 42,
+    v: 51.2,
+    ts: "2026-08-04T12:00:00Z",
+    quality: 1,
+    ok: false,
   });
 });
 
@@ -226,6 +246,7 @@ test("opc.values com value null e quality ruim vira v null e ok false", () => {
     tagId: 42,
     v: null,
     ts: "2026-08-04T12:00:00Z",
+    quality: 8,
     ok: false,
   });
 });
@@ -389,7 +410,7 @@ test("opc_values vai ao callback de buffer e não muda o estado do canal", () =>
   );
 
   expect(b.opcRecebidas).toEqual([
-    { canal: "opc_values", tagId: 7, v: 1.5, ts: "2026-08-04T12:00:00Z", ok: true },
+    { canal: "opc_values", tagId: 7, v: 1.5, ts: "2026-08-04T12:00:00Z", quality: 0, ok: true },
   ]);
   expect(b.estado()).toBe(antes); // nenhuma atualização de estado por mensagem opc
 });

@@ -59,10 +59,13 @@ export type Interesse = {
 };
 
 /** Leitura crua de uma tag vinda do `opc.values.<conn_id>` (RF-204): o PV do faceplate na
- *  taxa OPC, não na taxa do MPC (decisão F6 A-1 revertida). `ok` = quality 0 (bom). */
+ *  taxa OPC, não na taxa do MPC (decisão F6 A-1 revertida). `quality` é o inteiro do
+ *  barramento (0=boa, 1=incerta, 2=ruim — `bus.py`); `ok` é o atalho `quality === 0` para
+ *  quem só plota e não distingue incerta de ruim. */
 export interface LeituraTag {
   v: number | null;
   ts: string;
+  quality: number;
   ok: boolean;
 }
 
@@ -237,6 +240,7 @@ export interface MensagemOpcValues {
   tagId: number;
   v: number | null;
   ts: string;
+  quality: number;
   ok: boolean;
 }
 
@@ -291,15 +295,16 @@ function lerEvento(data: Record<string, unknown>): EventMessage | null {
   return data as unknown as EventMessage;
 }
 
-/** Forma do RF-204: `value` pode ser null (falha de leitura no worker); `ok` espelha a
- *  convenção do barramento (quality 0 = bom). Qualquer campo fora de forma descarta. */
+/** Forma do RF-204: `value` pode ser null (falha de leitura no worker); `quality` passa
+ *  inteira e `ok` espelha a convenção do barramento (quality 0 = bom). Qualquer campo fora
+ *  de forma descarta. */
 function lerOpcValues(data: Record<string, unknown>): Omit<MensagemOpcValues, "canal"> | null {
   const { tag_id, ts, value, quality } = data;
   if (typeof tag_id !== "number" || !Number.isInteger(tag_id)) return null;
   if (typeof ts !== "string") return null;
   if (value !== null && typeof value !== "number") return null;
   if (typeof quality !== "number") return null;
-  return { tagId: tag_id, v: value, ts, ok: quality === 0 };
+  return { tagId: tag_id, v: value, ts, quality, ok: quality === 0 };
 }
 
 /**
@@ -774,7 +779,8 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
       registro.agregado,
       AMBIENTE_BROWSER,
       (mensagem) => {
-        buffer.set(mensagem.tagId, { v: mensagem.v, ts: mensagem.ts, ok: mensagem.ok });
+        const { v, ts, quality, ok } = mensagem;
+        buffer.set(mensagem.tagId, { v, ts, quality, ok });
       },
     );
     cicloRef.current = ciclo;
