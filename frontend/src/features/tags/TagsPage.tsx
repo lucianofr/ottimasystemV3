@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { Link } from "react-router";
 
+import { useAssinaturaOpcValues, useCanalAoVivo, type LeituraTag } from "../../app/CanalAoVivo";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { Label } from "../../components/ui/label";
 import { Select } from "../../components/ui/select";
 import { ApiError, type TagOut } from "../../lib/api";
+import { cn } from "../../lib/cn";
 import { useCanMutate } from "../auth/useAuth";
 import { useConnections } from "../connections/useConnections";
 import { useActiveProject } from "../projects/useProjects";
 import { TagForm } from "./TagForm";
+import { celulaOnline, tagIdsDeLeitura, type CelulaOnline } from "./tagsOnline";
 import {
   ROTULO_DIRECAO,
   ROTULO_TIPO,
@@ -26,8 +29,70 @@ const COLUNAS = [
   "Direção",
   "Tipo",
   "EU",
+  "Valor",
+  "Quality",
   "Descrição",
 ] as const;
+
+/** Cor da lâmpada de quality. Boa fica NEUTRA de propósito (Regra da Cor Anormal: superfície
+ *  em operação normal não tem cor) — a forma é que distingue boa de sem-dado. */
+const COR_QUALITY: Record<"success" | "warn" | "alarm", string> = {
+  success: "text-fg-muted",
+  warn: "text-warn-fg",
+  alarm: "text-alarm",
+};
+
+/** Lâmpada de quality: forma + cor + rótulo textual (Regra do Canal Redundante, DESIGN.md
+ *  §Colors) — mesma convenção de `LampadaSeveridade` (`EventsPage.tsx`), com vocabulário de
+ *  forma próprio porque o domínio (quality do OPC-UA, não severidade de evento) é outro:
+ *  círculo = boa, triângulo = incerta, losango = ruim. Sem dado não acende lâmpada. */
+function LampadaQuality({ celula }: { celula: CelulaOnline }) {
+  if (celula.tone === "neutral") return <span className="text-fg-muted">{celula.quality}</span>;
+  return (
+    <span className={cn("inline-flex items-center gap-1.5", COR_QUALITY[celula.tone])}>
+      <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+        {celula.tone === "success" && <circle cx="5" cy="5" r="4" />}
+        {celula.tone === "warn" && <path d="M5 0 10 9H0L5 0Z" />}
+        {celula.tone === "alarm" && <path d="M5 0 10 5 5 10 0 5Z" />}
+      </svg>
+      <span className="plaqueta text-[11px]">{celula.quality}</span>
+    </span>
+  );
+}
+
+/** Valor online + quality de uma linha (RF-204). Subcomponente para `celulaOnline` rodar uma
+ *  vez por linha e ainda entregar duas células. A Regra do Número Tabular pede mono tabular
+ *  com a EU ao lado: `process-value` fica no span do NÚMERO, não no `<td>`, senão a EU herda
+ *  o mono por cascata (mesmo recorte de `BlocoChapa.tsx` e `FlowsPage.tsx`). */
+function CelulasOnline({
+  tag,
+  leitura,
+  aoVivo,
+}: {
+  tag: TagOut;
+  leitura: LeituraTag | undefined;
+  aoVivo: boolean;
+}) {
+  const celula = celulaOnline(tag.direction, leitura, aoVivo);
+  return (
+    <>
+      <td className="px-3 py-2 text-right" data-testid="tag-valor">
+        {celula.valor === null ? (
+          <span className="text-fg-muted">—</span>
+        ) : (
+          <>
+            <span className="process-value">{celula.valor}</span>
+            {/* Espaço de TEXTO, não só margem: a célula é copiável e vai a leitor de tela. */}
+            {tag.eu !== "" && <> <span className="text-xs text-fg-muted">{tag.eu}</span></>}
+          </>
+        )}
+      </td>
+      <td className="px-3 py-2" data-testid="tag-quality">
+        <LampadaQuality celula={celula} />
+      </td>
+    </>
+  );
+}
 
 export function TagsPage() {
   const [filtros, setFiltros] = useState<FiltrosTags>({ connectionId: null, direction: null });
@@ -47,6 +112,13 @@ export function TagsPage() {
   const filtrando = filtros.connectionId !== null || filtros.direction !== null;
   const podeMutar = useCanMutate();
   const totalColunas = COLUNAS.length + (podeMutar ? 1 : 0);
+  // Assinatura DINÂMICA: o conjunto de linhas muda com os filtros e com o projeto ativo, sem
+  // remontar a página — `useAssinatura` congelaria o interesse do primeiro render.
+  useAssinaturaOpcValues(tagIdsDeLeitura(linhas));
+  const { estado, tagValues } = useCanalAoVivo();
+  // Socket fora do ar ⇒ `tagValues` congela no último lote; a célula vira travessão em vez de
+  // exibir número velho como se fosse a leitura de agora (ver `celulaOnline`).
+  const aoVivo = estado === "aberto";
 
   if (projeto.data === null && projeto.isSuccess) {
     return (
@@ -223,6 +295,7 @@ export function TagsPage() {
                 <td className="px-3 py-2 text-fg-muted">
                   {tag.eu || <span className="text-fg-muted">—</span>}
                 </td>
+                <CelulasOnline tag={tag} leitura={tagValues.get(tag.id)} aoVivo={aoVivo} />
                 <td className="px-3 py-2">
                   {tag.description || <span className="text-fg-muted">—</span>}
                 </td>
