@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-import { PORT_CONTRACTS } from "../../lib/contracts.gen";
+import {
+  PORT_CONTRACTS,
+  type ContratoPortaDinamicaComDefault,
+} from "../../lib/contracts.gen";
 import {
   avisosInversao,
   compactarExecOrder,
@@ -25,6 +28,12 @@ import {
 } from "./graph";
 
 const POS = { x: 0, y: 0 };
+
+/** `PORT_CONTRACTS.fuzzy` é tipado como a união `ContratoPorta`, e checar só `dynamic`
+ *  deixa `ContratoPortaDinamica | ...ComDefault` — `default_fll`/`default_counts` não
+ *  existem no primeiro. Mesmo estreitamento que `graph.ts` já faz no `contratoFuzzy`
+ *  interno dele (ADR-029): o contrato do fuzzy é o dinâmico COM defaults. */
+const contratoFuzzy = PORT_CONTRACTS.fuzzy as ContratoPortaDinamicaComDefault;
 
 /** Tags do projeto do flow, como o editor as monta a partir de `useTags`. */
 const TAGS: MapaTags = new Map([
@@ -228,13 +237,13 @@ test("as portas do Fuzzy acompanham n_inputs/n_outputs (RF-541)", () => {
 test("criarBloco('fuzzy', ...) nasce com os defaults do contrato, nunca literal local (RF-541, ADR-029)", () => {
   const no = criarBloco("fuzzy", "f", POS, 1);
   if (no.type !== "fuzzy") throw new Error("tipo preservado");
-  if (!PORT_CONTRACTS.fuzzy.dynamic) throw new Error("contrato do fuzzy deveria ser dinâmico");
+  expect(contratoFuzzy.dynamic).toBe(true);
   expect(no.data).toEqual({
     exec_order: 1,
     label: "",
-    n_inputs: PORT_CONTRACTS.fuzzy.default_counts.n_inputs,
-    n_outputs: PORT_CONTRACTS.fuzzy.default_counts.n_outputs,
-    fll: PORT_CONTRACTS.fuzzy.default_fll,
+    n_inputs: contratoFuzzy.default_counts.n_inputs,
+    n_outputs: contratoFuzzy.default_counts.n_outputs,
+    fll: contratoFuzzy.default_fll,
     output_eu: {},
   });
 });
@@ -533,7 +542,7 @@ test("nó Fuzzy salvo sem fll/output_eu carrega com o default do contrato e {} (
   });
   const f = grafo.nodes.find((no) => no.id === "f");
   if (f?.type !== "fuzzy") throw new Error("tipo preservado");
-  expect(f.data.fll).toBe(PORT_CONTRACTS.fuzzy.default_fll);
+  expect(f.data.fll).toBe(contratoFuzzy.default_fll);
   expect(f.data.output_eu).toEqual({});
 });
 

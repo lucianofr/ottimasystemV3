@@ -1,6 +1,5 @@
-import { Input } from "../../../components/ui/input";
-import { Label } from "../../../components/ui/label";
 import type { NoFirstOrder, NoKalman } from "../graph";
+import { Campo } from "./CamposComuns";
 
 /**
  * Formulários dos dois blocos de filtro (RF-532/533, ADR-026).
@@ -10,38 +9,9 @@ import type { NoFirstOrder, NoKalman } from "../graph";
  * não há estado de modal aqui — ao contrário do TFS, onde `enabled`/`kind` decidem quais
  * parâmetros existem.
  *
- * O texto de apoio é parte do contrato de usabilidade da janela resumida: os parâmetros do
- * Kalman só são "fáceis de configurar" porque estão na EU do próprio sinal e se leem numa
- * tendência. Sem a dica, o mesmo campo vira estatística.
+ * O campo em si (e o porquê do texto de apoio) mora em `CamposComuns.tsx`, compartilhado
+ * com o formulário do PID.
  */
-
-function Campo({
-  id,
-  rotulo,
-  valor,
-  ajuda,
-}: {
-  id: string;
-  rotulo: string;
-  valor: number;
-  ajuda: string;
-}) {
-  return (
-    <div className="space-y-1">
-      <Label htmlFor={id}>{rotulo}</Label>
-      <Input
-        id={id}
-        name={id}
-        data-testid={`config-${id.replace(/_/g, "-")}`}
-        type="text"
-        inputMode="decimal"
-        className="process-value"
-        defaultValue={String(valor)}
-      />
-      <p className="text-[10px] leading-tight text-fg-muted">{ajuda}</p>
-    </div>
-  );
-}
 
 export function CamposFiltroPrimeiraOrdem({ dados }: { dados: NoFirstOrder["data"] }) {
   return (

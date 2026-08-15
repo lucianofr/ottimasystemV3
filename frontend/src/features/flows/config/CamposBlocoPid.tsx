@@ -1,12 +1,12 @@
-import { Input } from "../../../components/ui/input";
-import { Label } from "../../../components/ui/label";
 import type { NoPid } from "../graph";
+import { Campo } from "./CamposComuns";
 
 /**
  * Formulário do bloco PID (RF-551..554, ADR-031). Os dez campos ficam sempre visíveis — nenhum
  * gate outro campo (ao contrário do TFS, onde `enabled`/`kind` decidem o que existe) — então o
  * formulário não carrega estado de React, só lê o FormData no envio, igual aos filtros
- * (`CamposFiltros.tsx`).
+ * (`CamposFiltros.tsx`). O campo numérico é o compartilhado de `CamposComuns.tsx`; os limites
+ * de saída passam `valor={null}` quando em branco (sem limite) e ganham placeholder.
  *
  * Três grupos (Ganhos, Setpoint e saída, Estrutura) para os dez campos caberem sem virar uma
  * parede de rótulos: cada um é uma decisão de sintonia diferente, e a `ajuda` é parte do
@@ -16,65 +16,6 @@ import type { NoPid } from "../graph";
  * `CamposBlocoPid` (não `CamposPid`) porque `mpc/CamposPid.tsx` já existe e é outra coisa: o
  * binding de tags PLC-PID por MV do MPC (spec F4 §2.1-3), sem relação com este bloco.
  */
-
-function Campo({
-  id,
-  rotulo,
-  valor,
-  ajuda,
-}: {
-  id: string;
-  rotulo: string;
-  valor: number;
-  ajuda: string;
-}) {
-  return (
-    <div className="space-y-1">
-      <Label htmlFor={id}>{rotulo}</Label>
-      <Input
-        id={id}
-        name={id}
-        data-testid={`config-${id.replace(/_/g, "-")}`}
-        type="text"
-        inputMode="decimal"
-        className="process-value"
-        defaultValue={String(valor)}
-      />
-      <p className="text-[10px] leading-tight text-fg-muted">{ajuda}</p>
-    </div>
-  );
-}
-
-/** Limite de saída: campo em branco = sem limite (`null`), ao contrário de `Campo` — nunca
- *  cai num número de fallback (`numeroOuNuloDoCampo`, `campos.ts`). */
-function CampoLimite({
-  id,
-  rotulo,
-  valor,
-  ajuda,
-}: {
-  id: string;
-  rotulo: string;
-  valor: number | null;
-  ajuda: string;
-}) {
-  return (
-    <div className="space-y-1">
-      <Label htmlFor={id}>{rotulo}</Label>
-      <Input
-        id={id}
-        name={id}
-        data-testid={`config-${id.replace(/_/g, "-")}`}
-        type="text"
-        inputMode="decimal"
-        className="process-value"
-        defaultValue={valor === null ? "" : String(valor)}
-        placeholder="sem limite"
-      />
-      <p className="text-[10px] leading-tight text-fg-muted">{ajuda}</p>
-    </div>
-  );
-}
 
 function CampoBooleano({
   id,
@@ -147,16 +88,18 @@ export function CamposBlocoPid({ dados }: { dados: NoPid["data"] }) {
             valor={dados.starting_output}
             ajuda="Semente bumpless aplicada no deploy ou ao sair de parado — evita um degrau na saída ao ligar o controlador."
           />
-          <CampoLimite
+          <Campo
             id="output_min"
             rotulo="Saída mínima (EU)"
             valor={dados.output_min}
+            placeholder="sem limite"
             ajuda="Em branco, sem limite inferior. Os limites também travam a ação integral (anti-windup)."
           />
-          <CampoLimite
+          <Campo
             id="output_max"
             rotulo="Saída máxima (EU)"
             valor={dados.output_max}
+            placeholder="sem limite"
             ajuda="Em branco, sem limite superior. Os limites também travam a ação integral (anti-windup)."
           />
         </div>

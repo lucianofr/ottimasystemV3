@@ -11,6 +11,7 @@ import {
   interesseDeCondicoes,
   TETO_EVENTOS,
   type CicloVidaCanal,
+  type DeltaInteresse,
   type EstadoDoCanal,
   type MensagemOpcValues,
   type RegistroInteresses,
@@ -55,13 +56,29 @@ const EVENTO = {
 // ----------------------------------------------------------------------------------------
 // Agregação de interesses de N páginas: refcount, deltas mínimos
 // ----------------------------------------------------------------------------------------
+/** Monta o delta/agregado COMPLETO dos quatro canais, preenchendo com `[]` os que o caso não
+ *  exercita. Escrever os quatro literais à mão em cada asserção foi o que deixou este arquivo
+ *  vermelho quando `fuzzy_state` entrou (ADR-030): eram ~30 objetos para atualizar à mão.
+ *
+ *  A exaustividade do `toEqual` continua de pé — `D` devolve exatamente as quatro chaves de
+ *  `DeltaInteresse`, então um quinto canal no código quebra a comparação por chave extra, que
+ *  é justamente o alarme que se quer. O tipo de retorno faz o `tsc` cobrar o mesmo. */
+function D(parcial: Partial<DeltaInteresse>): DeltaInteresse {
+  return {
+    flow_status: parcial.flow_status ?? [],
+    mpc_state: parcial.mpc_state ?? [],
+    fuzzy_state: parcial.fuzzy_state ?? [],
+    opc_values: parcial.opc_values ?? [],
+  };
+}
+
 
 test("duas páginas pedindo o mesmo flow: só a primeira gera delta de entrada", () => {
   const registro = criarRegistroInteresses();
 
-  expect(registro.adicionar({ flow_status: [12] })).toEqual({ flow_status: [12], mpc_state: [], opc_values: [] });
-  expect(registro.adicionar({ flow_status: [12] })).toEqual({ flow_status: [], mpc_state: [], opc_values: [] });
-  expect(registro.agregado()).toEqual({ flow_status: [12], mpc_state: [], opc_values: [] });
+  expect(registro.adicionar({ flow_status: [12] })).toEqual(D({ flow_status: [12] }));
+  expect(registro.adicionar({ flow_status: [12] })).toEqual(D({}));
+  expect(registro.agregado()).toEqual(D({ flow_status: [12] }));
 });
 
 test("remover só desliga quando a última página que queria o id sai", () => {
@@ -69,44 +86,40 @@ test("remover só desliga quando a última página que queria o id sai", () => {
   registro.adicionar({ flow_status: [12] });
   registro.adicionar({ flow_status: [12] });
 
-  expect(registro.remover({ flow_status: [12] })).toEqual({ flow_status: [], mpc_state: [], opc_values: [] });
-  expect(registro.agregado()).toEqual({ flow_status: [12], mpc_state: [], opc_values: [] });
+  expect(registro.remover({ flow_status: [12] })).toEqual(D({}));
+  expect(registro.agregado()).toEqual(D({ flow_status: [12] }));
 
-  expect(registro.remover({ flow_status: [12] })).toEqual({ flow_status: [12], mpc_state: [], opc_values: [] });
-  expect(registro.agregado()).toEqual({ flow_status: [], mpc_state: [], opc_values: [] });
+  expect(registro.remover({ flow_status: [12] })).toEqual(D({ flow_status: [12] }));
+  expect(registro.agregado()).toEqual(D({}));
 });
 
 test("três páginas com interesses parcialmente sobrepostos agregam a união, sem duplicar", () => {
   const registro = criarRegistroInteresses();
 
-  expect(registro.adicionar({ flow_status: [1, 2], mpc_state: ["1/b1"] })).toEqual({
-    flow_status: [1, 2],
-    mpc_state: ["1/b1"],
-    opc_values: [],
-  });
-  expect(registro.adicionar({ flow_status: [2, 3] })).toEqual({ flow_status: [3], mpc_state: [], opc_values: [] });
-  expect(registro.adicionar({ mpc_state: ["1/b1", "2/b2"] })).toEqual({
-    flow_status: [],
-    mpc_state: ["2/b2"],
-    opc_values: [],
-  });
+  expect(registro.adicionar({ flow_status: [1, 2], mpc_state: ["1/b1"] })).toEqual(
+    D({ flow_status: [1, 2], mpc_state: ["1/b1"] }),
+  );
+  expect(registro.adicionar({ flow_status: [2, 3] })).toEqual(D({ flow_status: [3] }));
+  expect(registro.adicionar({ mpc_state: ["1/b1", "2/b2"] })).toEqual(D({ mpc_state: ["2/b2"] }));
 
-  expect(registro.agregado()).toEqual({ flow_status: [1, 2, 3], mpc_state: ["1/b1", "2/b2"], opc_values: [] });
+  expect(registro.agregado()).toEqual(
+    D({ flow_status: [1, 2, 3], mpc_state: ["1/b1", "2/b2"] }),
+  );
 
   // Uma das duas páginas que queriam o flow 2 sai: o outro ainda segura o id, sem delta.
-  expect(registro.remover({ flow_status: [2, 3] })).toEqual({ flow_status: [3], mpc_state: [], opc_values: [] });
-  expect(registro.agregado()).toEqual({ flow_status: [1, 2], mpc_state: ["1/b1", "2/b2"], opc_values: [] });
+  expect(registro.remover({ flow_status: [2, 3] })).toEqual(D({ flow_status: [3] }));
+  expect(registro.agregado()).toEqual(D({ flow_status: [1, 2], mpc_state: ["1/b1", "2/b2"] }));
 });
 
 test("opc_values tem refcount próprio: entra e sai do agregado por tag", () => {
   const registro = criarRegistroInteresses();
 
-  expect(registro.adicionar({ opc_values: [7, 8] })).toEqual({ flow_status: [], mpc_state: [], opc_values: [7, 8] });
-  expect(registro.adicionar({ opc_values: [8] })).toEqual({ flow_status: [], mpc_state: [], opc_values: [] });
-  expect(registro.remover({ opc_values: [8] })).toEqual({ flow_status: [], mpc_state: [], opc_values: [] });
-  expect(registro.agregado()).toEqual({ flow_status: [], mpc_state: [], opc_values: [7, 8] });
-  expect(registro.remover({ opc_values: [7, 8] })).toEqual({ flow_status: [], mpc_state: [], opc_values: [7, 8] });
-  expect(registro.agregado()).toEqual({ flow_status: [], mpc_state: [], opc_values: [] });
+  expect(registro.adicionar({ opc_values: [7, 8] })).toEqual(D({ opc_values: [7, 8] }));
+  expect(registro.adicionar({ opc_values: [8] })).toEqual(D({}));
+  expect(registro.remover({ opc_values: [8] })).toEqual(D({}));
+  expect(registro.agregado()).toEqual(D({ opc_values: [7, 8] }));
+  expect(registro.remover({ opc_values: [7, 8] })).toEqual(D({ opc_values: [7, 8] }));
+  expect(registro.agregado()).toEqual(D({}));
 });
 
 // ----------------------------------------------------------------------------------------
@@ -508,7 +521,7 @@ test("registrar sem ciclo (socket ainda não aberto) não perde o interesse no a
   // no mesmo commit ao abrir a URL do editor direto) — `ciclo` ainda é `null` aqui.
   aplicarInteresse(registro, null, "subscribe", { flow_status: [461] });
 
-  expect(registro.agregado()).toEqual({ flow_status: [461], mpc_state: [], opc_values: [] });
+  expect(registro.agregado()).toEqual(D({ flow_status: [461] }));
 });
 
 test("remover sem ciclo também atualiza o agregado, mesmo sem socket para notificar", () => {
@@ -517,7 +530,7 @@ test("remover sem ciclo também atualiza o agregado, mesmo sem socket para notif
 
   aplicarInteresse(registro, null, "unsubscribe", { flow_status: [461] });
 
-  expect(registro.agregado()).toEqual({ flow_status: [], mpc_state: [], opc_values: [] });
+  expect(registro.agregado()).toEqual(D({}));
 });
 
 test("com o ciclo já aberto, aplicarInteresse manda o delta na hora", () => {
@@ -529,7 +542,7 @@ test("com o ciclo já aberto, aplicarInteresse manda o delta na hora", () => {
   aplicarInteresse(b.registro, ciclo, "subscribe", { flow_status: [461] });
 
   expect(b.sockets[0].enviados).toEqual(['{"subscribe":{"flow_status":[461]}}']);
-  expect(b.registro.agregado()).toEqual({ flow_status: [461], mpc_state: [], opc_values: [] });
+  expect(b.registro.agregado()).toEqual(D({ flow_status: [461] }));
 });
 
 // ----------------------------------------------------------------------------------------
@@ -685,7 +698,7 @@ test("sincronizador: condição ativa gera subscribe da origem correspondente", 
   sincronizador.sincronizar([condicaoAtiva("estado", "flow:3/block:mpc", "mpc_solver_error")], b.registro, ciclo);
 
   expect(b.sockets[0].enviados).toEqual(['{"subscribe":{"mpc_state":["3/mpc"]}}']);
-  expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: ["3/mpc"], opc_values: [] });
+  expect(b.registro.agregado()).toEqual(D({ mpc_state: ["3/mpc"] }));
 });
 
 test("sincronizador: cessação (condição sai da varredura) gera unsubscribe da origem", () => {
@@ -699,7 +712,7 @@ test("sincronizador: cessação (condição sai da varredura) gera unsubscribe d
   sincronizador.sincronizar([], b.registro, ciclo);
 
   expect(b.sockets[0].enviados).toEqual(['{"unsubscribe":{"mpc_state":["3/mpc"]}}']);
-  expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: [], opc_values: [] });
+  expect(b.registro.agregado()).toEqual(D({}));
 });
 
 test("sincronizador: sem condição nenhuma, nada além de events é assinado no connect", () => {
@@ -712,7 +725,7 @@ test("sincronizador: sem condição nenhuma, nada além de events é assinado no
   sincronizador.sincronizar([], b.registro, ciclo);
 
   expect(b.sockets[0].enviados).toEqual([]);
-  expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: [], opc_values: [] });
+  expect(b.registro.agregado()).toEqual(D({}));
 });
 
 test("sincronizador: varredura repetida com a mesma condição ativa não reincrementa o refcount", () => {
@@ -743,17 +756,17 @@ test("sincronizador: coexistência com interesse de página — origem pedida pe
   // A condição liga na mesma origem: refcount sobe pra 2, sem novo comando (já assinado).
   sincronizador.sincronizar([condicaoAtiva("estado", "flow:3/block:mpc", "mpc_solver_error")], b.registro, ciclo);
   expect(b.sockets[0].enviados).toEqual([]);
-  expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: ["3/mpc"], opc_values: [] });
+  expect(b.registro.agregado()).toEqual(D({ mpc_state: ["3/mpc"] }));
 
   // A página solta: refcount cai pra 1 (a condição ainda quer) — nada sai do socket.
   aplicarInteresse(b.registro, ciclo, "unsubscribe", { mpc_state: ["3/mpc"] });
   expect(b.sockets[0].enviados).toEqual([]);
-  expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: ["3/mpc"], opc_values: [] });
+  expect(b.registro.agregado()).toEqual(D({ mpc_state: ["3/mpc"] }));
 
   // A condição cessa: agora sim, ninguém mais quer — unsubscribe sai.
   sincronizador.sincronizar([], b.registro, ciclo);
   expect(b.sockets[0].enviados).toEqual(['{"unsubscribe":{"mpc_state":["3/mpc"]}}']);
-  expect(b.registro.agregado()).toEqual({ flow_status: [], mpc_state: [], opc_values: [] });
+  expect(b.registro.agregado()).toEqual(D({}));
 });
 
 test("ciclo completo (WS real, não sintético): evento ativa/assina, estado confirma, recupera/cessa/desassina, REOCORRÊNCIA reativa e reassina (fix round 1, achado crítico)", () => {
