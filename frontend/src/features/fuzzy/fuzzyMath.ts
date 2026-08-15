@@ -154,17 +154,42 @@ export interface GrauDeTermo {
   readonly degree: number;
 }
 
+/** Três casas, ponto decimal, meia-para-cima.
+ *
+ *  Não é `toFixed`: `toFixed` arredonda a representação BINÁRIA, então um empate decimal cai
+ *  para o lado que o double calhou de ocupar — `0.9235` vira `0.923` (o double é
+ *  `0.92349999999999998757`, logo abaixo do empate) enquanto `0.1128` vira `0.113`. São 496
+ *  de 10001 valores de 4 casas em [0,1] que divergem: em empate o comportamento não é "para
+ *  baixo", é imprevisível. O `roundingMode` default do `Intl` ("halfExpand") arredonda o
+ *  valor DECIMAL, meia-para-cima sempre, que é o que o resto do app já faz de fato
+ *  (`nodes/index.tsx`, `trendTheme.ts`) e o que o engenheiro espera ler.
+ *
+ *  `en-US` e não `pt-BR` de propósito: aqui o separador é o ponto técnico da fórmula
+ *  (μ(x), ŷ), não um valor de processo em pt-BR. `useGrouping: false` porque `ŷ` está na EU
+ *  da planta e pode passar de mil — sem isso viraria `1,234.568`. */
+const FORMATO_TRES_CASAS = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 3,
+  maximumFractionDigits: 3,
+  useGrouping: false,
+});
+
+export function tresCasas(v: number): string {
+  // `-0` sairia como "-0.000" (o `toFixed` dava "0.000"): zero negativo na tela é ruído.
+  // `-0 === 0` é verdadeiro, então a comparação normaliza os dois zeros para o positivo.
+  return FORMATO_TRES_CASAS.format(v === 0 ? 0 : v);
+}
+
 /** `μ(x) = 0.924/MEDIUM + 0.113/HIGH` — só termos com grau > 0 entram na soma (grau 0 não
  *  pertence ao conjunto ativo); nenhum termo ativo devolve `"μ(x) = 0"`. */
 export function rodapeMuDeX(termos: readonly GrauDeTermo[]): string {
   const ativos = termos.filter((termo) => termo.degree > 0);
   if (ativos.length === 0) return "μ(x) = 0";
-  return `μ(x) = ${ativos.map((termo) => `${termo.degree.toFixed(3)}/${termo.term}`).join(" + ")}`;
+  return `μ(x) = ${ativos.map((termo) => `${tresCasas(termo.degree)}/${termo.term}`).join(" + ")}`;
 }
 
 /** `ŷ = 23.456 °C` — valor crisp ausente (`v === null`: cold-start ou saída sem regra
  *  disparada e sem `default_value`) cai no travessão, nunca finge um número. */
 export function rodapeYChapeu(v: number | null, eu: string | null): string {
   if (v === null) return "ŷ = —";
-  return eu !== null && eu !== "" ? `ŷ = ${v.toFixed(3)} ${eu}` : `ŷ = ${v.toFixed(3)}`;
+  return eu !== null && eu !== "" ? `ŷ = ${tresCasas(v)} ${eu}` : `ŷ = ${tresCasas(v)}`;
 }

@@ -1,6 +1,7 @@
 import { Badge } from "../../components/ui/badge";
 import { Card } from "../../components/ui/card";
 import { cn } from "../../lib/cn";
+import { tresCasas } from "./fuzzyMath";
 import type { FuzzyRuleBlockOut } from "./types";
 
 /**
@@ -68,7 +69,7 @@ export function PainelRegras({ ruleBlocks, graus }: PainelRegrasProps) {
                         style={{ width: `${String(Math.min(100, Math.max(0, grau * 100)))}%` }}
                       />
                     </div>
-                    <span className="process-value w-10 text-right">{grau.toFixed(3)}</span>
+                    <span className="process-value w-10 text-right">{tresCasas(grau)}</span>
                   </div>
                 </td>
               </tr>

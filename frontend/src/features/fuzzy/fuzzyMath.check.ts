@@ -12,6 +12,7 @@ import {
   rodapeMuDeX,
   rodapeYChapeu,
   silhuetaAgregada,
+  tresCasas,
   xDoMarcador,
   xParaSvg,
   yParaSvg,
@@ -159,6 +160,26 @@ test("rodapeMuDeX: soma só os termos com grau > 0, 3 casas, ponto decimal", () 
     { term: "HIGH", degree: 0.1128 },
   ]);
   expect(texto).toBe("μ(x) = 0.924/MEDIUM + 0.113/HIGH");
+});
+
+test("tresCasas: empate decimal sobe (meia-para-cima), não segue o acaso do double", () => {
+  // `toFixed(3)` devolveria "0.923" aqui: o double de 0.9235 é 0.92349999999999998757.
+  expect(tresCasas(0.9235)).toBe("0.924");
+  expect(tresCasas(0.0045)).toBe("0.005");
+  expect(tresCasas(-0.9235)).toBe("-0.924");
+});
+
+test("tresCasas: sem separador de milhar e sem zero negativo", () => {
+  // `ŷ` está na EU da planta e passa de mil; o `Intl` agruparia em "1,234.568".
+  expect(tresCasas(1234.5678)).toBe("1234.568");
+  // `-0` sairia como "-0.000" sem a normalização.
+  expect(tresCasas(-0)).toBe("0.000");
+  expect(tresCasas(0)).toBe("0.000");
+});
+
+test("tresCasas: sempre três casas, mesmo em inteiro", () => {
+  expect(tresCasas(1)).toBe("1.000");
+  expect(tresCasas(23.4562)).toBe("23.456");
 });
 
 test("rodapeMuDeX: nenhum termo ativo devolve 'μ(x) = 0'", () => {
