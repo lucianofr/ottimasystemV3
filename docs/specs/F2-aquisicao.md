@@ -51,6 +51,8 @@ A tela de trend da F2 consome `GET /api/history` por **polling** (sem WS); "ao v
 
 > Nota (spec F5 §1.2): o registro de valores de tag (`opc.values.<conn_id>` no `/ws`) é reapontado — fica F6 ou nunca, só com consumidor real; eventos (faixa anunciadora com dados reais) seguem F5.
 
+> Emenda 2026-08-14 (defeito de comportamento): as duas frases acima ("polling, sem WS"; "só com consumidor real") deixam de valer para o trend. `opc.values.<conn_id>` tem consumidor real desde a F6 (decisão F6 A-1 revertida — `ws.py`, faceplates de `/operacao`), e o trend de engenharia (§9.2) passou a ser o segundo: histórico do TimescaleDB pelo `GET /api/history` **mais** ponta viva pelo `/ws`, o mesmo desenho que o trend de operação MPC já usava. Motivo: com polling puro as três telas de trend do app mostravam o mesmo dado em cadências diferentes. Alcança também o trend fuzzy (ADR-030), que passou a consumir o canal `fuzzy.state` que já era dele. A cláusula "trend de engenharia segue polling" em F5 §1.2/A-5 e F6 §1.2/A-1 fica superada por esta emenda.
+
 > Nota (spec F6 §6.2): a linha "UI de gestão de certificados | F6" (§1.2) é cumprida por `docs/specs/F6-portabilidade-hardening.md` §6.2.
 
 ---
@@ -199,6 +201,8 @@ services/opc-worker/src/ottima_opc_worker/
 ### 9.2 Trend mínimo (`/engenharia/trend`)
 
 Seletor de tags (≤6) + janela (30 min · 2 h · 8 h · 24 h · 7 d) + uPlot **re-vestido** (DESIGN §Do's): fundo Poço, grade Linha, valores em mono tabular com EU na legenda (Regra do Número Tabular); polling de `/api/history` a 5 s. **Qualidade ruim sem depender de cor** (Regra do Canal Redundante): pontos `quality=2` viram *gap* na pena; legenda exibe rótulo `BAD` quando o último ponto da série é bad. Predição/linha-agora ("tinta que não secou") é assinatura da tela de operação — F5, fora do trend de engenharia. **[NOVA — implementação]** (forma)
+
+> Emenda 2026-08-14: "polling de `/api/history` a 5 s" passa a ser **histórico + ponta viva**. O poll segue como ressincronização (e é ele quem traz o `quality=2` que abre o *gap*, regra acima inalterada); entre um poll e o outro a pena cresce por mensagem de `opc.values` no `/ws`, com a assinatura seguindo a seleção de penas em runtime. Ponto vivo em carimbo que o histórico já trouxe não duplica: o que o recorder gravou é a versão canônica. O julgamento de SEM DADO continua no relógio do dado GRAVADO (`referenciaPersistidaS`) — no modo `1m` os buckets materializam ~196 s atrasados, e medir contra o relógio de parede acusaria pena saudável. Mesmo desenho no trend fuzzy (ADR-030) e no de operação MPC (F5 §7.4-6), que já era assim.
 
 ### 9.3 Paleta de penas — resolve o `[a resolver]` do DESIGN §Colors
 

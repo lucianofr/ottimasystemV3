@@ -3,12 +3,17 @@ import { useMemo, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { cn } from "../../lib/cn";
+import { referenciaPersistidaS, useBordaViva, type LeituraViva } from "../trend/bordaViva";
 import { JanelaTempo } from "../trend/JanelaTempo";
 import { TrendChart } from "../trend/TrendChart";
 import { CLASSES_PENA, FORMATO_VALOR, LIMITE_PENAS } from "../trend/trendTheme";
 import { useJanelaDeslizante } from "../trend/useJanelaDeslizante";
-import { montarMatrizFuzzy, resumirSeriesFuzzy } from "./historicoFuzzy";
-import type { FuzzyNodeOut } from "./types";
+import {
+  mesclarHistoricoFuzzyVivo,
+  montarMatrizFuzzy,
+  resumirSeriesFuzzy,
+} from "./historicoFuzzy";
+import type { FuzzyNodeOut, FuzzyState } from "./types";
 import { useHistoryFuzzy } from "./useHistoryFuzzy";
 
 /**
@@ -35,7 +40,18 @@ function rotuloVarFuzzy(v: VarSelecionavel): string {
   return v.eu ? `${v.port} — ${v.name} (${v.eu})` : `${v.port} — ${v.name}`;
 }
 
-export function TrendFuzzy({ flowId, blockId, no }: { flowId: number; blockId: string; no: FuzzyNodeOut }) {
+export function TrendFuzzy({
+  flowId,
+  blockId,
+  no,
+  estado,
+}: {
+  flowId: number;
+  blockId: string;
+  no: FuzzyNodeOut;
+  /** Último `fuzzy.state` do bloco (o pai já assina `fuzzy_state` e o tem em mãos). */
+  estado: FuzzyState | undefined;
+}) {
   const variaveis: VarSelecionavel[] = useMemo(
     () => [
       ...no.inputs.map((v) => ({ port: v.port, name: v.name, eu: null })),
@@ -53,11 +69,38 @@ export function TrendFuzzy({ flowId, blockId, no }: { flowId: number; blockId: s
   const deslizante = useJanelaDeslizante(janelaSegundos);
   const historico = useHistoryFuzzy(flowId, blockId, selecionadas, janelaSegundos, deslizante.fimEpochS);
 
-  const dados = useMemo(
-    () => (historico.data ? montarMatrizFuzzy(historico.data, selecionadas) : null),
-    [historico.data, selecionadas],
+  // Ponta viva: o histórico do TimescaleDB desenha o passado até agora e daí em diante o
+  // gráfico cresce a cada `fuzzy.state`, sem esperar o poll de 5 s. Reload cai no mesmo
+  // caminho — busca o histórico de novo e recomeça a acumular.
+  const leiturasVivas = useMemo(() => {
+    const mapa = new Map<string, LeituraViva>();
+    // Quadro inválido não plota: o valor não vale (o pai já marca INVÁLIDO na plaqueta).
+    if (estado?.ok !== true) return mapa;
+    for (const v of [...estado.inputs, ...estado.outputs]) {
+      if (v.v !== null) mapa.set(v.port, { ts: estado.ts, v: v.v });
+    }
+    return mapa;
+  }, [estado]);
+  const bordaViva = useBordaViva(leiturasVivas, janelaSegundos, deslizante.aoVivo);
+
+  // Uma resposta só alimenta gráfico e legenda: mesclada aqui, os dois veem a mesma ponta.
+  const resposta = useMemo(
+    () => (historico.data ? mesclarHistoricoFuzzyVivo(historico.data, bordaViva) : null),
+    [historico.data, bordaViva],
   );
-  const resumos = historico.data ? resumirSeriesFuzzy(historico.data, selecionadas) : [];
+
+  const dados = useMemo(
+    () => (resposta ? montarMatrizFuzzy(resposta, selecionadas) : null),
+    [resposta, selecionadas],
+  );
+  // Referência de "parou de reportar" = histórico PERSISTIDO (ver `referenciaPersistidaS`).
+  const resumos = resposta
+    ? resumirSeriesFuzzy(
+        resposta,
+        selecionadas,
+        referenciaPersistidaS(historico.data?.series ?? []),
+      )
+    : [];
   const ids = selecionadas.map((port) => idPorPorta.get(port) ?? 0);
   const rotulos = selecionadas.map((port) => {
     const v = porPorta.get(port);

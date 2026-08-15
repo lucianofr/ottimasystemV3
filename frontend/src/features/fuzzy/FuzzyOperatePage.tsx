@@ -137,7 +137,7 @@ function FuzzyResolvido({ no }: { no: FuzzyNodeOut }) {
         <PainelRegras ruleBlocks={introspection.rule_blocks} graus={estado?.rules} />
       </div>
 
-      <TrendFuzzy flowId={flowId} blockId={blockId} no={no} />
+      <TrendFuzzy flowId={flowId} blockId={blockId} no={no} estado={estado} />
     </div>
   );
 }

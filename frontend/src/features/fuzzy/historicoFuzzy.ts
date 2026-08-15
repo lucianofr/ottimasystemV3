@@ -1,5 +1,6 @@
 import type uPlot from "uplot";
 
+import { colunasVivas, type PontoVivo } from "../trend/bordaViva";
 import { tetoCarryForwardSegundos } from "../trend/useHistory";
 import type { FuzzyHistoryResponse } from "./types";
 
@@ -60,19 +61,25 @@ export interface ResumoSerieFuzzy {
   readonly semDado: boolean;
 }
 
+/** `referenciaAgoraS`: mesmo contrato de `resumirSeries` (`../trend/useHistory.ts`) — quem
+ *  mescla a borda viva passa a referência do histórico PERSISTIDO, para uma porta que já
+ *  recebeu quadro vivo não marcar a vizinha ainda sem quadro como SEM DADO. */
 export function resumirSeriesFuzzy(
   resposta: FuzzyHistoryResponse,
   ordem: readonly string[],
+  referenciaAgoraS?: number,
 ): ResumoSerieFuzzy[] {
   const porVar = new Map(resposta.series.map((serie) => [serie.var_id, serie]));
   const teto = tetoCarryForwardSegundos(resposta.mode);
   // Referência de "agora": o carimbo mais recente da resposta, de qualquer pena — mesmo
   // motivo de `resumirSeries` (`../trend/useHistory.ts`): `resposta.end` vem do relógio do
   // navegador, e o modo `1m` só enxerga buckets já materializados pela policy do TimescaleDB.
-  let referencia = Number.NEGATIVE_INFINITY;
-  for (const serie of resposta.series) {
-    const ultimo = serie.t[serie.t.length - 1];
-    if (ultimo !== undefined) referencia = Math.max(referencia, Date.parse(ultimo) / 1000);
+  let referencia = referenciaAgoraS ?? Number.NEGATIVE_INFINITY;
+  if (referenciaAgoraS === undefined) {
+    for (const serie of resposta.series) {
+      const ultimo = serie.t[serie.t.length - 1];
+      if (ultimo !== undefined) referencia = Math.max(referencia, Date.parse(ultimo) / 1000);
+    }
   }
   return ordem.map((varId) => {
     const serie = porVar.get(varId);
@@ -82,4 +89,40 @@ export function resumirSeriesFuzzy(
     }
     return { varId, valor: serie.v[ultimo], semDado: false };
   });
+}
+
+/**
+ * Histórico do trend fuzzy com a ponta viva de `fuzzy.state` acrescentada — espelho de
+ * `mesclarHistoricoVivo` (`../trend/bordaViva.ts`) sem a coluna `q`, que `fuzzy_samples` não
+ * tem. A porta cujo quadro vivo não trouxe valor fica de fora e cai no teto de carry-forward,
+ * como qualquer pena que parou de reportar.
+ */
+export function mesclarHistoricoFuzzyVivo(
+  resposta: FuzzyHistoryResponse,
+  vivos: ReadonlyMap<string, readonly PontoVivo[]>,
+): FuzzyHistoryResponse {
+  if (vivos.size === 0) return resposta;
+
+  let mudou = false;
+  const series = resposta.series.map((serie) => {
+    const extra = colunasVivas(serie.t, vivos.get(serie.var_id) ?? []);
+    if (extra === null) return serie;
+    mudou = true;
+    return { ...serie, t: [...serie.t, ...extra.t], v: [...serie.v, ...extra.v] };
+  });
+
+  // Porta sem amostra persistida na janela não vem como série na resposta: existe só na borda
+  // viva (bloco fuzzy que acabou de entrar em execução).
+  const persistidas = new Set(resposta.series.map((serie) => serie.var_id));
+  for (const [varId, pontos] of vivos) {
+    if (persistidas.has(varId) || pontos.length === 0) continue;
+    series.push({
+      var_id: varId,
+      t: pontos.map((ponto) => new Date(ponto.t * 1000).toISOString()),
+      v: pontos.map((ponto) => ponto.v),
+    });
+    mudou = true;
+  }
+
+  return mudou ? { ...resposta, series } : resposta;
 }

@@ -152,9 +152,19 @@ export interface ResumoSerie {
   readonly semDado: boolean;
 }
 
+/**
+ * `referenciaAgoraS` (opcional): o instante que vale como "agora" para o teto de carry-forward.
+ * Quem mescla a borda viva no histórico (`bordaViva.ts`) passa a referência do histórico
+ * PERSISTIDO, não da resposta mesclada: no modo `1m` os buckets materializam com ~196 s de
+ * atraso, então uma pena que já recebeu ponto vivo puxaria "agora" para o relógio de parede e
+ * marcaria como SEM DADO a pena vizinha saudável que ainda não recebeu o primeiro quadro dela.
+ * O que o operador lê como valor continua vindo da resposta mesclada — só o julgamento de
+ * "parou de reportar" fica no relógio do dado gravado.
+ */
 export function resumirSeries(
   resposta: HistoryResponse,
   ordem: readonly number[],
+  referenciaAgoraS?: number,
 ): ResumoSerie[] {
   const porTag = new Map(resposta.series.map((serie) => [serie.tag_id, serie]));
   const teto = tetoCarryForwardSegundos(resposta.mode);
@@ -164,10 +174,12 @@ export function resumirSeries(
   // enxerga buckets já materializados pela policy do TimescaleDB (`end_offset` 1 min,
   // `schedule_interval` 1 min, medido ~196 s de atraso), o que marcaria toda série agregada
   // saudável como sem dado.
-  let referencia = Number.NEGATIVE_INFINITY;
-  for (const serie of resposta.series) {
-    const ultimo = serie.t[serie.t.length - 1];
-    if (ultimo !== undefined) referencia = Math.max(referencia, Date.parse(ultimo) / 1000);
+  let referencia = referenciaAgoraS ?? Number.NEGATIVE_INFINITY;
+  if (referenciaAgoraS === undefined) {
+    for (const serie of resposta.series) {
+      const ultimo = serie.t[serie.t.length - 1];
+      if (ultimo !== undefined) referencia = Math.max(referencia, Date.parse(ultimo) / 1000);
+    }
   }
   return ordem.map((tagId) => {
     const serie = porTag.get(tagId);

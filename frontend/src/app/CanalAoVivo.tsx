@@ -880,6 +880,37 @@ export function useAssinatura(interesse: Interesse): void {
   }, [contexto, interesseInicial]);
 }
 
+/**
+ * `opc_values` de um conjunto que muda em RUNTIME — a seleção de penas do trend de engenharia
+ * (`features/trend/TrendPage.tsx`), onde `useAssinatura` não serve: ele congela o interesse do
+ * primeiro render, e quem precisa de outro alvo remonta o componente. Remontar o trend a cada
+ * clique na seleção custaria o zoom do engenheiro e um refetch do histórico.
+ *
+ * Um efeito só, que assina e desassina exatamente o mesmo conjunto: trocar de seleção manda um
+ * `unsubscribe` do conjunto antigo e um `subscribe` do novo (dois quadros por clique deliberado
+ * do engenheiro, dentro da fila de 8 do servidor — F5R-22). Diferenciar quem entrou/saiu
+ * economizaria um quadro, mas exigiria guardar o conjunto assinado numa ref compartilhada entre
+ * dois efeitos — setup num, cleanup no outro —, que é justamente o acoplamento que quebra
+ * quando um dos dois roda sozinho.
+ */
+export function useAssinaturaOpcValues(tagIds: readonly number[]): void {
+  const contexto = useContext(AssinaturaContext);
+  if (contexto === null) {
+    throw new Error("useAssinaturaOpcValues fora de CanalAoVivoProvider");
+  }
+  // Chave textual do CONJUNTO: o array vem novo a cada render da página, e id repetido
+  // desbalancearia o refcount (`RegistroInteresses`) — subiria duas vezes e só desceria uma.
+  const chave = [...new Set(tagIds)].sort((a, b) => a - b).join(",");
+
+  useEffect(() => {
+    // Nenhuma pena ligada não vira quadro: `opc_values: []` gastaria um slot da fila para nada.
+    if (chave === "") return undefined;
+    const alvo = chave.split(",").map(Number);
+    contexto.registrar({ opc_values: alvo });
+    return () => contexto.remover({ opc_values: alvo });
+  }, [contexto, chave]);
+}
+
 export function useCanalAoVivo(): EstadoDoCanal {
   const estado = useContext(EstadoContext);
   if (estado === null) {

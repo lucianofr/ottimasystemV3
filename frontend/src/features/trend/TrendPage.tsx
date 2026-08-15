@@ -1,10 +1,17 @@
 import { useMemo, useRef, useState } from "react";
 
+import { useAssinaturaOpcValues, useCanalAoVivo } from "../../app/CanalAoVivo";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { cn } from "../../lib/cn";
 import { useConnections } from "../connections/useConnections";
 import { useActiveProject } from "../projects/useProjects";
+import {
+  mesclarHistoricoVivo,
+  referenciaPersistidaS,
+  useBordaViva,
+  type LeituraViva,
+} from "./bordaViva";
 import { EditorEscala } from "./EditorEscala";
 import { ESCALA_AUTO, gravarEscalas, lerEscalas, limparEscalas, type EscalaVar } from "./escalas";
 import { JanelaTempo } from "./JanelaTempo";
@@ -38,12 +45,40 @@ export function TrendPage() {
   const tags = useTags();
   const historico = useHistory(selecionadas, janelaSegundos, deslizante.fimEpochS);
 
+  // Ponta viva (`opc.values` via WS): o histórico do TimescaleDB desenha o passado até agora e
+  // daí em diante o gráfico cresce por mensagem, sem esperar o poll de 5 s. Reload cai no mesmo
+  // caminho — busca o histórico de novo e recomeça a acumular.
+  useAssinaturaOpcValues(selecionadas);
+  const { tagValues } = useCanalAoVivo();
+  const leiturasVivas = useMemo(() => {
+    const mapa = new Map<string, LeituraViva>();
+    for (const tagId of selecionadas) {
+      const leitura = tagValues.get(tagId);
+      // Qualidade ruim/valor ausente não vira ponto: o `q === 2` que abre o gap chega
+      // persistido no próximo poll (ver `LeituraViva`).
+      if (leitura === undefined || !leitura.ok || leitura.v === null) continue;
+      mapa.set(String(tagId), { ts: leitura.ts, v: leitura.v });
+    }
+    return mapa;
+  }, [tagValues, selecionadas]);
+  const bordaViva = useBordaViva(leiturasVivas, janelaSegundos, deslizante.aoVivo);
+
+  // Uma resposta só alimenta gráfico e legenda: mesclada aqui, os dois veem a mesma ponta.
+  const resposta = useMemo(
+    () => (historico.data ? mesclarHistoricoVivo(historico.data, bordaViva) : null),
+    [historico.data, bordaViva],
+  );
+
   // `selecionadas` é estado: a identidade só muda quando a seleção muda de fato.
   const dados = useMemo(
-    () => (historico.data ? montarMatriz(historico.data, selecionadas) : null),
-    [historico.data, selecionadas],
+    () => (resposta ? montarMatriz(resposta, selecionadas) : null),
+    [resposta, selecionadas],
   );
-  const resumos = historico.data ? resumirSeries(historico.data, selecionadas) : [];
+  // A referência de "parou de reportar" é a do histórico PERSISTIDO, não da resposta mesclada:
+  // ver `referenciaPersistidaS`. O valor exibido segue vindo da ponta viva.
+  const resumos = resposta
+    ? resumirSeries(resposta, selecionadas, referenciaPersistidaS(historico.data?.series ?? []))
+    : [];
 
   // Escopo por projeto ativo: o worker só reconcilia o projeto ativo (ADR-017), então uma pena
   // de tag fora dele desenharia vazia para sempre. `GET /api/tags` não aceita `project_id`.
