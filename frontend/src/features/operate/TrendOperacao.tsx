@@ -19,7 +19,7 @@ import { FORMATO_VALOR, lerTemaTrend, type TemaTrend } from "../trend/trendTheme
 import "../trend/trend.css";
 import { useJanelaDeslizante } from "../trend/useJanelaDeslizante";
 import { LegendaOperacao } from "./LegendaOperacao";
-import { calcularRangeXOperacao, pluginSecaoFutura } from "./secaoFutura";
+import { ancoraDivisorAgora, calcularRangeXOperacao, pluginSecaoFutura } from "./secaoFutura";
 import {
   CUSTO_PENAS,
   OPCOES_DEGRAU_MV,
@@ -707,12 +707,28 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
 
   const container = useRef<HTMLDivElement>(null);
   const grafico = useRef<uPlot | null>(null);
-  // Âncora do divisor "agora"/seção futura: SEMPRE o relógio de parede na vista ao vivo
-  // (B-5) — a linha anda a cada segundo pelo tique abaixo, mesmo sem dado novo; o overlay de
-  // predição segue ancorado em `prediction.ts` (F5R-01), isso é só a LINHA. `null` fora do
-  // ao vivo (vista congelada não tem "agora").
+  // Zoom manual em X (arrasto no gráfico): estado porque a tela precisa avisar que a vista
+  // parou de seguir o relógio, e ref porque o `range` do eixo x roda DENTRO do `setScale` do
+  // próprio zoom — esperar o re-render do React devolveria a janela velha e comeria o recorte.
+  // Declarado antes da âncora do "agora" porque é ela que decide se o divisor anda.
+  const [zoomX, setZoomX] = useState<ZoomX | null>(null);
+  const zoomXRef = useRef<ZoomX | null>(null);
+  function aplicarZoomX(faixa: ZoomX | null): void {
+    zoomXRef.current = faixa;
+    setZoomX(faixa);
+  }
+
+  // Âncora do divisor "agora"/seção futura — política em `ancoraDivisorAgora` (uma só, também
+  // usada pelo tique de 1 s abaixo): relógio de parede ao vivo (B-5), congelada sob zoom manual,
+  // nula na janela deslizada. O overlay de predição segue ancorado em `prediction.ts` (F5R-01),
+  // isso é só a LINHA.
   const agoraDivisorRef = useRef<number | null>(null);
-  agoraDivisorRef.current = janelaDeslizante.aoVivo ? Date.now() / 1000 : null;
+  agoraDivisorRef.current = ancoraDivisorAgora(
+    agoraDivisorRef.current,
+    janelaDeslizante.aoVivo,
+    zoomXRef.current !== null,
+    Date.now() / 1000,
+  );
   const semPredicaoRef = useRef(false);
   semPredicaoRef.current = semPredicao;
   const rangeXRef = useRef<readonly [number, number]>([0, 0]);
@@ -724,16 +740,6 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   });
   const colunasAtuais = useRef(colunas);
   colunasAtuais.current = colunas;
-
-  // Zoom manual em X (arrasto no gráfico): estado porque a tela precisa avisar que a vista
-  // parou de seguir o relógio, e ref porque o `range` do eixo x roda DENTRO do `setScale` do
-  // próprio zoom — esperar o re-render do React devolveria a janela velha e comeria o recorte.
-  const [zoomX, setZoomX] = useState<ZoomX | null>(null);
-  const zoomXRef = useRef<ZoomX | null>(null);
-  function aplicarZoomX(faixa: ZoomX | null): void {
-    zoomXRef.current = faixa;
-    setZoomX(faixa);
-  }
 
   const idsEstrutura = defaults.filter((pena) => ligadas.has(pena.id)).map((pena) => pena.id);
   const escalaAssinatura = idsEstrutura
@@ -791,19 +797,27 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     instancia.setData(colunas.dados, zoomXRef.current === null);
   }, [colunas]);
 
-  // Tique de 1 s da linha "agora" (B-5): ao vivo e sem zoom manual, re-ancora no relógio de
-  // parede e reaplica a janela X via `setScale` — o redesenho (plugin `pluginLinhaAgora`)
-  // acontece mesmo sem dado novo chegando. Com zoom manual o tique congela: o operador está
-  // olhando um recorte e a tela não pode andar debaixo dele.
+  // Tique de 1 s da linha "agora" (B-5): re-ancora no relógio de parede e reaplica a janela X
+  // via `setScale`, para o redesenho (plugin `pluginLinhaAgora`) acontecer mesmo sem dado novo
+  // chegando. A âncora passa pela MESMA política do render (`ancoraDivisorAgora`) — quem congela
+  // sob zoom manual é ela, não este `if`, senão os dois escritores voltam a divergir. O
+  // `setScale` é que continua condicionado ao recorte: o operador está olhando um pedaço e a
+  // vista não pode andar debaixo dele.
   useEffect(() => {
     const id = window.setInterval(() => {
       const instancia = grafico.current;
-      if (!instancia || !janelaDeslizante.aoVivo) return;
-      if (zoomXRef.current !== null) return;
-      agoraDivisorRef.current = Date.now() / 1000;
+      if (!instancia) return;
+      const agora = Date.now() / 1000;
+      agoraDivisorRef.current = ancoraDivisorAgora(
+        agoraDivisorRef.current,
+        janelaDeslizante.aoVivo,
+        zoomXRef.current !== null,
+        agora,
+      );
+      if (!janelaDeslizante.aoVivo || zoomXRef.current !== null) return;
       rangeXRef.current = calcularRangeXOperacao({
         fimEpochS: janelaDeslizante.fimEpochS,
-        agoraEpochS: Date.now() / 1000,
+        agoraEpochS: agora,
         janelaSegundos,
         horizonteFuturoS,
       });

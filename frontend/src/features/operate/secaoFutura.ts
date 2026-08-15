@@ -41,6 +41,31 @@ export function calcularRangeXOperacao(
   return [fimEpochS - janelaSegundos, fimEpochS];
 }
 
+/**
+ * Âncora do divisor "agora" (linha-cursor + sombreamento da seção futura). Política única, com
+ * dois escritores no componente (o render e o tique de 1 s): duas cópias divergiam — o render
+ * reescrevia o relógio a cada quadro novo enquanto o tique se recusava a andar sob zoom manual,
+ * e qualquer redesenho (dado novo, `setSize`) teleportava a linha e a sombra "Previsão" para o
+ * relógio de agora sobre um eixo deliberadamente congelado, chegando a empurrar o divisor para
+ * fora da vista.
+ *
+ * - Fora do ao vivo (janela deslizada): não existe "agora" na vista — `null`.
+ * - Com zoom manual: a âncora é a que estava valendo quando o operador congelou a vista. O
+ *   recorte não segue o relógio (é o que o aviso da tela diz), então o divisor também não.
+ * - Ao vivo e sem recorte: o relógio de parede (B-5) — a linha anda a cada tique, mesmo sem
+ *   dado novo chegando.
+ */
+export function ancoraDivisorAgora(
+  anterior: number | null,
+  aoVivo: boolean,
+  zoomAtivo: boolean,
+  agoraEpochS: number,
+): number | null {
+  if (!aoVivo) return null;
+  if (zoomAtivo) return anterior;
+  return agoraEpochS;
+}
+
 const TEXTO_SEM_PREDICAO = "Sem predição — MPC fora de AUTO";
 
 /**
