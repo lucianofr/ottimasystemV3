@@ -13,8 +13,11 @@ Padrão de processo reaproveitado de `script_pool.py` (achados hard-won da revis
       pool de scripts — herdar locks/estado de um processo com event loop já rodando é
       armadilha conhecida.
     - Criação de processo, `Process.kill()/join()` e I/O bloqueante do `Pipe`
-      (`conn.poll()/recv()/send()`) sempre em `asyncio.to_thread` (ADR-004): são syscalls de
-      custo variável e NUNCA podem rodar no event loop.
+      (`conn.poll()/recv()/send()`) sempre FORA do event loop (ADR-004): são syscalls de
+      custo variável e NUNCA podem rodar nele. E fora dele num executor **próprio deste
+      host** (`_off_loop`), não no default do asyncio: no default, a espera de um solve —
+      uma thread presa pelo deadline inteiro — competia por vaga com o `ScriptPool` e com os
+      outros blocos MPC, e o script de um flow sem culpa nenhuma pagava o orçamento na fila.
     - `stats()["respawns"]` só conta REPOSIÇÕES (mesma convenção de `ScriptPool._respawns`):
       o spawn inicial de `start()` não é um respawn.
     - `stop()` espera um PONTO FIXO das tasks em segundo plano antes de desligar o worker
@@ -36,7 +39,7 @@ síncrono — o payload é um punhado de floats, o buffer do pipe do SO nunca en
 mensagem dessas; ao contrário do `ScriptPool.run()`, `dispatch()` não pode `await`, então não
 há como tirar o `send` do event loop aqui sem quebrar o contrato "nunca bloqueia" da
 assinatura síncrona) e imediatamente agenda uma task de fundo que espera a resposta em
-`asyncio.to_thread(conn.poll, deadline_s)`. O relógio do deadline é o tempo de parede dessa
+`_off_loop(partial(_receive, conn, deadline_s))`. O relógio do deadline é o tempo de parede dessa
 espera — não o `wall_ms` que `SolveResult` carrega (esse mede só o `make_step` do FILHO;
 conflar os dois foi o erro que a revisão da tarefa 1.1 apontou). Estourou -> mata o processo
 + repõe em segundo plano + entrega via `poll()` um `SolveResult` sintético (`status="overrun"`)
@@ -72,6 +75,8 @@ import dataclasses
 import logging
 import multiprocessing as mp
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from multiprocessing.connection import Connection
 from multiprocessing.context import SpawnContext, SpawnProcess
 from typing import Any, Final
@@ -161,6 +166,23 @@ class MpcHost:
         self._last_solve_ms: float | None = None
         self._pending_result: SolveResult | None = None
         self._background: set[asyncio.Task[None]] = set()
+        # Executor PRÓPRIO deste host, não o default do asyncio: `_await_response` prende uma
+        # thread por solve em voo durante todo o deadline de 0,7xTs_mpc, e no default isso
+        # disputava vaga com o `ScriptPool` (e com os outros blocos MPC) — script de um flow
+        # sem culpa nenhuma pagava o orçamento na fila. Pico real de demanda é UMA thread: o
+        # gating síncrono de `_busy`/`_ready` serializa a atividade de fundo a uma por vez, e o
+        # par shutdown+spawn de um respawn é sequencial. A segunda thread é margem deliberada —
+        # um executor de 1 devolveria o defeito acima (espera em fila) na primeira atividade de
+        # fundo que alguém puser em paralelo.
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"mpc-{block_id}")
+
+    def _off_loop[T](self, work: Callable[[], T]) -> asyncio.Future[T]:
+        """`asyncio.to_thread` deste host: mesma semântica, executor próprio.
+
+        Invocável sem argumentos porque `run_in_executor` não repassa keywords — `partial` no
+        call-site, mesmo idioma de `ScriptPool._off_loop`.
+        """
+        return asyncio.get_running_loop().run_in_executor(self._executor, work)
 
     # ------------------------------------------------------------------------------
     # Interface pública (plano F4b tarefa 1.2)
@@ -255,7 +277,11 @@ class MpcHost:
         proc, conn = self._proc, self._conn
         self._proc, self._conn = None, None
         if proc is not None and conn is not None:
-            await asyncio.to_thread(_shutdown_worker, proc, conn)
+            await self._off_loop(partial(_shutdown_worker, proc, conn))
+        # Depois do worker, nunca antes: o `_shutdown_worker` acima roda nele. `wait=False`
+        # para não bloquear o event loop; `stop()` já esperou `_background` esvaziar, então
+        # nenhuma espera de solve está em voo aqui.
+        self._executor.shutdown(wait=False)
 
     # ------------------------------------------------------------------------------
     # Trabalho em segundo plano
@@ -266,7 +292,7 @@ class MpcHost:
         pedido que acabou de ser mandado por `conn` — `conn` é passado por parâmetro, não
         lido de `self._conn`, para nunca correr atrás de um respawn concorrente que troque
         o pipe embaixo desta espera."""
-        outcome = await asyncio.to_thread(_receive, conn, self._deadline_s)
+        outcome = await self._off_loop(partial(_receive, conn, self._deadline_s))
         self._busy = False
 
         if outcome is None:
@@ -311,7 +337,7 @@ class MpcHost:
         # `self._proc`/`self._conn` (já `None` aqui) no seu próprio trecho de desligamento.
         self._proc, self._conn = None, None
         if proc is not None and conn is not None:
-            await asyncio.to_thread(_shutdown_worker, proc, conn)
+            await self._off_loop(partial(_shutdown_worker, proc, conn))
         self._respawns += 1
         self._needs_reinit = True
         if self._stopped:
@@ -324,9 +350,9 @@ class MpcHost:
         await self._spawn_and_wait_ready()
 
     async def _spawn_and_wait_ready(self) -> None:
-        proc, conn = await asyncio.to_thread(self._spawn_worker)
+        proc, conn = await self._off_loop(self._spawn_worker)
         self._proc, self._conn = proc, conn
-        handshake = await asyncio.to_thread(_receive, conn, _BOOT_TIMEOUT_S)
+        handshake = await self._off_loop(partial(_receive, conn, _BOOT_TIMEOUT_S))
         if self._stopped:
             # `stop()` venceu a corrida enquanto o boot estava em voo (chamado por `start()`
             # OU por `_respawn()`): `self._proc`/`self._conn` já apontam para o processo que

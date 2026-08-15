@@ -17,6 +17,14 @@ eles vivem enquanto o serviço viver.
 
 O pool é **sem estado**: recebe `state`, devolve `state`. A cópia-mestre vive no bloco, que
 só a substitui em retorno `ok` — timeout ou exceção nunca corrompem estado (spec §3.3).
+
+Threads: todo I/O bloqueante do `Pipe` sai do event loop num executor **próprio do pool**, não
+no default do asyncio (`asyncio.to_thread`). O default tem `min(32, cpu+4)` threads e é dividido
+com quem mais chamar `to_thread` no processo — no flow-runtime, com `MpcHost._await_response`,
+que prende uma thread por solve em voo durante todo o deadline de 0,7×Ts_mpc. Saturado o default,
+o `send`/`_receive` de `run()` esperava na FILA enquanto o orçamento corria, e o flow recebia
+`timeout` (ou, pior, um `ok` fora do prazo) sem ter script lento nenhum — acoplamento entre
+flows por um recurso que nem o pool nem o host contabilizavam.
 """
 
 import asyncio
@@ -26,8 +34,10 @@ import multiprocessing as mp
 import os
 import pickle
 import traceback
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from functools import partial
 from multiprocessing.connection import Connection
 from multiprocessing.context import SpawnContext, SpawnProcess
 from typing import Any, Final, Literal
@@ -214,6 +224,17 @@ class ScriptPool:
         self._idle: asyncio.Queue[_Worker] = asyncio.Queue()
         self._running = False
         self._respawns = 0
+        self._executor: ThreadPoolExecutor | None = None
+
+    def _off_loop[T](self, work: Callable[[], T]) -> asyncio.Future[T]:
+        """`asyncio.to_thread` do pool: mesma semântica, executor próprio (ver módulo).
+
+        Recebe um invocável sem argumentos porque `run_in_executor` não repassa keywords —
+        `partial` no call-site deixa cada chamada legível e uniforme.
+        """
+        if self._executor is None:
+            raise RuntimeError("ScriptPool não está em execução")
+        return asyncio.get_running_loop().run_in_executor(self._executor, work)
 
     @property
     def worker_pids(self) -> tuple[int, ...]:
@@ -237,6 +258,15 @@ class ScriptPool:
         if self._running:
             return
         self._running = True
+        # `size + 1` threads, e a conta fecha exata: cada `run()` ocupa no máximo UMA thread
+        # por vez (o `send` e o `_receive` são sequenciais) e há no máximo `size` `run()`
+        # simultâneos, porque `_idle` só entrega `size` workers; `_spawn`/`_do_replace`/
+        # `_enqueue_when_ready` também são sequenciais e cabem no lugar do `run()` do worker
+        # que estão repondo. O `+1` cobre o único caso de sobreposição real: o laço de
+        # `_shutdown` de `stop()`, que não espera os `run()` em voo.
+        self._executor = ThreadPoolExecutor(
+            max_workers=self._size + 1, thread_name_prefix="script-pool"
+        )
         await asyncio.gather(*(self._spawn() for _ in range(self._size)))
         # Devolver com o pool quente: senão a primeira varredura pagaria o boot dentro do
         # próprio orçamento de 0,7xTs e viraria um timeout espúrio.
@@ -266,7 +296,12 @@ class ScriptPool:
         self._state.workers = []
         self._idle = asyncio.Queue()
         for worker in workers:
-            await asyncio.to_thread(_shutdown, worker, hard=False)
+            await self._off_loop(partial(_shutdown, worker, hard=False))
+        # Depois dos workers, nunca antes: os `_shutdown` acima rodam NELE. `wait=False` para
+        # não bloquear o event loop — as threads terminam o que já pegaram e morrem sozinhas.
+        executor, self._executor = self._executor, None
+        if executor is not None:
+            executor.shutdown(wait=False)
 
     async def run(
         self,
@@ -305,9 +340,18 @@ class ScriptPool:
                 if output_names is not None
                 else tuple(f"OUT{index}" for index in range(1, n_outputs + 1))
             )
-            await asyncio.to_thread(worker.conn.send, (code, inputs, state, names))
-            result = await asyncio.to_thread(
-                _receive, worker.conn, max(0.0, deadline - loop.time())
+            # Só `self._idle.get()` acima tem `wait_for`; estas duas idas a thread NÃO — e é
+            # deliberado. Um `wait_for` aqui não interromperia a thread que já começou (o
+            # future do executor só cancela enquanto está na fila), então o ramo de estouro
+            # seguiria para `_replace(hard=True)` e fecharia este `conn` embaixo de uma thread
+            # ainda presa em `send`/`poll` — exatamente a corrida que `MpcHost.stop()`
+            # documenta evitar. Quem limita o tempo aqui é o executor DEDICADO (nunca há fila:
+            # ver `start()`) mais o timeout do próprio `_receive`; o único bloqueio que resta
+            # sem prazo é `send` com buffer de pipe cheio, que só ocorre com worker morto ou
+            # travado — caso que o `_receive` seguinte já resolve em `timeout` + kill.
+            await self._off_loop(partial(worker.conn.send, (code, inputs, state, names)))
+            result = await self._off_loop(
+                partial(_receive, worker.conn, max(0.0, deadline - loop.time()))
             )
         except asyncio.CancelledError:
             # O worker pode estar rodando código arbitrário do usuário: devolvê-lo à fila é
@@ -335,7 +379,7 @@ class ScriptPool:
         # custo variável — e este caminho roda no respawn, ou seja, dentro da varredura de um
         # flow que acabou de estourar. Bloquear aqui atrasaria a fronteira de TODOS os flows
         # do processo, não só a do que falhou.
-        worker = await asyncio.to_thread(_spawn_worker, self._ctx)
+        worker = await self._off_loop(partial(_spawn_worker, self._ctx))
         self._state.workers.append(worker)
         task = asyncio.create_task(self._enqueue_when_ready(worker))
         self._state.booting.add(task)
@@ -345,7 +389,7 @@ class ScriptPool:
         """Só entra na fila de livres depois do handshake — um worker ainda importando numpy
         consumiria o orçamento de quem o pegasse."""
         try:
-            ready = await asyncio.to_thread(_receive, worker.conn, _BOOT_TIMEOUT_S)
+            ready = await self._off_loop(partial(_receive, worker.conn, _BOOT_TIMEOUT_S))
         except (OSError, EOFError, ValueError):
             ready = None
         if ready == _READY and self._running:
@@ -362,7 +406,7 @@ class ScriptPool:
                 "pool reduzido para %d worker(s)",
                 len(self._state.workers),
             )
-        await asyncio.to_thread(_shutdown, worker, hard=True)
+        await self._off_loop(partial(_shutdown, worker, hard=True))
 
     async def _replace(self, worker: _Worker, *, hard: bool) -> None:
         """Derruba `worker` e repõe — blindado contra cancelamento nos 4 call-sites de
@@ -385,9 +429,22 @@ class ScriptPool:
         await asyncio.shield(task)
 
     async def _do_replace(self, worker: _Worker, *, hard: bool) -> None:
+        # Pool já parado: `stop()` é dono de TODO worker, inclusive deste — sair de `_idle` não
+        # tira o worker de `_state.workers`, então o laço de desmonte o desliga de qualquer
+        # forma. Seguir aqui daria um segundo `_shutdown` CONCORRENTE no mesmo `_Worker`, e
+        # `Process.close()` mexe em `_popen`/`_sentinel` sem lock: a colisão sai como
+        # `AttributeError`, que escapa do `except (OSError, ValueError)` de `_shutdown` e faz
+        # `stop()` levantar (proibido, ADR-009). Além disso o executor do pool já foi desligado,
+        # e `_off_loop` levantaria `RuntimeError` no lugar do resultado do script. Reposição
+        # tardia não tem o que desligar nem o que repor: é no-op por definição.
+        #
+        # Um `_do_replace` que COMEÇOU antes do `stop()` não cai aqui: `_replace` o registra em
+        # `_state.replacing` antes de suspender, e o laço de ponto fixo de `stop()` o espera.
+        if not self._running:
+            return
         if worker in self._state.workers:
             self._state.workers.remove(worker)
-        await asyncio.to_thread(_shutdown, worker, hard=hard)
+        await self._off_loop(partial(_shutdown, worker, hard=hard))
         if self._running:
             await self._spawn()
             self._respawns += 1
