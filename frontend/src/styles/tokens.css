@@ -35,8 +35,12 @@
   /* Penas de trend — paleta de série do design system (projeto Claude Design, tokens/colors.css),
      8 posições: cobre o teto do trend de operação (`TETO_PENAS_OPERACAO`) e as 6 primeiras
      servem o trend de engenharia (`LIMITE_PENAS`). Consumidas por JS (uPlot) e pelas faixas da
-     legenda. Desenhadas sempre sobre o poço escuro do gráfico, não sobre o fundo do tema. */
-  --color-pen-1: oklch(0.68 0.22 258);
+     legenda. Desenhadas sempre sobre o poço escuro do gráfico, não sobre o fundo do tema.
+     A pena 1 nasceu no matiz do acento (258) e a 4 no do Âmbar Advertência: a Regra do Azul
+     Único e a Regra da Cor Anormal (DESIGN §Colors) proíbem os dois — no trend de operação o
+     acento É a pena de SP, então uma pena de série no mesmo azul faz o operador ler o SP como
+     a variável daquela posição da legenda. Matizes conferidos em `trendOperacao.check.ts`. */
+  --color-pen-1: oklch(0.68 0.22 312);
   --color-pen-2: oklch(0.78 0.16 195);
   --color-pen-3: oklch(0.7 0.26 340);
   --color-pen-4: oklch(0.85 0.18 95);
@@ -136,11 +140,13 @@
   --color-success: oklch(0.75 0.15 148);
   --color-success-soft: oklch(0.3 0.07 148);
   --color-success-fg: oklch(0.85 0.13 148);
-  /* Penas do tema escuro — mesmas 8 posições, versão do design system para fundo escuro */
-  --color-pen-1: oklch(0.72 0.16 258);
+  /* Penas do tema escuro — mesmas 8 posições, versão do design system para fundo escuro; pena 1
+     e pena 4 fora do azul de interação e do âmbar de severidade pelo mesmo motivo do tema claro
+     (aqui a colisão era pior: 0.022 e 0.039 de distância perceptual, indistinguíveis na tela) */
+  --color-pen-1: oklch(0.72 0.16 312);
   --color-pen-2: oklch(0.78 0.14 200);
   --color-pen-3: oklch(0.76 0.18 340);
-  --color-pen-4: oklch(0.8 0.15 90);
+  --color-pen-4: oklch(0.88 0.17 95);
   --color-pen-5: oklch(0.76 0.17 45);
   --color-pen-6: oklch(0.75 0.02 255);
   --color-pen-7: oklch(0.78 0.12 230);

@@ -266,35 +266,139 @@ const TOKENS_CSS = readFileSync(
   "utf-8",
 );
 
-function valorToken(nome: string): string {
-  const casado = TOKENS_CSS.match(new RegExp(`${nome}:\\s*([^;]+);`));
-  if (casado === null) throw new Error(`token ${nome} não encontrado em tokens.css`);
+/** Valor cru do token no tema pedido: o bloco `@theme` é o claro, `[data-theme="dark"]` é o
+ *  escuro, e os dois têm paleta própria — ler só o primeiro casamento do arquivo deixaria o
+ *  tema escuro sem teste nenhum (foi nele que a pena 1 e o Azul Único ficaram idênticos). */
+const INICIO_TEMA_ESCURO = TOKENS_CSS.indexOf('[data-theme="dark"]');
+if (INICIO_TEMA_ESCURO === -1) {
+  throw new Error('tokens.css: seletor [data-theme="dark"] não encontrado — fatia de tema inválida');
+}
+
+type Tema = "claro" | "escuro";
+const TEMAS: readonly Tema[] = ["claro", "escuro"];
+
+function valorTokenTema(nome: string, tema: Tema): string {
+  const fonte =
+    tema === "claro"
+      ? TOKENS_CSS.slice(0, INICIO_TEMA_ESCURO)
+      : TOKENS_CSS.slice(INICIO_TEMA_ESCURO);
+  const casado = fonte.match(new RegExp(`${nome}:\\s*([^;]+);`));
+  if (casado === null) throw new Error(`token ${nome} não encontrado no tema ${tema}`);
   return casado[1].trim();
 }
+
+/** Só a forma sem unidade (`oklch(L C H)`), que é a que `tokens.css` usa. A forma percentual
+ *  (`oklch(72% 0.16 258)`) é CSS válido e casaria no mesmo regex capturando `72`, cem vezes a
+ *  escala de L — a distância sairia enorme e o teste aprovaria colisão real. Melhor falhar. */
+function coordenadasOklch(valor: string): readonly [number, number, number] {
+  const casado = /^oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(valor);
+  if (casado === null || valor.includes("%")) {
+    throw new Error(`valor não é oklch() de 3 coordenadas sem unidade: ${valor}`);
+  }
+  return [Number(casado[1]), Number(casado[2]), Number(casado[3])];
+}
+
+/**
+ * Distância perceptual entre duas cores OKLCH: L mais o par cromático do próprio espaço
+ * (`C·cos h`, `C·sin h`). Comparar só o texto do token (o que este teste fazia antes) aprova
+ * `oklch(0.72 0.16 258)` contra `oklch(0.7 0.17 258)` — duas cores que o operador não consegue
+ * separar no gráfico —, e comparar matiz em grau puro trataria 20° a C 0.02 (cinza) como colisão
+ * e 20° a C 0.22 como distinção.
+ */
+function distanciaPerceptual(a: string, b: string): number {
+  const [la, ca, ha] = coordenadasOklch(a);
+  const [lb, cb, hb] = coordenadasOklch(b);
+  const ra = (ha * Math.PI) / 180;
+  const rb = (hb * Math.PI) / 180;
+  return Math.hypot(
+    la - lb,
+    ca * Math.cos(ra) - cb * Math.cos(rb),
+    ca * Math.sin(ra) - cb * Math.sin(rb),
+  );
+}
+
+/** Piso de distinção, calibrado na própria paleta: o par mais apertado que ela embarca de
+ *  propósito é 0.0615 (`--color-pen-2` × `--color-pen-8`, tema escuro), enquanto as duas
+ *  colisões que a tela de operação provou ficavam em 0.022 (pena 1 × Azul Único) e 0.039
+ *  (pena 4 × Âmbar Advertência). 0.05 separa os dois grupos com folga para os dois lados. */
+const PISO_DISTINCAO = 0.05;
+
+/** Cores que a pena nunca pode imitar: as três de severidade (A Regra da Cor Anormal) e o Azul
+ *  Único, que no trend de operação é a própria pena de SP (§7.4-6). */
+const TOKENS_RESERVADOS = ["--color-alarm", "--color-warn", "--color-success", "--color-accent"];
+
+/** Faixa de matiz do Azul Único, em graus OKLCH: "existe UM azul" (DESIGN §Colors) é regra de
+ *  matiz, não de luminosidade — duas cores no mesmo matiz e L diferente continuam sendo "o
+ *  azul" para quem lê o gráfico. 25° deixa passar a pena 7 (a mais próxima de propósito: 27°
+ *  no tema claro, 28° no escuro) e reprova qualquer pena no matiz do acento. Pena
+ *  quase-neutra (`--color-pen-6`, C 0.02) fica fora da regra: cinza não é o azul. */
+const FAIXA_MATIZ_AZUL_UNICO = 25;
+const CROMA_NEUTRA = 0.05;
 
 test("paleta do trend de operação tem 8 tokens, um por posição do teto (§6.6-5)", () => {
   expect(TOKENS_PENA_OPERACAO).toHaveLength(TETO_PENAS_OPERACAO);
 });
 
-test("as 8 cores de pena são distintas entre si — comparação por conjunto, não caso a caso (§6.6-5)", () => {
-  const coresPenas = TOKENS_PENA_OPERACAO.map(valorToken);
-  expect(new Set(coresPenas).size).toBe(TETO_PENAS_OPERACAO);
+test("as 8 cores de pena são distinguíveis entre si nos dois temas (§6.6-5)", () => {
+  const colisoes: string[] = [];
+  for (const tema of TEMAS) {
+    for (const [i, tokenA] of TOKENS_PENA_OPERACAO.entries()) {
+      for (const tokenB of TOKENS_PENA_OPERACAO.slice(i + 1)) {
+        const distancia = distanciaPerceptual(
+          valorTokenTema(tokenA, tema),
+          valorTokenTema(tokenB, tema),
+        );
+        if (distancia < PISO_DISTINCAO) {
+          colisoes.push(`${tema}: ${tokenA} × ${tokenB} = ${distancia.toFixed(4)}`);
+        }
+      }
+    }
+  }
+
+  expect(colisoes).toEqual([]);
 });
 
 test("nenhuma cor de pena colide com cor reservada de severidade nem com o Azul Único (§6.6-5, DESIGN §Colors)", () => {
-  const coresPenas = new Set(TOKENS_PENA_OPERACAO.map(valorToken));
-  const coresReservadas = ["--color-alarm", "--color-warn", "--color-success", "--color-accent"].map(
-    valorToken,
-  );
-
-  for (const reservada of coresReservadas) {
-    expect(coresPenas.has(reservada)).toBe(false);
+  // A pena de SP é o Azul Único (§7.4-6): uma pena de série no mesmo azul faz o operador ler o
+  // SP como a variável daquela posição da legenda — inclusive desligada, quando ela não desenha
+  // nada e a linha azul continua no gráfico.
+  const colisoes: string[] = [];
+  for (const tema of TEMAS) {
+    for (const tokenPena of TOKENS_PENA_OPERACAO) {
+      for (const tokenReservado of TOKENS_RESERVADOS) {
+        const distancia = distanciaPerceptual(
+          valorTokenTema(tokenPena, tema),
+          valorTokenTema(tokenReservado, tema),
+        );
+        if (distancia < PISO_DISTINCAO) {
+          colisoes.push(`${tema}: ${tokenPena} × ${tokenReservado} = ${distancia.toFixed(4)}`);
+        }
+      }
+    }
   }
+
+  // Mesmo matiz do acento com outra luminosidade ainda é "o azul": a distância perceptual acima
+  // aprovaria (a pena 1 do tema claro ficava a 0.10 do acento) e o operador continuaria lendo a
+  // pena de SP como a variável da legenda que usa a pena 1.
+  for (const tema of TEMAS) {
+    const [, , matizAcento] = coordenadasOklch(valorTokenTema("--color-accent", tema));
+    for (const tokenPena of TOKENS_PENA_OPERACAO) {
+      const [, croma, matiz] = coordenadasOklch(valorTokenTema(tokenPena, tema));
+      if (croma < CROMA_NEUTRA) continue;
+      const bruto = Math.abs(matiz - matizAcento) % 360;
+      const desvio = bruto > 180 ? 360 - bruto : bruto;
+      if (desvio < FAIXA_MATIZ_AZUL_UNICO) {
+        colisoes.push(`${tema}: ${tokenPena} está a ${String(desvio)}° do Azul Único`);
+      }
+    }
+  }
+
+  expect(colisoes).toEqual([]);
 });
 
 test("atribuirCoresPenas — a mesma função que TrendOperacao.tsx usa para colorir cada pena — devolve 8 cores distintas para 8 ids, sem wrap antes do teto (§6.6-5)", () => {
   const ids = ["cv_1", "cv_2", "co_1", "co_2", "co_3", "mv_1", "mv_2", "dv_1"]; // 8 ids
-  const coresResolvidas = TOKENS_PENA_OPERACAO.map(valorToken); // valores reais de tokens.css
+  const coresResolvidas = TOKENS_PENA_OPERACAO.map((t) => valorTokenTema(t, "claro"));
   const mapa = atribuirCoresPenas(ids, coresResolvidas);
 
   expect(mapa.size).toBe(8);
@@ -304,7 +408,7 @@ test("atribuirCoresPenas — a mesma função que TrendOperacao.tsx usa para col
 
 test("atribuirCoresPenas: id além do teto de 8 recicla por módulo — mesmo comportamento de antes (§6.6-5)", () => {
   const ids = Array.from({ length: 9 }, (_, i) => `v${String(i)}`); // 9º id, 1 além do teto
-  const coresResolvidas = TOKENS_PENA_OPERACAO.map(valorToken);
+  const coresResolvidas = TOKENS_PENA_OPERACAO.map((t) => valorTokenTema(t, "claro"));
   const mapa = atribuirCoresPenas(ids, coresResolvidas);
 
   expect(mapa.get("v8")).toBe(mapa.get("v0"));
