@@ -1,22 +1,27 @@
 /**
  * Valor online e quality da tabela de Tags: tradução pura de `opc.values` (RF-204) para as
  * duas células da linha. Nada de estado nem de React aqui — a página só desenha o que sai.
+ *
+ * `direction` não entra na conta: o worker lê todo node que o servidor declara legível,
+ * inclusive o de uma tag `w` (`polling.py::_declares_read_access`) — o valor dela é o
+ * comando EM VIGOR, grandeza distinta do readback de posição real (RF-604). Quem não tem
+ * série é o comando write-only, e isso se manifesta como ausência de leitura, não como
+ * direção.
  */
 
 import type { LeituraTag } from "../../app/CanalAoVivo";
 import { formatarNumero } from "../flows/useFlowStatus";
-import type { Direcao } from "./useTags";
 
 /** Rótulos pt-BR da quality do barramento (`bus.py:39-40`: 0=good, 1=uncertain, 2=bad). */
 const ROTULO_QUALITY: Record<number, string> = { 0: "Boa", 1: "Incerta", 2: "Ruim" };
 
-/** Sem leitura no ar: tag de escrita, tag que nunca publicou, socket fora do ar. */
+/** Sem leitura no ar: comando write-only, tag que ainda não publicou, socket fora do ar. */
 const SEM_DADO = "—";
 
 export type ToneQuality = "success" | "warn" | "alarm" | "neutral";
 
 /** Tom por quality. Fora de 0/1 é não-confiável: `status_to_quality`
- *  (`subscriptions.py:45-55`) já fecha o contrato em 0/1/2 e manda reservado para 2, então
+ *  (`polling.py`) já fecha o contrato em 0/1/2 e manda reservado para 2, então
  *  inteiro estranho vem de worker fora do contrato — trata como alarme, não como novidade. */
 const TONE_QUALITY: Record<number, ToneQuality> = { 0: "success", 1: "warn" };
 
@@ -28,16 +33,6 @@ export interface CelulaOnline {
   tone: ToneQuality;
 }
 
-/** Tags a assinar em `opc_values`: só `direction === "r"` publica no barramento — monitored
- *  item é leitura (`subscriptions.py:147-150`) e o heartbeat só republica tag `r`
- *  (`heartbeat.py:108-109`). Assinar uma tag `w` gastaria slot da fila do `/ws` (8,
- *  drop-oldest) esperando um valor que nunca vem. */
-export function tagIdsDeLeitura(
-  linhas: readonly { id: number; direction: Direcao }[],
-): number[] {
-  return linhas.filter((linha) => linha.direction === "r").map((linha) => linha.id);
-}
-
 /**
  * Célula de valor + célula de quality de uma linha.
  *
@@ -47,12 +42,8 @@ export function tagIdsDeLeitura(
  * número — o heartbeat republica o último valor conhecido sob `quality=2`
  * (`heartbeat.py:92-105`), e a severidade vai ao lado do valor (Regra do Canal Redundante).
  */
-export function celulaOnline(
-  direction: Direcao,
-  leitura: LeituraTag | undefined,
-  aoVivo: boolean,
-): CelulaOnline {
-  if (direction !== "r" || leitura === undefined || !aoVivo) {
+export function celulaOnline(leitura: LeituraTag | undefined, aoVivo: boolean): CelulaOnline {
+  if (leitura === undefined || !aoVivo) {
     return { valor: null, quality: SEM_DADO, tone: "neutral" };
   }
   return {
