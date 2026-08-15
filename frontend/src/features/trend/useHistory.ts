@@ -35,16 +35,23 @@ export function tetoCarryForwardSegundos(modo: HistoryResponse["mode"]): number 
   return CADENCIAS_ATE_SEM_DADO * (modo === "1m" ? CADENCIA_1M_S : CADENCIA_RAW_S);
 }
 
-/** Tags ordenadas por conexão e nome (brief 6.4: não filtrar direção). `GET /api/tags` não aceita
- *  `project_id`: o escopo por projeto ativo é aplicado na página. */
+/** Ordem total do seletor: primeiro as tags OPC agrupadas por conexão (ordem estável e óbvia
+ *  de operação), depois as tags calculadas — sem conexão para agrupar por — e dentro de cada
+ *  grupo por nome (`localeCompare` pt-BR). `GET /api/tags` não aceita `project_id`: o escopo
+ *  por projeto ativo é aplicado na página. */
 export function useTags(): UseQueryResult<TagOut[]> {
   return useQuery({
     queryKey: ["tags"],
     queryFn: () => api<TagOut[]>("/api/tags"),
     select: (tags) =>
-      [...tags].sort(
-        (a, b) => a.connection_id - b.connection_id || a.name.localeCompare(b.name, "pt-BR"),
-      ),
+      [...tags].sort((a, b) => {
+        if (a.connection_id === null && b.connection_id === null) {
+          return a.name.localeCompare(b.name, "pt-BR");
+        }
+        if (a.connection_id === null) return 1;
+        if (b.connection_id === null) return -1;
+        return a.connection_id - b.connection_id || a.name.localeCompare(b.name, "pt-BR");
+      }),
   });
 }
 

@@ -219,6 +219,25 @@ test("opc.values.<conn> vira mensagem opc_values com o payload cru do RF-204", (
   });
 });
 
+// `calc.values` (ADR-033): tag calculada publica no mesmo `LeituraTag` do opc-worker, num
+// canal fixo sem sufixo — mesma forma final `opc_values` que `opc.values.<conn_id>`.
+test("calc.values vira a mesma mensagem opc_values que opc.values.<conn>", () => {
+  const payload = { tag_id: 7, ts: "2026-08-04T12:00:00Z", value: 51.2, quality: 0 };
+  const viaCalc = analisarMensagemCanal(envelope("calc.values", payload));
+  const viaOpc = analisarMensagemCanal(envelope("opc.values.7", payload));
+
+  expect(viaCalc).toEqual(viaOpc);
+  expect(viaCalc).toEqual({ canal: "opc_values", tagId: 7, v: 51.2, ts: payload.ts, quality: 0, ok: true });
+});
+
+test("canal desconhecido continua ignorado mesmo com payload no formato de opc_values", () => {
+  expect(
+    analisarMensagemCanal(
+      envelope("canal.inexistente", { tag_id: 7, ts: "2026-08-04T12:00:00Z", value: 1, quality: 0 }),
+    ),
+  ).toBeNull();
+});
+
 // O caso que separa `quality` de `ok`: uncertain (1) não é bom, mas também não é ruim — a
 // tela de Tags mostra "Incerta" e o `ok` sozinho não distinguiria de "Ruim".
 test("opc.values com quality uncertain preserva o 1 e marca ok false", () => {

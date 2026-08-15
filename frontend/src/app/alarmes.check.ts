@@ -118,6 +118,30 @@ test("par de eventos: script_timeout e script_error fecham com script_recovered 
   ]);
 });
 
+test("par de eventos: calc_tag_timeout e calc_tag_error fecham com calc_tag_recovered da mesma tag", () => {
+  // O `calc-worker` publica só na TRANSIÇÃO (ADR-033): uma tag em falha permanente emite UM
+  // evento e cala. Quem sustenta a condição no banner até o recovered é este par — sem ele,
+  // o alarme apareceria por um instante e sumiria.
+  const eventos = [
+    // tag 8: recuperada
+    evento("calc_tag_recovered", "tag:8", { ts: "2026-01-01T00:00:10.000Z" }),
+    evento("calc_tag_timeout", "tag:8", { ts: "2026-01-01T00:00:05.000Z" }),
+    // tag 7: ainda em falha, e o único evento dela é antigo
+    evento("calc_tag_error", "tag:7", { ts: "2026-01-01T00:00:01.000Z" }),
+  ];
+
+  expect(resolverAlarmes(eventos, SEM_FLOW_STATUS, SEM_MPC_STATES, AGORA)).toEqual([
+    {
+      familia: "par",
+      kind: "calc_tag_error",
+      origin: "tag:7",
+      desde: "2026-01-01T00:00:01.000Z",
+      severity: "alarm",
+      message: "mensagem de calc_tag_error",
+    },
+  ]);
+});
+
 // ----------------------------------------------------------------------------------------
 // Família 2 — estado publicado
 // ----------------------------------------------------------------------------------------

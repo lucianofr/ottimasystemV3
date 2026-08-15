@@ -79,6 +79,14 @@ const PARES: readonly ParDef[] = [
     relevantes: { script_timeout: true, script_error: true, script_recovered: true },
     fechamento: "script_recovered",
   },
+  // Tag calculada (ADR-033): mesma família do bloco Script — o worker publica só na
+  // TRANSIÇÃO de estado, então quem segura a condição ativa entre o alarme e o
+  // `calc_tag_recovered` é este par. Sem ele, uma tag em falha permanente emitiria um
+  // evento e sumiria do banner.
+  {
+    relevantes: { calc_tag_timeout: true, calc_tag_error: true, calc_tag_recovered: true },
+    fechamento: "calc_tag_recovered",
+  },
 ];
 
 function condicoesPar(eventos: readonly EventMessage[]): CondicaoAtiva[] {

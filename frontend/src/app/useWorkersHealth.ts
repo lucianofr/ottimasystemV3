@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 
 const POLLING_MS = 5000;
 
-export type WorkerId = "opc_worker" | "flow_runtime" | "recorder";
+export type WorkerId = "opc_worker" | "flow_runtime" | "recorder" | "calc_worker";
 
 /** Corpo por worker (`_fetch_worker_health`, `routers/health.py`): `up` é o único campo
  *  garantido — o resto (`status`/`service`/`version`/...) só existe quando `up: true`, e a
@@ -30,13 +30,14 @@ const ROTULO_WORKER: Record<WorkerId, string> = {
   opc_worker: "OPC Worker",
   flow_runtime: "Flow Runtime",
   recorder: "Recorder",
+  calc_worker: "Calc Worker",
 };
 
-/** Ordem fixa das 3 lâmpadas (mesma do agregador, `health.py:40-45`). */
-const ORDEM: readonly WorkerId[] = ["opc_worker", "flow_runtime", "recorder"];
+/** Ordem fixa das lâmpadas (mesma do agregador, `health.py`). */
+const ORDEM: readonly WorkerId[] = ["opc_worker", "flow_runtime", "recorder", "calc_worker"];
 
-/** Deriva as 3 lâmpadas do agregador (`GET /api/health/workers`, spec F5 §4.2, decisão A-8).
- *  Sem resposta ainda (pending ou erro de rede) as 3 ficam indisponíveis — a lâmpada nunca
+/** Deriva as lâmpadas do agregador (`GET /api/health/workers`, spec F5 §4.2, decisão A-8).
+ *  Sem resposta ainda (pending ou erro de rede) todas ficam indisponíveis — a lâmpada nunca
  *  some da tela por falta de dado, só muda de estado. */
 export function derivarLampadas(saude: WorkersHealth | undefined): LampadaWorker[] {
   return ORDEM.map((id) => {
@@ -45,7 +46,7 @@ export function derivarLampadas(saude: WorkersHealth | undefined): LampadaWorker
   });
 }
 
-/** Heartbeat dos 3 workers (RNF-07, plano F5b tarefa 3.2) por polling de 5 s — sem WS aqui.
+/** Heartbeat dos workers (RNF-07, plano F5b tarefa 3.2) por polling de 5 s — sem WS aqui.
  *  `refetchIntervalInBackground` fica no default (false), mesma escolha de `useLastFlowState`. */
 export function useWorkersHealth(): UseQueryResult<WorkersHealth> {
   return useQuery({

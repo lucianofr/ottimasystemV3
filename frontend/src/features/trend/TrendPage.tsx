@@ -16,6 +16,7 @@ import { EditorEscala } from "./EditorEscala";
 import { ESCALA_AUTO, gravarEscalas, lerEscalas, limparEscalas, type EscalaVar } from "./escalas";
 import { JanelaTempo } from "./JanelaTempo";
 import { TrendChart, type TrendChartHandle } from "./TrendChart";
+import { tagDoProjeto } from "./tagsDoProjeto";
 import { CLASSES_PENA, FORMATO_VALOR, LIMITE_PENAS } from "./trendTheme";
 import { montarMatriz, resumirSeries, useHistory, useTags } from "./useHistory";
 import { useJanelaDeslizante } from "./useJanelaDeslizante";
@@ -80,10 +81,14 @@ export function TrendPage() {
     ? resumirSeries(resposta, selecionadas, referenciaPersistidaS(historico.data?.series ?? []))
     : [];
 
-  // Escopo por projeto ativo: o worker só reconcilia o projeto ativo (ADR-017), então uma pena
-  // de tag fora dele desenharia vazia para sempre. `GET /api/tags` não aceita `project_id`.
+  // Escopo por projeto ativo: o worker só reconcilia o projeto ativo (ADR-017) e uma tag
+  // calculada pertence direto ao projeto (ADR-033) — fora desse recorte a pena desenharia
+  // vazia para sempre. `GET /api/tags` não aceita `project_id`.
   const idsConexao = new Set((conexoes.data ?? []).map((conexao) => conexao.id));
-  const listaTags = (tags.data ?? []).filter((tag) => idsConexao.has(tag.connection_id));
+  const projetoAtivoId = projeto.data?.id ?? null;
+  const listaTags = (tags.data ?? []).filter(
+    (tag) => projetoAtivoId !== null && tagDoProjeto(tag, idsConexao, projetoAtivoId),
+  );
 
   const porId = new Map(listaTags.map((tag) => [tag.id, tag]));
   const rotulos = selecionadas.map((id) => porId.get(id)?.name ?? String(id));

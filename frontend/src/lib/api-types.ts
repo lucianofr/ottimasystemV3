@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * Health Workers
-         * @description Agrega os 3 workers em paralelo, 1 thread cada (F5R-09: urllib stdlib, sem httpx em
+         * @description Agrega os 4 workers em paralelo, 1 thread cada (F5R-09: urllib stdlib, sem httpx em
          *     produção).
          */
         get: operations["health_workers_api_health_workers_get"];
@@ -338,6 +338,43 @@ export interface paths {
         head?: never;
         /** Update Tag */
         patch: operations["update_tag_api_tags__tag_id__patch"];
+        trace?: never;
+    };
+    "/api/calculated-tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Calculated Tags */
+        get: operations["list_calculated_tags_api_calculated_tags_get"];
+        put?: never;
+        /** Create Calculated Tag */
+        post: operations["create_calculated_tag_api_calculated_tags_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calculated-tags/{tag_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Calculated Tag */
+        get: operations["get_calculated_tag_api_calculated_tags__tag_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Calculated Tag */
+        delete: operations["delete_calculated_tag_api_calculated_tags__tag_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Calculated Tag */
+        patch: operations["update_calculated_tag_api_calculated_tags__tag_id__patch"];
         trace?: never;
     };
     "/api/flows": {
@@ -798,6 +835,93 @@ export interface components {
             /** Application Uri */
             application_uri?: string | null;
         };
+        /** CalculatedTagCreate */
+        CalculatedTagCreate: {
+            /** Project Id */
+            project_id: number;
+            /** Name */
+            name: string;
+            /**
+             * Eu
+             * @default
+             */
+            eu: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Period Seconds
+             * @enum {integer}
+             */
+            period_seconds: 1 | 2 | 5 | 10 | 30 | 60;
+            /** Code */
+            code: string;
+            /** Input Tag Ids */
+            input_tag_ids?: number[];
+        };
+        /**
+         * CalculatedTagOut
+         * @description Montado pelo router a partir de `Tag` + `CalculatedTag` + `CalculatedTagInput`
+         *     ordenados por posição — não é `from_attributes` porque não existe um único objeto
+         *     ORM com essa forma (a lista `input_tag_ids` cruza três tabelas).
+         */
+        CalculatedTagOut: {
+            /** Id */
+            id: number;
+            /** Project Id */
+            project_id: number;
+            /** Name */
+            name: string;
+            /** Eu */
+            eu: string;
+            /** Description */
+            description: string;
+            /**
+             * Data Type
+             * @constant
+             */
+            data_type: "float";
+            /**
+             * Period Seconds
+             * @enum {integer}
+             */
+            period_seconds: 1 | 2 | 5 | 10 | 30 | 60;
+            /** Code */
+            code: string;
+            /** Input Tag Ids */
+            input_tag_ids: number[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * CalculatedTagUpdate
+         * @description Atualização parcial; `project_id` está ausente de propósito — dono do id-space
+         *     (RF-208) é imutável após a criação.
+         */
+        CalculatedTagUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Eu */
+            eu?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Period Seconds */
+            period_seconds?: (1 | 2 | 5 | 10 | 30 | 60) | null;
+            /** Code */
+            code?: string | null;
+            /** Input Tag Ids */
+            input_tag_ids?: number[] | null;
+        };
         /** ConnectionCreate */
         ConnectionCreate: {
             /** Name */
@@ -826,6 +950,11 @@ export interface components {
             auth_username?: string | null;
             /** Server Cert File */
             server_cert_file?: string | null;
+            /**
+             * Polling Period Ms
+             * @default 1000
+             */
+            polling_period_ms: number;
             /** Project Id */
             project_id: number;
             /** Auth Password */
@@ -859,6 +988,11 @@ export interface components {
             auth_username?: string | null;
             /** Server Cert File */
             server_cert_file?: string | null;
+            /**
+             * Polling Period Ms
+             * @default 1000
+             */
+            polling_period_ms: number;
             /** Id */
             id: number;
             /** Project Id */
@@ -897,6 +1031,8 @@ export interface components {
             auth_password?: string | null;
             /** Server Cert File */
             server_cert_file?: string | null;
+            /** Polling Period Ms */
+            polling_period_ms?: number | null;
         };
         /**
          * ConstraintOut
@@ -1797,11 +1933,13 @@ export interface components {
             /** Id */
             id: number;
             /** Connection Id */
-            connection_id: number;
+            connection_id: number | null;
             /** Name */
             name: string;
             /** Node Id */
-            node_id: string;
+            node_id: string | null;
+            /** Project Id */
+            project_id: number | null;
             /**
              * Direction
              * @enum {string}
@@ -2768,6 +2906,165 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TagOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_calculated_tags_api_calculated_tags_get: {
+        parameters: {
+            query?: {
+                project_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalculatedTagOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_calculated_tag_api_calculated_tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalculatedTagCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalculatedTagOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_calculated_tag_api_calculated_tags__tag_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalculatedTagOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_calculated_tag_api_calculated_tags__tag_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_calculated_tag_api_calculated_tags__tag_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalculatedTagUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalculatedTagOut"];
                 };
             };
             /** @description Validation Error */

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 
 import { useAssinaturaOpcValues, useCanalAoVivo, type LeituraTag } from "../../app/CanalAoVivo";
+import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { Label } from "../../components/ui/label";
@@ -11,8 +12,11 @@ import { cn } from "../../lib/cn";
 import { useCanMutate } from "../auth/useAuth";
 import { useConnections } from "../connections/useConnections";
 import { useActiveProject } from "../projects/useProjects";
+import { TagCalculadaForm } from "./TagCalculadaForm";
 import { TagForm } from "./TagForm";
-import { celulaOnline, tagIdsDeLeitura, type CelulaOnline } from "./tagsOnline";
+import { eCalculada, tagsElegiveis } from "./tagCalculada";
+import { celulaOnline, type CelulaOnline } from "./tagsOnline";
+import { formatarPeriodo, useCalculatedTag, useCalculatedTags, useDeleteCalculatedTag } from "./useCalculatedTags";
 import {
   ROTULO_DIRECAO,
   ROTULO_TIPO,
@@ -28,6 +32,7 @@ const COLUNAS = [
   "Node ID",
   "Direção",
   "Tipo",
+  "Período",
   "EU",
   "Valor",
   "Quality",
@@ -73,7 +78,7 @@ function CelulasOnline({
   leitura: LeituraTag | undefined;
   aoVivo: boolean;
 }) {
-  const celula = celulaOnline(tag.direction, leitura, aoVivo);
+  const celula = celulaOnline(leitura, aoVivo);
   return (
     <>
       <td className="px-3 py-2 text-right" data-testid="tag-valor">
@@ -97,24 +102,46 @@ function CelulasOnline({
 export function TagsPage() {
   const [filtros, setFiltros] = useState<FiltrosTags>({ connectionId: null, direction: null });
   const projeto = useActiveProject();
-  const conexoes = useConnections(projeto.data?.id ?? null);
+  const projetoAtivoId = projeto.data?.id ?? null;
+  const conexoes = useConnections(projetoAtivoId);
   const tags = useTags(filtros);
+  const calcTags = useCalculatedTags(projetoAtivoId);
   const excluir = useDeleteTag();
+  const excluirCalc = useDeleteCalculatedTag();
   const [formAberto, setFormAberto] = useState(false);
   const [emEdicao, setEmEdicao] = useState<TagOut | null>(null);
+  const [formCalcAberto, setFormCalcAberto] = useState(false);
+  const [emEdicaoCalcId, setEmEdicaoCalcId] = useState<number | null>(null);
+  const calcEmEdicao = useCalculatedTag(emEdicaoCalcId);
   const [aConfirmar, setAConfirmar] = useState<number | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
   const listaConexoes = conexoes.data ?? [];
   const nomePorConexao = new Map(listaConexoes.map((conexao) => [conexao.id, conexao.name]));
-  // Escopo por projeto ativo em memória: `GET /api/tags` não aceita `project_id` (API da F1).
-  const linhas = (tags.data ?? []).filter((tag) => nomePorConexao.has(tag.connection_id));
+  const idsConexoesDoProjeto = new Set(nomePorConexao.keys());
+  const periodoPorId = new Map((calcTags.data ?? []).map((c) => [c.id, c.period_seconds]));
+  // Escopo por projeto ativo em memória: `GET /api/tags` não aceita `project_id` (API da F1) e
+  // devolve toda tag, inclusive calculada de outro projeto — o discriminador (`eCalculada`,
+  // ADR-033 D1) decide a regra: OPC entra pela conexão do projeto, calculada entra pelo próprio
+  // `project_id` (ela não tem conexão nenhuma).
+  const linhas = (tags.data ?? []).filter((tag) => {
+    if (eCalculada(tag)) return tag.project_id === projetoAtivoId;
+    return tag.connection_id !== null && idsConexoesDoProjeto.has(tag.connection_id);
+  });
+  const entradasElegiveis = tagsElegiveis(
+    tags.data ?? [],
+    projetoAtivoId,
+    idsConexoesDoProjeto,
+    emEdicaoCalcId,
+  );
   const filtrando = filtros.connectionId !== null || filtros.direction !== null;
   const podeMutar = useCanMutate();
   const totalColunas = COLUNAS.length + (podeMutar ? 1 : 0);
   // Assinatura DINÂMICA: o conjunto de linhas muda com os filtros e com o projeto ativo, sem
-  // remontar a página — `useAssinatura` congelaria o interesse do primeiro render.
-  useAssinaturaOpcValues(tagIdsDeLeitura(linhas));
+  // remontar a página — `useAssinatura` congelaria o interesse do primeiro render. Toda tag
+  // entra, inclusive a de escrita e a calculada: ambas publicam no mesmo `opc_values` do WS
+  // (tag calculada via `calc.values`, sem mudança de contrato no `/ws`, ADR-033 D2).
+  useAssinaturaOpcValues(linhas.map((tag) => tag.id));
   const { estado, tagValues } = useCanalAoVivo();
   // Socket fora do ar ⇒ `tagValues` congela no último lote; a célula vira travessão em vez de
   // exibir número velho como se fosse a leitura de agora (ver `celulaOnline`).
@@ -135,24 +162,45 @@ export function TagsPage() {
     );
   }
 
-  function abrirCriacao(): void {
+  function fecharFormularios(): void {
+    setFormAberto(false);
+    setFormCalcAberto(false);
     setEmEdicao(null);
+    setEmEdicaoCalcId(null);
     setAConfirmar(null);
     setErro(null);
+  }
+
+  function abrirCriacao(): void {
+    fecharFormularios();
     setFormAberto(true);
   }
 
   function abrirEdicao(tag: TagOut): void {
+    fecharFormularios();
     setEmEdicao(tag);
-    setAConfirmar(null);
-    setErro(null);
     setFormAberto(true);
   }
 
-  async function confirmarExclusao(id: number): Promise<void> {
+  function abrirCriacaoCalc(): void {
+    fecharFormularios();
+    setFormCalcAberto(true);
+  }
+
+  function abrirEdicaoCalc(tag: TagOut): void {
+    fecharFormularios();
+    setEmEdicaoCalcId(tag.id);
+    setFormCalcAberto(true);
+  }
+
+  async function confirmarExclusao(tag: TagOut): Promise<void> {
     setErro(null);
     try {
-      await excluir.mutateAsync(id);
+      if (eCalculada(tag)) {
+        await excluirCalc.mutateAsync(tag.id);
+      } else {
+        await excluir.mutateAsync(tag.id);
+      }
       setAConfirmar(null);
     } catch (err) {
       setErro(err instanceof ApiError ? err.message : "Erro de comunicação com o servidor");
@@ -164,19 +212,30 @@ export function TagsPage() {
       <div className="flex items-center justify-between">
         <h1 className="plaqueta text-sm">Tags</h1>
         {podeMutar && (
-          <Button
-            data-testid="tag-new"
-            onClick={abrirCriacao}
-            disabled={listaConexoes.length === 0}
-          >
-            Nova tag
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              data-testid="tag-new"
+              onClick={abrirCriacao}
+              disabled={listaConexoes.length === 0}
+            >
+              Nova tag
+            </Button>
+            <Button
+              variant="outline"
+              data-testid="calc-new"
+              onClick={abrirCriacaoCalc}
+              disabled={projetoAtivoId === null}
+            >
+              Nova tag calculada
+            </Button>
+          </div>
         )}
       </div>
 
       {podeMutar && conexoes.isSuccess && listaConexoes.length === 0 && (
         <p className="text-sm text-fg-muted">
-          Nenhuma conexão cadastrada: cadastre uma conexão antes de criar tags.
+          Nenhuma conexão cadastrada: cadastre uma conexão antes de criar tags OPC. Tag calculada
+          não depende de conexão.
         </p>
       )}
 
@@ -232,6 +291,27 @@ export function TagsPage() {
         />
       )}
 
+      {podeMutar &&
+        formCalcAberto &&
+        projetoAtivoId !== null &&
+        (emEdicaoCalcId !== null && calcEmEdicao.isPending ? (
+          <Card className="p-6 text-sm text-fg-muted" data-testid="calc-form-loading">
+            Carregando tag calculada…
+          </Card>
+        ) : emEdicaoCalcId !== null && calcEmEdicao.isError ? (
+          <Card className="p-6 text-sm text-alarm" role="alert" data-testid="calc-form-load-error">
+            Falha ao carregar tag calculada
+          </Card>
+        ) : (
+          <TagCalculadaForm
+            key={emEdicaoCalcId ?? "nova"}
+            tag={emEdicaoCalcId === null ? null : (calcEmEdicao.data ?? null)}
+            tagsDisponiveis={entradasElegiveis}
+            projectId={projetoAtivoId}
+            onClose={() => setFormCalcAberto(false)}
+          />
+        ))}
+
       {erro && (
         <p role="alert" data-testid="tag-error" className="text-sm text-alarm">
           {erro}
@@ -281,74 +361,92 @@ export function TagsPage() {
                 </td>
               </tr>
             )}
-            {linhas.map((tag) => (
-              <tr key={tag.id} data-testid="tag-row" className="border-b border-border transition-colors duration-[var(--duration-fast)] hover:bg-surface-2">
-                <td className="px-3 py-2">{tag.name}</td>
-                <td className="px-3 py-2">
-                  {nomePorConexao.get(tag.connection_id) ?? (
-                    <span className="text-fg-muted">—</span>
-                  )}
-                </td>
-                <td className="process-value px-3 py-2">{tag.node_id}</td>
-                <td className="px-3 py-2">{ROTULO_DIRECAO[tag.direction]}</td>
-                <td className="px-3 py-2">{ROTULO_TIPO[tag.data_type]}</td>
-                <td className="px-3 py-2 text-fg-muted">
-                  {tag.eu || <span className="text-fg-muted">—</span>}
-                </td>
-                <CelulasOnline tag={tag} leitura={tagValues.get(tag.id)} aoVivo={aoVivo} />
-                <td className="px-3 py-2">
-                  {tag.description || <span className="text-fg-muted">—</span>}
-                </td>
-                {podeMutar && (
+            {linhas.map((tag) => {
+              const periodo = periodoPorId.get(tag.id);
+              return (
+                <tr key={tag.id} data-testid="tag-row" className="border-b border-border transition-colors duration-[var(--duration-fast)] hover:bg-surface-2">
+                  <td className="px-3 py-2">{tag.name}</td>
                   <td className="px-3 py-2">
-                    {aConfirmar === tag.id ? (
-                      <div className="flex items-center justify-end gap-2">
-                        <span className="text-xs text-fg-muted">Excluir esta tag?</span>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          data-testid="tag-delete-confirm"
-                          disabled={excluir.isPending}
-                          onClick={() => void confirmarExclusao(tag.id)}
-                        >
-                          Confirmar
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          data-testid="tag-delete-cancel"
-                          onClick={() => setAConfirmar(null)}
-                        >
-                          Cancelar
-                        </Button>
-                      </div>
+                    {eCalculada(tag) ? (
+                      <Badge tone="accent">Calculada</Badge>
                     ) : (
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          data-testid="tag-edit"
-                          onClick={() => abrirEdicao(tag)}
-                        >
-                          Editar
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          data-testid="tag-delete"
-                          onClick={() => {
-                            setErro(null);
-                            setAConfirmar(tag.id);
-                          }}
-                        >
-                          Excluir
-                        </Button>
-                      </div>
+                      (tag.connection_id !== null
+                        ? nomePorConexao.get(tag.connection_id)
+                        : undefined) ?? <span className="text-fg-muted">—</span>
                     )}
                   </td>
-                )}
-              </tr>
-            ))}
+                  <td className="process-value px-3 py-2">
+                    {tag.node_id ?? <span className="text-fg-muted">—</span>}
+                  </td>
+                  <td className="px-3 py-2">{ROTULO_DIRECAO[tag.direction]}</td>
+                  <td className="px-3 py-2">{ROTULO_TIPO[tag.data_type]}</td>
+                  <td className="process-value px-3 py-2">
+                    {periodo !== undefined ? (
+                      formatarPeriodo(periodo)
+                    ) : (
+                      <span className="text-fg-muted">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-fg-muted">
+                    {tag.eu || <span className="text-fg-muted">—</span>}
+                  </td>
+                  <CelulasOnline tag={tag} leitura={tagValues.get(tag.id)} aoVivo={aoVivo} />
+                  <td className="px-3 py-2">
+                    {tag.description || <span className="text-fg-muted">—</span>}
+                  </td>
+                  {podeMutar && (
+                    <td className="px-3 py-2">
+                      {aConfirmar === tag.id ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <span className="text-xs text-fg-muted">Excluir esta tag?</span>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            data-testid="tag-delete-confirm"
+                            disabled={excluir.isPending || excluirCalc.isPending}
+                            onClick={() => void confirmarExclusao(tag)}
+                          >
+                            Confirmar
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            data-testid="tag-delete-cancel"
+                            onClick={() => setAConfirmar(null)}
+                          >
+                            Cancelar
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            data-testid="tag-edit"
+                            onClick={() =>
+                              eCalculada(tag) ? abrirEdicaoCalc(tag) : abrirEdicao(tag)
+                            }
+                          >
+                            Editar
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            data-testid="tag-delete"
+                            onClick={() => {
+                              setErro(null);
+                              setAConfirmar(tag.id);
+                            }}
+                          >
+                            Excluir
+                          </Button>
+                        </div>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </Card>

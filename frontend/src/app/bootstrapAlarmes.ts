@@ -15,8 +15,12 @@ import type { EventMessage } from "./CanalAoVivo";
  *   latcha `script_timeout`/`script_error` até `script_recovered`, mas publica com
  *   `origin=flow:<id>/block:<id>`, `blocks/script.py:62`; igualdade exata no servidor,
  *   `routers/events.py:44`, não casa com `origin=flow:<id>` sozinho — sem isto, um
- *   script_error latchado há mais de 2h fica invisível no reload) `origin=flow:<id>/
- *   block:<id>` por bloco Script — teto de 10 flows + 5 conexões + 20 blocos Script
+ *   block:<id>` por bloco Script e `origin=tag:<id>` por tag calculada (ADR-033: o
+ *   `calc-worker` latcha `calc_tag_timeout`/`calc_tag_error` até `calc_tag_recovered`
+ *   exatamente como o bloco Script, e publica com `origin=tag:<id>` — sem esta consulta,
+ *   uma tag calculada em falha permanente há mais de 2 h some do banner no reload, porque
+ *   o latch por transição não reemite nada) — teto de 10 flows + 5 conexões + 20 blocos
+ *   Script + 20 tags calculadas
  *   (RNF-01 dimensiona ~10 flows; RF-201 dimensiona 5 conexões; 20 blocos é o corte
  *   desta emenda, documentado junto de `TETO_BLOCOS_SCRIPT`), `limit=20` (padrão
  *   `useLastFlowState.ts:112-133`: o suficiente para achar o último evento do par sem
@@ -38,6 +42,9 @@ const TETO_CONEXOES = 5;
  *  origens de bloco Script consultadas, no espírito dos tetos de flows/conexões acima —
  *  corte determinístico (`Array.prototype.slice`, ordem de chegada do escopo). */
 const TETO_BLOCOS_SCRIPT = 20;
+/** Mesmo espírito do teto de blocos Script: corte determinístico das origens `tag:<id>`
+ *  consultadas no bootstrap (ADR-033). */
+const TETO_TAGS_CALCULADAS = 20;
 const LIMITE_PAR = 20;
 const LIMITE_JANELA = 500;
 const JANELA_MS = 2 * 60 * 60 * 1000;
@@ -56,6 +63,10 @@ export interface EscopoBootstrap {
    *  ativo, para o grupo 1 também cobrir `script_timeout`/`script_error` ⇒
    *  `script_recovered` (família "par", `alarmes.ts`). */
   scriptBlocks: readonly OrigemBlocoScript[];
+  /** Tags calculadas do projeto ativo (ADR-033), pelo mesmo motivo dos blocos Script: o
+   *  par `calc_tag_timeout`/`calc_tag_error` ⇒ `calc_tag_recovered` publica com
+   *  `origin=tag:<id>`, que a consulta por flow/conexão não alcança. */
+  calcTagIds: readonly number[];
 }
 
 /** Só o fetch é injetável — `agora` já entra como parâmetro explícito (mesmo padrão de
@@ -106,6 +117,7 @@ export async function bootstrapAlarmes(
   const flowIds = escopo.flowIds.slice(0, TETO_FLOWS);
   const connectionIds = escopo.connectionIds.slice(0, TETO_CONEXOES);
   const scriptBlocks = escopo.scriptBlocks.slice(0, TETO_BLOCOS_SCRIPT);
+  const calcTagIds = escopo.calcTagIds.slice(0, TETO_TAGS_CALCULADAS);
   const inicioJanela = new Date(agora.getTime() - JANELA_MS).toISOString();
   const janela = new URLSearchParams({ start: inicioJanela, limit: String(LIMITE_JANELA) });
 
@@ -116,6 +128,7 @@ export async function bootstrapAlarmes(
       ({ flowId, blockId }) =>
         `/api/events?origin=flow:${String(flowId)}/block:${blockId}&limit=${String(LIMITE_PAR)}`,
     ),
+    ...calcTagIds.map((id) => `/api/events?origin=tag:${String(id)}&limit=${String(LIMITE_PAR)}`),
     `/api/events?severity=warning&${janela.toString()}`,
     `/api/events?severity=alarm&${janela.toString()}`,
   ];

@@ -28,6 +28,7 @@ import { useConnections } from "../features/connections/useConnections";
 import { useActiveProject } from "../features/projects/useProjects";
 import { deGraphJson } from "../features/flows/graph";
 import { useFlows } from "../features/flows/useFlows";
+import { useCalculatedTags } from "../features/tags/useCalculatedTags";
 import {
   criarCacheBootstrapAlarmes,
   TETO_FLOWS,
@@ -255,6 +256,10 @@ const PREFIXO_FLOW_STATUS = "flow.status.";
 const PREFIXO_MPC_STATE = "mpc.state.";
 const PREFIXO_FUZZY_STATE = "fuzzy.state.";
 const PREFIXO_OPC_VALUES = "opc.values.";
+/** Tag calculada (ADR-033) publica no canal fixo `calc.values`, mesmo payload `LeituraTag`
+ *  do `opc.values.<conn_id>`: o roteamento abaixo trata como mais uma origem, sem chave de
+ *  assinatura nova no cliente. */
+export const CANAL_CALC_VALUES = "calc.values";
 const CANAL_EVENTS = "events";
 
 const SEVERIDADES: Record<string, true> = { info: true, warning: true, alarm: true };
@@ -360,9 +365,10 @@ export function analisarMensagemCanal(raw: string): MensagemCanal | null {
     return state === null ? null : { canal: "fuzzy_state", chave: `${flowIdStr}/${blockId}`, state };
   }
 
-  if (canal.startsWith(PREFIXO_OPC_VALUES)) {
-    // O sufixo é o conn_id — o filtro por tag acontece no servidor (`ws.py`), aqui o que
-    // interessa é o payload; envelope sem payload de forma exata é descartado.
+  if (canal.startsWith(PREFIXO_OPC_VALUES) || canal === CANAL_CALC_VALUES) {
+    // O sufixo é o conn_id (ou, para tag calculada, o canal fixo) — o filtro por tag
+    // acontece no servidor (`ws.py`), aqui o que interessa é o payload; envelope sem
+    // payload de forma exata é descartado.
     const leitura = lerOpcValues(data);
     return leitura === null ? null : { canal: "opc_values", ...leitura };
   }
@@ -707,6 +713,7 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
   const projectId = projetoAtivo.data?.id ?? null;
   const flows = useFlows(projectId);
   const conexoes = useConnections(projectId);
+  const tagsCalculadas = useCalculatedTags(projectId);
   /** Fix round 4: `projetoAtivo`/`flows`/`conexoes` falhando não pode passar batido —
    *  o bootstrap abaixo segue best-effort com o escopo que tiver (política inalterada),
    *  mas cada falha é logada uma única vez (mesmo desenho do efeito de `detalhesFlow`
@@ -823,12 +830,17 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (bootstrapFeitoRef.current) return;
     if (projetoAtivo.isPending) return;
-    if (projectId !== null && (flows.isPending || conexoes.isPending || !detalhesFlow.pronto)) return;
+    if (
+      projectId !== null &&
+      (flows.isPending || conexoes.isPending || tagsCalculadas.isPending || !detalhesFlow.pronto)
+    )
+      return;
     bootstrapFeitoRef.current = true;
     const escopo: EscopoBootstrap = {
       flowIds: (flows.data ?? []).map((flow) => flow.id),
       connectionIds: (conexoes.data ?? []).map((conexao) => conexao.id),
       scriptBlocks: detalhesFlow.scriptBlocks,
+      calcTagIds: (tagsCalculadas.data ?? []).map((tag) => tag.id),
     };
     cacheBootstrap
       .obter(escopo, new Date())
@@ -851,6 +863,8 @@ export function CanalAoVivoProvider({ children }: { children: ReactNode }) {
     flows.data,
     conexoes.isPending,
     conexoes.data,
+    tagsCalculadas.isPending,
+    tagsCalculadas.data,
     detalhesFlow.pronto,
     detalhesFlow.scriptBlocks,
     cacheBootstrap,

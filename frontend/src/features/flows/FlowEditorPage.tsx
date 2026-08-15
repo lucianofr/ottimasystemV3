@@ -362,7 +362,12 @@ function Editor({ flowId }: { flowId: number }) {
   const tags = useTags({ connectionId: null, direction: null });
   const tagsDoProjeto = useMemo<TagOut[]>(() => {
     const doProjeto = new Set((conexoes.data ?? []).map((conexao) => conexao.id));
-    return (tags.data ?? []).filter((tag) => doProjeto.has(tag.connection_id));
+    // Tag calculada NÃO é entrada válida de bloco OPC-Read (ADR-033 v1): o backend
+    // (`project_tags`) faz INNER JOIN com `opc_connections`, então `connection_id` nulo nunca
+    // passaria na validação do grafo — fora do canvas de propósito, não por esquecimento.
+    return (tags.data ?? []).filter(
+      (tag) => tag.connection_id !== null && doProjeto.has(tag.connection_id),
+    );
   }, [conexoes.data, tags.data]);
   const porId = useMemo(
     () => new Map(tagsDoProjeto.map((tag) => [tag.id, tag])),

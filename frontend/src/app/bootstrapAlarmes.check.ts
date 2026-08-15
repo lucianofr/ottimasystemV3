@@ -64,7 +64,7 @@ test("grupo 1: uma chamada origin por id, teto de 10 flows e 5 conexões, limit 
   const flowIds = Array.from({ length: 12 }, (_, i) => i + 1);
   const connectionIds = Array.from({ length: 7 }, (_, i) => i + 1);
 
-  await bootstrapAlarmes({ flowIds, connectionIds, scriptBlocks: [] }, AGORA, ambiente);
+  await bootstrapAlarmes({ flowIds, connectionIds, scriptBlocks: [], calcTagIds: [] }, AGORA, ambiente);
 
   const deFlow = chamadas.filter((c) => c.includes("origin=flow:") && !c.includes("/block:"));
   const deConexao = chamadas.filter((c) => c.includes("origin=conn:"));
@@ -91,6 +91,7 @@ test("grupo 1 (emenda): uma chamada origin por bloco Script, limit 20", async ()
         { flowId: 9, blockId: "script_a1b2c3d4" },
         { flowId: 12, blockId: "script_e5f6a7b8" },
       ],
+      calcTagIds: [],
     },
     AGORA,
     ambiente,
@@ -107,12 +108,76 @@ test("grupo 1 (emenda): teto de 20 blocos Script no total, corte determinístico
     blockId: `script_${String(i + 1)}`,
   }));
 
-  await bootstrapAlarmes({ flowIds: [], connectionIds: [], scriptBlocks }, AGORA, ambiente);
+  await bootstrapAlarmes(
+    { flowIds: [], connectionIds: [], scriptBlocks, calcTagIds: [] },
+    AGORA,
+    ambiente,
+  );
 
   const deBloco = chamadas.filter((c) => c.includes("/block:"));
   expect(deBloco).toHaveLength(20);
   expect(deBloco).toContain("/api/events?origin=flow:1/block:script_1&limit=20");
   expect(deBloco).not.toContain("/api/events?origin=flow:1/block:script_21&limit=20");
+});
+
+test("grupo 1 (ADR-033): uma chamada origin por tag calculada, limit 20", async () => {
+  // O latch do `calc-worker` é por transição: sem esta consulta, uma tag em falha desde antes
+  // da janela de 2 h não tem evento nenhum para o grupo 2 achar e desaparece do banner.
+  const { ambiente, chamadas } = ambienteFake();
+
+  await bootstrapAlarmes(
+    { flowIds: [], connectionIds: [], scriptBlocks: [], calcTagIds: [7, 8] },
+    AGORA,
+    ambiente,
+  );
+
+  expect(chamadas).toContain("/api/events?origin=tag:7&limit=20");
+  expect(chamadas).toContain("/api/events?origin=tag:8&limit=20");
+});
+
+test("grupo 1 (ADR-033): teto de 20 tags calculadas, corte determinístico", async () => {
+  const { ambiente, chamadas } = ambienteFake();
+  const calcTagIds = Array.from({ length: 25 }, (_, i) => i + 1);
+
+  await bootstrapAlarmes(
+    { flowIds: [], connectionIds: [], scriptBlocks: [], calcTagIds },
+    AGORA,
+    ambiente,
+  );
+
+  const deTag = chamadas.filter((c) => c.includes("origin=tag:"));
+  expect(deTag).toHaveLength(20);
+  expect(deTag).toContain("/api/events?origin=tag:1&limit=20");
+  expect(deTag).not.toContain("/api/events?origin=tag:21&limit=20");
+});
+
+test("calc_tag_error como último evento da tag: resolverAlarmes acha a condição ativa", async () => {
+  // Cenário exato do furo: alarme mais velho que a janela de 2 h do grupo 2, só alcançável
+  // pela consulta por `origin=tag:<id>`.
+  const { ambiente } = ambienteFake({
+    "/api/events?origin=tag:7&limit=20": [
+      evento("calc_tag_error", "tag:7", { ts: "2026-01-01T09:00:00.000Z" }),
+    ],
+    [AVISO]: [],
+    [ALARME]: [],
+  });
+
+  const eventos = await bootstrapAlarmes(
+    { flowIds: [], connectionIds: [], scriptBlocks: [], calcTagIds: [7] },
+    AGORA,
+    ambiente,
+  );
+
+  expect(resolverAlarmes(eventos, new Map(), new Map(), AGORA)).toEqual([
+    {
+      familia: "par",
+      kind: "calc_tag_error",
+      origin: "tag:7",
+      desde: "2026-01-01T09:00:00.000Z",
+      severity: "alarm",
+      message: "mensagem de calc_tag_error",
+    },
+  ]);
 });
 
 // ----------------------------------------------------------------------------------------
@@ -122,7 +187,7 @@ test("grupo 1 (emenda): teto de 20 blocos Script no total, corte determinístico
 test("grupo 2: duas chamadas (warning e alarm), cada uma com sua própria severidade e a janela de 2h", async () => {
   const { ambiente, chamadas } = ambienteFake();
 
-  await bootstrapAlarmes({ flowIds: [], connectionIds: [], scriptBlocks: [] }, AGORA, ambiente);
+  await bootstrapAlarmes({ flowIds: [], connectionIds: [], scriptBlocks: [], calcTagIds: [] }, AGORA, ambiente);
 
   expect(chamadas).toContain(AVISO);
   expect(chamadas).toContain(ALARME);
@@ -135,7 +200,7 @@ test("grupo 2: a janela é recalculada a partir de `agora`, nunca fixa", async (
   const outroAgora = new Date("2026-03-15T08:30:00.000Z");
   const inicioEsperado = new Date(outroAgora.getTime() - 2 * 60 * 60 * 1000).toISOString();
 
-  await bootstrapAlarmes({ flowIds: [], connectionIds: [], scriptBlocks: [] }, outroAgora, ambiente);
+  await bootstrapAlarmes({ flowIds: [], connectionIds: [], scriptBlocks: [], calcTagIds: [] }, outroAgora, ambiente);
 
   expect(chamadas).toContain(
     `/api/events?severity=warning&start=${encodeURIComponent(inicioEsperado)}&limit=500`,
@@ -155,7 +220,7 @@ test("mescla os grupos por ts desc e remove duplicatas exatas entre eles", async
   });
 
   const eventos = await bootstrapAlarmes(
-    { flowIds: [9], connectionIds: [], scriptBlocks: [] },
+    { flowIds: [9], connectionIds: [], scriptBlocks: [], calcTagIds: [] },
     AGORA,
     ambiente,
   );
@@ -176,7 +241,7 @@ test("uma chamada rejeitada não derruba as outras: bootstrapAlarmes nunca rejei
   };
 
   const eventos = await bootstrapAlarmes(
-    { flowIds: [9], connectionIds: [], scriptBlocks: [] },
+    { flowIds: [9], connectionIds: [], scriptBlocks: [], calcTagIds: [] },
     AGORA,
     ambiente,
   );
@@ -191,7 +256,7 @@ test("uma chamada rejeitada não derruba as outras: bootstrapAlarmes nunca rejei
 test("cache: mesmo escopo dentro de 60s reaproveita, expira depois e refaz as chamadas", async () => {
   const { ambiente, chamadas } = ambienteFake();
   const cache = criarCacheBootstrapAlarmes();
-  const escopo = { flowIds: [1], connectionIds: [], scriptBlocks: [] };
+  const escopo = { flowIds: [1], connectionIds: [], scriptBlocks: [], calcTagIds: [] };
 
   await cache.obter(escopo, AGORA, ambiente);
   const apos1a = chamadas.length;
@@ -208,10 +273,10 @@ test("cache: escopo diferente não reaproveita, mesmo dentro da janela de 60s", 
   const { ambiente, chamadas } = ambienteFake();
   const cache = criarCacheBootstrapAlarmes();
 
-  await cache.obter({ flowIds: [1], connectionIds: [], scriptBlocks: [] }, AGORA, ambiente);
+  await cache.obter({ flowIds: [1], connectionIds: [], scriptBlocks: [], calcTagIds: [] }, AGORA, ambiente);
   const apos1a = chamadas.length;
 
-  await cache.obter({ flowIds: [2], connectionIds: [], scriptBlocks: [] }, AGORA, ambiente);
+  await cache.obter({ flowIds: [2], connectionIds: [], scriptBlocks: [], calcTagIds: [] }, AGORA, ambiente);
   expect(chamadas.length).toBeGreaterThan(apos1a);
 });
 
@@ -219,11 +284,11 @@ test("cache: só a lista de blocos Script mudar (mesmos flows/conexões) também
   const { ambiente, chamadas } = ambienteFake();
   const cache = criarCacheBootstrapAlarmes();
 
-  await cache.obter({ flowIds: [1], connectionIds: [], scriptBlocks: [] }, AGORA, ambiente);
+  await cache.obter({ flowIds: [1], connectionIds: [], scriptBlocks: [], calcTagIds: [] }, AGORA, ambiente);
   const apos1a = chamadas.length;
 
   await cache.obter(
-    { flowIds: [1], connectionIds: [], scriptBlocks: [{ flowId: 1, blockId: "script_1" }] },
+    { flowIds: [1], connectionIds: [], scriptBlocks: [{ flowId: 1, blockId: "script_1" }], calcTagIds: [] },
     AGORA,
     ambiente,
   );
@@ -244,7 +309,7 @@ test("último evento do par é a abertura: resolverAlarmes acha a condição ati
   });
 
   const eventos = await bootstrapAlarmes(
-    { flowIds: [9], connectionIds: [], scriptBlocks: [] },
+    { flowIds: [9], connectionIds: [], scriptBlocks: [], calcTagIds: [] },
     AGORA,
     ambiente,
   );
@@ -273,7 +338,7 @@ test("par já fechado (evento de recuperação é o mais recente): resolverAlarm
   });
 
   const eventos = await bootstrapAlarmes(
-    { flowIds: [9], connectionIds: [], scriptBlocks: [] },
+    { flowIds: [9], connectionIds: [], scriptBlocks: [], calcTagIds: [] },
     AGORA,
     ambiente,
   );
@@ -297,7 +362,7 @@ test("script_error como último evento na origem de bloco: resolverAlarmes acha 
   });
 
   const eventos = await bootstrapAlarmes(
-    { flowIds: [], connectionIds: [], scriptBlocks: [{ flowId: 9, blockId: "script_a1b2c3d4" }] },
+    { flowIds: [], connectionIds: [], scriptBlocks: [{ flowId: 9, blockId: "script_a1b2c3d4" }], calcTagIds: [] },
     AGORA,
     ambiente,
   );
@@ -343,6 +408,7 @@ test("script_error seguido de script_recovered num bloco Script fica inativo, ma
         { flowId: 9, blockId: "script_a1b2c3d4" },
         { flowId: 9, blockId: "script_e5f6a7b8" },
       ],
+      calcTagIds: [],
     },
     AGORA,
     ambiente,
