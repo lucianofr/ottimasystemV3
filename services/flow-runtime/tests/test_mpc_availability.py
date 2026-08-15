@@ -16,13 +16,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from ottima_core.flowgraph import MpcConfig
+from ottima_core.snapshot import TagValue
 from ottima_flow_runtime.mpc.availability import (
     MvAvailability,
     classify_mvs,
     frozen_mv_ids,
     readback_tag_id,
 )
-from ottima_flow_runtime.snapshot import TagValue
 
 READBACK_PID = 503
 MODE_READ_PID = 504

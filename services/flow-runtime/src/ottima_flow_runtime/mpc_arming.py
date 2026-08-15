@@ -27,10 +27,10 @@ from datetime import UTC, datetime
 
 from ottima_core.bus import OpcWrite
 from ottima_core.flowgraph import PidBinding
+from ottima_core.snapshot import ValueSnapshot
 
 from .blocks.mpc import MpcBlock
 from .mpc.availability import MvAvailability
-from .snapshot import ValueSnapshot
 
 CONFIRM_MISSES_LIMIT = 2
 """2×Ts_mpc sem confirmação ⇒ `no_confirm` (spec §4.4): cada "miss" é um tick de Ts_mpc."""

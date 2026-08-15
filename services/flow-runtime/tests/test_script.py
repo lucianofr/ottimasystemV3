@@ -21,16 +21,16 @@ from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
 from runtime_test_helpers import AWAIT_TIMEOUT_S, await_until
 
+from ottima_core import script_pool
 from ottima_core.bus import (
     CHANNEL_EVENTS,
     KIND_SCRIPT_ERROR,
     KIND_SCRIPT_RECOVERED,
     KIND_SCRIPT_TIMEOUT,
 )
-from ottima_flow_runtime import script_pool
+from ottima_core.script_pool import ScriptPool
 from ottima_flow_runtime.blocks.base import PortSample
 from ottima_flow_runtime.blocks.script import ScriptBlock
-from ottima_flow_runtime.script_pool import ScriptPool
 
 DRAIN_TIMEOUT_S = 5.0
 SENTINEL_CHANNEL = "tests.sentinel.script"
@@ -684,7 +684,7 @@ async def test_handshake_de_boot_falho_loga_o_tamanho_do_pool_que_sobrou(monkeyp
     monkeypatch.setattr(script_pool, "_receive", lambda conn, timeout_s: None)
     pool_local = ScriptPool(size=2)
 
-    with caplog.at_level(logging.WARNING, logger="ottima_flow_runtime.script_pool"):
+    with caplog.at_level(logging.WARNING, logger="ottima_core.script_pool"):
         await pool_local.start()
 
     try:

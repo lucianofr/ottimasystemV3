@@ -8,7 +8,8 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal
 
-from ..snapshot import ValueSnapshot
+from ottima_core.snapshot import ValueSnapshot
+
 from .base import Block, PortSample
 
 

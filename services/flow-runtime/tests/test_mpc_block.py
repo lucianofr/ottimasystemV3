@@ -37,10 +37,10 @@ from ottima_core.bus import (
     OpcWrite,
 )
 from ottima_core.flowgraph import MpcConfig
+from ottima_core.snapshot import TagValue
 from ottima_flow_runtime.blocks.base import PortSample
 from ottima_flow_runtime.blocks.mpc import MpcBlock
 from ottima_flow_runtime.mpc.worker import SolveRequest, SolveResult
-from ottima_flow_runtime.snapshot import TagValue
 
 TS_FLOW = 1.0
 OPERADOR = "user:7"

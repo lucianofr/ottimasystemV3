@@ -62,6 +62,7 @@ from ottima_core.bus import (
     SstoRun,
 )
 from ottima_core.flowgraph import CvVar, MpcConfig, MvVar, PidBinding, derive_horizons
+from ottima_core.snapshot import ValueSnapshot
 
 from ..mpc.availability import (
     MvAvailability,
@@ -71,7 +72,6 @@ from ..mpc.availability import (
 )
 from ..mpc.host import MpcHost
 from ..mpc.worker import SolveRequest, SolveResult
-from ..snapshot import ValueSnapshot
 from .base import Block, PortSample, has_cold_input, null_outputs
 
 _LocalRemote = Literal["local", "remote"]

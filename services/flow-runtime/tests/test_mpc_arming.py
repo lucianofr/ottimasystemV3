@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from ottima_core.flowgraph import ModeValues, PidBinding
+from ottima_core.snapshot import TagValue
 from ottima_flow_runtime.mpc_arming import watch_arm
-from ottima_flow_runtime.snapshot import TagValue
 
 _TARGET = 1
 _AUTO = 0

@@ -8,7 +8,7 @@ from redis.asyncio import Redis
 from runtime_test_helpers import AWAIT_TIMEOUT_S, await_until
 
 from ottima_core.bus import OpcValue, channel_opc_values
-from ottima_flow_runtime.snapshot import ValueSnapshot
+from ottima_core.snapshot import ValueSnapshot
 
 TS = datetime(2026, 8, 4, 12, 0, 0, tzinfo=UTC)
 

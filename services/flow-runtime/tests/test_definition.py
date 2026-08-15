@@ -6,9 +6,9 @@ serviços de runtime — mesmo padrão de `test_flowgraph.py`/`test_flowgraph_mp
 """
 
 from ottima_core.flowgraph import FlowGraph, TagRef, parse_graph
+from ottima_core.script_pool import ScriptPool
 from ottima_flow_runtime.blocks.mpc import MpcBlock
 from ottima_flow_runtime.definition import _conn_ids, _mpc_pid_tag_ids, build_definition
-from ottima_flow_runtime.script_pool import ScriptPool
 
 
 def opc_read_node(node_id: str, *, tag_id: int, exec_order: int) -> dict:

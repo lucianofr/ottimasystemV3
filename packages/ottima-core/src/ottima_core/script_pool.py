@@ -1,4 +1,9 @@
-"""ProcessPool dedicado ao bloco Script (RF-511..514, ADR-018/004, spec F3 §3.3, decisão A-4).
+"""ProcessPool para código Python do usuário (RF-511..514, ADR-018/004, spec F3 §3.3, decisão A-4).
+
+Dois consumidores compartilham este pool, e por isso ele mora no core: o bloco Script de um
+flow (`OUT1..OUTn`, orçamento de 0,7 × Ts) e a tag calculada (`OUT`, orçamento de 0,7 × período
+— ADR-033). Cada serviço instancia o SEU pool: uma tag calculada nunca disputa worker com a
+varredura de um flow.
 
 Por que um pool próprio e não `ProcessPoolExecutor`: ele não interrompe uma tarefa já em
 execução. Um `while True` no código do engenheiro ficaria girando para sempre e o executor
@@ -21,6 +26,7 @@ import multiprocessing as mp
 import os
 import pickle
 import traceback
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from multiprocessing.connection import Connection
 from multiprocessing.context import SpawnContext, SpawnProcess
@@ -71,8 +77,14 @@ class ScriptResult:
 # --------------------------------------------------------------------------------------
 
 
-def _run_script(code: str, inputs: dict[str, float], state: Any, n_outputs: int) -> ScriptResult:
-    """Executa o código do usuário no escopo fechado e valida o que ele produziu."""
+def _run_script(
+    code: str, inputs: dict[str, float], state: Any, output_names: tuple[str, ...]
+) -> ScriptResult:
+    """Executa o código do usuário no escopo fechado e valida o que ele produziu.
+
+    Os nomes das saídas chegam prontos do pai: `n_outputs` seria estado redundante aqui, e
+    quem chama já sabe se a convenção é `OUT1..OUTn` (bloco Script) ou `OUT` (tag calculada).
+    """
     scope: dict[str, Any] = {
         # Cópia por execução: um script que mexesse em `__builtins__` não contamina o próximo
         # job do mesmo worker.
@@ -89,8 +101,7 @@ def _run_script(code: str, inputs: dict[str, float], state: Any, n_outputs: int)
         return ScriptResult("error", None, None, traceback.format_exc())
 
     outputs: dict[str, float] = {}
-    for index in range(1, n_outputs + 1):
-        port = f"OUT{index}"
+    for port in output_names:
         if port not in scope:
             return ScriptResult("error", None, None, f"o script não atribuiu a saída {port}")
         try:
@@ -265,12 +276,16 @@ class ScriptPool:
         state: Any,
         n_outputs: int,
         timeout_s: float,
+        output_names: Sequence[str] | None = None,
     ) -> ScriptResult:
         """Executa o script num worker livre dentro do orçamento.
 
         O orçamento cobre **aquisição + execução**: esperar por worker livre até o prazo
         acabar é `timeout` igual, sem matar ninguém — a fronteira de varredura não se importa
         com o motivo do atraso.
+
+        `output_names` sobrepõe a convenção `OUT1..OUTn` do bloco Script: a tag calculada
+        (ADR-033) tem saída única chamada `OUT`, e é o nome que o engenheiro escreve no script.
         """
         if not self._running:
             raise RuntimeError("ScriptPool não está em execução")
@@ -285,7 +300,12 @@ class ScriptPool:
         try:
             # `send` também pode bloquear (buffer do pipe cheio): a mesma regra do `_receive`
             # vale aqui — nunca no event loop (ADR-004).
-            await asyncio.to_thread(worker.conn.send, (code, inputs, state, n_outputs))
+            names = (
+                tuple(output_names)
+                if output_names is not None
+                else tuple(f"OUT{index}" for index in range(1, n_outputs + 1))
+            )
+            await asyncio.to_thread(worker.conn.send, (code, inputs, state, names))
             result = await asyncio.to_thread(
                 _receive, worker.conn, max(0.0, deadline - loop.time())
             )

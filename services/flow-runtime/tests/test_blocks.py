@@ -16,6 +16,7 @@ from ottima_core.bus import (
     CHANNEL_OPC_WRITES,
     KIND_WRITE_SUPPRESSED,
 )
+from ottima_core.snapshot import TagValue
 from ottima_flow_runtime.blocks.base import (
     Block,
     PortSample,
@@ -24,7 +25,6 @@ from ottima_flow_runtime.blocks.base import (
 )
 from ottima_flow_runtime.blocks.opc_read import OpcReadBlock
 from ottima_flow_runtime.blocks.opc_write import OpcWriteBlock
-from ottima_flow_runtime.snapshot import TagValue
 
 TS = datetime(2026, 8, 4, 12, 0, 0, tzinfo=UTC)
 DRAIN_TIMEOUT_S = 5.0

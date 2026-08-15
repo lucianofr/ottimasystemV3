@@ -42,8 +42,7 @@ from collections.abc import Iterable, Mapping
 from enum import StrEnum
 
 from ottima_core.flowgraph import MvVar
-
-from ..snapshot import ValueSnapshot
+from ottima_core.snapshot import ValueSnapshot
 
 
 class MvAvailability(StrEnum):

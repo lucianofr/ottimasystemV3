@@ -1,14 +1,20 @@
 """Espelho em memória do último valor de cada tag (RF-401, spec F3 §2.1, §3.0).
 
-Uma instância por processo, compartilhada por todos os FlowTasks. O `opc-worker` é o único
-que fala OPC-UA (ADR-006): aqui só se consome `opc.values.*`. A leitura (`get`) é síncrona e
-O(1) porque roda de dentro do laço de varredura, que não pode bloquear o event loop
-(ADR-004); a escrita vem da task de fundo que consome o pubsub.
+Uma instância por processo, compartilhada por quem lê valor de tag. O `opc-worker` é o único
+que fala OPC-UA (ADR-006): aqui só se consome barramento. A leitura (`get`) é síncrona e
+O(1) porque roda de dentro de laços que não podem bloquear o event loop (ADR-004); a escrita
+vem da task de fundo que consome o pubsub.
+
+Mora no core porque dois serviços o consomem: o flow-runtime (só `opc.values.*`) e o
+calc-worker, que assina também `calc.values` para que uma tag calculada possa entrar como
+`INn` de outra (ADR-033). O payload é o mesmo `OpcValue` nos dois canais, então o espelho não
+precisa distinguir origem — a chave é sempre o `tag_id`.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -40,11 +46,12 @@ class TagValue:
 class ValueSnapshot:
     """Espelho do barramento: padrão `opc.values.*` → último valor por `tag_id`."""
 
-    def __init__(self, redis_client: Redis) -> None:
+    def __init__(self, redis_client: Redis, patterns: Sequence[str] = (VALUES_PATTERN,)) -> None:
         self._values: dict[int, TagValue] = {}
-        self._listener = PatternListener(
-            redis_client, VALUES_PATTERN, self._ingest, name="flow-runtime-snapshot"
-        )
+        self._listeners = [
+            PatternListener(redis_client, pattern, self._ingest, name=f"snapshot-{pattern}")
+            for pattern in patterns
+        ]
 
     def get(self, tag_id: int) -> TagValue | None:
         """Último valor da tag, ou `None` se ela nunca publicou.
@@ -55,16 +62,27 @@ class ValueSnapshot:
         return self._values.get(tag_id)
 
     async def start(self) -> None:
-        """Assina o padrão e sobe a task de leitura; retorna já. Idempotente.
+        """Assina os padrões e sobe as tasks de leitura; retorna já. Idempotente.
 
         O PSUBSCRIBE acontece aqui, e não dentro da task: quem chamou `start()` precisa poder
         publicar em seguida sem perder a mensagem.
         """
-        await self._listener.start()
+        iniciados: list[PatternListener] = []
+        try:
+            for listener in self._listeners:
+                await listener.start()
+                iniciados.append(listener)
+        except BaseException:
+            # Assinatura parcial vazaria inscrição no servidor Redis: desfaz o que subiu antes
+            # de propagar (mesma regra do `RecorderPipeline.start`).
+            for listener in iniciados:
+                await listener.stop()
+            raise
 
     async def stop(self) -> None:
-        """Cancela a task e encerra a inscrição. Idempotente e nunca levanta: é desmonte."""
-        await self._listener.stop()
+        """Cancela as tasks e encerra as inscrições. Idempotente e nunca levanta: é desmonte."""
+        for listener in self._listeners:
+            await listener.stop()
 
     async def _ingest(self, channel: str, raw: str) -> None:
         """Grava o último valor da tag; payload ruim é descartado e o laço segue."""

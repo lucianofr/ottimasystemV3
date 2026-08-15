@@ -12,15 +12,15 @@ teste — o objetivo aqui é o processo do worker em si, não o que o script do 
 import multiprocessing as mp
 import os
 
-from ottima_flow_runtime import script_pool
-from ottima_flow_runtime.script_pool import ScriptResult
+from ottima_core import script_pool
+from ottima_core.script_pool import ScriptResult
 
 
 def test_worker_limpa_o_ambiente_antes_do_primeiro_job(monkeypatch):
     monkeypatch.setenv("OTTIMA_DATABASE_URL", "postgresql://user:senha@host/banco")
 
     def _sonda_environ(
-        code: str, inputs: dict[str, float], state: object, n_outputs: int
+        code: str, inputs: dict[str, float], state: object, output_names: tuple[str, ...]
     ) -> ScriptResult:
         return ScriptResult("ok", {"OUT1": float(len(os.environ))}, None, None)
 
@@ -33,7 +33,7 @@ def test_worker_limpa_o_ambiente_antes_do_primeiro_job(monkeypatch):
     child_conn.close()
     try:
         assert parent_conn.recv() == script_pool._READY
-        parent_conn.send(("", {}, None, 1))
+        parent_conn.send(("", {}, None, ("OUT1",)))
         resultado = parent_conn.recv()
         # Zero: nem OTTIMA_DATABASE_URL, nem PATH/HOME/o-que-for — o worker não enxerga
         # nada do ambiente do pai depois do scrub.

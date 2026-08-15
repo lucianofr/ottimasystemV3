@@ -26,8 +26,8 @@ from ottima_core.bus import (
     KIND_SCRIPT_TIMEOUT,
     publish_event,
 )
+from ottima_core.script_pool import ScriptPool, ScriptResult
 
-from ..script_pool import ScriptPool, ScriptResult
 from .base import Block, PortSample, has_cold_input, null_outputs
 
 
