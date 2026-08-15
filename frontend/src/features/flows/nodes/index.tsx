@@ -12,6 +12,7 @@ import {
   type NoKalman,
   type NoLeitura,
   type NoMpc as NoMpcData,
+  type NoPid as NoPidData,
   type NoScript,
   type NoTfs,
   type VariavelCv,
@@ -282,6 +283,36 @@ export function NoFuzzy({ id, data, selected }: NodeProps<NoFuzzyData>) {
   );
 }
 
+/** PID (RF-551, ADR-031): portas fixas pv/sp/out, resumo mostra só os três ganhos ISA — os
+ *  outros sete campos (limites, modo, bumpless) ficam no modal, não afogam o card do canvas.
+ *  `ti_seconds`/`td_seconds` zerados desligam a ação correspondente (mesmo tratamento
+ *  legível de caso degenerado que `NoFiltroPrimeiraOrdem` dá a `tau === 0`). */
+export function NoPid({ id, data, selected }: NodeProps<NoPidData>) {
+  return (
+    <BlocoChapa
+      tipo="pid"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("pid", "input"))}
+      saidas={portas(portasFixas("pid", "output"))}
+      blockId={id}
+    >
+      <div className="space-y-0.5">
+        <LinhaResumo rotulo="Ganho Kc" valor={FORMATO_PARAM.format(data.kc)} />
+        <LinhaResumo
+          rotulo="Tempo integral Ti"
+          valor={data.ti_seconds === 0 ? "desligada" : `${FORMATO_PARAM.format(data.ti_seconds)} s`}
+        />
+        <LinhaResumo
+          rotulo="Tempo derivativo Td"
+          valor={data.td_seconds === 0 ? "desligada" : `${FORMATO_PARAM.format(data.td_seconds)} s`}
+        />
+      </div>
+    </BlocoChapa>
+  );
+}
+
 /** Referência estável: `nodeTypes` novo a cada render faz o React Flow remontar os nós. */
 export const TIPOS_DE_NO: NodeTypes = {
   opc_read: NoLeituraOpc,
@@ -292,4 +323,5 @@ export const TIPOS_DE_NO: NodeTypes = {
   tfs: NoTfsMatriz,
   mpc: NoMpc,
   fuzzy: NoFuzzy,
+  pid: NoPid,
 };

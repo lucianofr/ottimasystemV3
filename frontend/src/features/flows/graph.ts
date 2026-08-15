@@ -29,6 +29,7 @@ export const TIPOS_BLOCO = [
   "tfs",
   "mpc",
   "fuzzy",
+  "pid",
 ] as const;
 export type TipoBloco = (typeof TIPOS_BLOCO)[number];
 
@@ -73,6 +74,7 @@ export const ROTULO_BLOCO: Record<TipoBloco, string> = {
   tfs: "TFS",
   mpc: "MPC",
   fuzzy: "Fuzzy",
+  pid: "PID",
 };
 
 /** Defaults dos blocos de filtro (ADR-026), compartilhados por `criarBloco` e `lerNo`: o
@@ -80,6 +82,21 @@ export const ROTULO_BLOCO: Record<TipoBloco, string> = {
  *  e um `graph_json` com o campo corrompido cai no mesmo valor em vez de virar `NaN`. */
 const PADRAO_FIRST_ORDER = { tau: 5 } as const;
 const PADRAO_KALMAN = { measurement_noise: 1, process_noise: 0.1 } as const;
+
+/** Defaults do PID (ADR-031, RF-551): estrutura ISA, tempos em segundos, derivativa
+ *  desligada de fábrica (PI é o padrão industrial), faixa de saída 0..100 (MV em %). */
+const PADRAO_PID = {
+  kc: 1,
+  ti_seconds: 60,
+  td_seconds: 0,
+  setpoint: 0,
+  output_min: 0,
+  output_max: 100,
+  auto_mode: true,
+  proportional_on_measurement: false,
+  differential_on_measurement: true,
+  starting_output: 0,
+} as const;
 
 export type TipoDadoTag = "float" | "int" | "bool";
 
@@ -136,6 +153,27 @@ export function passagemDireta(tau: number, tsFlowSegundos: number): boolean {
 /** Os dois campos são **desvio padrão na EU do sinal** (RF-533), nunca variância: o bloco
  *  eleva ao quadrado no runtime. `process_noise` é por varredura, não por segundo. */
 export type DadosKalman = DadosBase & { measurement_noise: number; process_noise: number };
+
+/** ISA (Kc/Ti/Td), não paralelo (Kp/Ki/Kd) — `criarBloco`/runtime convertem uma vez na
+ *  construção (ADR-031, RF-551..554). `ti_seconds === 0` desliga a ação integral (evita
+ *  divisão por zero, permite controle P/PD); `td_seconds === 0` desliga a derivativa.
+ *  `output_min`/`output_max` nulos = sem limite; quando os dois existem, `output_min` deve
+ *  ser estritamente menor que `output_max` (limites iguais travam a saída, erro de config).
+ *  `sample_time`/`error_map`/`time_fn` do `simple-pid` ficam de fora por decisão do gate: o
+ *  laço de varredura é a única autoridade de tempo, e os outros dois são callables Python,
+ *  não serializáveis em JSON. */
+export type DadosPid = DadosBase & {
+  kc: number;
+  ti_seconds: number;
+  td_seconds: number;
+  setpoint: number;
+  output_min: number | null;
+  output_max: number | null;
+  auto_mode: boolean;
+  proportional_on_measurement: boolean;
+  differential_on_measurement: boolean;
+  starting_output: number;
+};
 
 export type LimitesMpc = { min: number; max: number };
 export type FaixaMpc = { low: number; high: number };
@@ -303,7 +341,8 @@ export type DadosBloco =
   | DadosMpc
   | DadosFirstOrder
   | DadosKalman
-  | DadosFuzzy;
+  | DadosFuzzy
+  | DadosPid;
 
 /** `type` é opcional em `Node`; aqui ele é o discriminante e nunca falta. */
 type Bloco<D extends Record<string, unknown>, T extends TipoBloco> = Node<D, T> & { type: T };
@@ -316,6 +355,7 @@ export type NoMpc = Bloco<DadosMpc, "mpc">;
 export type NoFirstOrder = Bloco<DadosFirstOrder, "first_order">;
 export type NoKalman = Bloco<DadosKalman, "kalman">;
 export type NoFuzzy = Bloco<DadosFuzzy, "fuzzy">;
+export type NoPid = Bloco<DadosPid, "pid">;
 
 export type BlocoNode =
   | NoLeitura
@@ -325,7 +365,8 @@ export type BlocoNode =
   | NoMpc
   | NoFirstOrder
   | NoKalman
-  | NoFuzzy;
+  | NoFuzzy
+  | NoPid;
 
 /** Toda aresta do editor nasce de um par de handles resolvidos; `null` nunca chega ao save. */
 export type BlocoEdge = Omit<Edge, "sourceHandle" | "targetHandle"> & {
@@ -394,6 +435,7 @@ export function tipoPorta(no: BlocoNode, tags: MapaTags): TipoPorta {
   if (no.type === "mpc") return "num";
   if (no.type === "first_order" || no.type === "kalman") return "num";
   if (no.type === "fuzzy") return "num";
+  if (no.type === "pid") return "num";
   if (no.data.tag_id === null) return "desconhecido";
   const dado = tags.get(no.data.tag_id);
   if (dado === undefined) return "desconhecido";
@@ -531,6 +573,8 @@ export function comDados(no: BlocoNode, mudanca: Partial<DadosBase>): BlocoNode 
     case "kalman":
       return { ...no, data: { ...no.data, ...mudanca } };
     case "fuzzy":
+      return { ...no, data: { ...no.data, ...mudanca } };
+    case "pid":
       return { ...no, data: { ...no.data, ...mudanca } };
   }
 }
@@ -745,6 +789,8 @@ export function criarBloco(
           output_eu: {},
         },
       };
+    case "pid":
+      return { id, type: "pid", position, data: { exec_order, label: "", ...PADRAO_PID } };
   }
 }
 
@@ -946,6 +992,32 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           n_outputs: inteiro(dados.n_outputs, 0, 0, MAX_PORTAS_FUZZY),
           fll: texto(dados.fll, contratoFuzzy.default_fll),
           output_eu: lerOutputEu(dados.output_eu),
+        },
+      };
+    case "pid":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          kc: numero(dados.kc, PADRAO_PID.kc),
+          ti_seconds: numero(dados.ti_seconds, PADRAO_PID.ti_seconds),
+          td_seconds: numero(dados.td_seconds, PADRAO_PID.td_seconds),
+          setpoint: numero(dados.setpoint, PADRAO_PID.setpoint),
+          output_min: dados.output_min === null ? null : numero(dados.output_min, PADRAO_PID.output_min),
+          output_max: dados.output_max === null ? null : numero(dados.output_max, PADRAO_PID.output_max),
+          auto_mode: typeof dados.auto_mode === "boolean" ? dados.auto_mode : PADRAO_PID.auto_mode,
+          proportional_on_measurement:
+            typeof dados.proportional_on_measurement === "boolean"
+              ? dados.proportional_on_measurement
+              : PADRAO_PID.proportional_on_measurement,
+          differential_on_measurement:
+            typeof dados.differential_on_measurement === "boolean"
+              ? dados.differential_on_measurement
+              : PADRAO_PID.differential_on_measurement,
+          starting_output: numero(dados.starting_output, PADRAO_PID.starting_output),
         },
       };
   }

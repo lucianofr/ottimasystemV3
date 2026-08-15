@@ -20,6 +20,10 @@ dependencies = [
   # Já vinha transitivo pelo ottima-core (validação FLL no save) — dependência usada de
   # propósito é dependência declarada (ADR-029).
   "pyfuzzylite>=8.0,<9",
+  # Núcleo do bloco PID (RF-551): PidBlock chama simple_pid.PID em runtime. MIT, sem
+  # dependências de runtime próprias; a validação da config é Pydantic pura, então o
+  # ottima-core NÃO precisa da lib (ao contrário da pyfuzzylite, ADR-031).
+  "simple-pid>=2.0,<3",
 ]
 
 [tool.uv.sources]

@@ -224,9 +224,9 @@ def test_parse_rejeita_id_de_aresta_duplicado():
 
 def test_parse_rejeita_tipo_desconhecido():
     graph = base_graph()
-    node_of(graph, "r1")["type"] = "pid"
+    node_of(graph, "r1")["type"] = "bloco_inexistente"
     errors = parse_errors(graph)
-    assert has(errors, "r1", "pid")
+    assert has(errors, "r1", "bloco_inexistente")
 
 
 def test_parse_aceita_bloco_mpc_desde_a_f4():
@@ -392,11 +392,11 @@ def test_parse_rejeita_ganho_nao_finito():
 
 def test_parse_acumula_todos_os_problemas_estruturais():
     graph = base_graph()
-    node_of(graph, "r1")["type"] = "pid"
+    node_of(graph, "r1")["type"] = "bloco_inexistente"
     del node_of(graph, "s1")["data"]["exec_order"]
     errors = parse_errors(graph)
 
-    assert has(errors, "r1", "pid")
+    assert has(errors, "r1", "bloco_inexistente")
     assert has(errors, "s1", "exec_order")
 
 

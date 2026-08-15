@@ -12,7 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 NodeType = Literal[
-    "opc_read", "opc_write", "script", "fuzzy", "tfs", "mpc", "first_order", "kalman"
+    "opc_read", "opc_write", "script", "fuzzy", "tfs", "mpc", "first_order", "kalman", "pid"
 ]
 NODE_TYPES: tuple[str, ...] = (
     "opc_read",
@@ -23,6 +23,7 @@ NODE_TYPES: tuple[str, ...] = (
     "mpc",
     "first_order",
     "kalman",
+    "pid",
 )
 
 MAX_SCRIPT_PORTS = 8  # spec §3.3
@@ -41,6 +42,18 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
     "mpc": ("name", "multiplier", "variables", "models", "economics"),
     "first_order": ("tau",),
     "kalman": ("measurement_noise", "process_noise"),
+    "pid": (
+        "kc",
+        "ti_seconds",
+        "td_seconds",
+        "setpoint",
+        "output_min",
+        "output_max",
+        "auto_mode",
+        "proportional_on_measurement",
+        "differential_on_measurement",
+        "starting_output",
+    ),
 }
 # Blocos de filtro (ADR-026): config é só um punhado de escalares, e o valor do dicionário
 # diz se o campo exige positivo estrito (divisor) ou apenas não-negativo.
@@ -193,6 +206,30 @@ class KalmanConfig(BaseModel):
     process_noise: float = Field(ge=0)
 
 
+class PidConfig(BaseModel):
+    """Bloco PID (RF-551, ADR-031): controlador ISA, motor `simple-pid` por baixo.
+
+    A config é forma ISA — `out = Kc * [e + (1/Ti)*integral(e dt) + Td*de/dt]` — convertida
+    uma única vez para os ganhos paralelos que o `simple-pid` espera (`Kp=kc`,
+    `Ki=kc/ti_seconds`, `Kd=kc*td_seconds`) na construção do bloco em tempo de execução.
+    `ti_seconds = 0` desliga a ação integral (Ki=0, convenção documentada — evita divisão
+    por zero e permite controle P/PD); `td_seconds = 0` desliga a ação derivativa.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kc: float
+    ti_seconds: float = Field(ge=0)
+    td_seconds: float = Field(ge=0)
+    setpoint: float
+    output_min: float | None = None
+    output_max: float | None = None
+    auto_mode: bool = True
+    proportional_on_measurement: bool = False
+    differential_on_measurement: bool = True
+    starting_output: float
+
+
 class MpcRawConfig(BaseModel):
     """Payload bruto do bloco `mpc` (spec §2.1).
 
@@ -216,6 +253,7 @@ NodeConfig = (
     | MpcRawConfig
     | FirstOrderConfig
     | KalmanConfig
+    | PidConfig
 )
 
 
@@ -397,6 +435,8 @@ def _parse_config(where: str, node_type: str, data: dict, errors: list[str]) -> 
         return _parse_fuzzy_config(where, data, errors)
     if node_type == "mpc":
         return _parse_mpc_config(data)
+    if node_type == "pid":
+        return _parse_pid_config(where, data, errors)
     if node_type in _FILTER_KEYS:
         return _parse_filter_config(where, node_type, data, errors)
     return _parse_tfs_config(where, data, errors)
@@ -426,6 +466,105 @@ def _parse_filter_config(
     if len(values) != len(expected):
         return None
     return FirstOrderConfig(**values) if node_type == "first_order" else KalmanConfig(**values)
+
+
+def _parse_pid_config(where: str, data: dict, errors: list[str]) -> PidConfig | None:
+    """Config do bloco PID (RF-551, ADR-031): forma ISA, um erro por campo, nunca
+    curto-circuita — mesmo padrão de `_parse_filter_config`/`_parse_fuzzy_config`.
+
+    `kc`, `setpoint` e `starting_output` são obrigatórios e aceitam qualquer sinal;
+    `ti_seconds`/`td_seconds` são obrigatórios e não-negativos (zero desliga a ação
+    correspondente); `output_min`/`output_max`/`auto_mode`/`proportional_on_measurement`/
+    `differential_on_measurement` são opcionais — ausentes usam o default do `PidConfig`.
+    """
+    ok = True
+    values: dict[str, object] = {}
+
+    for key in ("kc", "setpoint", "starting_output"):
+        value = data.get(key)
+        if not _is_number(value) or not math.isfinite(value):
+            errors.append(f"{where}: '{key}' é obrigatório e deve ser um número finito")
+            ok = False
+        else:
+            values[key] = float(value)
+
+    for key in ("ti_seconds", "td_seconds"):
+        value = data.get(key)
+        if not _is_number(value) or not math.isfinite(value):
+            errors.append(f"{where}: '{key}' é obrigatório e deve ser um número finito")
+            ok = False
+        elif value < 0:
+            errors.append(f"{where}: '{key}' não pode ser negativo")
+            ok = False
+        else:
+            values[key] = float(value)
+
+    for key in ("output_min", "output_max"):
+        raw = data.get(key)
+        if raw is None:
+            values[key] = None
+        elif not _is_number(raw) or not math.isfinite(raw):
+            errors.append(f"{where}: '{key}' deve ser None ou um número finito")
+            ok = False
+        else:
+            values[key] = float(raw)
+
+    for key, default in (
+        ("auto_mode", True),
+        ("proportional_on_measurement", False),
+        ("differential_on_measurement", True),
+    ):
+        if key not in data:
+            values[key] = default
+        elif not isinstance(data[key], bool):
+            errors.append(f"{where}: '{key}' deve ser um booleano")
+            ok = False
+        else:
+            values[key] = data[key]
+
+    output_min, output_max = values.get("output_min"), values.get("output_max")
+    if isinstance(output_min, float) and isinstance(output_max, float) and output_min >= output_max:
+        errors.append(f"{where}: 'output_min' deve ser menor que 'output_max'")
+        ok = False
+
+    starting_output = values.get("starting_output")
+    if (
+        isinstance(output_min, float)
+        and isinstance(output_max, float)
+        and isinstance(starting_output, float)
+        and not output_min <= starting_output <= output_max
+    ):
+        errors.append(f"{where}: 'starting_output' deve estar entre 'output_min' e 'output_max'")
+        ok = False
+
+    # Ganhos DERIVADOS da conversão ISA -> paralela (ADR-031): cada campo é finito
+    # isoladamente, mas `kc/ti_seconds` e `kc*td_seconds` ainda podem estourar para `inf`
+    # por overflow IEEE-754 (ex.: ti_seconds = 1e-320). O bloco jamais deixaria esse valor
+    # chegar ao PLC — o guard de finitude do `step()` o barra —, mas o `_integral` do
+    # simple-pid ficaria envenenado com `inf`/`nan` para sempre (o `_clamp` da lib não
+    # resgata `nan`: comparação com `nan` é sempre falsa), e a malha ficaria presa em
+    # `ok=False` até um reset, com UM único `write_suppressed` no histórico e silêncio
+    # depois. Falhar aqui, no save, é 422 em vez de perda silenciosa de controle.
+    kc = values.get("kc")
+    ti_seconds, td_seconds = values.get("ti_seconds"), values.get("td_seconds")
+    if isinstance(kc, float) and isinstance(ti_seconds, float) and isinstance(td_seconds, float):
+        ki = kc / ti_seconds if ti_seconds > 0 else 0.0
+        if not math.isfinite(ki):
+            errors.append(
+                f"{where}: 'kc' e 'ti_seconds' produzem um ganho integral não finito "
+                f"(Ki = kc/ti_seconds); aumente 'ti_seconds' ou reduza 'kc'"
+            )
+            ok = False
+        if not math.isfinite(kc * td_seconds):
+            errors.append(
+                f"{where}: 'kc' e 'td_seconds' produzem um ganho derivativo não finito "
+                f"(Kd = kc*td_seconds); reduza 'td_seconds' ou 'kc'"
+            )
+            ok = False
+
+    if not ok:
+        return None
+    return PidConfig(**values)
 
 
 def _parse_mpc_config(data: dict) -> MpcRawConfig:

@@ -171,6 +171,16 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
             {"name": "out", "direction": "output", "type": "num"},
         ],
     },
+    # Bloco PID (RF-551, ADR-031): portas fixas — `pv` e `sp` de entrada (`sp` é opcional;
+    # ausente, `config.setpoint` supre, RF-552), `out` de saída, todas numéricas.
+    "pid": {
+        "dynamic": False,
+        "ports": [
+            {"name": "pv", "direction": "input", "type": "num"},
+            {"name": "sp", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+        ],
+    },
     "tfs": {
         "dynamic": False,
         "ports": [

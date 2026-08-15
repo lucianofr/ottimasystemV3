@@ -14,6 +14,7 @@ const DESCRICAO: Record<TipoBloco, string> = {
   tfs: "Matriz 2x2 de funções de transferência (SOPDT/IOPDT)",
   mpc: "Controle preditivo multivariável — portas dinâmicas conforme o config",
   fuzzy: "Controlador fuzzy (FLL)",
+  pid: "Controlador PID (ISA) — PV, SP e saída",
 };
 
 interface Props {
@@ -47,7 +48,7 @@ function ItemPaleta({ tipo, onAdicionar }: { tipo: TipoBloco; onAdicionar: Props
   );
 }
 
-/** Paleta de 8 blocos (RF-301): o MPC entra em operação na F4 (decisão A-1) igual aos
+/** Paleta de 9 blocos (RF-301, RF-551): o MPC entra em operação na F4 (decisão A-1) igual aos
  *  demais — arrastável, sem badge de fase pendente (spec F4 §7.1). */
 export function FlowPalette({ onAdicionar }: Props) {
   return (

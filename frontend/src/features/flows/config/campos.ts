@@ -15,6 +15,22 @@ export function numeroDoCampo(bruto: FormDataEntryValue | null, padrao: number):
   return Number.isFinite(valor) ? valor : padrao;
 }
 
+/** Limite de saída do PID (RF-551, ADR-031): campo em branco vira `null` — sem limite, e o
+ *  servidor aceita `null` em `output_min`/`output_max`. Em branco é escolha explícita do
+ *  engenheiro; texto ilegível ("8O" em vez de "80") NÃO é, e cai no valor anterior como em
+ *  `numeroDoCampo`. Tratar os dois como `null` apagaria em silêncio o teto da MV — que é
+ *  também o limite anti-windup da integral — sem erro nenhum na tela. */
+export function numeroOuNuloDoCampo(
+  bruto: FormDataEntryValue | null,
+  padrao: number | null,
+): number | null {
+  if (typeof bruto !== "string") return padrao;
+  const texto = bruto.trim().replace(",", ".");
+  if (texto === "") return null;
+  const valor = Number(texto);
+  return Number.isFinite(valor) ? valor : padrao;
+}
+
 export function inteiroDoCampo(
   bruto: FormDataEntryValue | null,
   padrao: number,

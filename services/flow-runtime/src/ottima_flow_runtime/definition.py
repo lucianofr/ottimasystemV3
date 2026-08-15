@@ -45,6 +45,7 @@ from .blocks.kalman import KalmanBlock
 from .blocks.mpc import MpcBlock
 from .blocks.opc_read import OpcReadBlock
 from .blocks.opc_write import OpcWriteBlock
+from .blocks.pid import PidBlock
 from .blocks.script import ScriptBlock
 from .blocks.tfs import TfsBlock
 from .mpc.host import MpcHost
@@ -243,6 +244,21 @@ def _instantiate(
         )
     if node.type == "fuzzy":
         return _instantiate_fuzzy(node, flow_id=flow_id, redis_client=redis_client)
+    if node.type == "pid":
+        return PidBlock(
+            node.id,
+            kc=config.kc,
+            ti_seconds=config.ti_seconds,
+            td_seconds=config.td_seconds,
+            setpoint=config.setpoint,
+            output_min=config.output_min,
+            output_max=config.output_max,
+            auto_mode=config.auto_mode,
+            proportional_on_measurement=config.proportional_on_measurement,
+            differential_on_measurement=config.differential_on_measurement,
+            starting_output=config.starting_output,
+            ts_seconds=ts_seconds,
+        )
     return TfsBlock(node.id, matrix=config.matrix, ts_seconds=ts_seconds)
 
 

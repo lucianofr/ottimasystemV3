@@ -115,6 +115,8 @@ def _output_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[
         # desconectadas (a malha real usa as tags do `pid`).
         config = mpc_configs.get(node.id)
         return tuple(mv.id for mv in config.variables.mvs) if config else ()
+    if node.type == "pid":
+        return ("out",)
     if node.type in _FILTER_TYPES:
         return ("out",)
     return ()
@@ -142,6 +144,8 @@ def _input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[s
                 *config.variables.dvs,
             )
         )
+    if node.type == "pid":
+        return ("pv", "sp")
     if node.type in _FILTER_TYPES:
         return ("in",)
     return ()
@@ -393,8 +397,8 @@ def _port_kind(node: FlowNode, tags: Mapping[int, TagRef]) -> PortKind | None:
         if tag is None:
             return None
         return "bool" if tag.data_type == "bool" else "num"
-    # Portas do TFS, do MPC (spec §2.1-5), do Fuzzy (RF-541) e dos blocos de filtro
-    # (ADR-026): todas numéricas.
+    # Portas do TFS, do MPC (spec §2.1-5), do Fuzzy (RF-541), dos blocos de filtro (ADR-026)
+    # e do PID (RF-551, ADR-031): todas numéricas.
     return "num"
 
 
@@ -427,6 +431,9 @@ def _required_input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -
         return tuple(
             f"u{k + 1}" for k in range(2) if any(row[k].enabled for row in node.config.matrix)
         )
+    if node.type == "pid":
+        # RF-552: só `pv` é obrigatória — `sp` é opcional (ausente, `config.setpoint` supre).
+        return ("pv",)
     # 'in' do Write, IN1..INn do Script e uma por CV/Restrição/DV do MPC (decisão A-10) são
     # sempre obrigatórias (RF-302).
     return _input_handles(node, mpc_configs)

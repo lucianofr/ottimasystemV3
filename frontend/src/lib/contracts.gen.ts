@@ -40,7 +40,7 @@ export interface ContratoPortaDinamicaComDefault extends ContratoPortaDinamica {
 
 export type ContratoPorta = ContratoPortaFixa | ContratoPortaDinamica | ContratoPortaDinamicaComDefault;
 
-export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy" | "first_order" | "kalman" | "tfs" | "mpc", ContratoPorta> = {
+export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy" | "first_order" | "kalman" | "pid" | "tfs" | "mpc", ContratoPorta> = {
   "opc_read": {
     "dynamic": false,
     "ports": [
@@ -127,6 +127,26 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy
     "ports": [
       {
         "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
+  },
+  "pid": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "pv",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "sp",
         "direction": "input",
         "type": "num"
       },

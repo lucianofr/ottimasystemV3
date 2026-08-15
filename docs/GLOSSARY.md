@@ -11,7 +11,7 @@
 | **Scan cycle** | Semântica de execução: a cada Ts, todos os blocos do flow são avaliados **em ordem crescente de `exec_order`** com os últimos valores conhecidos. |
 | **exec_order** | Parâmetro de todo bloco: inteiro único de 1 a N que define a ordem de execução na varredura (leituras < Script/MPC < escritas). Auto-numerado na inserção, editável, com badge no nó. Ordem invertida em relação a uma aresta ⇒ consumo do valor da varredura anterior (1 scan de atraso). |
 | **Ts (tempo de amostragem)** | Período do scan de um flow. Valores permitidos: 0.5, 1, 2, 5, 10, 30, 60 s. Definido individualmente por flow. |
-| **Bloco** | Nó do flow com entradas/saídas tipadas. Tipos da v1: OPC-Read, OPC-Write, MPC, Python-Script, TFS, Filtro 1ª ordem, Filtro Kalman. |
+| **Bloco** | Nó do flow com entradas/saídas tipadas. Tipos da v1: OPC-Read, OPC-Write, MPC, Python-Script, TFS, Filtro 1ª ordem, Filtro Kalman, Fuzzy, PID. |
 | **opc-worker** | Processo asyncio que mantém as sessões OPC-UA (asyncua), publica leituras no barramento, executa escritas e opera o watchdog. Único processo que fala com PLC/DCS. |
 | **flow-runtime** | Processo asyncio que interpreta e executa os flows (MPC, scripts) como loops vivos. |
 | **recorder** | Consumidor do barramento que grava amostras na hypertable do TimescaleDB. |
@@ -19,6 +19,10 @@
 | **Loop vivo** | Processo contínuo que mantém estado e cicla indefinidamente (MPC, sessão OPC); task asyncio, nunca job de fila. |
 | **Watchdog** | Bit alternante com NOT cruzado entre sistema e PLC, configurado **por flow** (não por conexão): um flow escolhe a conexão OPC-UA e o par de nós (1 leitura + 1 escrita, distintos) por onde o handshake passa. O sistema copia o bit lido para a escrita sem inverter; o PLC aplica o NOT do lado dele. Bit parado por >10 s ⇒ falha de comunicação daquele flow ⇒ para as escritas e para o flow; flows-irmãos na mesma conexão não são afetados; PLC retoma controle convencional. |
 | **LOCAL / REMOTO** | Eixo de modo do MPC. LOCAL: PID do PLC controla. REMOTO: MPC assume. Transições bumpless nos dois sentidos, comandadas escrevendo o modo do PID no PLC (AUTO ↔ RCAS/CAS/ROUT). |
+| **PID** | Bloco do canvas (não o PID de campo do PLC — ver **LOCAL/REMOTO**) com uma entrada **`pv`** (obrigatória), uma entrada **`sp`** opcional (sobrepõe o `setpoint` da config quando conectada) e uma saída **`out`**. Estrutura **ISA**, configurado por **`kc`** (ganho), **`ti_seconds`** (tempo integral), **`td_seconds`** (tempo derivativo) e limites de saída (`output_min`/`output_max`). Cobre malhas sem PID de campo ou malhas auxiliares/computadas dentro do canvas — não substitui nem interage com os eixos de modo do MPC. |
+| **Tempo integral (Ti)** | Parâmetro do bloco PID, em **segundos por repetição**. Reset em repetições por segundo é `1/Ti`. **`Ti = 0` desliga a ação integral** (convenção documentada, permite P ou PD puro). |
+| **Tempo derivativo (Td)** | Parâmetro do bloco PID, em **segundos**. **`Td = 0` desliga a ação derivativa**. |
+| **Ganho (Kc)** | Ganho da forma ISA do bloco PID. Qualquer sinal — **negativo é ação reversa**. |
 | **MAN / AUTO** | Sub-modo de REMOTO. MAN: operador escreve as MVs pela UI. AUTO: MPC calcula. Em LOCAL o sistema não escreve MV. |
 | **RCAS / CAS / ROUT** | Modos do PID no PLC usados pelo APC: SP remoto em cascata (RCAS/CAS) ou saída remota direta (ROUT). Determina o que o MPC escreve por MV. |
 | **Bumpless** | Transferência de controle sem salto na MV: MPC inicializa nas MVs atuais ao assumir; PID faz SP/OUT-tracking ao retomar. |

@@ -1,7 +1,13 @@
 import { expect, test } from "@playwright/test";
 
 import { matrizPadrao, type MatrizTfs } from "../graph";
-import { inteiroDoCampo, matrizDoFormulario, nomeParam, numeroDoCampo } from "./campos";
+import {
+  inteiroDoCampo,
+  matrizDoFormulario,
+  nomeParam,
+  numeroDoCampo,
+  numeroOuNuloDoCampo,
+} from "./campos";
 
 test("campo numérico aceita vírgula decimal e cai no padrão quando vazio ou inválido", () => {
   expect(numeroDoCampo("1,5", 0)).toBe(1.5);
@@ -75,4 +81,22 @@ test("a matriz remontada continua 2x2", () => {
   expect(nova).toHaveLength(2);
   expect(nova[0]).toHaveLength(2);
   expect(nova[1]).toHaveLength(2);
+});
+
+test("limite do PID: em branco é escolha explícita e vira null (sem limite)", () => {
+  expect(numeroOuNuloDoCampo("", 100)).toBe(null);
+  expect(numeroOuNuloDoCampo("   ", 100)).toBe(null);
+  expect(numeroOuNuloDoCampo(null, 100)).toBe(100);
+});
+
+test("limite do PID: texto ilegível NÃO apaga o limite, cai no valor anterior", () => {
+  // "8O" (letra O) é erro de digitação plausível num campo de texto decimal. Virar null
+  // removeria em silêncio o teto da MV e o limite anti-windup da integral.
+  expect(numeroOuNuloDoCampo("8O", 80)).toBe(80);
+  expect(numeroOuNuloDoCampo("abc", null)).toBe(null);
+});
+
+test("limite do PID: aceita vírgula decimal e sinal negativo", () => {
+  expect(numeroOuNuloDoCampo("12,5", 0)).toBe(12.5);
+  expect(numeroOuNuloDoCampo("-40", 0)).toBe(-40);
 });

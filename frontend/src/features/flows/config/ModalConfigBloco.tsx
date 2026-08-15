@@ -21,7 +21,8 @@ import {
   type NoMpc,
   type NoScript,
 } from "../graph";
-import { inteiroDoCampo, matrizDoFormulario, numeroDoCampo } from "./campos";
+import { inteiroDoCampo, matrizDoFormulario, numeroDoCampo, numeroOuNuloDoCampo } from "./campos";
+import { CamposBlocoPid } from "./CamposBlocoPid";
 import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
 import { CamposTfs } from "./CamposTfs";
 
@@ -383,6 +384,28 @@ export function ModalConfigBloco({
           execOrder,
         );
         break;
+      case "pid":
+        onAplicar(
+          {
+            ...no,
+            data: {
+              ...no.data,
+              label,
+              kc: numeroDoCampo(campos.get("kc"), no.data.kc),
+              ti_seconds: numeroDoCampo(campos.get("ti_seconds"), no.data.ti_seconds),
+              td_seconds: numeroDoCampo(campos.get("td_seconds"), no.data.td_seconds),
+              setpoint: numeroDoCampo(campos.get("setpoint"), no.data.setpoint),
+              output_min: numeroOuNuloDoCampo(campos.get("output_min"), no.data.output_min),
+              output_max: numeroOuNuloDoCampo(campos.get("output_max"), no.data.output_max),
+              auto_mode: campos.get("auto_mode") === "on",
+              proportional_on_measurement: campos.get("proportional_on_measurement") === "on",
+              differential_on_measurement: campos.get("differential_on_measurement") === "on",
+              starting_output: numeroDoCampo(campos.get("starting_output"), no.data.starting_output),
+            },
+          },
+          execOrder,
+        );
+        break;
     }
     // `onClose` (linha do <dialog>) chama `onFechar`; fechar via `close()` explícito em vez
     // de chamar `onFechar()` direto evita que o desmonte (estado -> null) derrube o <dialog>
@@ -453,6 +476,7 @@ export function ModalConfigBloco({
           {no.type === "fuzzy" && (
             <CamposFuzzy dados={no.data} nOutputs={nOutputsFuzzy} aoMudarNOutputs={setNOutputsFuzzy} />
           )}
+          {no.type === "pid" && <CamposBlocoPid dados={no.data} />}
         </fieldset>
 
         <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">
