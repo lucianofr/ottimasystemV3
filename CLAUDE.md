@@ -16,9 +16,10 @@ Plataforma on-premise de APC industrial: estratégias de controle montadas em ca
 frontend (React+Vite) ⇄ api (FastAPI: REST + WS)
                               │
                         Redis pub/sub (barramento)
-                        ↑      ↑      ↕
-                 opc-worker  recorder  flow-runtime (do-mpc, scripts, TFS)
-                        │                    │
+                        ↑      ↑      ↕            ↕
+                 opc-worker  recorder  flow-runtime  calc-worker
+                        │              (do-mpc,      (tags calculadas)
+                        │               scripts, TFS)      │
                  Servidores OPC-UA     Postgres + TimescaleDB
 ```
 
@@ -38,6 +39,7 @@ services/
                       #   mpc/                 -> controle DINÂMICO (do-mpc, move plan)
                       #   target_calculation/  -> SSTO: alvos de regime permanente por LP (ADR-027)
   recorder/           # barramento → hypertable
+  calc-worker/        # tags calculadas: uma task asyncio por tag + ScriptPool (ADR-033)
 deploy/               # docker-compose.yml, Dockerfiles, .env.example
 tests/                # integração cross-service (malha fechada MPC↔TFS — RNF-09)
 ```
@@ -52,7 +54,8 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 - **Barramento: apenas os canais do PRD §7.1.** Criar/alterar canal exige ADR. Pub/sub é fire-and-forget: comandos vão por `flow.commands` e a UI reflete **estado publicado**, nunca eco de comando. (ADR-002)
 - **Segurança de processo:** nenhuma escrita OPC sem flow em deploy + watchdog vivo + modo REMOTO; falha de comunicação ⇒ cessa escrita e para o flow; boot sobe tudo **parado**. Em LOCAL o sistema não escreve MV (a MV do MPC faz *tracking* do readback do PID). (ADR-009, 010, 017)
 - **Banco único** Postgres/TimescaleDB. Sem SQLite, sem segundo banco. Retenção (1 mês) e downsampling via policies/continuous aggregates do Timescale — **nunca** código manual de limpeza. (ADR-003)
-- **Script block:** escopo restrito a `math` + `numpy`; timeout ≈70% do Ts; `state` dict persistente. (ADR-018)
+- **Código Python do usuário** (bloco Script e tag calculada) roda SEMPRE via `ottima_core.script_pool`: escopo restrito a `math` + `numpy`, `state` dict persistente, timeout ≈70% da cadência (Ts do flow ou período da tag), processo morto e reposto no estouro. Cada serviço tem o SEU pool — tag calculada nunca disputa worker com varredura de flow. (ADR-018, ADR-033)
+- **Tag calculada é linha em `tags`** com `connection_id IS NULL` e `project_id` preenchido (`ck_tags_owner`): id compartilhado com as tags OPC é o que faz histórico, `/api/history` e `/ws` funcionarem sem alteração. Publica em `calc.values`; o `opc-worker` a ignora naturalmente porque carrega tags por `connection_id`. (ADR-033)
 - **Frontend nunca executa lógica de flow** — o canvas só edita o grafo; execução é 100% no flow-runtime. (ADR-005)
 - **Hot-swap:** troca de definição de flow é atômica entre varreduras, preservando estado dos blocos não alterados. (ADR-011)
 - **Ordem de execução:** blocos executam estritamente em ordem crescente de `exec_order` (1..N, único por flow) — nunca por ordenação topológica; aresta com ordem invertida ⇒ valor da varredura anterior. (ADR-024)
@@ -95,8 +98,8 @@ cd frontend && npm run generate:contracts           # só os contratos (portas p
 uv run pytest -m slow services/flow-runtime/tests   # carga do MPC (RNF-02); o run default exclui `slow` além de `e2e`
 
 # Stack. A F2 acrescentou o opcsim e as portas de host do gate: use SEMPRE os dois arquivos.
-cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 8 serviços
-# Sem o override e2e sobem 7 (sem opcsim) e o opcsim/redis não ficam acessíveis do host.
+cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 9 serviços
+# Sem o override e2e sobem 8 (sem opcsim) e o opcsim/redis não ficam acessíveis do host.
 # deploy/.env é obrigatório e gitignored. Se a 6379 já estiver ocupada por outro projeto da
 # máquina, defina OTTIMA_E2E_REDIS_PORT (ex.: 6399) — senão a L2 fala com o Redis do vizinho.
 # Rebuild de um serviço só: use --no-deps, senão `--build frontend` arrasta o `api` junto.
@@ -117,9 +120,12 @@ E2E_ADMIN_USERNAME=$(grep -m1 '^OTTIMA_ADMIN_USERNAME=' deploy/.env|cut -d= -f2-
 # materializa e audita — a API não emite evento (spec F4 §6.1).
 # F5: GET /api/history/mpc, GET /api/operate/mpcs, GET /api/health/workers (todas require_operator).
 # F6: GET /api/projects/{project_id}/export e POST /api/projects/import (ambas require_admin).
-# Envs novos: OTTIMA_HEALTH_URL_OPC_WORKER/_FLOW_RUNTIME/_RECORDER (defaults
-# http://opc-worker:8001/health, http://flow-runtime:8002/health, http://recorder:8003/health)
-# e OTTIMA_MPC_QUEUE_MAX (default 100000, teto do buffer de mpc_samples no recorder).
+# Envs novos: OTTIMA_HEALTH_URL_OPC_WORKER/_FLOW_RUNTIME/_RECORDER/_CALC_WORKER (defaults
+# http://opc-worker:8001/health, http://flow-runtime:8002/health, http://recorder:8003/health,
+# http://calc-worker:8004/health) e OTTIMA_MPC_QUEUE_MAX (default 100000, teto do buffer de
+# mpc_samples no recorder). calc-worker (porta 8004): 1 asyncio task por tag calculada, sandbox
+# de script via ScriptPool (OTTIMA_CALC_POOL_SIZE, default 4); mesmo padrão RNF-04/ADR-018 do
+# flow-runtime — não recebe o `.env` inteiro.
 # Telas da F5b (operador; admin herda): /operacao (seletor; 1 MPC redireciona direto),
 # /operacao/:flowId/:blockId (faceplate principal + faceplates de variável + trend com
 # predição) e /eventos. Nav do shell em dois grupos: Operação · Fuzzy · Eventos | engenharia.

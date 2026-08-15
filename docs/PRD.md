@@ -1,7 +1,7 @@
 # PRD — OttimaSystem (reescrita, v1)
 
 **Produto:** OttimaSystem — plataforma on-premise de Controle Avançado de Processos (APC) com MPC
-**Versão do documento:** 2.3 · 2026-08-14 · **Status:** aprovado para implementação (F1-F6 concluídas)
+**Versão do documento:** 2.5 · 2026-08-15 · **Status:** aprovado para implementação (F1-F6 concluídas)
 **Changelog 1.1:** adicionado o requisito de **ordem de execução explícita por bloco** (`exec_order`) — RF-307 e RF-401 revisados, ADR-024 criado (altera ADR-007). Sem impacto retroativo em F1/F2; efetivo a partir da F3.
 **Changelog 1.2:** payload do canal `flow.status.<flow_id>` estendido com `ports` (valores de porta por varredura, para o canvas ao vivo) — resolve a lacuna do RF-404, que exigia publicar valores de portas sem definir onde. Decisão aprovada no brainstorm da F3 (2026-08-04, `docs/specs/F3-motor-canvas.md` Anexo A-3).
 **Changelog 1.3:** payload do canal `mpc.state.<flow_id>.<block_id>` ganha `ts` e `prediction.ts`; consumidor `recorder` adicionado (§7.1); nova hypertable `MpcSample` (§4, retenção 1 mês, CAgg `mpc_samples_1m`); RF-703 passa a citar a fonte concreta (`mpc_samples`/`mpc_samples_1m`). PRD avança de 1.2 para v1.3 — decisão A-2 · F5R-01/11/26 (spec F5 §1.3-1, `docs/specs/F5-operacao.md`, 2026-08-06).
@@ -16,8 +16,9 @@
 **Changelog 2.2:** novo bloco **Fuzzy** (lógica difusa via FLL colado, `pyfuzzylite`) — RF-301 passa de 7 para **8 blocos**; nova **§5.12** com **RF-541..543**, logo após os blocos de filtro (§5.11), Tela de operação avança de §5.12 para **§5.13**, Histórico e eventos de §5.13 para **§5.14** e SSTO de §5.14 para **§5.15** (mesma reorganização cosmética do changelog 1.8, nenhum RF renumerado); §4 (`Block/Edge`) e §7.2 ganham o node `fuzzy`. ADR-029 criado. PRD avança de 2.1 para v2.2 — decisão do usuário no Gate (2026-08-14).
 **Changelog 2.3:** tela **FUZZY OPERATE** — novo **RF-544** (§5.12): página de operação do bloco `fuzzy` com funções de pertinência, normas, regras com grau de ativação e trend das portas, animada por execução do engine. Canal novo **`fuzzy.state.<flow_id>.<block_id>`** (§7.1, produtor flow-runtime, consumidores api(WS) e recorder, throttle de 0,25 s na origem), nova hypertable **`FuzzySample`** (§4, retenção 1 mês + CAgg `fuzzy_samples_1m`) e as rotas `/operate/fuzzy…` e `/history/fuzzy` mais a chave `fuzzy_state` no `/ws` (§7.3). Nenhum contrato existente alterado. ADR-030 criado. PRD avança de 2.2 para v2.3 (2026-08-14).
 **Changelog 2.4:** novo bloco **PID** (forma ISA sobre `simple-pid`, para malhas sem PID de campo ou auxiliares/computadas) — RF-301 passa de 8 para **9 blocos**; nova **§5.13** com **RF-551..554**, logo após o bloco Fuzzy (§5.12), Tela de operação avança de §5.13 para **§5.14**, Histórico e eventos de §5.14 para **§5.15** e SSTO de §5.15 para **§5.16** (mesma reorganização cosmética dos changelogs 1.8/2.2, nenhum RF renumerado); §1 revisado — a frase de visão sobre "controle regulatório nos PIDs do PLC" deixa de contradizer um PID interno ao canvas, mantendo a postura fail-safe. ADR-031 criado. PRD avança de 2.3 para v2.4 — decisão do usuário no Gate (2026-08-15).
+**Changelog 2.5:** tag calculada — tela Tags ganha CRUD de tags computadas por script Python (`IN1..INn` mapeadas por posição às tags de entrada selecionadas, saída em `OUT`, periodicidade fechada 1/2/5/10/30/60 s). Tag calculada é linha em `tags` com `connection_id IS NULL` e `project_id` como dono (`ck_tags_owner`, §3/§7.1); serviço novo **calc-worker** (porta 8004, um `asyncio.Task` + processo `ScriptPool` por tag) publica no canal novo **`calc.values`** (§7.1) e grava na hypertable `samples` existente pela via do recorder; novos **RF-208..RF-212** (§5.3). ADR-033 criado. PRD avança de 2.4 para v2.5 — decisão do usuário no Gate (2026-08-15).
 **Autor:** Luciano França Rocha (LFR Automação), consolidado em sessão de grilling
-**Documentos-irmãos (normativos):** `adr/ADR-001 … ADR-031` · `GLOSSARY.md`
+**Documentos-irmãos (normativos):** `adr/ADR-001 … ADR-033` · `GLOSSARY.md`
 
 > Convenção: itens `RF-xxx` são requisitos funcionais; `RNF-xxx`, não-funcionais. Referências `(ADR-nnn)` apontam a decisão de arquitetura que governa o requisito. Em conflito entre este PRD e um ADR, **o ADR prevalece** e o PRD deve ser corrigido.
 
@@ -66,6 +67,7 @@ frontend (React+Vite) ⇄ api (FastAPI: REST + WebSocket)
 | **flow-runtime** | Interpreta e executa flows (scan cycle); MPC (do-mpc), scripts, TFS; **SSTO** (alvos de regime permanente, no mesmo ciclo do MPC); publica estado/predições; recebe comandos | 004–007, 013, 014, 016, 018, 019, 022, 026, 027 |
 | **recorder** | Assina o barramento e grava amostras na hypertable | 003 |
 | **redis / db** | Barramento fire-and-forget / persistência única (cadastros + hypertables) | 002, 003 |
+| **calc-worker** | Executa tags calculadas (script Python do usuário sobre outras tags como entrada), uma task asyncio + processo `ScriptPool` por tag; publica em `calc.values` | 033 |
 
 Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via executor, nunca no event loop (ADR-004). Sem Celery.
 
@@ -106,6 +108,11 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 - **RF-205** opc-worker consome `opc.writes` e executa escritas; toda escrita gera evento de auditoria com origem (bloco/usuário). (ADR-020)
 - **RF-206** **Watchdog por flow**: um flow habilita o watchdog (`watchdog_enabled`) apontando uma conexão OPC-UA (`watchdog_connection_id`) e um par de nós distintos (leitura/escrita); o sistema copia o bit lido para a escrita (sem inverter) em ciclo fixo de 1–2 s; bit congelado por **> `watchdog_timeout_s`** (2–120 s, default 10, configurável por flow — e sempre ≥ 2× o período de toggle) ⇒ falha de comunicação daquele flow. (ADR-009)
 - **RF-207** Em falha de comunicação/OPC de um flow: **cessam imediatamente as escritas** daquele flow e **o flow para**; flows-irmãos que usam a mesma conexão, mas não o watchdog em falha, seguem rodando; evento de alarme é gerado. Retomada exige deploy manual. (ADR-009, 017)
+- **RF-208** Tela Tags permite criar/editar/remover **tag calculada**: nome, EU, descrição, periodicidade e script Python, mais a lista ordenada de tags de entrada selecionadas entre as tags já cadastradas do projeto ativo. (ADR-033)
+- **RF-209** As tags de entrada são mapeadas **posicionalmente** para as variáveis `IN1..INn` no script, na ordem em que foram selecionadas; o script atribui o resultado à variável **`OUT`**. (ADR-033)
+- **RF-210** A periodicidade da tag calculada é escolhida numa lista fechada: **1, 2, 5, 10, 30 ou 60 s**. (ADR-033)
+- **RF-211** O `calc-worker` mantém **um worker por tag calculada** (task asyncio + processo de sandbox), com falha isolada por tag: script travado ou com exceção mantém o **último valor bom** e gera **alarme** de timeout/erro; a volta a um cálculo bem-sucedido gera evento de recuperação. (ADR-033)
+- **RF-212** Cada cálculo bem-sucedido é publicado no canal `calc.values` (§7.1) e gravado na hypertable `samples` existente pela mesma via do recorder, sem hypertable nova. (ADR-033)
 
 ### 5.4 Editor de flows (canvas)
 - **RF-301** Canvas React Flow com paleta de **9 blocos**: OPC-Read, OPC-Write, MPC, Python-Script, TFS, Filtro 1ª ordem, Filtro Kalman, Fuzzy, PID; arrastar, conectar, configurar por duplo-clique. (ADR-005, 022, 026, 029, 031)
@@ -226,6 +233,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 | Canal | Produtor | Consumidores | Payload (JSON) |
 |---|---|---|---|
 | `opc.values.<conn_id>` | opc-worker | flow-runtime, recorder, api(WS, filtrado por assinatura de tag) | {tag_id, ts, value, quality} |
+| `calc.values` | calc-worker | api(WS), recorder | {tag_id, ts, value, quality} |
 | `opc.writes` | flow-runtime, api | opc-worker | {conn_id, tag_id, value, source, ts} |
 | `flow.status.<flow_id>` | flow-runtime | api(WS) | {state, scan_ms, overruns, ts, ports{block_id→{porta:{v, ok}}}} |
 | `flow.commands` | api | flow-runtime | {flow_id, cmd, args, user, ts} |
