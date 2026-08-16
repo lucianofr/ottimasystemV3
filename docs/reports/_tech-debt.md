@@ -48,12 +48,6 @@ _Debt that makes development harder but doesn't block._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
-- [ ] **TD-021**: Registro de tipo de Bloco espalhado por 6 arquivos do frontend, ~17 pontos de edição mecânica
-  - **Impact:** Medium - completude é conferida à mão; entrada faltando aparece em runtime/E2E, não no build
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-18
-  - **Effort:** 2 dias (`REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco>`)
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-15
 - [ ] **TD-025**: Subagente com caminho relativo escreve no checkout `main` em vez da worktree ativa
   - **Impact:** Medium - **já causou dano duas vezes**: `stash@{2}` ("resquícios pré-merge F4: spill de `graph.ts`/`test_scheduler.py` de agentes com caminho relativo") e de novo em 2026-08-16, quando 6 arquivos de 5 agentes diferentes apareceram modificados em `main` durante um lote paralelo. A sessão do subagente resolve path relativo contra a raiz do repositório principal, mesmo tendo lido o arquivo pelo path absoluto da worktree; o agente escreve de um lado, verifica do outro, e conclui "minha edição foi revertida" — um deles queimou ~20 min perseguindo um `git reset` que nunca houve. Também suja a árvore de trabalho do usuário sem ele pedir nada
   - **Source:** incidente do lote paralelo de 2026-08-16 (7 subagentes na worktree `fix-arch-review`)
@@ -191,6 +185,14 @@ _Completed tech debt items. Keep for 90 days then archive._
   - **Prova:** os dois vermelhos que motivaram o débito são barrados por passos nomeados do workflow (`ruff format --check` e `npm run typecheck`). YAML validado por `yaml.safe_load` (1 job, 11 passos). O único passo que ainda não existia como gate foi executado localmente na branch antes de entrar: `npm run generate:contracts && git diff --exit-code -- src/lib/contracts.gen.ts` → sem diff. Os demais passos são os mesmos comandos já rodados verdes nesta branch (607 unit, typecheck limpo, build verde, ruff limpo em 305 arquivos). `playwright.unit.config.ts` não declara projeto de navegador, então o `test:unit` não exige `npx playwright install` no runner — verificado lendo o config, não suposto.
   - **Limite honesto:** o workflow **nunca rodou no GitHub** ainda — não houve push. A primeira execução real é a prova que falta, e ela só acontece quando esta branch subir. Regressão de backend Python e de integração continua invisível ao CI por decisão da ADR-035, não por esquecimento.
 
+- [x] **TD-021**: Registro de tipo de Bloco espalhado por 6 arquivos do frontend, ~17 pontos de edição mecânica
+  - **Resolved:** 2026-08-16
+  - **Resolution:** `frontend/src/features/flows/registro.ts` novo, com `REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco>` (`rotulo`, `descricao`, `defaults`, `Node`). `graph.ts` (`ROTULO_BLOCO`, `criarBloco`), `nodes/index.tsx` (`TIPOS_DE_NO`) e `FlowPalette.tsx` (descrição da paleta) passaram a DERIVAR do registro em vez de manter listas paralelas. `comDados` (o `atualizarNo` do achado) deixou de ser switch — nenhum `case` fazia trabalho por tipo, era boilerplate de narrowing.
+  - **O que continuou switch, e por quê:** `lerNo` (`graph.ts`) e o `aplicar()`/dispatch de render de `ModalConfigBloco.tsx`. Cada `case` ali faz trabalho genuinamente diferente — helpers de coerção distintos por tipo, regra de "null explícito vs fallback" em `output_min`/`output_max`, `CamposTag` com prop extra `direcao`, `CamposScript`/`CamposFuzzy`/`CamposTfs` dependendo de estado local do componente pai. Convertê-los trocaria switch por `Record<TipoBloco, closure>` com o mesmo corpo: muda a forma, não concentra nada.
+  - **Prova (deletion test executado, não afirmado):** removida a entrada `pid` de `REGISTRO_BLOCO`, `npm run typecheck` falhou com `TS2741: Property 'pid' is missing ... but required in type 'Record<TipoBloco, DefinicaoBloco>'`; entrada restaurada, gates de volta ao verde. Reproduzido de forma independente pelo agente principal. Isso é exatamente o ganho que faltava: `TIPOS_DE_NO` era tipado `NodeTypes` — index signature solta —, então **faltar uma chave NÃO quebrava o build** e só aparecia em runtime/E2E. `registro.check.ts` novo é table-driven (`for (const tipo of TIPOS_BLOCO)`) e cobre completude dos 9 tipos numa suíte só, mais a garantia de que `defaults()` nunca compartilha objeto mutável entre dois blocos.
+  - **Contagem real, corrigindo o levantamento:** a auditoria estimou "~17 pontos em 6 arquivos"; a contagem no código dá **16 antes → 12 depois**. A diferença para 17 é `tipoPorta()`, um if-chain por tipo em `graph.ts` que o relatório cita de passagem mas nunca lista como alvo, e que ficou fora deste corte. O número bruto (25% a menos) subestima o ganho: **4 dos 5 pontos eliminados colapsam numa única entrada do registro**, e essa entrada passou de "conferida à mão" para "conferida pelo compilador".
+  - **Verificação:** `npm run test:unit` 607 → 627 (20 testes novos), `npm run typecheck` limpo, `npm run build` verde, `npm run generate:contracts` sem diff, e **regressão Playwright completa: 63 cenários, 0 falhas** contra o vite da worktree, com o flow 987 da planta parado pela fixture e redeployado de volta a `Rodando`. Os 132 `data-testid` referenciados em `frontend/e2e/` são idênticos antes e depois.
+
 ### Verificação do lote de 2026-08-16 (TD-017 a TD-022)
 
 Os itens acima foram executados em paralelo por agentes distintos, cada um com prova própria.
@@ -231,9 +233,9 @@ branch ficou com checkpoint na tag `rede-seguranca-lote1`.
 |----------|-------|--------|
 | Critical | 0 | - |
 | High | 1 | 2026-08-15 |
-| Medium | 2 | 2026-08-15 |
+| Medium | 1 | 2026-08-16 |
 | Low | 1 | 2026-08-15 |
-| **Total Open** | **4** | 2026-08-15 |
+| **Total Open** | **3** | 2026-08-15 |
 
 _Last updated: 2026-08-16_
 
