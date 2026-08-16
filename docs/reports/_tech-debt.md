@@ -54,12 +54,6 @@ _Debt that makes development harder but doesn't block._
   - **Effort:** 2 dias (`REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco>`)
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
-- [ ] **TD-023**: Gates documentados no CLAUDE.md sem nada que os mecanize
-  - **Impact:** Medium - dois casos comprovados no mesmo commit `e38f528`: `ruff format --check` vermelho em 18 arquivos, e `npm run typecheck` vermelho em `mpcLogic.check.ts:318` (fixture de `TagOut` sem `project_id`) — este último é recorrência literal do TD-010, porque `*.check.ts` fica fora do typecheck do `build` por design e só `npm run typecheck` o pega. `.github/workflows/` não existe
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — Primeiro corte, achado adjacente
-  - **Effort:** 4h, mas exige decisão com ADR (CI é escolha de arquitetura, não conserto mecânico)
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-15
 - [ ] **TD-025**: Subagente com caminho relativo escreve no checkout `main` em vez da worktree ativa
   - **Impact:** Medium - **já causou dano duas vezes**: `stash@{2}` ("resquícios pré-merge F4: spill de `graph.ts`/`test_scheduler.py` de agentes com caminho relativo") e de novo em 2026-08-16, quando 6 arquivos de 5 agentes diferentes apareceram modificados em `main` durante um lote paralelo. A sessão do subagente resolve path relativo contra a raiz do repositório principal, mesmo tendo lido o arquivo pelo path absoluto da worktree; o agente escreve de um lado, verifica do outro, e conclui "minha edição foi revertida" — um deles queimou ~20 min perseguindo um `git reset` que nunca houve. Também suja a árvore de trabalho do usuário sem ele pedir nada
   - **Source:** incidente do lote paralelo de 2026-08-16 (7 subagentes na worktree `fix-arch-review`)
@@ -190,6 +184,13 @@ _Completed tech debt items. Keep for 90 days then archive._
   - **Correção de fato no levantamento:** das 4 chamadas que o achado citava como metadados-only, a de `test_par_puro_ganho_via_mv_sem_atraso_nao_quebra_o_mterm` LÊ `built.mpc.model.n_x` mas TAMBÉM chama `_solve` logo depois — não é metadados-only e continuou em `build_mpc()` completo. A quarta real é `test_mv_com_objetivo_psv_constroi_com_tvp_utarget`.
   - **Prova:** `uv run pytest services/flow-runtime/tests/test_mpc_builder.py -q` → 14 passed antes e depois. Tempo medido na mesma máquina, com o estado ANTES reproduzido por `git apply -R` do patch isolado: **33,17 s → 24,40 s de pytest interno (~26%)**, 37,34 s → 30,41 s de wall real (~19%). **Ressalva honesta:** `--durations` mostrou os 4 testes repontados levando ~2,1-2,4 s cada, quase o mesmo dos que resolvem — para configs de teste minúsculas (1-2 MVs/CVs) o custo dominante é a construção simbólica CasADi e o import amortizado do do-mpc, não o `setup()`/IPOPT. A economia é real e reproduzível, mas MENOR do que a hipótese "causa concreta dos ~37 min de suíte" sugeria.
 
+- [x] **TD-023**: Gates documentados no CLAUDE.md sem nada que os mecanize
+  - **Resolved:** 2026-08-16
+  - **Decisão registrada:** [ADR-035](../adr/ADR-035-mecanizacao-dos-gates.md). O item exigia decisão de arquitetura, e ela foi tomada explicitamente em vez de escolhida por omissão: **o CI roda só o grupo hermético** — `ruff check`, `ruff format --check`, `npm run test:unit`, `npm run typecheck`, `npm run build` e a checagem de contrato gerado em dia. `uv run pytest` (testcontainers, ~20 min, e o TD-009 já registrou vermelhos falsos por contenção) e o gate E2E de 3 camadas (stack de 9 serviços, `opcsim`, credenciais de `deploy/.env`) ficam **fora**, com motivo escrito. Gancho local também fica fora: `core.hooksPath` já aponta para um diretório global do usuário, então hook do projeto não dispararia, e adotar um gerenciador seria dependência nova para um problema que o CI resolve.
+  - **Resolution:** `.github/workflows/gates.yml` — um job em `ubuntu-latest`, `push` de qualquer branch mais `workflow_dispatch`, `concurrency` com `cancel-in-progress`, 11 passos, **nenhum segredo** e nenhum Docker. Python e Node convivem no mesmo job porque `generate-contracts.mjs` chama `uv run python -m ottima_core.contracts_export` — a trava de contrato precisa dos dois. `npm run typecheck` é passo PRÓPRIO, não efeito colateral do `build`: é exatamente essa separação que pega a classe de erro do TD-010, já que `*.check.ts` fica fora do typecheck do `build` por design.
+  - **Prova:** os dois vermelhos que motivaram o débito são barrados por passos nomeados do workflow (`ruff format --check` e `npm run typecheck`). YAML validado por `yaml.safe_load` (1 job, 11 passos). O único passo que ainda não existia como gate foi executado localmente na branch antes de entrar: `npm run generate:contracts && git diff --exit-code -- src/lib/contracts.gen.ts` → sem diff. Os demais passos são os mesmos comandos já rodados verdes nesta branch (607 unit, typecheck limpo, build verde, ruff limpo em 305 arquivos). `playwright.unit.config.ts` não declara projeto de navegador, então o `test:unit` não exige `npx playwright install` no runner — verificado lendo o config, não suposto.
+  - **Limite honesto:** o workflow **nunca rodou no GitHub** ainda — não houve push. A primeira execução real é a prova que falta, e ela só acontece quando esta branch subir. Regressão de backend Python e de integração continua invisível ao CI por decisão da ADR-035, não por esquecimento.
+
 ### Verificação do lote de 2026-08-16 (TD-017 a TD-022)
 
 Os itens acima foram executados em paralelo por agentes distintos, cada um com prova própria.
@@ -230,9 +231,9 @@ branch ficou com checkpoint na tag `rede-seguranca-lote1`.
 |----------|-------|--------|
 | Critical | 0 | - |
 | High | 1 | 2026-08-15 |
-| Medium | 3 | 2026-08-15 |
+| Medium | 2 | 2026-08-15 |
 | Low | 1 | 2026-08-15 |
-| **Total Open** | **5** | 2026-08-15 |
+| **Total Open** | **4** | 2026-08-15 |
 
 _Last updated: 2026-08-16_
 

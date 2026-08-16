@@ -1,0 +1,76 @@
+# Gates do CLAUDE.md, mecanizados (ADR-035).
+#
+# Só o que é HERMÉTICO entra aqui: nada de Docker, nada de segredo, nada da stack de 9
+# serviços. `uv run pytest` (testcontainers) e o gate E2E de 3 camadas continuam sendo
+# responsabilidade de quem abre o PR — a razão está na ADR-035, e a pendência está no TD-023.
+#
+# Os dois vermelhos comprovados em `e38f528` que motivaram este arquivo — `ruff format --check`
+# em 18 arquivos e `npm run typecheck` em `mpcLogic.check.ts` — são barrados pelos passos
+# abaixo. O `typecheck` é passo PRÓPRIO de propósito: `*.check.ts` fica fora do typecheck do
+# `build` por design (TD-010), então o `build` sozinho não o pega.
+name: gates
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python e Node no MESMO job: `npm run generate:contracts` chama
+      # `uv run python -m ottima_core.contracts_export` (generate-contracts.mjs), então a
+      # checagem de contrato gerado precisa dos dois toolchains lado a lado.
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Ambiente Python do workspace
+        run: uv sync --all-packages --frozen
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: Dependências do frontend
+        working-directory: frontend
+        run: npm ci
+
+      # `playwright.unit.config.ts` não declara projeto de navegador: são checagens puras em
+      # Node. Nenhum `npx playwright install` é necessário, e nenhum teste daqui fala com a
+      # stack.
+      - name: npm run test:unit
+        working-directory: frontend
+        run: npm run test:unit
+
+      - name: npm run typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: npm run build
+        working-directory: frontend
+        run: npm run build
+
+      # Trava de forma prevista pelo ARCH-06/ADR-034: se um model Pydantic mudou sem o
+      # `contracts.gen.ts` acompanhar, a geração produz diff e o passo falha.
+      - name: Contrato gerado está em dia
+        working-directory: frontend
+        run: |
+          npm run generate:contracts
+          git diff --exit-code -- src/lib/contracts.gen.ts

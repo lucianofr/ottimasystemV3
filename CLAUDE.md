@@ -152,6 +152,14 @@ cd frontend && npm run e2e                          # regressão Playwright da F
 cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build --no-deps frontend
 ```
 
+**CI (ADR-035).** `.github/workflows/gates.yml` roda em todo `push` os gates HERMÉTICOS —
+`ruff check`, `ruff format --check`, `npm run test:unit`, `npm run typecheck`, `npm run build` e
+`npm run generate:contracts` + `git diff --exit-code` (contrato gerado em dia). Sem segredo, sem
+Docker, sem stack. **`uv run pytest` e o gate E2E de 3 camadas continuam MANUAIS** e são
+responsabilidade de quem abre o PR: o pytest precisaria de Docker no runner (~20 min, com o
+histórico de vermelho falso por contenção do TD-009) e o E2E precisaria da stack de 9 serviços
+mais as credenciais de `deploy/.env`. Não confunda "CI verde" com "gate completo".
+
 ## Proibições rápidas para agentes
 
 Não editar `docs/` sem o processo do item 4 · Não usar Django, Next.js, Celery, SQLite, InfluxDB · Não criar canal de barramento novo · Não escrever em tag OPC fora do fluxo `opc.writes` · Não persistir predições · Não colocar lógica de backend no frontend · Não "simplificar" removendo watchdog/modos/bumpless em ambiente de teste — use o bloco TFS para simular.
