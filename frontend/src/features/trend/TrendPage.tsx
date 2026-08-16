@@ -15,9 +15,14 @@ import {
 import { EditorEscala } from "./EditorEscala";
 import { ESCALA_AUTO, gravarEscalas, lerEscalas, limparEscalas, type EscalaVar } from "./escalas";
 import { JanelaTempo } from "./JanelaTempo";
+import {
+  type BadgeLegenda,
+  type LinhaLegenda,
+  PainelLegendaTrend,
+} from "./PainelLegendaTrend";
 import { TrendChart, type TrendChartHandle } from "./TrendChart";
 import { tagDoProjeto } from "./tagsDoProjeto";
-import { CLASSES_PENA, FORMATO_VALOR, LIMITE_PENAS } from "./trendTheme";
+import { CLASSES_PENA, LIMITE_PENAS } from "./trendTheme";
 import { montarMatriz, resumirSeries, useHistory, useTags } from "./useHistory";
 import { useJanelaDeslizante } from "./useJanelaDeslizante";
 
@@ -267,50 +272,46 @@ export function TrendPage() {
           )}
 
           {resumos.length > 0 && (
-            <Card data-testid="trend-legend" className="divide-y divide-border">
-              {resumos.map((resumo, indice) => {
+            <PainelLegendaTrend
+              testId="trend-legend"
+              linhas={resumos.map((resumo, indice) => {
                 const tag = porId.get(resumo.tagId);
-                return (
-                  <div
-                    key={resumo.tagId}
-                    data-testid="trend-legend-item"
-                    className="flex items-center gap-3 px-3 py-2"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className={cn("h-1 w-6 shrink-0", CLASSES_PENA[indice % CLASSES_PENA.length])}
-                    />
-                    <span className="plaqueta grow text-xs">
-                      {tag?.name ?? String(resumo.tagId)}
-                    </span>
-                    {resumo.bad && (
+                const badges: BadgeLegenda[] = [];
+                if (resumo.bad) {
+                  badges.push({
+                    testId: "trend-legend-bad",
+                    texto: "BAD",
+                    className: "plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg",
+                  });
+                }
+                // Sem amostra dentro do teto: rótulo próprio, não `BAD`. `BAD` é qualidade
+                // ruim que chegou da origem; isto é a aquisição parada. Confundir os dois
+                // mandaria o engenheiro depurar o servidor OPC em vez do worker.
+                if (resumo.semDado) {
+                  badges.push({
+                    testId: "trend-legend-sem-dado",
+                    texto: "SEM DADO",
+                    className: "plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg",
+                  });
+                }
+                const linha: LinhaLegenda = {
+                  chave: String(resumo.tagId),
+                  testId: "trend-legend-item",
+                  className: "flex items-center gap-3 px-3 py-2",
+                  identificacao: (
+                    <>
                       <span
-                        data-testid="trend-legend-bad"
-                        className="plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg"
-                      >
-                        BAD
+                        aria-hidden="true"
+                        className={cn("h-1 w-6 shrink-0", CLASSES_PENA[indice % CLASSES_PENA.length])}
+                      />
+                      <span className="plaqueta grow text-xs">
+                        {tag?.name ?? String(resumo.tagId)}
                       </span>
-                    )}
-                    {/* Sem amostra dentro do teto: rótulo próprio, não `BAD`. `BAD` é qualidade
-                        ruim que chegou da origem; isto é a aquisição parada. Confundir os dois
-                        mandaria o engenheiro depurar o servidor OPC em vez do worker. */}
-                    {resumo.semDado && (
-                      <span
-                        data-testid="trend-legend-sem-dado"
-                        className="plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg"
-                      >
-                        SEM DADO
-                      </span>
-                    )}
-                    <span
-                      className={cn(
-                        "process-value w-28 text-right text-sm",
-                        resumo.bad || resumo.semDado ? "text-fg-muted" : "text-fg",
-                      )}
-                    >
-                      {resumo.valor === null ? "—" : FORMATO_VALOR.format(resumo.valor)}
-                    </span>
-                    <span className="w-12 text-xs text-fg-muted">{tag?.eu ?? ""}</span>
+                    </>
+                  ),
+                  badges,
+                  valorEu: { valor: resumo.valor, eu: tag?.eu ?? "", muted: resumo.bad || resumo.semDado },
+                  filhoEscala: (
                     <EditorEscala
                       escala={escalas[String(resumo.tagId)] ?? ESCALA_AUTO}
                       prefixoTestid="trend"
@@ -318,10 +319,11 @@ export function TrendPage() {
                         definirEscala(resumo.tagId, escala);
                       }}
                     />
-                  </div>
-                );
+                  ),
+                };
+                return linha;
               })}
-            </Card>
+            />
           )}
         </div>
       </div>
