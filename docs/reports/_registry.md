@@ -1,6 +1,6 @@
 # Report Registry
 
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-08-15
 
 > Central index of agent work. Check here before starting new work.
 
@@ -25,6 +25,10 @@
 - review-spec-f6-testes-20260807 | Completed | REQUEST CHANGES (pr-test-analyzer) — 3C/4I/2m; A-8 inviável: `grafo_mpc_tfs` é hardcoded e o TFS é travado em 2x2. Falso-verde do E2E-F6-02 descartado com evidência
 - review-spec-f6-ux-20260807 | Completed | APPROVE WITH CHANGES (ux-designer) — 0C/10I/2m; UX-06: `node_id` contém `;`, separador do 422 agregado é ambíguo
 - review-spec-f6-seguranca-20260807 | Completed | APPROVE WITH CHANGES (security-reviewer) — 0C/6I/0m; SEC-01: import quebra a premissa de confiança do ADR-018. Gerou TD-001 e TD-002
+
+## 2026-08-15
+
+- arch-review-20260815 | Completed | Auditoria de arquitetura @e38f528, 7 fatias em paralelo: 22 candidatos de aprofundamento (12 Strong, 10 Worth exploring), 0 contradizendo ADR. ARCH-07 é defeito latente verificado — fixture de retrocompat usa `du_max` (chave sem leitor) e nunca assere `max_rate`, então regresso que zere a taxa máxima de MV passa verde. Gerou TD-015 a TD-024
 
 ---
 

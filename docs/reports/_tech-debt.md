@@ -27,6 +27,24 @@ _Debt that causes recurring problems or bugs._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
+- [ ] **TD-015**: Retrocompatibilidade de `max_rate` sem cobertura — fixture do teste usa `du_max`, chave que nenhum leitor consome
+  - **Impact:** High - regresso que zere a taxa máxima de variação de uma MV atravessa o teste verde
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-07
+  - **Effort:** 1h o corte mínimo (fixture + asserção); 1 dia o aprofundamento (tabela de defaults gerada do `model_json_schema()`)
+  - **Owner:** @unassigned
+  - **Created:** 2026-08-15
+- [ ] **TD-016**: Isolamento temporal entre Flows da mesma partição depende de disciplina de Bloco, não de estrutura
+  - **Impact:** High - um Bloco com custo síncrono inline rouba a fronteira de varredura dos irmãos; `test_isolamento_temporal.py:101` é `xfail(strict=True)` permanente
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-11
+  - **Effort:** 2-3 dias (medida por `block.step()` + evento `block_overrun`; não reabre o ADR-004)
+  - **Owner:** @unassigned
+  - **Created:** 2026-08-15
+- [ ] **TD-017**: Três telas de tendência, dois motores de instância uPlot — comportamento divergente entre superfícies
+  - **Impact:** High - divergência já reportada em operação (legenda sem valor nem EU onde trend e fuzzy mostram); bug de zoom/resize exige correção replicada
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-01, ARCH-02, ARCH-03, ARCH-04
+  - **Effort:** 2-3 dias (casca de instância uPlot como module único; ADR-030 já manda reusar)
+  - **Owner:** @unassigned
+  - **Created:** 2026-08-15
 
 ## Medium (Slows Development)
 
@@ -39,6 +57,42 @@ _Debt that makes development harder but doesn't block._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
+- [ ] **TD-018**: Forma do nó e defaults do `graph_json` reescritos à mão em TypeScript, fora do pipeline de geração que já existe
+  - **Impact:** Medium - `contracts_export.py` já gera PORT_CONTRACTS e ws_payloads do `model_json_schema()`, mas a config por bloco fica manual em `graph.ts` e `graphMpc.ts`
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-06, ARCH-07
+  - **Effort:** 2 dias
+  - **Owner:** @unassigned
+  - **Created:** 2026-08-15
+- [ ] **TD-019**: Migração de dados sobre `graph_json` (0009) reescreve o contrato sem validar e sem teste
+  - **Impact:** Medium - único caminho de escrita em `graph_json` fora da validação de save da API; migração futura herda o ponto cego
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-08
+  - **Effort:** 2h (`parse_graph()` após a mutação + fixture pré-rename)
+  - **Owner:** @unassigned
+  - **Created:** 2026-08-15
+- [ ] **TD-020**: Extração FormData→`data` do bloco PID só alcançável renderizando o modal; 10 campos sem teste
+  - **Impact:** Medium - checkbox `auto_mode` e `output_min` nulável sem cobertura unitária nem e2e
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-19
+  - **Effort:** 4h (`montarDados<Tipo>` pura, padrão de `matrizDoFormulario`)
+  - **Owner:** @unassigned
+  - **Created:** 2026-08-15
+- [ ] **TD-021**: Registro de tipo de Bloco espalhado por 6 arquivos do frontend, ~17 pontos de edição mecânica
+  - **Impact:** Medium - completude é conferida à mão; entrada faltando aparece em runtime/E2E, não no build
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-18
+  - **Effort:** 2 dias (`REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco>`)
+  - **Owner:** @unassigned
+  - **Created:** 2026-08-15
+- [ ] **TD-022**: `build_mpc()` funde montagem estrutural com compilação IPOPT — teste estrutural paga o solver
+  - **Impact:** Medium - 4 das 16 chamadas em `test_mpc_builder.py` só leem metadados; contribui para a suíte de ~37 min
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-12
+  - **Effort:** 1 dia (`_assemble_model` / `_compile_solver`; o seam de `mpc/host.py` já existe)
+  - **Owner:** @unassigned
+  - **Created:** 2026-08-15
+- [ ] **TD-023**: Gate `ruff format --check` documentado no CLAUDE.md sem nada que o mecanize
+  - **Impact:** Medium - 18 arquivos ficaram fora do padrão sem ninguém notar; `.github/workflows/` não existe
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — Nota de processo
+  - **Effort:** 4h, mas exige decisão com ADR (CI é escolha de arquitetura, não conserto mecânico)
+  - **Owner:** @unassigned
+  - **Created:** 2026-08-15
 
 ## Low (Track for Later)
 
@@ -51,6 +105,12 @@ _Known issues not currently prioritized._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
+- [ ] **TD-024**: Duplicações de apresentação no editor e nas legendas de tendência
+  - **Impact:** Low - funciona; custa uma reescrita a cada campo novo e deixa convenção de testid/ajuda divergente
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-04, ARCH-20, ARCH-21
+  - **Effort:** 1 dia (linha de legenda compartilhada, `campoOpcional`, `Campo` único)
+  - **Owner:** @unassigned
+  - **Created:** 2026-08-15
 
 ---
 
@@ -130,12 +190,12 @@ _Completed tech debt items. Keep for 90 days then archive._
 | Category | Count | Oldest |
 |----------|-------|--------|
 | Critical | 0 | - |
-| High | 0 | - |
-| Medium | 0 | - |
-| Low | 0 | - |
-| **Total Open** | **0** | - |
+| High | 3 | 2026-08-15 |
+| Medium | 6 | 2026-08-15 |
+| Low | 1 | 2026-08-15 |
+| **Total Open** | **10** | 2026-08-15 |
 
-_Last updated: 2026-08-11_
+_Last updated: 2026-08-15_
 
 ---
 
