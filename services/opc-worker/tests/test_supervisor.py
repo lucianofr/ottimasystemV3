@@ -660,8 +660,10 @@ async def test_editar_watchdog_do_flow_nao_recria_a_sessao(
 
         await update_flow(session_factory, flow_id, watchdog_period_ms=2000)
         await await_until(
-            lambda: (task := runtime.flow_watchdogs.get(flow_id)) is not None
-            and task.config.period_ms == 2000
+            lambda: (
+                (task := runtime.flow_watchdogs.get(flow_id)) is not None
+                and task.config.period_ms == 2000
+            )
         )
 
         assert supervisor.runtimes[conn_id] is runtime, "editar watchdog não recria o runtime"

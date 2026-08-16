@@ -184,9 +184,7 @@ class SteadyStateOptimizer:
         self._row_span = {var.id: var.span for var in rows}
         # Banda do SP por CV (RF-615): `%` do span em torno do SP do operador no solve.
         self._cv_sp_range = {
-            cv.id: cv.sp_range_pct
-            for cv in config.variables.cvs
-            if cv.sp_range_pct is not None
+            cv.id: cv.sp_range_pct for cv in config.variables.cvs if cv.sp_range_pct is not None
         }
         # CVs ancoradas no SP do operador: (row_id, peso por span), na ordem do config.
         self._cv_anchors: list[tuple[str, float]] = [
@@ -353,9 +351,7 @@ class SteadyStateOptimizer:
         n_slack = len(kept)
         row_index = {row_id: i for i, row_id in enumerate(model.row_ids)}
 
-        anchors = [
-            (cv_id, peso) for cv_id, peso in self._cv_anchors if cv_id in anchor_targets
-        ]
+        anchors = [(cv_id, peso) for cv_id, peso in self._cv_anchors if cv_id in anchor_targets]
         n_anchor = len(anchors)
         n_psv = len(self._mv_psv)
         n_eq_pairs = max(0, len(self._equalize_ids) - 1)

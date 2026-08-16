@@ -410,8 +410,7 @@ def optimization_enabled(config: MpcConfig) -> bool:
         return True
     variables = config.variables
     return any(
-        var.objective != "none"
-        for var in (*variables.mvs, *variables.cvs, *variables.constraints)
+        var.objective != "none" for var in (*variables.mvs, *variables.cvs, *variables.constraints)
     )
 
 

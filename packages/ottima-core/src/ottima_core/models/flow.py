@@ -54,8 +54,6 @@ class Flow(TimestampMixin, Base):
         UniqueConstraint("project_id", "name", name="uq_flows_project_name"),
         CheckConstraint("ts_seconds IN (0.5,1,2,5,10,30,60)", name="ck_flows_ts"),
         CheckConstraint("desired_state IN ('running','stopped')", name="ck_flows_desired_state"),
-        CheckConstraint(
-            "watchdog_period_ms BETWEEN 500 AND 5000", name="ck_flows_wd_period"
-        ),
+        CheckConstraint("watchdog_period_ms BETWEEN 500 AND 5000", name="ck_flows_wd_period"),
         CheckConstraint("watchdog_timeout_s BETWEEN 2 AND 120", name="ck_flows_wd_timeout"),
     )

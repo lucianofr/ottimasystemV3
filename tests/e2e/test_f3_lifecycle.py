@@ -164,9 +164,7 @@ def test_e2e_f3_07_comm_failure_derruba_so_os_flows_da_conexao(
     # A task de watchdog do flow se encerra sozinha na 1ª detecção de congelamento
     # (opc-worker `watchdog.py`) — só uma sessão nova volta a observar o bit (ADR-009
     # revisado); descongelar o rung sozinho não bastaria para revivê-la.
-    revivar_watchdog_de_flow(
-        ambiente.conn_id, flow_tag, eventos=eventos, parar_opcsim=parar_opcsim
-    )
+    revivar_watchdog_de_flow(ambiente.conn_id, flow_tag, eventos=eventos, parar_opcsim=parar_opcsim)
 
     # ADR-025 (TD-005): `comm_restored` com `desired_state == "running"` retoma o flow SEM
     # comando manual. Antes desta decisão o assert aqui era o oposto (`silencio() == []`,

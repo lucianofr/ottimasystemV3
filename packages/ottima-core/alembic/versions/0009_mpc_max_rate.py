@@ -26,12 +26,8 @@ def _regravar(
     conn.execute(flows.update().where(flows.c.id == flow_id).values(graph_json=graph))
 
 
-def _migrar(
-    flows: sa.sql.TableClause, conn: sa.engine.Connection, *, para_max_rate: bool
-) -> None:
-    rows = conn.execute(
-        sa.select(flows.c.id, flows.c.ts_seconds, flows.c.graph_json)
-    ).fetchall()
+def _migrar(flows: sa.sql.TableClause, conn: sa.engine.Connection, *, para_max_rate: bool) -> None:
+    rows = conn.execute(sa.select(flows.c.id, flows.c.ts_seconds, flows.c.graph_json)).fetchall()
     for flow_id, ts_seconds, graph_json in rows:
         graph = json.loads(graph_json) if isinstance(graph_json, str) else graph_json
         sujo = False

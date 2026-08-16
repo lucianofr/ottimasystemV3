@@ -509,16 +509,12 @@ class MpcBlock(Block):
         da última predição aplicada (índice 1 da série — o 0 é o instante do solve); sem
         predição disponível, a última medição boa (`_last_measured`, hold conservador)."""
         idx = self._row_ids.index(row_id)
-        serie = (
-            self._last_prediction.cv[idx] if idx < len(self._last_prediction.cv) else []
-        )
+        serie = self._last_prediction.cv[idx] if idx < len(self._last_prediction.cv) else []
         if len(serie) > 1:
             return float(serie[1])
         return self._last_measured.get(row_id)
 
-    def _avaliar_fail_actions(
-        self, samples: Mapping[str, PortSample], simuladas: set[str]
-    ) -> None:
+    def _avaliar_fail_actions(self, samples: Mapping[str, PortSample], simuladas: set[str]) -> None:
         """Debounce das fail actions (RF-613), na cadência da fronteira (Ts_mpc): 2
         execuções ruins consecutivas registram a ação final em `_fail_pending` para o
         orquestrador consumir. Só em REMOTO — em LOCAL o MPC não escreve, a ação não teria
@@ -551,10 +547,11 @@ class MpcBlock(Block):
                 motivo = "bad_quality"
                 if expirou:
                     agora = time.monotonic()
-                    if (
-                        acao in ("simulate_manual", "simulate_shed_local")
-                        and agora - self._simulacao_desde[var_id]
-                        > self._fail_timeout.get(var_id, 60.0)
+                    if acao in (
+                        "simulate_manual",
+                        "simulate_shed_local",
+                    ) and agora - self._simulacao_desde[var_id] > self._fail_timeout.get(
+                        var_id, 60.0
                     ):
                         motivo = "simulate_timeout"
                 final = {

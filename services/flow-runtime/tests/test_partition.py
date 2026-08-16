@@ -92,9 +92,7 @@ async def test_supervisor_atende_comando_do_proprio_flow(harness_factory, sessio
 
 
 def _deploy(flow_id: int) -> FlowCommand:
-    return FlowCommand(
-        flow_id=flow_id, cmd="deploy", args={}, user="teste", ts=datetime.now(UTC)
-    )
+    return FlowCommand(flow_id=flow_id, cmd="deploy", args={}, user="teste", ts=datetime.now(UTC))
 
 
 async def test_health_do_pai_preserva_o_formato_com_filhos_mortos():

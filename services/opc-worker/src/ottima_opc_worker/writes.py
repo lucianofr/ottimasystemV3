@@ -188,9 +188,7 @@ class WriteConsumer:
         # que restar na fila é descarte do desmonte. Não vai ao canal de eventos — os
         # kinds/reasons são fechados pela spec §7.3 — mas não pode sumir do registro.
         descartadas = {
-            conn_id: fila.qsize()
-            for conn_id, fila in self._conn_queues.items()
-            if fila.qsize()
+            conn_id: fila.qsize() for conn_id, fila in self._conn_queues.items() if fila.qsize()
         }
         self._conn_queues.clear()
         if descartadas:

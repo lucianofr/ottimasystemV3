@@ -346,9 +346,7 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
         # morta só é decidível aqui, com o Ts_mpc em mãos (era validator do MvVar).
         du_max_ciclo = mv.max_rate * ts_mpc
         if mv.du_min > du_max_ciclo:
-            raise ValueError(
-                f"du_min da MV '{mv.id}' deve ser menor ou igual a max_rate × Ts_mpc"
-            )
+            raise ValueError(f"du_min da MV '{mv.id}' deve ser menor ou igual a max_rate × Ts_mpc")
         for k in range(horizons.np + 1):
             tvp_template["_tvp", k, name] = du_max_ciclo if k < horizons.nc else 0.0
     for mv in mvs:
@@ -376,9 +374,7 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
         u_prev_state_name={mv.id: f"uprev_{mv.id}" for mv in mvs},
         output_expr_name=output_expr_name,
         sp_tvp_name={cv.id: f"sp_{cv.id}" for cv in cvs},
-        utarget_tvp_name={
-            mv.id: f"utarget_{mv.id}" for mv in mvs if mv.objective != "none"
-        },
+        utarget_tvp_name={mv.id: f"utarget_{mv.id}" for mv in mvs if mv.objective != "none"},
         bias_tvp_name={row_id: f"bias_{row_id}" for row_id in row_ids},
         dv_tvp_name={dv.id: dv.id for dv in dvs},
         pair_init=tuple(pair_inits),

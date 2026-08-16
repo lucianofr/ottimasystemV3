@@ -39,7 +39,6 @@ RECV_TIMEOUT_S = 30.0
 """Teto para o filho responder: spawn reimporta o mundo, e a máquina pode estar carregada."""
 
 
-
 async def test_flow_lento_numa_particao_nao_atrasa_o_flow_de_outra(redis_url: str):
     """O flow rápido mantém sua grade enquanto o flow lento gasta 1,0 s numa varredura.
 

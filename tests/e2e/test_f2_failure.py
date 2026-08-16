@@ -102,9 +102,7 @@ def test_e2e_f2_05_descongelar_restaura_e_reabre_o_gate(
     """
     conn_id = projeto_com_conexao.conn_id
     flow_id = projeto_com_conexao.flow_id
-    revivar_watchdog_de_flow(
-        conn_id, flow_id, eventos=eventos, parar_opcsim=parar_opcsim
-    )
+    revivar_watchdog_de_flow(conn_id, flow_id, eventos=eventos, parar_opcsim=parar_opcsim)
 
     congelar_watchdog(True)
     eventos.esperar(
@@ -114,9 +112,7 @@ def test_e2e_f2_05_descongelar_restaura_e_reabre_o_gate(
     )
 
     congelar_watchdog(False)
-    revivar_watchdog_de_flow(
-        conn_id, flow_id, eventos=eventos, parar_opcsim=parar_opcsim
-    )
+    revivar_watchdog_de_flow(conn_id, flow_id, eventos=eventos, parar_opcsim=parar_opcsim)
 
     # Gate stateless (§3.4): a primeira alternância do watchdog já reabre a escrita.
     valor = valor_unico()

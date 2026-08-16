@@ -126,8 +126,10 @@ class Bancada:
 
     async def gate_aberto(self, flow_id: int = FLOW_ID) -> None:
         await await_until(
-            lambda: self.runtime.state is ConnectionState.UP
-            and self.snapshot.flow_watchdog_alive.get(flow_id, False)
+            lambda: (
+                self.runtime.state is ConnectionState.UP
+                and self.snapshot.flow_watchdog_alive.get(flow_id, False)
+            )
         )
 
 
@@ -370,8 +372,10 @@ async def test_gate_reabre_apos_a_sessao_voltar_e_o_watchdog_alternar(redis_clie
     try:
         async with collecting(redis_client, CHANNEL_EVENTS) as ev:
             await await_until(
-                lambda: runtime.state is ConnectionState.UP
-                and snapshot.flow_watchdog_alive.get(FLOW_ID)
+                lambda: (
+                    runtime.state is ConnectionState.UP
+                    and snapshot.flow_watchdog_alive.get(FLOW_ID)
+                )
             )
 
             await sim.set_freeze_watchdog(True)
@@ -386,8 +390,10 @@ async def test_gate_reabre_apos_a_sessao_voltar_e_o_watchdog_alternar(redis_clie
             await sim.start()
             try:
                 await await_until(
-                    lambda: runtime.state is ConnectionState.UP
-                    and snapshot.flow_watchdog_alive.get(FLOW_ID)
+                    lambda: (
+                        runtime.state is ConnectionState.UP
+                        and snapshot.flow_watchdog_alive.get(FLOW_ID)
+                    )
                 )
                 await publicar(redis_client, tag_id=TAG_FLOAT, value=33.0)
                 await esperar_valor(sim, NODE_MIRROR_FLOAT, 33.0)
@@ -474,8 +480,10 @@ async def test_novo_periodo_avisa_mesmo_sem_escrita_na_janela_aberta(redis_clien
     try:
         async with collecting(redis_client, CHANNEL_EVENTS) as ev:
             await await_until(
-                lambda: runtime.state is ConnectionState.UP
-                and snapshot.flow_watchdog_alive.get(FLOW_ID)
+                lambda: (
+                    runtime.state is ConnectionState.UP
+                    and snapshot.flow_watchdog_alive.get(FLOW_ID)
+                )
             )
 
             await sim.set_freeze_watchdog(True)
@@ -490,8 +498,10 @@ async def test_novo_periodo_avisa_mesmo_sem_escrita_na_janela_aberta(redis_clien
             await sim.start()
             try:
                 await await_until(
-                    lambda: runtime.state is ConnectionState.UP
-                    and snapshot.flow_watchdog_alive.get(FLOW_ID)
+                    lambda: (
+                        runtime.state is ConnectionState.UP
+                        and snapshot.flow_watchdog_alive.get(FLOW_ID)
+                    )
                 )
                 await sim.set_freeze_watchdog(True)
                 await await_until(lambda: not snapshot.flow_watchdog_alive.get(FLOW_ID, False))
@@ -617,9 +627,11 @@ async def test_dois_flows_na_mesma_conexao_watchdog_de_um_nao_trava_o_outro(
     try:
         async with collecting(redis_client, CHANNEL_EVENTS) as ev:
             await await_until(
-                lambda: runtime.state is ConnectionState.UP
-                and snapshot.flow_watchdog_alive.get(flow_a)
-                and snapshot.flow_watchdog_alive.get(flow_b)
+                lambda: (
+                    runtime.state is ConnectionState.UP
+                    and snapshot.flow_watchdog_alive.get(flow_a)
+                    and snapshot.flow_watchdog_alive.get(flow_b)
+                )
             )
 
             await sim.set_freeze_watchdog(True, pair=1)
@@ -678,12 +690,16 @@ async def test_escrita_travada_na_conexao_a_nao_atrasa_a_conexao_b(
         await consumer.start()
         try:
             await await_until(
-                lambda: runtime_a.state is ConnectionState.UP
-                and runtime_a.snapshot.flow_watchdog_alive.get(FLOW_ID, False)
+                lambda: (
+                    runtime_a.state is ConnectionState.UP
+                    and runtime_a.snapshot.flow_watchdog_alive.get(FLOW_ID, False)
+                )
             )
             await await_until(
-                lambda: runtime_b.state is ConnectionState.UP
-                and runtime_b.snapshot.flow_watchdog_alive.get(flow_b, False)
+                lambda: (
+                    runtime_b.state is ConnectionState.UP
+                    and runtime_b.snapshot.flow_watchdog_alive.get(flow_b, False)
+                )
             )
 
             # A escrita no node de A trava para sempre: servidor lento/travado.
@@ -738,8 +754,10 @@ async def test_fila_de_conexao_removida_e_recusada_e_nao_descartada(
     try:
         async with collecting(redis_client, CHANNEL_EVENTS) as ev:
             await await_until(
-                lambda: runtime.state is ConnectionState.UP
-                and snapshot.flow_watchdog_alive.get(FLOW_ID, False)
+                lambda: (
+                    runtime.state is ConnectionState.UP
+                    and snapshot.flow_watchdog_alive.get(FLOW_ID, False)
+                )
             )
 
             entrou = asyncio.Event()

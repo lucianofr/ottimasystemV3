@@ -394,9 +394,7 @@ class ConnectionRuntime:
             self._redis,
             severity="info",
             origin=self._origin,
-            message=(
-                f"Watchdog restabelecido no flow {flow_id} (conexão '{self._config.name}')"
-            ),
+            message=(f"Watchdog restabelecido no flow {flow_id} (conexão '{self._config.name}')"),
             kind=KIND_COMM_RESTORED,
             payload={"conn_id": self._config.id, "flow_id": flow_id},
         )

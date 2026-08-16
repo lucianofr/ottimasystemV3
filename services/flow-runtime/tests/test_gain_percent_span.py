@@ -87,6 +87,5 @@ def test_eu_gain_params_escala_k_e_ki_e_nao_muta_o_original() -> None:
 
     integrador = {"Ki": 0.5, "theta": 0.0}
     assert (
-        eu_gain_params(integrador, kind="integrating", row_span=100.0, col_span=25.0)["Ki"]
-        == 2.0
+        eu_gain_params(integrador, kind="integrating", row_span=100.0, col_span=25.0)["Ki"] == 2.0
     )
