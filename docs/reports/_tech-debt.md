@@ -88,7 +88,7 @@ _Debt that makes development harder but doesn't block._
   - **Effort:** 1-2 dias (primitivo de alinhamento de pena; acumulador de borda viva; linha de legenda compartilhada)
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
-  - **Feito em 2026-08-15 (ARCH-01):** a casca de instância uPlot virou `features/trend/motorTrend.ts::useMotorTrend`, consumida pelas três telas; a regra de preservação de zoom saiu de dentro do efeito para `zoomX.ts::estaZoomadoEmX`, pura e testada. Verificado no browser contra a planta viva: dado vivo não recria a instância, mudança de estrutura recria exatamente uma vez, "Reset layout" preservado, zero erro. **A queixa original do usuário — legenda de operação sem valor nem EU — é o ARCH-04 e continua aberta**; era divergência de apresentação, não do motor.
+  - **Feito em 2026-08-15 (ARCH-01):** a casca de instância uPlot virou `features/trend/motorTrend.ts::useMotorTrend`, consumida pelas três telas; a regra de preservação de zoom saiu de dentro do efeito para `zoomX.ts::estaZoomadoEmX`, pura e testada. Verificado no browser contra a planta viva (dado vivo não recria a instância, mudança de estrutura recria exatamente uma vez, "Reset layout" preservado, zero erro) e pela regressão Playwright das três telas: **16 cenários, 0 falhas** — `trend-eng` 4/4, `operate-trend` 10/10, `fuzzy-operate` 2/2, com PW-OP-07 cobrindo o tique de 1 s e PW-OP-11 o zoom rastreado. **A queixa original do usuário — legenda de operação sem valor nem EU — é o ARCH-04 e continua aberta**; era divergência de apresentação, não do motor.
 
 ## Low (Track for Later)
 

@@ -104,11 +104,26 @@ por 12-14 s **não** recriou a instância (marca no canvas sobreviveu), mudança
 erro de página. Na tela de operação, predição, divisor Histórico|Previsão e legenda com editores de
 escala continuaram desenhando, e o tique de 1 s seguiu aplicando `setScale` pela instância do motor.
 
-O trend fuzzy não foi exercitado ao vivo: o projeto ativo não tem bloco fuzzy. Ele consome
-`TrendChart` pelas props públicas, que ficaram **byte a byte idênticas** (o diff da interface é
-vazio) e `TrendFuzzy.tsx` não foi tocado. As specs Playwright das três telas ficaram de fora de
-propósito: `criarAmbiente` ativa um projeto próprio, e isso pararia o MPC que está rodando agora na
-planta — a restauração devolve o projeto ativo, mas não redeploya os flows.
+**Regressão Playwright das três telas: 16 cenários, 0 falhas**, rodada contra o vite da worktree
+(`E2E_BASE_URL=http://127.0.0.1:5174`) com autorização para parar o flow da planta —
+`trend-eng` 4/4, `operate-trend` 10/10, `fuzzy-operate` 2/2. Três cenários cobrem exatamente as
+partes do motor que teste unitário não alcança:
+
+- **PW-OP-07** ("linha 'agora' anda no relógio de parede, mesmo sem dado novo") — prova o tique de
+  1 s aplicando `setScale` pela instância obtida de `motor.instancia`;
+- **PW-OP-11** ("zoom manual em X sobrevive à troca do eixo Y e volta no duplo-clique") — prova a
+  política `deveRerange` rastreada em `zoomXRef`, o parâmetro em que as duas telas divergem;
+- **PW-OP-08** / **PW-TR-03** ("reset layout zera a escala Y fixada") — provam
+  `aplicarDadosComRerange` nas duas telas.
+
+O trend fuzzy, que não era exercitável ao vivo (projeto ativo sem bloco fuzzy), ficou coberto por
+**PW-FZ-01/02**, que criam o bloco na própria fixture. Isso fecha a única lacuna de verificação do
+ARCH-01.
+
+Efeito colateral esperado e revertido: `e2e/fixtures.ts::criarAmbiente` ativa um projeto próprio, o
+que deixou o flow 987 da planta em `desired_state = stopped`. O `encerrar()` da fixture devolve o
+projeto ativo mas não redeploya — o flow foi redeployado por `POST /api/flows/987/deploy` (202) e
+confirmado de volta em `running`. A rodada não deixou projeto órfão.
 
 ---
 
