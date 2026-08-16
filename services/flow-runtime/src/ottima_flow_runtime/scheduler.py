@@ -31,6 +31,7 @@ from typing import Literal, Protocol
 from redis.asyncio import Redis
 
 from ottima_core.bus import (
+    KIND_BLOCK_OVERRUN,
     KIND_FLOW_FAILED,
     KIND_FLOW_OVERRUN,
     FlowStatus,
@@ -45,6 +46,17 @@ logger = logging.getLogger(__name__)
 
 COLD = PortSample(None, False)
 """Valor de porta que nunca foi escrito desde o deploy (§3.0). Imutável, logo compartilhável."""
+
+BLOCK_BUDGET_FRACTION = 1.0
+"""Orçamento de tempo síncrono de UM `block.step()`, como fração do `Ts` do próprio flow.
+
+Candidato óbvio, sem constante mágica sem origem (ARCH-11): 100% do Ts é o único limiar que
+não depende de nenhuma suposição sobre quantos blocos irmãos dividem o ciclo — um bloco que
+sozinho já gasta o Ts inteiro garante, por conta própria, que esta varredura estoura a grade
+(`_settle_grid`), não importa quão barato seja o resto do flow. Qualquer fração menor exigiria
+decidir quantos blocos "cabem" no orçamento, decisão sem base hoje (spec F3 não reparte Ts
+entre blocos). `block_overrun` é observabilidade — nomeia o bloco culpado; não reabre o
+modelo de concorrência (ADR-004: mesma partição, mesmo event loop)."""
 
 
 class Clock(Protocol):
@@ -109,6 +121,7 @@ class FlowTask:
         self._overruns = 0
         self._last_scan_ts: datetime | None = None
         self._overrun_armed = True
+        self._block_overrun_armed: dict[str, bool] = {}
         self._reset_ports()
 
     @property
@@ -136,6 +149,7 @@ class FlowTask:
         self._scan_ms = 0.0
         self._overruns = 0
         self._overrun_armed = True
+        self._block_overrun_armed = {}
         self._last_scan_ts = None
         self._t0 = self._clock.monotonic()
         self._state = "running"
@@ -212,8 +226,15 @@ class FlowTask:
         em `flow.status.ts` logo abaixo) — repassado a todo bloco via `step(inputs, ts=ts)`
         (spec F5 §2.1): quem carimba algo próprio (hoje só o MPC, `ts`/`prediction.ts` de
         `mpc.state`) usa exatamente este relógio, nunca um `datetime.now(UTC)` desacoplado.
+
+        Cada `block.step()` também é cronometrado individualmente (ARCH-11), reusando o
+        `time.monotonic()` do próprio relógio do laço — o mesmo que alimenta `scan_ms` em
+        `_run`, sem relógio novo. O custo agregado da varredura continua vindo de `_run`;
+        aqui só se decompõe esse total por bloco, para nomear o culpado quando ele estoura o
+        orçamento sozinho.
         """
         wiring = self._definition.wiring
+        budget_ms = self._definition.ts_seconds * BLOCK_BUDGET_FRACTION * 1000.0
         for block in self._definition.blocks:
             ports = self._ports[block.block_id]
             inputs: dict[str, PortSample] = {}
@@ -223,8 +244,42 @@ class FlowTask:
                 # A entrada também vai para a tabela: o canvas desenha os dois lados da
                 # aresta (§4.2). Só o dict `inputs` é restrito às portas conectadas.
                 ports[handle] = sample
-            for handle, sample in (await block.step(inputs, ts=ts)).items():
+            started = self._clock.monotonic()
+            outputs = await block.step(inputs, ts=ts)
+            block_ms = (self._clock.monotonic() - started) * 1000.0
+            for handle, sample in outputs.items():
                 ports[handle] = sample
+            await self._check_block_budget(block.block_id, block_ms, budget_ms)
+
+    async def _check_block_budget(self, block_id: str, block_ms: float, budget_ms: float) -> None:
+        """Compara o custo de UM `block.step()` contra o orçamento e nomeia o bloco culpado.
+
+        Mesmo dedupe/rearme do `flow_overrun` (`_settle_grid` logo abaixo): sem isso, um
+        bloco preso acima do orçamento em toda varredura emitiria um evento por varredura —
+        rearma só quando o MESMO bloco fecha uma varredura dentro do orçamento de novo.
+        """
+        if block_ms <= budget_ms:
+            self._block_overrun_armed[block_id] = True
+            return
+        if not self._block_overrun_armed.get(block_id, True):
+            return
+        self._block_overrun_armed[block_id] = False
+        await publish_event(
+            self._redis,
+            severity="warning",
+            origin=self._origin,
+            message=(
+                f"Bloco {block_id} do flow {self._definition.flow_id} estourou o orçamento"
+                f" de {budget_ms:.1f} ms ({block_ms:.1f} ms)"
+            ),
+            kind=KIND_BLOCK_OVERRUN,
+            payload={
+                "flow_id": self._definition.flow_id,
+                "block_id": block_id,
+                "block_ms": block_ms,
+                "budget_ms": budget_ms,
+            },
+        )
 
     async def _settle_grid(self, index: int) -> int:
         """Devolve o índice da próxima varredura, pulando as fronteiras perdidas (§2.2-2).

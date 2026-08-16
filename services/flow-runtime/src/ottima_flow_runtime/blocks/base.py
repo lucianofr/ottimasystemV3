@@ -4,6 +4,13 @@
 Script (tarefa 1.3) espera o ProcessPool. Read e TFS não dão `await` em nada e não devem —
 nenhum bloco pode bloquear o event loop (ADR-004).
 
+Esse "nenhum bloco pode bloquear" é contrato de disciplina, não garantia estrutural: nada
+aqui impede um `step()` de gastar CPU síncrona inline (ARCH-11). O scheduler
+(`FlowTask._scan`) cronometra cada `step()` individualmente e publica `block_overrun`
+nomeando o bloco quando ele sozinho estoura o orçamento — observabilidade do desvio deste
+contrato, não uma correção estrutural que o impeça (a partição por processo que faria isso é
+decisão do ADR-004, não reaberta aqui).
+
 `inputs` traz **somente** as portas de entrada conectadas: quem monta o dicionário é o
 scheduler, a partir das arestas do grafo. Porta declarada e sem aresta simplesmente não
 aparece, e por isso `has_cold_input` não pergunta pelas portas que faltam.

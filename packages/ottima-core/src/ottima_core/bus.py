@@ -237,6 +237,8 @@ KIND_FLOW_DEPLOYED = "flow_deployed"
 KIND_FLOW_STOPPED = "flow_stopped"
 KIND_FLOW_FAILED = "flow_failed"
 KIND_FLOW_OVERRUN = "flow_overrun"
+# ARCH-11: bloco cujo custo síncrono sozinho já estoura o Ts do flow.
+KIND_BLOCK_OVERRUN = "block_overrun"
 KIND_SCRIPT_TIMEOUT = "script_timeout"
 KIND_SCRIPT_ERROR = "script_error"
 KIND_WRITE_SUPPRESSED = "write_suppressed"
