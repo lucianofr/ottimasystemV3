@@ -84,6 +84,26 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 - Um **git worktree por fase**; branch limpa; revisão em duas etapas antes de merge.
 - Contratos do PRD §7 entram **verbatim** nos planos (payloads dos canais, JSON de projeto).
 
+### Subagente em worktree: caminho ABSOLUTO, sempre
+
+**Sessão de subagente resolve caminho RELATIVO contra a raiz do repositório principal, não
+contra a worktree** — mesmo quando o arquivo foi lido pelo caminho absoluto da worktree
+momentos antes. O agente então escreve de um lado e verifica do outro, conclui que "a edição
+foi revertida", e o `main` amanhece sujo com edições que ninguém pediu. Já aconteceu duas
+vezes (`stash@{2}`, spill de `graph.ts`/`test_scheduler.py` na F4; e 2026-08-16, com 5 de 7
+agentes de um lote paralelo — um deles gastou ~20 min caçando um `git reset` que nunca houve).
+
+Regra, ao despachar qualquer agente para uma worktree:
+
+1. Todo `read`/`write`/`edit` usa o caminho **absoluto** da worktree, do `/home/...` em diante.
+2. Todo comando de shell passa `cwd` explícito da worktree — nunca herda o diretório da sessão.
+3. Depois de cada escrita, **confirme por shell** (`grep`/`wc -l`) que o conteúdo chegou ao
+   arquivo certo. A resposta de sucesso da ferramenta de edição não é prova.
+4. Antes de relatar trabalho concluído, `git status --porcelain` no checkout principal tem de
+   estar **vazio**.
+5. Uma worktree por agente quando eles rodam em paralelo: isola o `git status` de cada um e
+   impede que um `git add -A` de um recolha o trabalho pela metade de outro.
+
 ## Comandos (materializam na F1, estendidos na F2 e na F3 — manter esta seção atualizada)
 
 ```bash
