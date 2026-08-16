@@ -154,8 +154,15 @@ class FuzzyBlock(Block):
         try:
             for port, variable in zip(self._input_ports, self._engine.input_variables, strict=True):
                 variable.value = float(inputs[port].v)
-            # ponytail: process() inline (sub-ms em engine típico); mover a executor se overrun
-            # aparecer
+            # `process()` roda INLINE, e isso foi medido, não suposto (ARCH-11, 2026-08-16):
+            # 2in/1out/3 termos/centroid 200 = 0,49 ms de mediana; 4/2/5/500 = 1,43 ms;
+            # 6/3/9/1000 = 3,80 ms; e um config patológico de 8in/4out/15 termos/centroid 1000
+            # = 8,04 ms (p95 9,14). Contra o menor `Ts` que a planta usa hoje (2 s) isso é
+            # 0,4% do ciclo, e mesmo contra um `Ts` de 100 ms sobra uma ordem de grandeza.
+            # Mover para executor custaria um salto de thread por varredura e uma fonte de
+            # falha nova (starvation do pool) para economizar isso — não compensa.
+            # O gatilho para revisitar não é opinião: é o `block_overrun` que o scheduler
+            # emite quando UM bloco sozinho estoura o `Ts` do flow.
             self._engine.process()
         except Exception:
             logger.exception(

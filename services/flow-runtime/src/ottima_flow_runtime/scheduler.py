@@ -118,6 +118,7 @@ class FlowTask:
         self._task: asyncio.Task[None] | None = None
         self._t0 = 0.0
         self._scan_ms = 0.0
+        self._atraso_ms = 0.0
         self._overruns = 0
         self._last_scan_ts: datetime | None = None
         self._overrun_armed = True
@@ -131,6 +132,17 @@ class FlowTask:
     @property
     def scan_ms(self) -> float:
         return self._scan_ms
+
+    @property
+    def atraso_ms(self) -> float:
+        """Quanto a ÚLTIMA varredura demorou a PARTIR depois da fronteira dela (ARCH-11).
+
+        Distinto de `scan_ms`, que é o custo da varredura em si. `sleep_until` só devolve o
+        controle quando o event loop volta a rodar, então este número é o tempo que OUTRA
+        task do mesmo processo segurou o loop — a medida do lado da VÍTIMA, complementar ao
+        `block_overrun`, que nomeia o culpado do lado de lá.
+        """
+        return self._atraso_ms
 
     @property
     def overruns(self) -> int:
@@ -147,6 +159,7 @@ class FlowTask:
         self._reset_blocks()
         self._reset_ports()
         self._scan_ms = 0.0
+        self._atraso_ms = 0.0
         self._overruns = 0
         self._overrun_armed = True
         self._block_overrun_armed = {}
@@ -206,6 +219,15 @@ class FlowTask:
                 if self._staged is not None:
                     index = self._adopt_staged(self._staged, index)
                 fired_at = self._clock.monotonic()
+                # Atraso de PARTIDA (ARCH-11): `sleep_until` só devolve o controle quando o
+                # event loop volta a rodar. Se outra task do mesmo processo o segurou, este
+                # número é grande mesmo com a varredura desta task custando quase nada — e é
+                # a única evidência, do lado da vítima, de que a fronteira se perdeu por
+                # motivo alheio. Calculado DEPOIS de `_adopt_staged`, que pode reancorar
+                # `_t0` e devolver outro `index`.
+                self._atraso_ms = (
+                    fired_at - (self._t0 + index * self._definition.ts_seconds)
+                ) * 1000.0
                 fired_ts = self._clock.now()
                 await self._scan(fired_ts)
                 self._scan_ms = (self._clock.monotonic() - fired_at) * 1000.0
@@ -287,6 +309,14 @@ class FlowTask:
         `overruns` conta **varreduras** que fecharam depois da fronteira seguinte, não
         fronteiras puladas: é a leitura que o aceite "zero overruns" mede (E2E-F3-03). Uma
         varredura de 10×Ts conta 1, não 10.
+
+        O evento distingue duas causas que antes saíam com a MESMA mensagem (ARCH-11). Um
+        flow pode estourar a fronteira sem ter feito nada de errado: se outra task do mesmo
+        event loop segurou o processo, o `sleep_until` desta aqui volta tarde e a fronteira
+        já nasce perdida. Antes disso, a vítima publicava "a varredura estourou o ciclo de
+        0,1 s (0,3 ms)" — número que se contradiz e manda o engenheiro procurar lentidão no
+        flow errado. Agora `atraso_ms` e `scan_ms` saem os dois no payload, e quem dominar
+        escolhe a mensagem. O culpado, do outro lado, é nomeado pelo `block_overrun`.
         """
         ts_seconds = self._definition.ts_seconds
         now = self._clock.monotonic()
@@ -302,13 +332,23 @@ class FlowTask:
                 severity="warning",
                 origin=self._origin,
                 message=(
-                    f"Varredura do flow {self._definition.flow_id} estourou o tempo de ciclo"
-                    f" de {ts_seconds} s ({self._scan_ms:.1f} ms)"
+                    f"Flow {self._definition.flow_id} perdeu a fronteira por atraso de"
+                    f" partida de {self._atraso_ms:.1f} ms (varredura própria:"
+                    f" {self._scan_ms:.1f} ms) — outra task do mesmo processo segurou o"
+                    f" event loop"
+                    if self._atraso_ms > self._scan_ms
+                    else (
+                        f"Varredura do flow {self._definition.flow_id} estourou o tempo de"
+                        f" ciclo de {ts_seconds} s ({self._scan_ms:.1f} ms)"
+                    )
                 ),
                 kind=KIND_FLOW_OVERRUN,
                 payload={
                     "flow_id": self._definition.flow_id,
                     "scan_ms": self._scan_ms,
+                    # Aditivo ao payload (mesmo espírito do `status` do `MpcVarState`):
+                    # consumidor existente que só lê `overruns` continua válido.
+                    "atraso_ms": self._atraso_ms,
                     "ts_seconds": ts_seconds,
                     "overruns": self._overruns,
                 },

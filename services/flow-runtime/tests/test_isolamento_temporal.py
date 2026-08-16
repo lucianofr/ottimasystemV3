@@ -14,15 +14,30 @@ seria um teste que passa sem testar. Por isso as `FlowTask` são montadas à mã
 e a asserção é uma contagem grosseira em janela de tempo de parede.
 
 O gatilho é `time.sleep` num `step`, que é a forma honesta do custo inline que existe em
-produção: `blocks/fuzzy.py` roda `engine.process()` dentro do loop (com um comentário admitindo
-"mover a executor se overrun aparecer"), e PID/TFS/Kalman/First-Order fazem o mesmo em escala
-menor. Nenhum deles é assíncrono; todos somam no mesmo núcleo. Basta um engine grande, um laço
-numpy mal dimensionado ou um `Ts` pequeno para o cenário deste teste sair de "sub-ms, ninguém
-percebe" para "o flow do lado perdeu 10 fronteiras".
+produção: PID/TFS/Kalman/First-Order fazem aritmética escalar no mesmo núcleo, e o fuzzy roda
+`engine.process()` dentro do loop. Nenhum deles é assíncrono; todos somam.
 
-XFAIL: reprodução de defeito aberto. Fecha quando o custo inline dos blocos deixar de rodar no
-event loop compartilhado (executor por bloco caro, ou a partição de flows por processo que o
-ADR-004 já prevê: "um event loop por núcleo").
+XFAIL PERMANENTE, e isto é uma LIMITAÇÃO DOCUMENTADA, não um defeito à espera de dono. O que
+o teste reproduz é uma propriedade do modelo de concorrência, não um bug consertável dentro
+dele: num event loop cooperativo, um `step` que gasta 1,0 s de CPU síncrona PRENDE o processo,
+e nenhuma mudança no scheduler preempta código síncrono já em execução. As duas saídas reais
+são executor por bloco (troca o custo por um salto de thread em toda varredura) e partição por
+processo — e o ADR-004 já decidiu contra reabrir o modelo. Manter `strict=True` é deliberado:
+se um dia isto passar, o modelo mudou e alguém precisa saber.
+
+O que MUDOU em 2026-08-16 (ARCH-11) foi deixar o defeito de ser invisível, nas duas pontas:
+
+- **culpado:** o scheduler cronometra cada `block.step()` e emite `block_overrun` com o
+  `block_id` quando um bloco sozinho estoura o `Ts` (`test_block_overrun.py`);
+- **vítima:** `flow_overrun` passou a carregar `atraso_ms` (quanto a varredura demorou a
+  PARTIR) além de `scan_ms` (quanto ela custou), com mensagem própria quando o atraso domina
+  (`test_atraso_fronteira.py`). Antes, o flow vizinho publicava "a varredura estourou o ciclo
+  de 0,1 s (0,3 ms)" — um número que se contradiz e mandava procurar lentidão no flow errado.
+
+E o suspeito nomeado foi medido em vez de presumido: o `engine.process()` do fuzzy custa
+0,49 ms num config típico e 8,04 ms num patológico (8in/4out/15 termos/centroid 1000), contra
+um `Ts` de planta de 2 s. Nenhum bloco do catálogo atual chega perto de roubar a fronteira de
+um irmão; o risco é de bloco FUTURO, e agora ele acusa sozinho.
 """
 
 import asyncio
