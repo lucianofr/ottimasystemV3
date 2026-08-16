@@ -318,6 +318,9 @@ test("tagsPorDirecao filtra por W (write/mode_cmd) e R (readback/mode_read)", ()
   const tag = (id: number, direction: "r" | "w"): TagOut => ({
     id,
     connection_id: 1,
+    // Tag OPC de conexão: `project_id` nulo. A Tag calculada é o inverso
+    // (`connection_id: null` + `project_id` dono) — ver GLOSSARY.
+    project_id: null,
     name: `tag${String(id)}`,
     node_id: `ns=2;s=tag${String(id)}`,
     direction,

@@ -3,7 +3,7 @@
 **Base:** branch `audit/arquitetura` @ `e38f528` (worktree `.worktrees/audit-arquitetura`)
 **Método:** 7 explorações paralelas somente-leitura sobre os hot spots dos últimos 120 commits
 **Achados:** 22 candidatos de aprofundamento — 12 Strong, 10 Worth exploring, 0 Speculative
-**Recomendação de primeiro corte:** ARCH-07
+**Recomendação de primeiro corte:** ARCH-07 — executado e reformulado pelo grilling (ver Apuração no achado). Próximo: ARCH-01
 **Débito registrado:** TD-015 a TD-024 (`_tech-debt.md`)
 
 Auditoria de *aprofundamento*: onde um module é raso (interface quase tão complexa quanto a
@@ -256,6 +256,52 @@ O seam `graph_json` tem uma parte disciplinada e três pontos de risco real. Dis
 **Correção sugerida:** Gerar uma tabela de defaults a partir do campo 'default' que model_json_schema() já emite por propriedade (mesmo pipeline do ARCH-06) e trocar os literais hand-typed de graphMpc.ts por leituras dessa tabela, corrigindo de quebra o fixture stale de graph.check.ts:611 e adicionando a asserção de `max_rate` que falta hoje.
 
 **Ganhos:** Defaults concentrados: um Field, uma origem · Teste fixa max_rate, não só chaves · Locality: retrocompat sai de 12 funções · Interface gerada elimina comentário não verificado
+
+**Apuração (grilling, 2026-08-15).** A alegação central deste achado — "um regresso que zera
+`max_rate` passaria pelo test_surface inteiro sem ser notado" — é **FALSA**, e fica registrada como
+erro de levantamento. A regra `max_rate > 0` tem três camadas:
+
+- **servidor:** `validate.py::_check_mpc_numbers:749-750` recusa com mensagem pt-BR ("a MV 'X'
+  precisa de max_rate > 0");
+- **editor:** `mpcLogic.ts:495` espelha a regra como erro bloqueante do Resumo;
+- **trava cross-language:** `mpcLogic.golden.json:1562` carrega `"max_rate": 0.0` sob
+  `"regra": "numbers_mv_max_rate_nao_positivo"` — o mecanismo golden do MPC já cobre o caso.
+
+A ausência de `gt=0` no `MvVar` **não é débito**: é decisão documentada em `mpc_config.py:141-143`
+(um `gt` do Pydantic trocaria o 422 legível pela localização do campo). O `parse_graph` aceitar
+`graph_json` sem `max_rate` também não é lacuna: `MpcRawConfig` repassa o bloco `mpc` sem validar
+conteúdo de propósito (`parse.py:233-242`), e `MpcConfig.model_validate` roda em
+`validate_graph::_parse_mpc_configs:604`. Verificado executando os dois caminhos: sem `max_rate` →
+`"config não confere com a spec F4 §2.1 (campos: variables.mvs.0.max_rate, variables.mvs.0.du_max)"`;
+com `max_rate: 0` → `"a MV 'mv_x7k2' precisa de max_rate > 0"`.
+
+**O que era real e foi corrigido:**
+
+1. `graphMpc.ts:157` fabricava `0` para um campo **required**, sob um comentário que declarava os
+   defaults como "os mesmos do `MvVar` do servidor" — verdadeiro para `du_min`/`move_weight`
+   (TD-007), falso para `max_rate`, que não tem default. O `0` é justamente o valor de MV congelada
+   (`du_max_ciclo = max_rate × Ts_mpc`, `builder.py:347`; o ADR-028 congela MV com `dumax = 0`).
+   Comportamento **mantido** — o sentinela é a escolha certa, porque o Resumo o barra e inventar uma
+   taxa plausível esconderia config incompleto — mas o comentário passou a dizer a verdade.
+2. O fixture de retrocompatibilidade (`graph.check.ts:611`) carregava `du_max: 5`, chave sem leitor,
+   e o teste não asserava `max_rate`. Corrigido para `max_rate: 5` + asserção de passthrough.
+3. Teste novo fixando o contrato do sentinela: `graph_json` sem `max_rate` → leitor devolve `0` →
+   `validarConfigMpc` bloqueia com "taxa máxima maior que zero".
+
+**Severidade real:** o raio de dano é UX em dado legado ou editado à mão, **não risco de planta**.
+`graph_json` sem `max_rate` não salva (422), não deploya, e a migração 0009 já converteu o banco. O
+que existia de fato era o editor exibir um `0` fabricado em vez de dizer que o config está
+incompleto — e isso não era coberto por nada.
+
+**Veredito sobre a metade "tabela de defaults gerada": DESCARTADA.** Falha no deletion test na forma
+proposta. `max_rate` não tem default para gerar (é required); os campos que têm default (`du_min`,
+`move_weight`, `zero`, `span`, `description`, `objective`, `fail_action`, `traj_tau_s`, `track_sp`,
+`fail_timeout_s`, `priority`, `operating_point`) já são espelhados corretamente, e o mecanismo golden
+já trava as REGRAS que importam. Gerar a tabela não concentraria complexidade: moveria os literais
+para um gerador e acrescentaria um artefato gerado, para proteger uma classe de divergência que
+produziu zero defeitos observados. O espelho manual continua sendo a escolha barata e certa aqui.
+**O ARCH-06 (gerar a FORMA das interfaces) não cai por associação** — é outra alegação, sobre 12
+interfaces hand-typed, e segue de pé.
 
 ---
 
@@ -777,30 +823,33 @@ verificado e está estruturalmente certo:
 
 ---
 
-## Recomendação de primeiro corte — ARCH-07
+## Primeiro corte — ARCH-07, executado
 
-É o único achado onde a auditoria confirmou **defeito latente**, não apenas fricção. Verificado
-arquivo por arquivo:
+Foi o corte escolhido e o grilling o **reformulou para menos**. A alegação de partida ("regresso que
+zera `max_rate` passa verde") era falsa: a regra tem três camadas e o mecanismo golden do MPC já a
+cobre. A Apuração completa está no próprio ARCH-07, com os caminhos executados e as linhas exatas.
 
-- `frontend/src/features/flows/graph.check.ts:611` alimenta o fixture de retrocompatibilidade do MPC
-  com a chave `du_max`.
-- Essa chave não tem leitor: `grep du_max frontend/src/features/flows/mpc/graphMpc.ts` → nenhuma
-  ocorrência. O campo real é `max_rate` desde a migração `0009_mpc_max_rate.py`.
-- As asserções do teste (`graph.check.ts:648-651`) olham só `objective` e `psv`.
+Sobrou — e foi feito — o que era verdade:
 
-**Consequência:** um regresso que zere `max_rate` — o limite de taxa de variação de uma MV, campo com
-peso de segurança — atravessa o teste de retrocompatibilidade verde. A cobertura desse caminho está
-silenciosamente vazia.
+- fixture de retrocompatibilidade corrigido (`du_max` → `max_rate`) e a asserção de passthrough que
+  faltava, com RED provado revertendo o fixture (`Received: 0` contra `toBe(5)`);
+- teste novo fixando o contrato do sentinela (`graph_json` sem `max_rate` → `0` → Resumo bloqueia);
+- comentário de `graphMpc.ts:157` corrigido: declarava um default de servidor que não existe.
 
-**Corte mínimo (não depende de refactor nenhum):** trocar `du_max` por `max_rate` no fixture e
-acrescentar a asserção do valor resultante. Depois, o aprofundamento do ARCH-07/ARCH-06: gerar a
-tabela de defaults do `model_json_schema()` e apagar os literais das 12 funções `ler*()`.
+A metade "gerar a tabela de defaults" foi **descartada por falhar no deletion test** — moveria
+literais para um gerador e acrescentaria um artefato, contra uma classe de divergência com zero
+defeitos observados.
+
+Achado adjacente, colhido no caminho: `npm run typecheck` estava **vermelho** em `e38f528`
+(`mpcLogic.check.ts:318`, fixture de `TagOut` sem `project_id`, campo que a Tag calculada
+introduziu). É recorrência literal do TD-010 — `*.check.ts` fica fora do typecheck do `build` por
+design, então só `npm run typecheck` pega, e nada o mecaniza. Corrigido; a causa raiz está no TD-023.
 
 ### Sequência sugerida
 
 | Ordem | Achado | Por quê |
 |---|---|---|
-| 1 | ARCH-07 | risco verificado em campo de segurança; corte mínimo é pequeno e isolado |
+| 1 | ~~ARCH-07~~ | **executado**; alegação de severidade corrigida pelo grilling, metade do aprofundamento descartada |
 | 2 | ARCH-01 | maior retorno em fricção e a divergência de comportamento já reportada entre as telas de tendência; ADR-030 já manda reusar, não há decisão a reabrir |
 | 3 | ARCH-18 | ~17 edições mecânicas em 6 arquivos por Bloco novo, no eixo de extensibilidade central do produto |
 | 4 | ARCH-11 | defeito aberto e admitido via `xfail(strict=True)`; fecha a lacuna intra-partição sem reabrir o ADR-004 |

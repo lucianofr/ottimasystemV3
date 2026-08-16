@@ -35,6 +35,7 @@
 | **SOPDT** | Modelo de 2ª ordem com tempo morto (K, τ1, τ2, θ) por par MV→CV / DV→CV, para CVs autorreguláveis. |
 | **Processo integrador** | CV que não estabiliza (rampa); modelado por ganho integrador Ki + θ por par. Tipo de resposta definido por CV. |
 | **Multiplicador (MPC)** | N tal que o bloco MPC executa a cada N varreduras do flow (Ts_mpc = N × Ts_flow). |
+| **Taxa máxima (max_rate)** | Limite de variação de uma MV, em **EU/s** — o Δu permitido por ciclo do solve é `max_rate × Ts_mpc`. Chamava-se `du_max` e era EU/**ciclo** até o RF-604 revisado (migração `0009_mpc_max_rate`); a coordenada é ABSOLUTA, a mesma de `limits` e `initial_value`. **Obrigatório, sem default**: um `graph_json` sem a chave é config incompleto, não config antigo válido. O piso `max_rate > 0` não vive no Pydantic de propósito (um `gt` trocaria o 422 legível pela localização do campo) — mora em `validate._check_mpc_numbers`, espelhado no Resumo do editor e travado pelo golden cross-language. `max_rate × Ts_mpc = 0` é o mecanismo de **MV congelada** do ADR-028. |
 | **Deploy** | Ato explícito de colocar um flow em execução. Após boot, flows sobem parados aguardando deploy. |
 | **Faceplate** | Painel de operação de um elemento: principal (modos/status/comandos do MPC) e menores (uma variável cada: CV+SP, MV, DV). |
 | **Tela de operação** | Tela dedicada por MPC: faceplate principal + faceplates das variáveis (base) + tendência central com histórico e **predição** (PVs/MVs no horizonte Np). |

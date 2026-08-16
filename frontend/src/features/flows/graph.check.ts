@@ -26,6 +26,7 @@ import {
   type FaixaMpc,
   type MapaTags,
 } from "./graph";
+import { validarConfigMpc } from "./mpc/mpcLogic";
 
 const POS = { x: 0, y: 0 };
 
@@ -608,7 +609,7 @@ test("nó mpc salvo antes da feature, sem objective/psv, carrega com defaults re
                 name: "Vazão de refluxo",
                 eu: "m3/h",
                 limits: { min: 0, max: 100 },
-                du_max: 5,
+                max_rate: 5,
                 initial_value: 0,
                 pid: null,
               },
@@ -649,6 +650,56 @@ test("nó mpc salvo antes da feature, sem objective/psv, carrega com defaults re
   expect(no.data.variables.mvs[0].psv).toBeNull();
   expect(no.data.variables.cvs[0].objective).toBe("none");
   expect(no.data.variables.constraints[0].objective).toBe("none");
+  // `max_rate` é REQUIRED no `MvVar` do servidor (sem default): o leitor precisa repassar o
+  // valor salvo, nunca fabricar um. A asserção existe porque a ausência dela deixava passar
+  // um regresso que trocasse o passthrough pelo sentinela `0` — que é o valor de MV
+  // congelada (`du_max_ciclo = max_rate × Ts_mpc`, `mpc/builder.py`; ADR-028).
+  expect(no.data.variables.mvs[0].max_rate).toBe(5);
+});
+
+test("mv sem max_rate no graph_json cai no sentinela 0 e o Resumo bloqueia (campo required no servidor)", () => {
+  // Diferente de `du_min`/`move_weight`, `max_rate` não tem default no `MvVar`: um
+  // `graph_json` sem a chave é config INCOMPLETO, não config antigo válido. O leitor devolve
+  // `0` de propósito — valor que `validarConfigMpc` recusa — em vez de inventar uma taxa
+  // plausível que o usuário nunca digitou. `validate_graph` do servidor recusa o mesmo caso
+  // ("a MV precisa de max_rate > 0"), então o sentinela nunca chega à planta.
+  const grafo = deGraphJson({
+    nodes: [
+      {
+        id: "m",
+        type: "mpc",
+        position: POS,
+        data: {
+          exec_order: 1,
+          label: "",
+          name: "MPC incompleto",
+          multiplier: 5,
+          variables: {
+            mvs: [
+              {
+                id: "mv_x7k2",
+                name: "Vazão de refluxo",
+                eu: "m3/h",
+                limits: { min: 0, max: 100 },
+                initial_value: 0,
+                pid: null,
+              },
+            ],
+            cvs: [],
+            constraints: [],
+            dvs: [],
+          },
+          models: {},
+        },
+      },
+    ],
+    edges: [],
+  });
+  const no = grafo.nodes[0];
+  if (no?.type !== "mpc") throw new Error("tipo preservado");
+  expect(no.data.variables.mvs[0].max_rate).toBe(0);
+  const erros = validarConfigMpc(no.data.variables, no.data.models, 5, 1).erros;
+  expect(erros.some((e) => e.includes("taxa máxima maior que zero"))).toBe(true);
 });
 
 test("ida e volta preserva objective/psv configurados nas variáveis do mpc", () => {

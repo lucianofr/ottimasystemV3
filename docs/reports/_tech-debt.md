@@ -27,12 +27,6 @@ _Debt that causes recurring problems or bugs._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
-- [ ] **TD-015**: Retrocompatibilidade de `max_rate` sem cobertura — fixture do teste usa `du_max`, chave que nenhum leitor consome
-  - **Impact:** High - regresso que zere a taxa máxima de variação de uma MV atravessa o teste verde
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-07
-  - **Effort:** 1h o corte mínimo (fixture + asserção); 1 dia o aprofundamento (tabela de defaults gerada do `model_json_schema()`)
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-15
 - [ ] **TD-016**: Isolamento temporal entre Flows da mesma partição depende de disciplina de Bloco, não de estrutura
   - **Impact:** High - um Bloco com custo síncrono inline rouba a fronteira de varredura dos irmãos; `test_isolamento_temporal.py:101` é `xfail(strict=True)` permanente
   - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-11
@@ -57,12 +51,13 @@ _Debt that makes development harder but doesn't block._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
-- [ ] **TD-018**: Forma do nó e defaults do `graph_json` reescritos à mão em TypeScript, fora do pipeline de geração que já existe
-  - **Impact:** Medium - `contracts_export.py` já gera PORT_CONTRACTS e ws_payloads do `model_json_schema()`, mas a config por bloco fica manual em `graph.ts` e `graphMpc.ts`
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-06, ARCH-07
+- [ ] **TD-018**: Forma dos configs de bloco do `graph_json` reescrita à mão em TypeScript, fora do pipeline de geração que já existe
+  - **Impact:** Medium - `contracts_export.py` já gera PORT_CONTRACTS e ws_payloads do `model_json_schema()`, mas a FORMA de `MvVar`/`CvVar`/`MpcConfig`/`ScriptConfig`/`FuzzyConfig`/`TfsConfig`/`PidConfig` continua hand-typed em `graph.ts`
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-06
   - **Effort:** 2 dias
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
+  - **Escopo reduzido em 2026-08-15:** a metade "gerar tabela de DEFAULTS" (ARCH-07) foi descartada por falhar no deletion test — `max_rate` é required e não tem default para gerar; os campos que têm default já são espelhados certo e o mecanismo golden do MPC já trava as regras. Só a geração da FORMA sobrevive.
 - [ ] **TD-019**: Migração de dados sobre `graph_json` (0009) reescreve o contrato sem validar e sem teste
   - **Impact:** Medium - único caminho de escrita em `graph_json` fora da validação de save da API; migração futura herda o ponto cego
   - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-08
@@ -87,9 +82,9 @@ _Debt that makes development harder but doesn't block._
   - **Effort:** 1 dia (`_assemble_model` / `_compile_solver`; o seam de `mpc/host.py` já existe)
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
-- [ ] **TD-023**: Gate `ruff format --check` documentado no CLAUDE.md sem nada que o mecanize
-  - **Impact:** Medium - 18 arquivos ficaram fora do padrão sem ninguém notar; `.github/workflows/` não existe
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — Nota de processo
+- [ ] **TD-023**: Gates documentados no CLAUDE.md sem nada que os mecanize
+  - **Impact:** Medium - dois casos comprovados no mesmo commit `e38f528`: `ruff format --check` vermelho em 18 arquivos, e `npm run typecheck` vermelho em `mpcLogic.check.ts:318` (fixture de `TagOut` sem `project_id`) — este último é recorrência literal do TD-010, porque `*.check.ts` fica fora do typecheck do `build` por design e só `npm run typecheck` o pega. `.github/workflows/` não existe
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — Primeiro corte, achado adjacente
   - **Effort:** 4h, mas exige decisão com ADR (CI é escolha de arquitetura, não conserto mecânico)
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
@@ -182,6 +177,14 @@ _Completed tech debt items. Keep for 90 days then archive._
   - **Resolved:** 2026-08-11
   - **Resolution:** Um cenário L2 (`tests/e2e/test_td_filtros.py::test_e2e_td_10_kalman_deployado_filtra_e_escreve_na_planta`, E2E-TD-10) deploya `opc_read -> kalman -> opc_write` contra o stack real e prova, por 8 amostras consecutivas pós-partida, que a saída do Kalman diverge da leitura bruta na MESMA varredura (filtra de verdade, não repassa) e que o valor filtrado chega à planta simulada via o mirror do opcsim, com variação ao longo do tempo (entrega viva, não escrita parada). `first_order` não ganha cenário próprio — mesmo contrato de porta única/config escalar (RF-531) e mesmo caminho de execução do motor; o Kalman é o mais rico dos dois para provar filtragem de verdade. L3 (`frontend/e2e/filtros.spec.ts`, PW-FT-01, arquivo próprio pelo mesmo critério de `filtros.check.ts`) configura os dois blocos pelo modal (`tau`/`measurement_noise`/`process_noise`) e prova round-trip via reload + `GET /api/flows/{id}.graph_json` como fonte de verdade; `tau` novo fica bem acima de `Ts/DIRECT_PASS_RATIO` (TD-011) para o cenário ficar sobre o round-trip, não sobre o rótulo de borda.
   - **Prova:** L2: `uv run pytest -q -m e2e tests/e2e/test_td_filtros.py` → 1 passed; confirmado excluído do run default (`uv run pytest -q tests/e2e/test_td_filtros.py` → 1 deselected). L3: `npx playwright test filtros.spec.ts` → 1 passed; confirmado fora de `playwright.unit.config.ts` (`--list` não lista o arquivo).
+- [x] **TD-015**: Retrocompatibilidade de `max_rate` sem cobertura — fixture do teste usava `du_max`, chave que nenhum leitor consome
+  - **Resolved:** 2026-08-15
+  - **Severidade corrigida:** o débito foi aberto afirmando que "um regresso que zere `max_rate` atravessa o teste verde". **Falso** — apurado no grilling do ARCH-07: a regra `max_rate > 0` tem três camadas (`validate.py::_check_mpc_numbers:749-750` no servidor, `mpcLogic.ts:495` no editor, e a trava cross-language `mpcLogic.golden.json:1562` sob `"regra": "numbers_mv_max_rate_nao_positivo"`). A ausência de `gt=0` no `MvVar` é decisão documentada (`mpc_config.py:141-143`), não débito, e o `parse_graph` não validar conteúdo de `mpc` é deliberado (`MpcRawConfig`, `parse.py:233-242`), com `MpcConfig.model_validate` rodando em `validate_graph::_parse_mpc_configs:604`. Raio de dano real: UX em dado legado ou editado à mão — `graph_json` sem `max_rate` não salva (422), não deploya, e a 0009 já converteu o banco.
+  - **Resolution:** O que era verdade, corrigido em três pontos. (a) `graph.check.ts:611` trocou `du_max: 5` por `max_rate: 5` e o teste de retrocompat ganhou a asserção de passthrough que faltava. (b) Teste novo fixando o contrato do sentinela: `graph_json` sem `max_rate` ⇒ leitor devolve `0` ⇒ `validarConfigMpc` bloqueia com "taxa máxima maior que zero" — o `0` é deliberadamente o valor de MV congelada (`du_max_ciclo = max_rate × Ts_mpc`, `builder.py:347`; ADR-028), e inventar uma taxa plausível esconderia config incompleto. (c) O comentário de `graphMpc.ts:157` declarava o `0` como "mesmo default do `MvVar` do servidor" — falso, o campo é required; passou a dizer a verdade. Nenhuma mudança de comportamento.
+  - **Prova:** RED provado revertendo o fixture para `du_max: 5` com a asserção nova no lugar: `Received: 0` contra `toBe(5)` em `graph.check.ts:657`. GREEN: `npm run test:unit` 590 passed (era 589), `npm run typecheck` limpo, `npm run build` verde.
+  - **Achado adjacente corrigido junto:** `npm run typecheck` estava vermelho já em `e38f528` (`mpcLogic.check.ts:318`, fixture de `TagOut` sem `project_id`, campo que a Tag calculada introduziu) — recorrência literal do TD-010. Corrigido; a causa raiz (gate sem enforcement) segue aberta no TD-023.
+  - **Descartado com motivo:** a metade "gerar tabela de defaults do `model_json_schema()`" falha no deletion test — `max_rate` é required e não tem default para gerar, os campos que têm default já são espelhados corretamente, e o mecanismo golden já trava as regras. Moveria literais para um gerador e acrescentaria um artefato gerado contra uma classe de divergência com zero defeitos observados. O TD-018 foi reduzido à geração da FORMA (ARCH-06), que segue de pé.
+
 
 ---
 
@@ -190,10 +193,10 @@ _Completed tech debt items. Keep for 90 days then archive._
 | Category | Count | Oldest |
 |----------|-------|--------|
 | Critical | 0 | - |
-| High | 3 | 2026-08-15 |
+| High | 2 | 2026-08-15 |
 | Medium | 6 | 2026-08-15 |
 | Low | 1 | 2026-08-15 |
-| **Total Open** | **10** | 2026-08-15 |
+| **Total Open** | **9** | 2026-08-15 |
 
 _Last updated: 2026-08-15_
 

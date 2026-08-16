@@ -154,6 +154,11 @@ function lerVariavelMv(bruto: unknown): VariavelMv | null {
     zero: numero(cru.zero, 0),
     span: numero(cru.span, 100),
     limits: lerLimitesMpc(cru.limits),
+    // `max_rate` NÃO tem default no `MvVar` do servidor — é required. O `0` aqui é sentinela
+    // deliberado de config INCOMPLETO, não espelho de default: `validarConfigMpc` recusa
+    // (`max_rate > 0`) e `validate.py::_check_mpc_numbers` recusa igual no save, então o
+    // sentinela nunca chega à planta. Fabricar uma taxa plausível esconderia o config
+    // incompleto; `0` é justamente o valor de MV congelada, que o Resumo barra na cara.
     max_rate: numero(cru.max_rate, 0),
     // TD-007: `graph_json` salvo antes desta tarefa não tem os campos — `0`/`1` são os
     // mesmos defaults do `MvVar` do servidor (`du_min: 0.0`, `move_weight: 1.0`).

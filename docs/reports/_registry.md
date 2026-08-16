@@ -28,7 +28,7 @@
 
 ## 2026-08-15
 
-- arch-review-20260815 | Completed | Auditoria de arquitetura @e38f528, 7 fatias em paralelo: 22 candidatos de aprofundamento (12 Strong, 10 Worth exploring), 0 contradizendo ADR. ARCH-07 é defeito latente verificado — fixture de retrocompat usa `du_max` (chave sem leitor) e nunca assere `max_rate`, então regresso que zere a taxa máxima de MV passa verde. Gerou TD-015 a TD-024
+- arch-review-20260815 | Completed | Auditoria de arquitetura @e38f528, 7 fatias em paralelo: 22 candidatos de aprofundamento (12 Strong, 10 Worth exploring), 0 contradizendo ADR. Registra também a saúde confirmada (contrato de Bloco deep, Canal ao vivo sem repasse puro, seam com asyncua contido, RBAC num lugar só). ARCH-07 foi aprofundado no mesmo dia e o grilling **corrigiu a severidade para baixo**: a alegação de que um regresso em `max_rate` passaria verde era falsa (três camadas enforçam a regra, incluindo a trava golden). Sobrou fixture stale + asserção ausente, corrigidos; metade do aprofundamento descartada por falhar no deletion test. Gerou TD-015 (já resolvido) a TD-024
 
 ---
 
