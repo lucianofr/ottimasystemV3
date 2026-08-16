@@ -29,10 +29,12 @@ import {
   atribuirCoresPenas,
   dividirSpPorAuto,
   emendarPlanoNoDivisor,
+  idPenaSp,
   mesclarSeriesVivas,
   montarOverlayPrevisao,
   selecionarPenasDefault,
   tetoCarryForwardOperacaoS,
+  tracoPenaSp,
   ultimoCarimboHistorico,
   type AmostraViva,
   type OverlayPrevisao,
@@ -83,19 +85,6 @@ function corClara(cor: string): string {
 function corTransparente(cor: string): string {
   return `color-mix(in oklch, ${cor}, transparent 80%)`;
 }
-
-/** SP rastreado: mesmo matiz puxado para o texto do poço. O valor do texto entra RESOLVIDO
- *  (`tema.texto`) porque `color-mix` vai para o canvas, que não resolve `var()` — não há
- *  elemento de onde herdar a custom property. */
-function corDessaturada(cor: string, texto: string): string {
-  return `color-mix(in oklch, ${cor}, ${texto} 60%)`;
-}
-
-/** SP: pontilhado no matiz da própria CV. O Azul Único nunca codifica dado (DESIGN §Colors —
- *  A Regra do Azul Único), e pena azul sem entrada na legenda é linha órfã na tela do
- *  operador. Padrão distinto do tracejado da predição (`[5, 5]` em `tracoComFade`): sólido =
- *  PV medido, pontilhado = SP comandado, tracejado = futuro. */
-const TRACO_SP = [2, 4];
 
 /** CV/Restrição tracejada: mesmo matiz mais claro, com fade ao horizonte (§7.4-6). O
  *  gradiente vai de `corClara` em "agora" a quase transparente na ponta do horizonte —
@@ -243,49 +232,53 @@ function montarColunas(
     return pushColuna(alinharNoEixo(eixoX, plano.t, plano.v, 0), { ...opts, spanGaps: true });
   }
 
-  // CVs (PV + SP) — linhas de `overlay.cv` = CVs na ordem do config, depois Restrições
-  // (spec F4 §5.1/F5 §3.2); o índice de linha é sempre o da posição no config, ligada ou não.
+  // CVs — linhas de `overlay.cv` = CVs na ordem do config, depois Restrições (spec F4 §5.1/F5
+  // §3.2); o índice de linha é sempre o da posição no config, ligada ou não.
   // Cada variável tem escala própria (`chaveEscala`, tarefa 2.3): PV, previsto, SP e SP
   // rastreado da MESMA CV compartilham a escala — sem isso uma CV em % e outra em t/h
-  // achatariam uma contra a outra no mesmo eixo.
+  // achatariam uma contra a outra no mesmo eixo. A pena de SP é INDEPENDENTE da pena da CV
+  // (emenda de §7.4-6): o operador liga o alvo quando quer, e ligar só o SP ainda desenha —
+  // a escala da CV existe porque `escalasUplot` a monta pelo `varId` da pena, não pelo id dela.
   mpc.variables.cvs.forEach((cv, indiceLinha) => {
-    if (!ligadas.has(cv.id)) return;
+    const cvLigada = ligadas.has(cv.id);
+    const spLigada = ligadas.has(idPenaSp(cv.id));
+    if (!cvLigada && !spLigada) return;
     const historica = porId.get(cv.id) ?? SERIE_VAZIA(cv.id);
     const cor = cores.get(cv.id) ?? corPadrao;
     const scale = chaveEscala(cv.id);
-    pushHistorico(historica.t, historica.v, {
-      label: `${cv.name} PV`,
-      stroke: cor,
-      width: 1.5,
-      spanGaps: false,
-      points: { show: false },
-      scale,
-    });
-    pushPrevisao(overlay.cv[indiceLinha] ?? [], false, {
-      label: `${cv.name} previsto`,
-      stroke: tracoComFade(cor, overlay.agora),
-      width: 1.5,
-      dash: [5, 5],
-      points: { show: false },
-      scale,
-    });
-    const divisao = dividirSpPorAuto(historica.sp, historica.auto);
-    pushHistorico(historica.t, divisao.comandado, {
-      label: `${cv.name} SP`,
-      stroke: cor,
-      width: 1.5,
-      dash: TRACO_SP,
-      points: { show: false },
-      scale,
-    });
-    pushHistorico(historica.t, divisao.rastreado, {
-      label: `${cv.name} SP rastreado`,
-      stroke: corDessaturada(cor, tema.texto),
-      width: 1.5,
-      dash: TRACO_SP,
-      points: { show: false },
-      scale,
-    });
+    if (cvLigada) {
+      pushHistorico(historica.t, historica.v, {
+        label: `${cv.name} PV`,
+        stroke: cor,
+        width: 1.5,
+        spanGaps: false,
+        points: { show: false },
+        scale,
+      });
+      pushPrevisao(overlay.cv[indiceLinha] ?? [], false, {
+        label: `${cv.name} previsto`,
+        stroke: tracoComFade(cor, overlay.agora),
+        width: 1.5,
+        dash: [5, 5],
+        points: { show: false },
+        scale,
+      });
+    }
+    if (spLigada) {
+      const divisao = dividirSpPorAuto(historica.sp, historica.auto);
+      pushHistorico(historica.t, divisao.comandado, {
+        label: `${cv.name} SP`,
+        ...tracoPenaSp(cor, tema.texto, false),
+        points: { show: false },
+        scale,
+      });
+      pushHistorico(historica.t, divisao.rastreado, {
+        label: `${cv.name} SP rastreado`,
+        ...tracoPenaSp(cor, tema.texto, true),
+        points: { show: false },
+        scale,
+      });
+    }
   });
 
   // Restrições — banda low/high sombreada no Poço; a pena de PV conta no teto (brief 5.3), a
@@ -620,10 +613,10 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   const [ligadas, setLigadas] = useState<ReadonlySet<string>>(
     () => new Set(defaults.filter((pena) => pena.ligada).map((pena) => pena.id)),
   );
-  // Variável focada (tarefa 2.3): dona do único eixo Y visível. Default = primeira ligada;
-  // depois disso, a última ligada pela legenda assume o foco (ver `alternarPena`).
+  // Variável focada (tarefa 2.3): dona do único eixo Y visível. Default = variável da primeira
+  // pena ligada; depois disso, a variável da última pena ligada assume o foco (`alternarPena`).
   const [foco, setFoco] = useState<string | null>(
-    () => defaults.find((pena) => pena.ligada)?.id ?? null,
+    () => defaults.find((pena) => pena.ligada)?.varId ?? null,
   );
   const [aviso, setAviso] = useState<string | null>(null);
 
@@ -643,16 +636,23 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   }
 
   /** Clique na legenda (brief 5.3): desligar nunca é bloqueado; ligar respeita o mesmo teto
-   *  de 8 penas dos defaults — sem isso o operador furaria o teto pena por pena. A variável
-   *  ligada por último vira o foco do eixo Y (tarefa 2.3); desligar a focada passa o foco
-   *  para outra ligada (ou nenhuma, se essa era a última). */
+   *  de 8 penas dos defaults — sem isso o operador furaria o teto pena por pena. A pena ligada
+   *  por último traz o eixo Y para a VARIÁVEL dela (tarefa 2.3): a pena de SP tem o `varId` da
+   *  própria CV, então ligar o alvo aponta o eixo para a CV, nunca para uma escala que não
+   *  existe. Desligar a pena que sustentava o foco passa o eixo para outra variável desenhada
+   *  (ou nenhuma, se essa era a última). */
   function alternarPena(pena: PenaLegenda): void {
     if (ligadas.has(pena.id)) {
       const proxima = new Set(ligadas);
       proxima.delete(pena.id);
       setLigadas(proxima);
       setAviso(null);
-      if (foco === pena.id) setFoco([...proxima][0] ?? null);
+      // O eixo é de uma VARIÁVEL, não de uma pena: só cai quando a variável perde a última pena
+      // ligada — desligar o SP de uma CV que continua desenhada não mexe no eixo dela.
+      const focoSobrevive = defaults.some((item) => proxima.has(item.id) && item.varId === foco);
+      if (!focoSobrevive) {
+        setFoco(defaults.find((item) => proxima.has(item.id))?.varId ?? null);
+      }
       return;
     }
     const custoAtual = defaults.reduce(
@@ -664,17 +664,17 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
       return;
     }
     setLigadas(new Set([...ligadas, pena.id]));
-    setFoco(pena.id);
+    setFoco(pena.varId);
     setAviso(null);
   }
 
-  /** Clique na linha da legenda: a variável clicada passa a ser dona do único eixo Y visível.
+  /** Clique na linha da legenda: a variável da linha passa a ser dona do único eixo Y visível.
    *  Pena desligada não pode ser foco — o eixo pertence a quem está desenhado —, então a linha
    *  liga a pena pelo mesmo caminho do checkbox, que já respeita o teto e leva o foco com ela.
    *  Nenhum clique na linha desliga pena nenhuma: mover o eixo nunca apaga uma variável. */
   function focarPena(pena: PenaLegenda): void {
     if (ligadas.has(pena.id)) {
-      setFoco(pena.id);
+      setFoco(pena.varId);
       // O aviso do teto é de uma tentativa de ligar pena, não do eixo: sem limpar aqui, ele
       // ficaria pendurado na tela enquanto o operador só troca de eixo, descrevendo outra ação.
       setAviso(null);
@@ -698,12 +698,18 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     [mpc, seriesMescladas, overlay, tema, cores, coresPena, ligadas, tetoCarryS],
   );
 
+  // Escalas do uPlot pelo `varId` das penas ligadas, não pelo id delas: a pena de SP desenha na
+  // escala da própria CV (mesma grandeza), então ligar só o SP tem de montar a escala da CV.
+  const varsLigadas = useMemo(
+    () => [...new Set(defaults.filter((pena) => ligadas.has(pena.id)).map((pena) => pena.varId))],
+    [defaults, ligadas],
+  );
   const escalasUplot = useMemo(
     () =>
       construirEscalasUplot(
-        [...ligadas].map((id) => ({ id, escala: escalasPorVar[id] ?? ESCALA_AUTO })),
+        varsLigadas.map((id) => ({ id, escala: escalasPorVar[id] ?? ESCALA_AUTO })),
       ),
-    [ligadas, escalasPorVar],
+    [varsLigadas, escalasPorVar],
   );
   const eixoYChave = (foco !== null ? escalasUplot.scaleKeyPorVar.get(foco) : undefined) ?? "y";
   const eixoYCor = (foco !== null ? cores.get(foco) : undefined) ?? tema.texto;
@@ -750,7 +756,9 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   colunasAtuais.current = colunas;
 
   const idsEstrutura = defaults.filter((pena) => ligadas.has(pena.id)).map((pena) => pena.id);
-  const escalaAssinatura = idsEstrutura
+  // A faixa é da VARIÁVEL (a pena de SP usa a escala da CV), então a assinatura percorre
+  // `varsLigadas`: um id de pena de SP nunca tem faixa própria em `escalasPorVar`.
+  const escalaAssinatura = varsLigadas
     .map((id) => {
       const e = escalasPorVar[id] ?? ESCALA_AUTO;
       return e.auto ? `${id}:a` : `${id}:${String(e.min)}-${String(e.max)}`;

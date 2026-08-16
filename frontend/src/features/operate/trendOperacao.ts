@@ -303,20 +303,28 @@ export function dividirSpPorAuto(
  *  (`features/trend/trendTheme.ts`, `LIMITE_PENAS`), que serve outro caso de uso. */
 export const TETO_PENAS_OPERACAO = 8;
 
-export type CategoriaVarOperacao = "cv" | "constraint" | "mv" | "dv";
+/** Categoria de pena da legenda: as quatro categorias de variável do bloco, mais `sp` — a
+ *  pena de SP de uma CV é selecionável por si (o operador liga se quiser ver o alvo), então
+ *  ela é uma LINHA da legenda, não um traço que a pena da CV arrasta junto. */
+export type CategoriaVarOperacao = "cv" | "constraint" | "mv" | "dv" | "sp";
 
-/** Custo em penas de cada categoria: CV soma PV+SP (2 traços na mesma legenda); Restrição
- *  soma só o traço de PV — a banda low/high não é uma pena adicional (brief 5.3); MV/DV
- *  custam 1 quando o operador liga pela legenda. */
+/** Custo em penas de cada categoria: um traço, uma pena. Restrição soma só o traço de PV — a
+ *  banda low/high não é uma pena adicional (brief 5.3). CV custava 2 (PV+SP no mesmo item da
+ *  legenda); com o SP em pena própria, cada um paga o seu. */
 export const CUSTO_PENAS: Readonly<Record<CategoriaVarOperacao, number>> = {
-  cv: 2,
+  cv: 1,
   constraint: 1,
   mv: 1,
   dv: 1,
+  sp: 1,
 };
 
 export interface PenaLegenda {
+  /** Identidade da PENA (chave de `ligadas`, do `key` da legenda e da estrutura do gráfico):
+   *  igual a `varId` nas penas de variável, `idPenaSp(varId)` na pena de SP. */
   readonly id: string;
+  /** Variável a que a pena pertence — de quem vêm cor, nome, escala Y e faixa do operador. */
+  readonly varId: string;
   readonly categoria: CategoriaVarOperacao;
   readonly ligada: boolean;
   /** A seleção default ligaria esta pena, mas o teto cortou — a legenda precisa dizer isso,
@@ -324,11 +332,20 @@ export interface PenaLegenda {
   readonly excedente: boolean;
 }
 
+/** Id da pena de SP de uma CV. Prefixo, não campo separado, porque a pena de SP entra no MESMO
+ *  conjunto de penas ligadas das variáveis: o teto de 8, o clique da legenda e a estrutura do
+ *  gráfico continuam com uma fonte só. `PenaLegenda.varId` faz o caminho de volta — ninguém
+ *  precisa desmontar a string. */
+export function idPenaSp(cvId: string): string {
+  return `sp:${cvId}`;
+}
+
 /**
- * Seleção default de penas (decisão A-11, F5R-16): CVs (PV+SP) ligam na ordem do config até
- * o teto; Restrições ligam como banda (PV conta no teto) com o que sobrar; MVs e DVs nascem
- * desligadas — são opt-in pela legenda, mesmo com o teto livre. Pura: a UI (`TrendOperacao.tsx`)
- * decide o que fazer com um clique depois; esta função só decide o estado inicial.
+ * Seleção default de penas (decisão A-11, F5R-16; emenda 2026-08-16): CVs (PV) ligam na ordem
+ * do config até o teto; Restrições ligam como banda (PV conta no teto) com o que sobrar; MVs,
+ * DVs **e a pena de SP de cada CV** nascem desligadas — são opt-in pela legenda, mesmo com o
+ * teto livre. Pura: a UI (`TrendOperacao.tsx`) decide o que fazer com um clique depois; esta
+ * função só decide o estado inicial.
  */
 export function selecionarPenasDefault(
   cvs: readonly { readonly id: string }[],
@@ -342,15 +359,68 @@ export function selecionarPenasDefault(
     const custo = CUSTO_PENAS[categoria];
     const ligada = custo <= restante;
     if (ligada) restante -= custo;
-    return { id, categoria, ligada, excedente: !ligada };
+    return { id, varId: id, categoria, ligada, excedente: !ligada };
+  }
+
+  function optIn(id: string, categoria: "mv" | "dv"): PenaLegenda {
+    return { id, varId: id, categoria, ligada: false, excedente: false };
   }
 
   return [
-    ...cvs.map((cv) => comTeto(cv.id, "cv")),
+    // A pena de SP vem logo abaixo da CV dela: mesma cor na faixa da legenda, e a linha de
+    // cima diz de quem é o alvo.
+    ...cvs.flatMap((cv) => [
+      comTeto(cv.id, "cv"),
+      {
+        id: idPenaSp(cv.id),
+        varId: cv.id,
+        categoria: "sp" as const,
+        ligada: false,
+        excedente: false,
+      },
+    ]),
     ...constraints.map((c) => comTeto(c.id, "constraint")),
-    ...mvs.map((mv) => ({ id: mv.id, categoria: "mv" as const, ligada: false, excedente: false })),
-    ...dvs.map((dv) => ({ id: dv.id, categoria: "dv" as const, ligada: false, excedente: false })),
+    ...mvs.map((mv) => optIn(mv.id, "mv")),
+    ...dvs.map((dv) => optIn(dv.id, "dv")),
   ];
+}
+
+/** Pontilhado da pena de SP — padrão distinto do tracejado da predição (`[5, 5]`,
+ *  `tracoComFade` em `TrendOperacao.tsx`): sólido = PV medido, pontilhado = SP comandado,
+ *  tracejado = futuro. Fonte única do padrão, consumida pelo gráfico e pela faixa da legenda. */
+const TINTA_SP = 2;
+const VAO_SP = 4;
+export const TRACO_SP: number[] = [TINTA_SP, VAO_SP];
+
+/**
+ * Traço da pena de SP: matiz da PRÓPRIA CV, pontilhado. O Azul Único nunca desenha dado
+ * (DESIGN §Colors) — enquanto o SP saía em `--color-accent`, a tela mostrava uma linha azul que
+ * a legenda não explicava, e as CVs ligadas saíam todas no mesmo azul. `rastreado` é o trecho
+ * `auto = false`, que puxa o MESMO matiz para o texto do poço (§2.2-1, F5R-21): SP em
+ * PV-tracking não é SP comandado. `texto` entra RESOLVIDO porque `color-mix` vai para o canvas,
+ * que não resolve `var()` — não há elemento de onde herdar a custom property.
+ */
+export function tracoPenaSp(
+  corDaCv: string,
+  texto: string,
+  rastreado: boolean,
+): { readonly stroke: string; readonly dash: number[]; readonly width: number } {
+  return {
+    stroke: rastreado ? `color-mix(in oklch, ${corDaCv}, ${texto} 60%)` : corDaCv,
+    dash: TRACO_SP,
+    width: 1.5,
+  };
+}
+
+/**
+ * Faixa da pena de SP na legenda, no mesmo pontilhado do traço do gráfico. A pena de SP tem o
+ * MESMO matiz da CV de propósito (é o alvo daquela variável), então a cor sozinha não separa as
+ * duas linhas da legenda — cor + estilo separam (A Regra do Canal Redundante, DESIGN §Colors).
+ */
+export function faixaPontilhadaSp(cor: string): string {
+  const tinta = `${String(TINTA_SP)}px`;
+  const vao = `${String(TINTA_SP + VAO_SP)}px`;
+  return `repeating-linear-gradient(to right, ${cor} 0 ${tinta}, transparent ${tinta} ${vao})`;
 }
 
 // ----------------------------------------------------------------------------------------

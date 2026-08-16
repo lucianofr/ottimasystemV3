@@ -5,17 +5,22 @@ import { fileURLToPath } from "node:url";
 import type { MpcHistoryResponse } from "../../lib/api";
 import type { MpcPrediction } from "../../lib/contracts.gen";
 import {
+  CUSTO_PENAS,
   OPCOES_DEGRAU_MV,
   TETO_PENAS_OPERACAO,
   TOKENS_PENA_OPERACAO,
+  TRACO_SP,
   alinharNoEixo,
   atribuirCoresPenas,
   dividirSpPorAuto,
   emendarPlanoNoDivisor,
+  faixaPontilhadaSp,
+  idPenaSp,
   mesclarSeriesVivas,
   montarOverlayPrevisao,
   selecionarPenasDefault,
   tetoCarryForwardOperacaoS,
+  tracoPenaSp,
   ultimoCarimboHistorico,
   type AmostraViva,
 } from "./trendOperacao";
@@ -285,18 +290,41 @@ test("SP dessaturada: null original nunca vira valor em nenhum dos dois traços"
   expect(divisao.rastreado).toEqual([null, null]);
 });
 
-test("defaults: CVs (PV+SP, 2 penas cada) ligam na ordem do config até o teto de 8 penas", () => {
-  const cvs = [{ id: "cv_a" }, { id: "cv_b" }, { id: "cv_c" }, { id: "cv_d" }, { id: "cv_e" }];
-  const selecao = selecionarPenasDefault(cvs, [], [], []);
+test("defaults: cada CV traz a pena de PV ligada e a pena de SP DESLIGADA logo abaixo (emenda de §7.4-6)", () => {
+  const selecao = selecionarPenasDefault([{ id: "cv_a" }, { id: "cv_b" }], [], [], []);
 
-  expect(selecao.map((p) => p.id)).toEqual(["cv_a", "cv_b", "cv_c", "cv_d", "cv_e"]);
-  expect(selecao.map((p) => p.ligada)).toEqual([true, true, true, true, false]);
-  // A 5ª CV custaria 2 penas, mas só sobrava 0 depois das 4 primeiras (4×2 = 8 = teto).
-  expect(selecao.map((p) => p.excedente)).toEqual([false, false, false, false, true]);
+  expect(selecao.map((p) => [p.id, p.categoria, p.ligada])).toEqual([
+    ["cv_a", "cv", true],
+    [idPenaSp("cv_a"), "sp", false],
+    ["cv_b", "cv", true],
+    [idPenaSp("cv_b"), "sp", false],
+  ]);
+  // A pena de SP é da MESMA variável da CV: cor, nome, escala Y e faixa do operador saem de lá
+  // (`LegendaOperacao`/`escalasUplot` leem `varId`, nunca o id da pena).
+  expect(selecao.map((p) => p.varId)).toEqual(["cv_a", "cv_a", "cv_b", "cv_b"]);
+});
+
+test("defaults: CV custa 1 pena (o SP paga a dele), então 8 CVs cabem no teto e a 9ª é excedente", () => {
+  const cvs = Array.from({ length: 9 }, (_, i) => ({ id: `cv_${String(i)}` }));
+  const selecao = selecionarPenasDefault(cvs, [], [], []);
+  const pv = selecao.filter((p) => p.categoria === "cv");
+
+  expect(CUSTO_PENAS.cv).toBe(1);
+  expect(CUSTO_PENAS.sp).toBe(1);
+  expect(pv.filter((p) => p.ligada)).toHaveLength(TETO_PENAS_OPERACAO);
+  expect(pv[8]).toEqual({
+    id: "cv_8",
+    varId: "cv_8",
+    categoria: "cv",
+    ligada: false,
+    excedente: true,
+  });
+  // Nenhuma pena de SP nasce ligada — o teto é gasto por traço DESENHADO, e o alvo é opt-in.
+  expect(selecao.filter((p) => p.categoria === "sp" && p.ligada)).toEqual([]);
 });
 
 test("defaults: Restrições (banda, 1 pena) preenchem o que sobrou do teto depois das CVs, na ordem do config", () => {
-  const cvs = [{ id: "cv_1" }, { id: "cv_2" }, { id: "cv_3" }]; // 3×2 = 6 penas
+  const cvs = Array.from({ length: 6 }, (_, i) => ({ id: `cv_${String(i)}` })); // 6 penas
   const constraints = [{ id: "co_1" }, { id: "co_2" }, { id: "co_3" }]; // sobram 2 penas
   const selecao = selecionarPenasDefault(cvs, constraints, [], []);
   const restricoes = selecao.filter((p) => p.categoria === "constraint");
@@ -310,9 +338,36 @@ test("defaults: MVs e DVs nascem desligadas (opt-in pela legenda), mesmo com o t
   const selecao = selecionarPenasDefault([], [], [{ id: "mv_1" }], [{ id: "dv_1" }]);
 
   expect(selecao).toEqual([
-    { id: "mv_1", categoria: "mv", ligada: false, excedente: false },
-    { id: "dv_1", categoria: "dv", ligada: false, excedente: false },
+    { id: "mv_1", varId: "mv_1", categoria: "mv", ligada: false, excedente: false },
+    { id: "dv_1", varId: "dv_1", categoria: "dv", ligada: false, excedente: false },
   ]);
+});
+
+test("tracoPenaSp: o SP sai no matiz da PRÓPRIA CV, pontilhado — nunca no Azul Único (§7.4-6)", () => {
+  const traco = tracoPenaSp("PENA", "TEXTO", false);
+
+  expect(traco.stroke).toBe("PENA");
+  expect(traco.dash).toEqual(TRACO_SP);
+  // Pontilhado ≠ tracejado da predição (`[5, 5]`): sólido = PV medido, pontilhado = SP
+  // comandado, tracejado = futuro. Três estilos, um matiz por variável.
+  expect(traco.dash).not.toEqual([5, 5]);
+});
+
+test("tracoPenaSp rastreado: MESMA cor da CV puxada para o texto do poço, mesmo pontilhado (§2.2-1, F5R-21)", () => {
+  const rastreado = tracoPenaSp("PENA", "TEXTO", true);
+
+  expect(rastreado.stroke).toBe("color-mix(in oklch, PENA, TEXTO 60%)");
+  expect(rastreado.dash).toEqual(tracoPenaSp("PENA", "TEXTO", false).dash);
+  expect(rastreado.width).toBe(tracoPenaSp("PENA", "TEXTO", false).width);
+});
+
+test("faixa da legenda do SP usa o MESMO pontilhado do traço do gráfico (canal redundante)", () => {
+  // Duas linhas da legenda com o mesmo matiz de propósito (CV e o alvo dela): cor sozinha não
+  // separa, cor + estilo separam — a faixa tem de repetir o dash do canvas, não um valor solto.
+  expect(faixaPontilhadaSp("PENA")).toBe(
+    "repeating-linear-gradient(to right, PENA 0 2px, transparent 2px 6px)",
+  );
+  expect(TRACO_SP).toEqual([2, 4]);
 });
 
 test("teto de penas de operação é 8 (distinto do teto de 6 do trend de engenharia)", () => {
@@ -454,6 +509,26 @@ test("nenhuma cor de pena colide com cor reservada de severidade nem com o Azul 
       const desvio = bruto > 180 ? 360 - bruto : bruto;
       if (desvio < FAIXA_MATIZ_AZUL_UNICO) {
         colisoes.push(`${tema}: ${tokenPena} está a ${String(desvio)}° do Azul Único`);
+      }
+    }
+  }
+
+  expect(colisoes).toEqual([]);
+});
+
+test("o traço do SP de qualquer posição da paleta fica longe do Azul Único nos dois temas (§7.4-6)", () => {
+  // O invariante que o defeito reportado em operação violou, agora executável: a cor do SP é
+  // SEMPRE a da pena da CV, então nenhuma posição da paleta pode aproximá-la do acento. O
+  // trecho rastreado fica fora: o `color-mix` com o texto do poço não é `oklch()` de 3
+  // coordenadas, e afastar do matiz é justo o que ele faz.
+  const colisoes: string[] = [];
+  for (const tema of TEMAS) {
+    const acento = valorTokenTema("--color-accent", tema);
+    for (const tokenPena of TOKENS_PENA_OPERACAO) {
+      const { stroke } = tracoPenaSp(valorTokenTema(tokenPena, tema), "irrelevante", false);
+      const distancia = distanciaPerceptual(stroke, acento);
+      if (distancia < PISO_DISTINCAO) {
+        colisoes.push(`${tema}: SP em ${tokenPena} = ${distancia.toFixed(4)} do acento`);
       }
     }
   }

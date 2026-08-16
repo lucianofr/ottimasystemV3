@@ -131,7 +131,11 @@ test.describe("Tela de Operação", () => {
   test("PW-OP-02: cada variável listada tem escala Y na própria linha, independente", async ({
     page,
   }) => {
-    const linhas = page.getByTestId("operate-trend-legend-item");
+    // A pena de SP é linha da legenda sem escala própria (desenha na escala da CV), então o
+    // universo deste cenário são as linhas de VARIÁVEL.
+    const linhasVariavel = page.locator(
+      '[data-testid="operate-trend-legend-item"]:not([data-categoria="sp"])',
+    );
     const linha = (varId: string) =>
       page.locator(`[data-testid="operate-trend-legend-item"][data-var-id="${varId}"]`);
     const linhaCv = linha("cv_1");
@@ -140,7 +144,9 @@ test.describe("Tela de Operação", () => {
     // O ponto do cenário: o controle de escala (min/max + AUTOSCALE) mora na LINHA de cada
     // variável listada, não num bloco único acima da lista — inclusive nas linhas de pena
     // desligada (`mv_1`), cuja faixa passa a valer no instante em que a pena é ligada.
-    await expect(page.getByTestId("operate-escala-auto")).toHaveCount(await linhas.count());
+    await expect(page.getByTestId("operate-escala-auto")).toHaveCount(
+      await linhasVariavel.count(),
+    );
     await expect(linhaCv.getByTestId("operate-escala-auto")).toBeChecked();
     await expect(linhaMv.getByTestId("operate-escala-auto")).toBeChecked();
 

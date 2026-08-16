@@ -1,7 +1,11 @@
 import { Card } from "../../components/ui/card";
 import { EditorEscala } from "../trend/EditorEscala";
 import { ESCALA_AUTO, type EscalaVar } from "../trend/escalas";
-import type { CategoriaVarOperacao, PenaLegenda } from "./trendOperacao";
+import {
+  faixaPontilhadaSp,
+  type CategoriaVarOperacao,
+  type PenaLegenda,
+} from "./trendOperacao";
 
 /**
  * Legenda do trend de operação (spec F5 §7.4-6; plano F5b tarefa 5.3; plano de melhorias
@@ -18,12 +22,14 @@ import type { CategoriaVarOperacao, PenaLegenda } from "./trendOperacao";
  */
 
 /** Mesmos rótulos de `FaceplateVariavel.tsx` (`ROTULO_TIPO`, não exportado de lá — duplicar
- *  um record de 4 linhas é mais barato que acoplar dois arquivos de tarefas diferentes). */
+ *  um record de 4 linhas é mais barato que acoplar dois arquivos de tarefas diferentes), mais
+ *  o SP, que é pena da legenda sem ser variável do bloco. */
 const ROTULO_CATEGORIA: Record<CategoriaVarOperacao, string> = {
   mv: "MV",
   cv: "CV",
   constraint: "Restrição",
   dv: "DV",
+  sp: "SP",
 };
 
 export interface LegendaOperacaoProps {
@@ -55,13 +61,22 @@ export function LegendaOperacao({
   return (
     <Card data-testid="operate-trend-legend" className="divide-y divide-border">
       {defaults.map((pena) => {
-        const definicao = porIdDefinicao.get(pena.id);
+        // Nome, cor e faixa vêm da VARIÁVEL da pena: a linha de SP é do mesmo `varId` da CV.
+        const definicao = porIdDefinicao.get(pena.varId);
         const ligada = ligadas.has(pena.id);
+        const ehSp = pena.categoria === "sp";
+        const cor = cores.get(pena.varId) ?? "transparent";
+        // O eixo Y é da VARIÁVEL: a marca fica na linha da CV, e cai para a linha do SP quando
+        // ele é a única pena daquela variável desenhada (senão o operador vê um eixo colorido
+        // sem nenhuma linha da legenda dizendo de quem ele é).
+        const donaDoEixo =
+          ligada && pena.varId === foco && (!ehSp || !ligadas.has(pena.varId));
         return (
           <div
             key={pena.id}
             data-testid="operate-trend-legend-item"
             data-var-id={pena.id}
+            data-categoria={pena.categoria}
             className="flex items-center gap-3 px-4 py-2 transition-colors duration-[var(--duration-fast)] hover:bg-surface-2"
           >
             {/* Três alvos de clique distintos na mesma linha: o checkbox alterna a pena, o
@@ -75,7 +90,7 @@ export function LegendaOperacao({
             <label className="flex shrink-0 cursor-pointer items-center p-1.5">
               <input
                 type="checkbox"
-                aria-label={`Plotar ${ROTULO_CATEGORIA[pena.categoria]} ${definicao?.name ?? pena.id}`}
+                aria-label={`Plotar ${ROTULO_CATEGORIA[pena.categoria]} ${definicao?.name ?? pena.varId}`}
                 className="accent-accent"
                 checked={ligada}
                 onChange={() => {
@@ -88,7 +103,7 @@ export function LegendaOperacao({
                 interruptor independente por linha. */}
             <button
               type="button"
-              aria-current={ligada && pena.id === foco ? "true" : undefined}
+              aria-current={donaDoEixo ? "true" : undefined}
               title="Trazer o eixo Y para esta variável"
               className="focus-ring flex min-h-6 grow cursor-pointer items-center gap-3 text-left"
               onClick={() => {
@@ -98,13 +113,13 @@ export function LegendaOperacao({
               <span
                 aria-hidden="true"
                 className="h-1.5 w-6 shrink-0 rounded-pill"
-                style={{ backgroundColor: cores.get(pena.id) }}
+                style={ehSp ? { backgroundImage: faixaPontilhadaSp(cor) } : { backgroundColor: cor }}
               />
               <span className="plaqueta grow text-xs">
-                {ROTULO_CATEGORIA[pena.categoria]} · {definicao?.name ?? pena.id}
+                {ROTULO_CATEGORIA[pena.categoria]} · {definicao?.name ?? pena.varId}
               </span>
             </button>
-            {ligada && pena.id === foco && (
+            {donaDoEixo && (
               <span className="plaqueta text-xs text-fg-muted">Eixo Y</span>
             )}
             {pena.excedente && !ligada && (
@@ -115,13 +130,18 @@ export function LegendaOperacao({
                 Acima do teto
               </span>
             )}
-            <EditorEscala
-              escala={escalas[pena.id] ?? ESCALA_AUTO}
-              prefixoTestid="operate"
-              aoMudar={(escala) => {
-                onMudarEscala(pena.id, escala);
-              }}
-            />
+            {/* A pena de SP desenha na escala da própria CV (mesma grandeza): editor de faixa
+                só na linha da variável, senão a tela ofereceria dois controles para a mesma
+                escala e o segundo gravaria uma faixa que ninguém lê. */}
+            {!ehSp && (
+              <EditorEscala
+                escala={escalas[pena.varId] ?? ESCALA_AUTO}
+                prefixoTestid="operate"
+                aoMudar={(escala) => {
+                  onMudarEscala(pena.varId, escala);
+                }}
+              />
+            )}
           </div>
         );
       })}
