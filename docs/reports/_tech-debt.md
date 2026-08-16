@@ -190,6 +190,37 @@ _Completed tech debt items. Keep for 90 days then archive._
   - **Correção de fato no levantamento:** das 4 chamadas que o achado citava como metadados-only, a de `test_par_puro_ganho_via_mv_sem_atraso_nao_quebra_o_mterm` LÊ `built.mpc.model.n_x` mas TAMBÉM chama `_solve` logo depois — não é metadados-only e continuou em `build_mpc()` completo. A quarta real é `test_mv_com_objetivo_psv_constroi_com_tvp_utarget`.
   - **Prova:** `uv run pytest services/flow-runtime/tests/test_mpc_builder.py -q` → 14 passed antes e depois. Tempo medido na mesma máquina, com o estado ANTES reproduzido por `git apply -R` do patch isolado: **33,17 s → 24,40 s de pytest interno (~26%)**, 37,34 s → 30,41 s de wall real (~19%). **Ressalva honesta:** `--durations` mostrou os 4 testes repontados levando ~2,1-2,4 s cada, quase o mesmo dos que resolvem — para configs de teste minúsculas (1-2 MVs/CVs) o custo dominante é a construção simbólica CasADi e o import amortizado do do-mpc, não o `setup()`/IPOPT. A economia é real e reproduzível, mas MENOR do que a hipótese "causa concreta dos ~37 min de suíte" sugeria.
 
+### Verificação do lote de 2026-08-16 (TD-017 a TD-022)
+
+Os itens acima foram executados em paralelo por agentes distintos, cada um com prova própria.
+Depois de todos integrados na branch `fix/arch-review-20260815`, o agente principal repetiu os
+gates do zero, com `bash` puro, em vez de confiar nos relatórios:
+
+| Gate | Resultado |
+|---|---|
+| `npm run test:unit` | 607 passed (era 596 no baseline da branch) |
+| `npm run typecheck` | limpo |
+| `npm run build` | verde |
+| `npm run generate:contracts` (2×) | md5 idêntico — geração determinística |
+| `uv run ruff check .` / `format --check` | limpos, 305 arquivos |
+| pytest das suítes tocadas | 35 passed, **1 xfailed** (o `xfail` do TD-016, mantido de propósito) |
+| **`npx playwright test` (suíte completa)** | **63 passed, 0 falhas**, 14 arquivos, contra o vite da worktree |
+
+A rodada Playwright cobre as superfícies que teste unitário não alcança e que este lote mexeu:
+modais do editor (`mpc-variables-fields`, `mpc-objective`, `flows-editor`, `filtros` — o `Campo`
+unificado e o `campoOpcional`) e as três telas de tendência (`trend-eng`, `operate-trend`,
+`fuzzy-operate` — o primitivo de alinhamento e a legenda). Smoke adicional no browser contra a
+planta viva: canvas do flow 987 com 8 nós e valores vivos, zero erro de página; legenda de
+operação mostrando travessão antes do primeiro quadro `mpc.state` e passando a número vivo
+(45,446 → 45,055) quando ele chega — que é exatamente o contrato do PW-OP-12. O flow 987 foi
+parado pela fixture e redeployado de volta a `Rodando`, watchdog `Vivo`.
+
+**Incidente de infraestrutura, registrado no TD-025:** durante o lote, 5 dos 7 agentes gravaram
+parte das edições no checkout `main` em vez da worktree (resolução de caminho relativo). Nada se
+perdeu — todo marcador das sobras existia também na worktree, com contagem igual ou maior —, o
+`main` foi devolvido limpo em `7f0f62c` com as sobras recuperáveis em `stash@{0}`, e a árvore da
+branch ficou com checkpoint na tag `rede-seguranca-lote1`.
+
 
 ---
 
