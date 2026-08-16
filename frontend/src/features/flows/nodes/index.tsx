@@ -1,4 +1,4 @@
-import type { NodeProps, NodeTypes } from "@xyflow/react";
+import type { NodeProps } from "@xyflow/react";
 
 import type { TagOut } from "../../../lib/api";
 import { ROTULO_TIPO } from "../../tags/useTags";
@@ -313,15 +313,7 @@ export function NoPid({ id, data, selected }: NodeProps<NoPidData>) {
   );
 }
 
-/** Referência estável: `nodeTypes` novo a cada render faz o React Flow remontar os nós. */
-export const TIPOS_DE_NO: NodeTypes = {
-  opc_read: NoLeituraOpc,
-  opc_write: NoEscritaOpc,
-  script: NoScriptPython,
-  first_order: NoFiltroPrimeiraOrdem,
-  kalman: NoFiltroKalman,
-  tfs: NoTfsMatriz,
-  mpc: NoMpc,
-  fuzzy: NoFuzzy,
-  pid: NoPid,
-};
+/** ARCH-18/TD-021: mapa derivado de `REGISTRO_BLOCO` (`registro.ts`), não mantido aqui à
+ *  parte — reexportado para `FlowEditorPage.tsx` continuar importando `TIPOS_DE_NO` de
+ *  `"./nodes"` sem mudança. */
+export { TIPOS_DE_NO } from "../registro";
