@@ -1,4 +1,4 @@
-import type { NodeProps } from "@xyflow/react";
+import type { NodeProps, NodeTypes } from "@xyflow/react";
 
 import type { TagOut } from "../../../lib/api";
 import { ROTULO_TIPO } from "../../tags/useTags";
@@ -15,6 +15,7 @@ import {
   type NoPid as NoPidData,
   type NoScript,
   type NoTfs,
+  type TipoBloco,
   type VariavelCv,
   type VariavelDv,
   type VariavelMv,
@@ -313,7 +314,25 @@ export function NoPid({ id, data, selected }: NodeProps<NoPidData>) {
   );
 }
 
-/** ARCH-18/TD-021: mapa derivado de `REGISTRO_BLOCO` (`registro.ts`), não mantido aqui à
- *  parte — reexportado para `FlowEditorPage.tsx` continuar importando `TIPOS_DE_NO` de
- *  `"./nodes"` sem mudança. */
-export { TIPOS_DE_NO } from "../registro";
+/** Mapa de COMPONENTES por tipo (ARCH-18/TD-021). Mora AQUI, não em `registro.ts`: o
+ *  registro é alcançado pelo chunk inicial via `CanalAoVivo.tsx` → `graph.ts` →
+ *  `registro.ts`, e tocar os componentes de nó dali arrastaria o `@xyflow/react` de volta
+ *  para o chunk inicial (era exatamente o defeito que este módulo corrige).
+ *
+ *  `Record<TipoBloco, ComponenteNo>`, nunca `NodeTypes` (index signature solta): faltar um
+ *  tipo aqui tem de quebrar o BUILD, a mesma garantia que `REGISTRO_BLOCO` dá ao lado dos
+ *  dados (ARCH-18). Const de módulo, nunca criada dentro de componente: `nodeTypes` novo a
+ *  cada render faz o React Flow remontar todos os nós. */
+type ComponenteNo = NodeTypes[string];
+
+export const TIPOS_DE_NO: Record<TipoBloco, ComponenteNo> = {
+  opc_read: NoLeituraOpc,
+  opc_write: NoEscritaOpc,
+  script: NoScriptPython,
+  first_order: NoFiltroPrimeiraOrdem,
+  kalman: NoFiltroKalman,
+  tfs: NoTfsMatriz,
+  mpc: NoMpc,
+  fuzzy: NoFuzzy,
+  pid: NoPid,
+};

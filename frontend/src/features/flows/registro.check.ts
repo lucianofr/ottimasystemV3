@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 import { criarBloco, TIPOS_BLOCO } from "./graph";
-import { REGISTRO_BLOCO, ROTULO_BLOCO, TIPOS_DE_NO } from "./registro";
+import { TIPOS_DE_NO } from "./nodes";
+import { REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
 
 /**
  * Completude do registro (ARCH-18/TD-021): antes, um tipo esquecido em `nodes/index.tsx`
@@ -13,12 +14,11 @@ import { REGISTRO_BLOCO, ROTULO_BLOCO, TIPOS_DE_NO } from "./registro";
  */
 
 for (const tipo of TIPOS_BLOCO) {
-  test(`REGISTRO_BLOCO['${tipo}']: rótulo, descrição, defaults e Node preenchidos`, () => {
+  test(`REGISTRO_BLOCO['${tipo}']: rótulo, descrição e defaults preenchidos`, () => {
     const definicao = REGISTRO_BLOCO[tipo];
     expect(definicao).toBeDefined();
     expect(definicao.rotulo.trim()).not.toBe("");
     expect(definicao.descricao.trim()).not.toBe("");
-    expect(typeof definicao.Node).toBe("function");
 
     const defaults = definicao.defaults();
     expect(defaults).not.toBeNull();

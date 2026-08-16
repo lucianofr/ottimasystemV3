@@ -1,5 +1,3 @@
-import type { NodeTypes } from "@xyflow/react";
-
 import {
   contratoFuzzy,
   matrizPadrao,
@@ -14,17 +12,6 @@ import {
   type DadosTfs,
   type TipoBloco,
 } from "./graph";
-import {
-  NoEscritaOpc,
-  NoFiltroKalman,
-  NoFiltroPrimeiraOrdem,
-  NoFuzzy,
-  NoLeituraOpc,
-  NoMpc,
-  NoPid,
-  NoScriptPython,
-  NoTfsMatriz,
-} from "./nodes";
 
 /**
  * Registro de tipo de Bloco (ARCH-18/TD-021).
@@ -61,8 +48,6 @@ type ConfigDoBloco =
   | Omit<DadosFuzzy, keyof DadosBase>
   | Omit<DadosPid, keyof DadosBase>;
 
-type ComponenteNo = NodeTypes[string];
-
 export interface DefinicaoBloco {
   rotulo: string;
   descricao: string;
@@ -72,7 +57,6 @@ export interface DefinicaoBloco {
    *  comportamento de `matrizPadrao()`/`{}` chamados por instância em `criarBloco`, agora
    *  preservado aqui). */
   defaults: () => ConfigDoBloco;
-  Node: ComponenteNo;
 }
 
 /** Defaults dos blocos de filtro (ADR-026), compartilhados pelo registro e por `lerNo`
@@ -102,37 +86,31 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
     rotulo: "Leitura OPC",
     descricao: "Lê o valor corrente de uma tag do projeto",
     defaults: () => ({ tag_id: null }),
-    Node: NoLeituraOpc,
   },
   opc_write: {
     rotulo: "Escrita OPC",
     descricao: "Escreve o valor da entrada em uma tag do projeto",
     defaults: () => ({ tag_id: null }),
-    Node: NoEscritaOpc,
   },
   script: {
     rotulo: "Script",
     descricao: "Código Python com IN1..INn e OUT1..OUTn",
     defaults: () => ({ n_inputs: 1, n_outputs: 1, code: "OUT1 = IN1\n", output_eu: {} }),
-    Node: NoScriptPython,
   },
   first_order: {
     rotulo: "Filtro 1ª ordem",
     descricao: "Suaviza o sinal por constante de tempo (τ)",
     defaults: () => ({ ...PADRAO_FIRST_ORDER }),
-    Node: NoFiltroPrimeiraOrdem,
   },
   kalman: {
     rotulo: "Filtro Kalman",
     descricao: "Estima o valor verdadeiro de um sinal ruidoso",
     defaults: () => ({ ...PADRAO_KALMAN }),
-    Node: NoFiltroKalman,
   },
   tfs: {
     rotulo: "TFS",
     descricao: "Matriz 2x2 de funções de transferência (SOPDT/IOPDT)",
     defaults: () => ({ matrix: matrizPadrao(), output_eu: {} }),
-    Node: NoTfsMatriz,
   },
   mpc: {
     rotulo: "MPC",
@@ -143,7 +121,6 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
       variables: { mvs: [], cvs: [], constraints: [], dvs: [] },
       models: {},
     }),
-    Node: NoMpc,
   },
   fuzzy: {
     rotulo: "Fuzzy",
@@ -154,13 +131,11 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
       fll: contratoFuzzy.default_fll,
       output_eu: {},
     }),
-    Node: NoFuzzy,
   },
   pid: {
     rotulo: "PID",
     descricao: "Controlador PID (ISA) — PV, SP e saída",
     defaults: () => ({ ...PADRAO_PID }),
-    Node: NoPid,
   },
 };
 
@@ -172,9 +147,3 @@ export const ROTULO_BLOCO: Record<TipoBloco, string> = Object.fromEntries(
   TIPOS_DO_REGISTRO.map((tipo) => [tipo, REGISTRO_BLOCO[tipo].rotulo]),
 ) as Record<TipoBloco, string>;
 
-/** Referência estável: `nodeTypes` novo a cada render faz o React Flow remontar os nós.
- *  Reexportado por `nodes/index.tsx` para `FlowEditorPage.tsx` continuar importando de
- *  `"./nodes"` sem mudança. */
-export const TIPOS_DE_NO: NodeTypes = Object.fromEntries(
-  TIPOS_DO_REGISTRO.map((tipo) => [tipo, REGISTRO_BLOCO[tipo].Node]),
-);
