@@ -33,6 +33,9 @@ _Debt that causes recurring problems or bugs._
   - **Effort:** 2-3 dias (medida por `block.step()` + evento `block_overrun`; não reabre o ADR-004)
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
+  - **Feito em 2026-08-16 (ARCH-11, metade de OBSERVABILIDADE — o débito continua aberto):** o `scheduler.py` passou a cronometrar CADA `block.step()` individualmente (reusando o `time.monotonic()` do mesmo `Clock` que já alimenta o `scan_ms` agregado), comparar contra um orçamento por bloco (`BLOCK_BUDGET_FRACTION = 1.0` do Ts do próprio flow, justificado no código) e emitir `block_overrun` nomeando `block_id`/`flow_id`, com dedupe/rearme no padrão do `mpc_overrun` para não virar tempestade de eventos. `blocks/base.py` ganhou parágrafo dizendo que "nenhum bloco bloqueia" é disciplina, não garantia estrutural.
+  - **Por que continua aberto:** o `xfail(strict=True)` de `test_isolamento_temporal.py` **permanece xfail**, e isso é o resultado correto, não uma pendência de execução. A auditoria supunha que ele "viraria verde"; não vira — o cronômetro só registra o custo DEPOIS que o event loop já ficou preso pelo trecho síncrono do bloco culpado. Medir e nomear o culpado é observabilidade; a perda de fronteira do Flow vizinho continua acontecendo. A correção estrutural (partição por processo) está decidida CONTRA pelo ADR-004, então este item não fecha por essa via — o que mudou é que o defeito deixou de ser invisível em produção.
+  - **Prova:** `uv run pytest services/flow-runtime/tests/test_block_overrun.py test_isolamento_temporal.py test_scheduler.py -q` → `20 passed, 1 xfailed`. O teste novo força um bloco que queima ~200 ms sozinho (Ts = 100 ms, orçamento = 100 ms) e prova exatamente um `block_overrun` com o `block_id` certo. RED: `ImportError: cannot import name 'KIND_BLOCK_OVERRUN' from 'ottima_core.bus'`.
 
 ## Medium (Slows Development)
 
@@ -45,35 +48,10 @@ _Debt that makes development harder but doesn't block._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
-- [ ] **TD-018**: Forma dos configs de bloco do `graph_json` reescrita à mão em TypeScript, fora do pipeline de geração que já existe
-  - **Impact:** Medium - `contracts_export.py` já gera PORT_CONTRACTS e ws_payloads do `model_json_schema()`, mas a FORMA de `MvVar`/`CvVar`/`MpcConfig`/`ScriptConfig`/`FuzzyConfig`/`TfsConfig`/`PidConfig` continua hand-typed em `graph.ts`
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-06
-  - **Effort:** 2 dias
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-15
-  - **Escopo reduzido em 2026-08-15:** a metade "gerar tabela de DEFAULTS" (ARCH-07) foi descartada por falhar no deletion test — `max_rate` é required e não tem default para gerar; os campos que têm default já são espelhados certo e o mecanismo golden do MPC já trava as regras. Só a geração da FORMA sobrevive. Fronteira registrada na [ADR-034](../adr/ADR-034-espelho-contrato-python-ts.md), que recomenda explicitamente este item e recusa a metade descartada — não confundir os dois.
-- [ ] **TD-019**: Migração de dados sobre `graph_json` (0009) reescreve o contrato sem validar e sem teste
-  - **Impact:** Medium - único caminho de escrita em `graph_json` fora da validação de save da API; migração futura herda o ponto cego
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-08
-  - **Effort:** 2h (`parse_graph()` após a mutação + fixture pré-rename)
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-15
-- [ ] **TD-020**: Extração FormData→`data` do bloco PID só alcançável renderizando o modal; 10 campos sem teste
-  - **Impact:** Medium - checkbox `auto_mode` e `output_min` nulável sem cobertura unitária nem e2e
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-19
-  - **Effort:** 4h (`montarDados<Tipo>` pura, padrão de `matrizDoFormulario`)
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-15
 - [ ] **TD-021**: Registro de tipo de Bloco espalhado por 6 arquivos do frontend, ~17 pontos de edição mecânica
   - **Impact:** Medium - completude é conferida à mão; entrada faltando aparece em runtime/E2E, não no build
   - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-18
   - **Effort:** 2 dias (`REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco>`)
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-15
-- [ ] **TD-022**: `build_mpc()` funde montagem estrutural com compilação IPOPT — teste estrutural paga o solver
-  - **Impact:** Medium - 4 das 16 chamadas em `test_mpc_builder.py` só leem metadados; contribui para a suíte de ~37 min
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-12
-  - **Effort:** 1 dia (`_assemble_model` / `_compile_solver`; o seam de `mpc/host.py` já existe)
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
 - [ ] **TD-023**: Gates documentados no CLAUDE.md sem nada que os mecanize
@@ -82,16 +60,12 @@ _Debt that makes development harder but doesn't block._
   - **Effort:** 4h, mas exige decisão com ADR (CI é escolha de arquitetura, não conserto mecânico)
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
-- [ ] **TD-017**: Três telas de tendência com lógica de pena/legenda resolvida mais de uma vez
-  - **Impact:** Medium - reduzido de High em 2026-08-15: o segundo motor de instância uPlot (a metade que fazia bug de zoom/resize precisar de correção replicada) foi eliminado. O que resta é duplicação de lógica pura e de apresentação, sem risco de divergência de comportamento da instância
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-02, ARCH-03, ARCH-04
-  - **Effort:** 1 dia (primitivo de alinhamento de pena; acumulador de borda viva) — a lacuna de comportamento da legenda foi fechada em 2026-08-16
+- [ ] **TD-025**: Subagente com caminho relativo escreve no checkout `main` em vez da worktree ativa
+  - **Impact:** Medium - **já causou dano duas vezes**: `stash@{2}` ("resquícios pré-merge F4: spill de `graph.ts`/`test_scheduler.py` de agentes com caminho relativo") e de novo em 2026-08-16, quando 6 arquivos de 5 agentes diferentes apareceram modificados em `main` durante um lote paralelo. A sessão do subagente resolve path relativo contra a raiz do repositório principal, mesmo tendo lido o arquivo pelo path absoluto da worktree; o agente escreve de um lado, verifica do outro, e conclui "minha edição foi revertida" — um deles queimou ~20 min perseguindo um `git reset` que nunca houve. Também suja a árvore de trabalho do usuário sem ele pedir nada
+  - **Source:** incidente do lote paralelo de 2026-08-16 (7 subagentes na worktree `fix-arch-review`)
+  - **Effort:** 2h (instrução no `CLAUDE.md` exigindo path ABSOLUTO da worktree em todo `read`/`write`/`edit` de subagente, mais verificação por `bash` com `cwd` explícito antes de qualquer relato de FEITO; a alternativa robusta é uma worktree por agente, o que também isola o `git status`)
   - **Owner:** @unassigned
-  - **Created:** 2026-08-15
-  - **Feito em 2026-08-15 (ARCH-01):** a casca de instância uPlot virou `features/trend/motorTrend.ts::useMotorTrend`, consumida pelas três telas; a regra de preservação de zoom saiu de dentro do efeito para `zoomX.ts::estaZoomadoEmX`, pura e testada. Verificado no browser contra a planta viva (dado vivo não recria a instância, mudança de estrutura recria exatamente uma vez, "Reset layout" preservado, zero erro) e pela regressão Playwright das três telas: **16 cenários, 0 falhas** — `trend-eng` 4/4, `operate-trend` 10/10, `fuzzy-operate` 2/2, com PW-OP-07 cobrindo o tique de 1 s e PW-OP-11 o zoom rastreado. **A queixa original do usuário — legenda de operação sem valor nem EU — é o ARCH-04 e continua aberta**; era divergência de apresentação, não do motor.
-  - **Feito em 2026-08-16 (ARCH-04, metade de COMPORTAMENTO):** a legenda de operação passou a mostrar valor corrente + EU na linha, como as de engenharia e fuzzy — fecha a queixa original do dono ("todos os gráficos de tendência devem se comportar igual"). O primitivo é `trendOperacao.ts::valorDaPena(pena, vars)`: linha de variável lê o PV do último `mpc.state`, linha de SP lê o ALVO da própria CV (a série que cada uma desenha — repetir o PV na linha do alvo faria o operador ler o número errado); variável ausente do quadro publicado devolve `null` e a legenda escreve travessão, nunca um zero fabricado. O `sp` nulo é tratado como defesa contra o tipo do contrato (`MpcVarState.sp: number | null`), não como estado real: `blocks/mpc.py` semeia `_sp` com `0.0` por CV e publica congelado em AUTO ou rastreado por PV-tracking fora dele — uma CV presente em `vars` sempre tem alvo. `porIdDefinicao` passou a exigir `eu`; larguras de coluna copiadas de `TrendPage.tsx` (`w-28`/`w-12`) para a linha de SP, que não tem editor de escala, alinhar com as demais. **A metade de ESTRUTURA (module `PainelLegendaTrend` único para as três telas) NÃO foi feita** e segue no TD-024: o deletion test do próprio achado diz que extrair a linha hoje MOVE JSX sem concentrar decisão — o que concentrava a decisão era escolher o comportamento, e isso já foi escolhido.
-    - **Prova:** RED genuíno (`SyntaxError: does not provide an export named 'valorDaPena'`), GREEN com 2 checks novos cobrindo PV vs ALVO e os dois caminhos de `null` — `npm run test:unit` 598 passed (era 596), `npm run typecheck` limpo, `npm run build` verde. Verificação na superfície real: browser contra a planta viva (MPC "coluna de naftaleno", 7 linhas de legenda) — CV LT-201 `69,255 %`, Restrição FT-204 `2,12 m3/h`, MVs `50 %`, valores acompanhando o dado ao vivo entre leituras (67,985 → 68,449 → 69,255). Com a pena de SP ligada, o traço pontilhado desenha exatamente no `0` que a legenda mostra — legenda concorda com a pena, e o `0` é valor publicado de verdade (`blocks/mpc.py:314` semeia `_sp` em `0.0`; PV-tracking só sobrescreve com o bloco em varredura válida), não coerção da UI.
-    - **Regressão Playwright das três telas: 17 cenários, 0 falhas** (`trend-eng` 4/4, `operate-trend` 11/11, `fuzzy-operate` 2/2), rodada contra o vite da worktree (`E2E_BASE_URL=http://127.0.0.1:5174`) com autorização para parar o flow da planta. A trava nova é **PW-OP-12**: conta uma coluna de valor e uma de EU por linha da legenda (inclusive na do SP, que não tem editor de escala), exige o EU vindo da DEFINIÇÃO (existe antes de qualquer quadro publicado) e — como o MPC da fixture nunca é deployado — exige travessão em TODAS as linhas, fixando o contrato de não inventar número. Efeito colateral esperado e revertido: `criarAmbiente` ativa projeto próprio e deixou o flow 987 em `desired_state = stopped`; redeployado pela tela de Flows e confirmado de volta em `Rodando`, watchdog `Vivo`, sem projeto órfão.
+  - **Created:** 2026-08-16
 
 ## Low (Track for Later)
 
@@ -109,6 +83,8 @@ _Known issues not currently prioritized._
   - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-04 (só a metade de estrutura), ARCH-20, ARCH-21
   - **Effort:** 1 dia (linha de legenda compartilhada, `campoOpcional`, `Campo` único)
   - **Nota 2026-08-16:** a metade de COMPORTAMENTO do ARCH-04 (valor + EU na legenda de operação) foi resolvida no TD-017; o que resta aqui é só a extração do module de apresentação comum às três telas.
+  - **Feito em 2026-08-16 (ARCH-20 e ARCH-21):** `campoOpcional(dados, campo, atual, converter)` extraído para `config/campos.ts` e aplicado nos 4 usos reais da regra "ausente preserva / vazio vira null / valor converte"; `Campo` (`config/CamposComuns.tsx`) ganhou `nome`/`testid` opcionais e absorveu o `CampoNumero` do MPC e o `<Input>` cru do TFS. **Correção de fato no levantamento:** o ARCH-21 dizia "uma IIFE por função" nas 4 `variavel*DoFormulario`; são 2 em `variavelMvDoFormulario` (`readback_tag_id`, `local_shed_mode`) e 2 em `variavelCvDoFormulario` (`remote_sp_tag_id`, `sp_range_pct`). `variavelDvDoFormulario` usa lógica DIFERENTE (par de campos, null só se AMBOS vazios) e `variavelRestricaoDoFormulario` nunca teve a IIFE (range é obrigatório) — nenhuma das duas foi convertida, porque forçar mudaria regra de negócio. Prova: `campos.check.ts` +4 (ausente/vazio/válido/inválido), `npm run test:unit` 601 → 605, `mpcLogic.golden.check.ts` verde (trava cross-language intacta), `npm run typecheck` limpo.
+  - **O que resta:** só a extração do module de apresentação da LINHA de legenda, comum às três telas (metade de estrutura do ARCH-04).
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
 
@@ -189,6 +165,30 @@ _Completed tech debt items. Keep for 90 days then archive._
   - **Prova:** RED provado revertendo o fixture para `du_max: 5` com a asserção nova no lugar: `Received: 0` contra `toBe(5)` em `graph.check.ts:657`. GREEN: `npm run test:unit` 590 passed (era 589), `npm run typecheck` limpo, `npm run build` verde.
   - **Achado adjacente corrigido junto:** `npm run typecheck` estava vermelho já em `e38f528` (`mpcLogic.check.ts:318`, fixture de `TagOut` sem `project_id`, campo que a Tag calculada introduziu) — recorrência literal do TD-010. Corrigido; a causa raiz (gate sem enforcement) segue aberta no TD-023.
   - **Descartado com motivo:** a metade "gerar tabela de defaults do `model_json_schema()`" falha no deletion test — `max_rate` é required e não tem default para gerar, os campos que têm default já são espelhados corretamente, e o mecanismo golden já trava as regras. Moveria literais para um gerador e acrescentaria um artefato gerado contra uma classe de divergência com zero defeitos observados. O TD-018 foi reduzido à geração da FORMA (ARCH-06), que segue de pé.
+- [x] **TD-017**: Três telas de tendência com lógica de pena/legenda resolvida mais de uma vez
+  - **Resolved:** 2026-08-16
+  - **Resolution:** Fechado em três cortes. **ARCH-01 (2026-08-15):** a casca de instância uPlot virou `features/trend/motorTrend.ts::useMotorTrend`, consumida pelas três telas, com a regra de preservação de zoom extraída para `zoomX.ts::estaZoomadoEmX`. **ARCH-04 (2026-08-16), metade de comportamento:** a legenda de operação passou a mostrar valor corrente + EU na linha, via `trendOperacao.ts::valorDaPena(pena, vars)` — linha de variável lê o PV do último `mpc.state`, linha de SP lê o ALVO da própria CV (cada uma devolve a série que desenha); variável ausente do quadro vira travessão, nunca zero fabricado. **ARCH-02 (2026-08-16):** o carry-forward, que existia em três implementações independentes com dois estilos (cursor multi-série vs Map por coluna), virou fonte única em `features/trend/alinhamento.ts` (`montarEixoUniao` + `alinharNoEixo`); `montarMatriz` (`useHistory.ts`) e `montarMatrizFuzzy` (`historicoFuzzy.ts`) foram recompostas como N chamadas do primitivo, perdendo o cursor duplicado. `trendOperacao.ts` re-exporta `alinharNoEixo`, então nenhum consumidor mudou de import.
+  - **ARCH-03 avaliado e RECUSADO com motivo:** migrar `mesclarSeriesVivas` para o acumulador de `bordaViva.ts` foi examinado contra o código real e reprovado — o formato genérico (`Map<string, PontoVivo[]>` por id) não comporta as colunas extras que o MPC precisa (sp, auto, taxa OPC) sem torcer a interface, e o próprio deletion test do achado já dizia que deletar `mesclarSeriesVivas` MOVERIA a complexidade de volta para `TrendOperacao.tsx` em vez de concentrá-la. Forçar aqui pioraria o código.
+  - **Prova:** `npm run test:unit` 596 → 607 ao longo dos três cortes, `npm run typecheck` limpo, `npm run build` verde. ARCH-02 é behavior-preserving e foi provado assim: baseline verde capturada com `alinhamento.ts` já em uso por `montarMatriz`/`montarMatrizFuzzy` mas ANTES de tocar em qualquer `*.check.ts` — 605 passed, bit a bit igual ao cursor duplicado que substituiu. As 6 provas de invariante do primitivo migraram de `trendOperacao.check.ts` para `alinhamento.check.ts` com o mesmo texto, mais 2 novas de `montarEixoUniao`. ARCH-04 foi verificado na planta viva (browser) e travado por **PW-OP-12**; regressão Playwright das três telas: **17 cenários, 0 falhas** (`trend-eng` 4/4, `operate-trend` 11/11, `fuzzy-operate` 2/2), com o flow 987 parado pela fixture e redeployado de volta a `Rodando`.
+- [x] **TD-018**: Forma dos configs de bloco do `graph_json` reescrita à mão em TypeScript, fora do pipeline de geração que já existe
+  - **Resolved:** 2026-08-16
+  - **Resolution:** `contracts_export.py::build_contracts()` ganhou a chave `node_configs` com o `model_json_schema()` de `MvVar`/`CvVar`/`ConstraintVar`/`DvVar`/`MpcConfig`/`ScriptConfig`/`FuzzyConfig`/`PidConfig`/`SopdtParams`/`IopdtParams`, no MESMO padrão de `_WS_MODELS`. O gerador foi reusado sem mudar a lógica de tradução (`generate-contracts.mjs::interfacesWsPayloads` só foi renomeada para `interfacesDeSchemas`, agora genérica). 15 tipos hand-typed de `graph.ts` viraram alias do tipo gerado. Fronteira da [ADR-034](../adr/ADR-034-espelho-contrato-python-ts.md) respeitada: só a FORMA é gerada — a tabela de defaults segue recusada.
+  - **Duas exclusões documentadas, não escondidas:** (a) `ElementoTfs`/`DadosTfs` continuam manuais porque `TfsElement.params: SopdtParams | IopdtParams` é união Python NÃO discriminada (sem `Field(discriminator=...)`), e o `model_json_schema()` emite `anyOf` solto, sem vínculo com o campo irmão `kind` — o TS gerado não estreitaria `params` por `kind`, que é exatamente o que `CamposTfs.tsx::valorParam/trocarElemento` fazem hoje. (b) Os 7 tipos-enum seguem literal union à mão: `RowKind = Literal[...]` atribuído a variável comum não ganha `$defs` nomeado no JSON Schema (verificado empiricamente); `type RowKind = Literal[...]` do PEP 695 resolveria, mas migrar `mpc_config.py` estava fora do escopo cirúrgico do item.
+  - **Prova:** RED `KeyError: 'node_configs'` em `build_contracts()`. GREEN: `npm run generate:contracts` rodado duas vezes seguidas com md5 idêntico (`f9881688e84020122bcdb504e7d7f9e2`) — geração determinística, confirmada de forma independente pelo agente principal; `npm run typecheck` limpo; `npm run test:unit` 607 passed sem nenhum teste precisar mudar; `uv run ruff check`/`format --check` limpos.
+- [x] **TD-019**: Migração de dados sobre `graph_json` (0009) reescreve o contrato sem validar e sem teste
+  - **Resolved:** 2026-08-16
+  - **Resolution:** A correção sugerida pela auditoria (chamar `parse_graph` dentro de `_migrar`) foi avaliada e **recusada com motivo**; a migração `0009_mpc_max_rate.py` ficou intocada. Razão: o caminho de leitura da API já trata `graph_json` corrompido como dado degradável — pula o flow com log e nunca devolve 5xx (`services/api/tests/test_operate.py::test_mpcs_graph_invalido_pulado_com_log`) —, então fazer a migração levantar sobre um `graph_json` alheio já inválido, sem nenhuma relação com `du_max`/`max_rate`, trocaria uma falha tolerada por uma falha FATAL nova que trava `alembic upgrade head` em qualquer ambiente novo. Pior que o problema que resolve. A prova de correção da mutação foi para onde o valor real estava: o teste que não existia.
+  - **Prova:** `packages/ottima-core/tests/test_migration_0009.py` (novo) carrega a migração por `importlib.util` (o nome do módulo começa com dígito), monta fixture `graph_json` pré-rename com `du_max`, roda o `_migrar` real contra uma linha `flows` real via `AsyncConnection.run_sync`, e afirma `parse_graph(resultado)` limpo **e** a conversão numérica (`max_rate == du_max / (ts_seconds * multiplier)`). `uv run pytest packages/ottima-core/tests/test_migration_0009.py -q` → `1 passed` em 15,52 s. O RED aqui é o registrado pela própria auditoria: busca por `0009`/`mpc_max_rate` em `packages/ottima-core/tests/` não retornava nada.
+- [x] **TD-020**: Extração FormData→`data` do bloco PID só alcançável renderizando o modal; 10 campos sem teste
+  - **Resolved:** 2026-08-16
+  - **Resolution:** `montarDadosPid(atual, campos): DadosPid` extraída como função pura em `config/campos.ts`, no mesmo padrão de `matrizDoFormulario` (o precedente que já existia para o TFS). O `case 'pid'` do switch de `ModalConfigBloco.tsx::aplicar()` virou dispatch de uma linha; o `<dialog>` e todos os `data-testid` ficaram intocados.
+  - **Resíduo documentado (não é débito aberto):** `output_eu` de Script/Fuzzy continua inline. A extração dele depende de mover `outputEuDoFormulario` (hoje privada em `ModalConfigBloco.tsx`) para um module exportável e de reconstruir `n_inputs`/`n_outputs`/`code`/`fll`, dobrando o raio do diff — e a dor concreta que a auditoria cita (0% de cobertura, 10 campos, checkbox + nulável) é especificamente do PID.
+  - **Prova:** RED `SyntaxError: The requested module './config/campos' does not provide an export named 'montarDadosPid'`. GREEN: `pid.check.ts` 11 passed, com 3 testes novos cobrindo o que não tinha cobertura nenhuma — `auto_mode` marcado E desmarcado, `output_min` vazio→`null` e preenchido→número, e os demais campos preservados. `npm run typecheck` limpo; `npm run test:unit` 601 passed.
+- [x] **TD-022**: `build_mpc()` funde montagem estrutural com compilação IPOPT — teste estrutural paga o solver
+  - **Resolved:** 2026-08-16
+  - **Resolution:** `build_mpc()` foi separada em `_assemble_model` (Model simbólico, objetivo, bounds e `tvp_template` — barata, sem `nlpsol`) e `_compile_solver` (só o `mpc.setup()`, o trecho caro). `build_mpc()` continua com a MESMA assinatura e o MESMO retorno `BuiltMpc`, apenas costurando as duas — nenhum chamador de produção (`worker.py`, `host.py`, `target_calculation/ssto.py`) mudou, e a matemática do do-mpc ficou intocada. Os 4 testes puramente estruturais de `test_mpc_builder.py` foram repontados para `_assemble_model`.
+  - **Correção de fato no levantamento:** das 4 chamadas que o achado citava como metadados-only, a de `test_par_puro_ganho_via_mv_sem_atraso_nao_quebra_o_mterm` LÊ `built.mpc.model.n_x` mas TAMBÉM chama `_solve` logo depois — não é metadados-only e continuou em `build_mpc()` completo. A quarta real é `test_mv_com_objetivo_psv_constroi_com_tvp_utarget`.
+  - **Prova:** `uv run pytest services/flow-runtime/tests/test_mpc_builder.py -q` → 14 passed antes e depois. Tempo medido na mesma máquina, com o estado ANTES reproduzido por `git apply -R` do patch isolado: **33,17 s → 24,40 s de pytest interno (~26%)**, 37,34 s → 30,41 s de wall real (~19%). **Ressalva honesta:** `--durations` mostrou os 4 testes repontados levando ~2,1-2,4 s cada, quase o mesmo dos que resolvem — para configs de teste minúsculas (1-2 MVs/CVs) o custo dominante é a construção simbólica CasADi e o import amortizado do do-mpc, não o `setup()`/IPOPT. A economia é real e reproduzível, mas MENOR do que a hipótese "causa concreta dos ~37 min de suíte" sugeria.
 
 
 ---
@@ -199,9 +199,9 @@ _Completed tech debt items. Keep for 90 days then archive._
 |----------|-------|--------|
 | Critical | 0 | - |
 | High | 1 | 2026-08-15 |
-| Medium | 7 | 2026-08-15 |
+| Medium | 3 | 2026-08-15 |
 | Low | 1 | 2026-08-15 |
-| **Total Open** | **9** | 2026-08-15 |
+| **Total Open** | **5** | 2026-08-15 |
 
 _Last updated: 2026-08-16_
 
