@@ -9,6 +9,7 @@ import {
   type MatrizTfs,
   type TipoElemento,
 } from "../graph";
+import { Campo } from "./CamposComuns";
 import { nomeParam } from "./campos";
 
 /** Rótulos dos params por modelo (spec F3 §3.4). */
@@ -131,17 +132,12 @@ export function CamposTfs({ dados, aoMudar }: Props) {
                 </div>
 
                 {PARAMS[elemento.kind].map(({ chave, rotulo }) => (
-                  <div key={chave} className="space-y-1">
-                    <Label htmlFor={nomeParam(j, k, chave)}>{rotulo}</Label>
-                    <Input
-                      id={nomeParam(j, k, chave)}
-                      name={nomeParam(j, k, chave)}
-                      type="text"
-                      inputMode="decimal"
-                      className="process-value"
-                      defaultValue={String(valorParam(elemento, chave))}
-                    />
-                  </div>
+                  <Campo
+                    key={chave}
+                    id={nomeParam(j, k, chave)}
+                    rotulo={rotulo}
+                    valor={valorParam(elemento, chave)}
+                  />
                 ))}
               </fieldset>
             );

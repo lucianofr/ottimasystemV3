@@ -1,5 +1,5 @@
 import type { TagOut } from "../../../lib/api";
-import { numeroDoCampo } from "../config/campos";
+import { campoOpcional, numeroDoCampo } from "../config/campos";
 import type {
   FaixaMpc,
   ParModeloMpc,
@@ -111,13 +111,10 @@ export function variavelMvDoFormulario(
     // mesma classe de bug da revisão 4.3) e preserva o valor; vazio é o engenheiro tirando
     // a tag, e tem que remover mesmo — esta é a chave que decide se em LOCAL a MV segue a
     // planta ou escreve nela um valor de config, então "limpei e continuou lá" seria grave.
-    readback_tag_id: (() => {
-      const bruto = dados.get(c("readback_tag_id"));
-      if (bruto === null) return atual.readback_tag_id;
-      if (bruto === "") return null;
+    readback_tag_id: campoOpcional(dados, c("readback_tag_id"), atual.readback_tag_id, (bruto) => {
       const valor = Number(bruto);
       return Number.isInteger(valor) && valor > 0 ? valor : null;
-    })(),
+    }),
     // `objective` é estado controlado (como `kind` na CV): já vem decidido pelo Select no
     // estado, o formulário não carrega campo para ele. `psv` é o contrário — campo
     // não-controlado que só existe no DOM quando `objective === "psv"`; fora dele, `null`
@@ -129,13 +126,10 @@ export function variavelMvDoFormulario(
     // Não-controlado, ausente-fora-da-aba preserva, vazio é `null` (mesma regra do
     // readback acima: "limpei e continuou lá" seria grave — o PLC receberia um modo que
     // ninguém mais vê no form).
-    local_shed_mode: (() => {
-      const bruto = dados.get(c("local_shed_mode"));
-      if (bruto === null) return atual.local_shed_mode;
-      if (bruto === "") return null;
+    local_shed_mode: campoOpcional(dados, c("local_shed_mode"), atual.local_shed_mode, (bruto) => {
       const valor = Number(bruto);
       return Number.isInteger(valor) ? valor : null;
-    })(),
+    }),
     pid: !comPid
       ? null
       : {
@@ -212,20 +206,16 @@ export function variavelCvDoFormulario(atual: VariavelCv, dados: FormData): Vari
     fail_timeout_s: n("fail_timeout_s", atual.fail_timeout_s),
     // Vazio = livre (null), mesmo padrão da faixa da DV — um "0" impresso voltaria como
     // texto e o servidor recusaria (`sp_range_pct` é `gt=0, le=100`).
-    sp_range_pct: (() => {
-      const bruto = dados.get(c("sp_range_pct"));
-      if (bruto === null) return atual.sp_range_pct;
-      if (typeof bruto !== "string" || bruto.trim() === "") return null;
-      const valor = Number(bruto);
+    sp_range_pct: campoOpcional(dados, c("sp_range_pct"), atual.sp_range_pct, (bruto) => {
+      const texto = bruto.trim();
+      if (texto === "") return null;
+      const valor = Number(texto);
       return Number.isFinite(valor) ? valor : null;
-    })(),
-    remote_sp_tag_id: (() => {
-      const bruto = dados.get(c("remote_sp_tag_id"));
-      if (bruto === null) return atual.remote_sp_tag_id;
-      if (bruto === "") return null;
+    }),
+    remote_sp_tag_id: campoOpcional(dados, c("remote_sp_tag_id"), atual.remote_sp_tag_id, (bruto) => {
       const valor = Number(bruto);
       return Number.isInteger(valor) && valor > 0 ? valor : null;
-    })(),
+    }),
   };
 }
 

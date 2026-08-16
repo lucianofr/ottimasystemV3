@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { matrizPadrao, type MatrizTfs } from "../graph";
 import {
+  campoOpcional,
   inteiroDoCampo,
   matrizDoFormulario,
   nomeParam,
@@ -23,6 +24,38 @@ test("campo inteiro trunca e prende na faixa", () => {
   expect(inteiroDoCampo("2,9", 0, 0, 8)).toBe(2);
   expect(inteiroDoCampo("99", 0, 0, 8)).toBe(8);
   expect(inteiroDoCampo("-4", 0, 1, 8)).toBe(1);
+});
+
+// ARCH-20 (TD-024): combinator "ausente preserva o valor anterior, vazio vira null, valor
+// converte" — antes copiado byte a byte em 4 IIFEs de mpcLogic.ts (readback_tag_id/
+// local_shed_mode da MV, remote_sp_tag_id/sp_range_pct da CV).
+const inteiroPositivo = (bruto: string): number | null => {
+  const valor = Number(bruto);
+  return Number.isInteger(valor) && valor > 0 ? valor : null;
+};
+
+test("campoOpcional: campo ausente da submissão preserva o valor anterior", () => {
+  const dados = new FormData();
+  expect(campoOpcional(dados, "readback_tag_id", 7, inteiroPositivo)).toBe(7);
+  expect(campoOpcional(dados, "readback_tag_id", null, inteiroPositivo)).toBeNull();
+});
+
+test("campoOpcional: campo vazio (removido deliberadamente) vira null, mesmo com valor anterior", () => {
+  const dados = new FormData();
+  dados.set("readback_tag_id", "");
+  expect(campoOpcional(dados, "readback_tag_id", 7, inteiroPositivo)).toBeNull();
+});
+
+test("campoOpcional: valor válido converte", () => {
+  const dados = new FormData();
+  dados.set("readback_tag_id", "12");
+  expect(campoOpcional(dados, "readback_tag_id", 7, inteiroPositivo)).toBe(12);
+});
+
+test("campoOpcional: valor inválido para o converter vira null, não preserva o anterior", () => {
+  const dados = new FormData();
+  dados.set("readback_tag_id", "-3");
+  expect(campoOpcional(dados, "readback_tag_id", 7, inteiroPositivo)).toBeNull();
 });
 
 function formulario(pares: Record<string, string>): FormData {

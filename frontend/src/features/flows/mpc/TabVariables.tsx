@@ -18,6 +18,7 @@ import type {
   VariavelMv,
   VariavelRestricao,
 } from "../graph";
+import { Campo } from "../config/CamposComuns";
 import { CamposPid } from "./CamposPid";
 import {
   gerarIdVariavel,
@@ -128,6 +129,10 @@ function CampoZeroSpan({
   );
 }
 
+/** Delega a `Campo` (`config/CamposComuns.tsx`, ARCH-21/TD-024): id HTML é `<id>-<campo>`
+ *  (não-colidente entre variáveis, mesmo padrão de antes), `name` desacoplado pela convenção
+ *  `nomeCampoVar` do MPC via o prop `nome`. `testid` só é desenhado quando o chamador passa
+ *  um — metade dos campos do MPC nunca teve testid, e isso continua assim. */
 function CampoNumero({
   id,
   campo,
@@ -145,18 +150,13 @@ function CampoNumero({
   testid?: string;
 }) {
   return (
-    <div className="space-y-1">
-      <Label htmlFor={`${id}-${campo}`}>{rotulo}</Label>
-      <Input
-        id={`${id}-${campo}`}
-        name={nomeCampoVar(id, campo)}
-        type="text"
-        inputMode="decimal"
-        className="process-value"
-        defaultValue={valor === null ? "" : String(valor)}
-        data-testid={testid}
-      />
-    </div>
+    <Campo
+      id={`${id}-${campo}`}
+      nome={nomeCampoVar(id, campo)}
+      rotulo={rotulo}
+      valor={valor}
+      testid={testid}
+    />
   );
 }
 
