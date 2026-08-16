@@ -4,6 +4,7 @@ import uPlot from "uplot";
 import { useCanalAoVivo } from "../../app/CanalAoVivo";
 import { Button } from "../../components/ui/button";
 import type { MpcState } from "../../lib/contracts.gen";
+import { useTema } from "../../lib/theme";
 import {
   chaveEscala,
   construirEscalasUplot,
@@ -574,11 +575,14 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     [mpcState],
   );
 
-  const tema = useMemo(() => lerTemaTrend(), []);
+  // `lerTemaTrend()` e `lerCoresPenaOperacao()` leem `getComputedStyle(document.documentElement)`,
+  // então o valor muda quando o `data-theme` do `<html>` muda: `temaId` é a dependência.
+  const temaId = useTema();
+  const tema = useMemo(() => lerTemaTrend(), [temaId]);
   // Paleta PRÓPRIA do trend de operação (§6.6-5) — não `tema.penas` (6, do trend de
   // engenharia): o resto do tema (grade, eixos, mono, accent, poço) segue vindo de
   // `lerTemaTrend()`, só a cor de pena tem fonte própria de 8 posições.
-  const coresPena = useMemo(() => lerCoresPenaOperacao(), []);
+  const coresPena = useMemo(() => lerCoresPenaOperacao(), [temaId]);
   const cores = useMemo(
     () => atribuirCoresPenas(idsHistorico, coresPena),
     [idsHistorico, coresPena],
@@ -766,7 +770,9 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
       return e.auto ? `${id}:a` : `${id}:${String(e.min)}-${String(e.max)}`;
     })
     .join(",");
-  const estrutura = `${String(janelaSegundos)}|${idsEstrutura.join(",")}|${escalaAssinatura}|${foco ?? ""}`;
+  // O tema entra na estrutura: o uPlot pinta no canvas com as cores lidas na montagem, então
+  // alternar claro/escuro só reflete no gráfico recriando a instância.
+  const estrutura = `${temaId}|${String(janelaSegundos)}|${idsEstrutura.join(",")}|${escalaAssinatura}|${foco ?? ""}`;
 
   const motor = useMotorTrend({
     estrutura,

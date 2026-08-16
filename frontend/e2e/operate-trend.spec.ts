@@ -529,4 +529,36 @@ test.describe("Tela de Operação", () => {
       expect(texto.trim()).toBe("—");
     }
   });
+
+  test("PW-OP-13: alternar claro/escuro recria a instância do uPlot do trend de operação", async ({
+    page,
+  }) => {
+    // O uPlot pinta no canvas com as cores lidas na MONTAGEM: trocar o tema depois disso não
+    // repinta nada, só recriar a instância repinta. A invariante provada aqui é a recriação —
+    // marcamos o `.u-wrap` vivo e exigimos um nó novo depois do toggle. Comparar pixels do
+    // canvas seria flaky por construção: o trend tem dado vivo.
+    const wrap = page.getByTestId("operate-trend-chart").locator(".u-wrap");
+    await expect(wrap).toBeVisible();
+    await page.evaluate(() => {
+      document
+        .querySelector('[data-testid="operate-trend-chart"] .u-wrap')
+        ?.setAttribute("data-e2e-instancia", "antes");
+    });
+
+    const temaAntes = await page.evaluate(() =>
+      document.documentElement.getAttribute("data-theme"),
+    );
+    await page.getByTestId("theme-toggle").click();
+    await expect
+      .poll(async () =>
+        page.evaluate(() => document.documentElement.getAttribute("data-theme")),
+      )
+      .not.toBe(temaAntes);
+
+    // Nó novo: o marcado foi descartado junto com a instância antiga.
+    await expect(
+      page.getByTestId("operate-trend-chart").locator(".u-wrap[data-e2e-instancia]"),
+    ).toHaveCount(0);
+    await expect(wrap).toBeVisible();
+  });
 });
