@@ -293,3 +293,171 @@ export interface FuzzyState {
   rules: number[];
   outputs: FuzzyVarState[];
 }
+
+// --------------------------------------------------------------------------------------
+// Forma dos configs de bloco (JSON Schema via model_json_schema(), ARCH-06/TD-018): campos
+// de MvVar/CvVar/ConstraintVar/DvVar/MpcConfig/ScriptConfig/FuzzyConfig/PidConfig, mesmo
+// mecanismo dos payloads do WS acima (ADR-034: forma é gerada, regra travada por golden,
+// default pode continuar espelhado à mão). TfsConfig fica de fora — ver
+// contracts_export.py::_NODE_CONFIG_MODELS.
+// --------------------------------------------------------------------------------------
+
+export interface Limits {
+  min: number;
+  max: number;
+}
+
+export interface ModeValues {
+  auto: number;
+  target: number;
+}
+
+export interface PidBinding {
+  write_tag_id: number;
+  target_mode: "rcas" | "cas" | "rout";
+  mode_cmd_tag_id: number;
+  mode_read_tag_id: number | null;
+  readback_tag_id: number;
+  mode_values: ModeValues;
+}
+
+export interface MvVar {
+  id: string;
+  name: string;
+  eu: string;
+  description: string;
+  zero: number;
+  span: number;
+  limits: Limits;
+  max_rate: number;
+  du_min: number;
+  move_weight: number;
+  initial_value: number;
+  operating_point: number;
+  readback_tag_id: number | null;
+  pid: PidBinding | null;
+  objective: "none" | "maximize" | "minimize" | "psv" | "equalize";
+  psv: number | null;
+  fail_action: "no_action" | "shed_local" | "manual";
+  local_shed_mode: number | null;
+}
+
+export interface CvVar {
+  id: string;
+  name: string;
+  eu: string;
+  description: string;
+  zero: number;
+  span: number;
+  kind: "selfreg" | "integrating";
+  tss: number;
+  weight: number;
+  sp_limits: Limits;
+  priority: number;
+  objective: "none" | "maximize" | "minimize" | "observe_limit" | "target" | "psv";
+  traj_tau_s: number;
+  track_sp: boolean;
+  fail_action: "no_action" | "shed_local" | "manual" | "simulate_manual" | "simulate_shed_local";
+  fail_timeout_s: number;
+  sp_range_pct: number | null;
+  remote_sp_tag_id: number | null;
+}
+
+export interface Range {
+  low: number;
+  high: number;
+}
+
+export interface ConstraintVar {
+  id: string;
+  name: string;
+  eu: string;
+  description: string;
+  zero: number;
+  span: number;
+  kind: "selfreg" | "integrating";
+  tss: number;
+  range: Range;
+  priority: number;
+  objective: "none" | "maximize" | "minimize";
+  fail_action: "no_action" | "shed_local" | "manual" | "simulate_manual" | "simulate_shed_local";
+  fail_timeout_s: number;
+}
+
+export interface DvVar {
+  id: string;
+  name: string;
+  eu: string;
+  zero: number;
+  span: number;
+  range: Range | null;
+  operating_point: number;
+}
+
+export interface EconomicsConfig {
+  enabled: boolean;
+  costs: Record<string, number>;
+  slack_weight: number;
+  detuning_weight: number;
+  solver: "highs" | "osqp" | "gurobi";
+  integrating_tolerance: number;
+}
+
+export interface MpcVariables {
+  mvs: MvVar[];
+  cvs: CvVar[];
+  constraints: ConstraintVar[];
+  dvs: DvVar[];
+}
+
+export interface PairModel {
+  enabled: boolean;
+  params: Record<string, number>;
+}
+
+export interface MpcConfig {
+  name: string;
+  multiplier: number;
+  variables: MpcVariables;
+  models: Record<string, Record<string, PairModel>>;
+  economics: EconomicsConfig | null;
+}
+
+export interface ScriptConfig {
+  n_inputs: number;
+  n_outputs: number;
+  code: string;
+  output_eu: Record<string, string>;
+}
+
+export interface FuzzyConfig {
+  fll: string;
+  n_inputs: number;
+  n_outputs: number;
+  output_eu: Record<string, string>;
+}
+
+export interface PidConfig {
+  kc: number;
+  ti_seconds: number;
+  td_seconds: number;
+  setpoint: number;
+  output_min: number | null;
+  output_max: number | null;
+  auto_mode: boolean;
+  proportional_on_measurement: boolean;
+  differential_on_measurement: boolean;
+  starting_output: number;
+}
+
+export interface SopdtParams {
+  K: number;
+  tau1: number;
+  tau2: number;
+  theta: number;
+}
+
+export interface IopdtParams {
+  Ki: number;
+  theta: number;
+}

@@ -1,9 +1,25 @@
 import type { Edge, Node, XYPosition } from "@xyflow/react";
 import {
   PORT_CONTRACTS,
+  type ConstraintVar,
   type ContratoPortaDinamica,
+  type CvVar,
   type DirecaoPorta,
+  type DvVar,
+  type FuzzyConfig,
+  type IopdtParams,
+  type Limits,
+  type ModeValues,
+  type MpcConfig,
+  type MpcVariables,
+  type MvVar,
+  type PairModel,
+  type PidBinding,
+  type PidConfig,
+  type Range,
   type RegraPortaDinamica,
+  type ScriptConfig,
+  type SopdtParams,
 } from "../../lib/contracts.gen";
 import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
 
@@ -106,24 +122,27 @@ export type MapaTags = ReadonlyMap<number, TipoDadoTag>;
 type DadosBase = { exec_order: number; label: string };
 
 export type DadosTag = DadosBase & { tag_id: number | null };
-export type DadosScript = DadosBase & {
-  n_inputs: number;
-  n_outputs: number;
-  code: string;
-  output_eu: Record<string, string>;
-};
+/** `Pick<T, keyof T>`, não `DadosBase & ScriptConfig` puro: `ScriptConfig` é uma
+ *  `interface` gerada, e o TS não aceita `interface` referenciada direto onde o genérico de
+ *  `Node<D, T>` (`@xyflow/react`) exige `D extends Record<string, unknown>` — falta o índice
+ *  implícito que um alias de objeto tem. `Pick` materializa um tipo mapeado (mesma forma,
+ *  sem esse problema); mesmo ajuste em `DadosFuzzy`/`DadosPid` abaixo. */
+export type DadosScript = DadosBase & Pick<ScriptConfig, keyof ScriptConfig>;
 
 /** `n_inputs`/`n_outputs` mapeiam posicionalmente às `InputVariable`/`OutputVariable`
  *  declaradas no `fll`, na ordem de declaração (RF-541, ADR-029). */
-export type DadosFuzzy = DadosBase & {
-  fll: string;
-  n_inputs: number;
-  n_outputs: number;
-  output_eu: Record<string, string>;
-};
+export type DadosFuzzy = DadosBase & Pick<FuzzyConfig, keyof FuzzyConfig>;
 
-export type ParamsSopdt = { K: number; tau1: number; tau2: number; theta: number };
-export type ParamsIopdt = { Ki: number; theta: number };
+/** `SopdtParams`/`IopdtParams` (`parse.py::TfsElement`) são planas — sobrevivem à geração
+ *  (ARCH-06/TD-018) sem ressalva. `ElementoTfs`/`DadosTfs` continuam manuais: no Pydantic,
+ *  `TfsElement.params: SopdtParams | IopdtParams` é uma união NÃO discriminada (sem
+ *  `Field(discriminator=...)`), então `model_json_schema()` emite só um `anyOf` solto, sem
+ *  vínculo com o campo irmão `kind` — o TS gerado não conseguiria estreitar `params` a partir
+ *  de `kind` (é exatamente o que `valorParam`/`trocarElemento`, em `CamposTfs.tsx`, fazem
+ *  hoje). Ligar as duas coisas exigiria reescrever `TfsElement` como union tagged no Pydantic
+ *  — fora do escopo cirúrgico deste item (`mpc_config.py`/`parse.py` não estão no Target). */
+export type ParamsSopdt = SopdtParams;
+export type ParamsIopdt = IopdtParams;
 export type TipoElemento = "sopdt" | "iopdt";
 
 export type ElementoTfs =
@@ -162,33 +181,28 @@ export type DadosKalman = DadosBase & { measurement_noise: number; process_noise
  *  `sample_time`/`error_map`/`time_fn` do `simple-pid` ficam de fora por decisão do gate: o
  *  laço de varredura é a única autoridade de tempo, e os outros dois são callables Python,
  *  não serializáveis em JSON. */
-export type DadosPid = DadosBase & {
-  kc: number;
-  ti_seconds: number;
-  td_seconds: number;
-  setpoint: number;
-  output_min: number | null;
-  output_max: number | null;
-  auto_mode: boolean;
-  proportional_on_measurement: boolean;
-  differential_on_measurement: boolean;
-  starting_output: number;
-};
+export type DadosPid = DadosBase & Pick<PidConfig, keyof PidConfig>;
 
-export type LimitesMpc = { min: number; max: number };
-export type FaixaMpc = { low: number; high: number };
-export type ValoresModoPid = { auto: number; target: number };
+/** `LimitesMpc`/`FaixaMpc`/`ValoresModoPid`/`PidMv` abaixo viram alias do tipo gerado
+ *  (ARCH-06/TD-018): `Limits`/`Range`/`ModeValues`/`PidBinding` de `mpc_config.py`, mesmo
+ *  mecanismo de `contracts_export.py::build_contracts()["node_configs"]`.
+ *
+ *  `ModoAlvoPid`/`TipoLinhaMpc`/`ObjetivoMv`/`ObjetivoCv`/`ObjetivoRestricao`/`AcaoFalhaMv`/
+ *  `AcaoFalhaLinha` continuam declarados à mão: no Pydantic eles nascem de `Literal[...]`
+ *  atribuído a uma variável comum (`RowKind = Literal["selfreg", "integrating"]` etc.), e
+ *  `model_json_schema()` só nomeia um `$defs` para esse padrão quando a declaração usa a
+ *  sintaxe de alias do PEP 695 (`type RowKind = Literal[...]`, testado à mão neste item) —
+ *  `mpc_config.py` usa a forma antiga, então cada `Literal` aparece só inline, sem nome, no
+ *  campo que o usa (ex.: `MvVar.objective` em `contracts.gen.ts` carrega a união solta, sem
+ *  um `ObjetivoMv` para importar). Migrar `mpc_config.py` para PEP 695 resolveria, mas esse
+ *  arquivo não está no Target deste item. */
+export type LimitesMpc = Limits;
+export type FaixaMpc = Range;
+export type ValoresModoPid = ModeValues;
 export type ModoAlvoPid = "rcas" | "cas" | "rout";
 
 /** Tags do PID de uma MV (spec F4 §2.1-3, RF-604); ausente ⇒ MV "direta" (decisão A-8). */
-export type PidMv = {
-  write_tag_id: number;
-  target_mode: ModoAlvoPid;
-  mode_cmd_tag_id: number;
-  mode_read_tag_id: number | null;
-  readback_tag_id: number;
-  mode_values: ValoresModoPid;
-};
+export type PidMv = PidBinding;
 
 /** `kind` da linha (CV ou Restrição) define a forma dos `params` do par na matriz `models`
  *  (spec F4 §2.1-2): `selfreg` → SOPDT, `integrating` → IOPDT. */
@@ -212,7 +226,8 @@ export type AcaoFalhaLinha =
   | "simulate_manual"
   | "simulate_shed_local";
 
-/** `operating_point`/`readback_tag_id` (TD-003): o modelo do MPC é incremental — o builder
+/** Espelho de `MvVar` (`mpc_config.py`), gerado via `contracts.gen.ts` (ARCH-06/TD-018).
+ *  `operating_point`/`readback_tag_id` (TD-003): o modelo do MPC é incremental — o builder
  *  alimenta cada par com `coluna - operating_point`, então `operating_point` é o ponto de
  *  linearização. Por isso a porta do bloco fica na coordenada ABSOLUTA da planta (`limits`,
  *  `max_rate` e `initial_value` também), sem precisar de um bloco Script somando constantes.
@@ -232,107 +247,32 @@ export type AcaoFalhaLinha =
  *  `fail_action` (RF-613): ação quando a MV fica indisponível em REMOTO. `local_shed_mode`:
  *  valor escrito no `mode_cmd` em qualquer devolução ao local; `null` = `mode_values.auto`
  *  (só com PID — o servidor valida). */
-export type VariavelMv = {
-  id: string;
-  name: string;
-  eu: string;
-  description: string;
-  zero: number;
-  span: number;
-  limits: LimitesMpc;
-  max_rate: number;
-  du_min: number;
-  move_weight: number;
-  initial_value: number;
-  operating_point: number;
-  readback_tag_id: number | null;
-  pid: PidMv | null;
-  objective: ObjetivoMv;
-  /** Valor preferido da MV quando `objective === "psv"` (coordenada absoluta, mesma de
-   *  `limits`); `null` fora do PSV — o servidor valida as duas direções. */
-  psv: number | null;
-  fail_action: AcaoFalhaMv;
-  local_shed_mode: number | null;
-};
+export type VariavelMv = MvVar;
 
-export type VariavelCv = {
-  id: string;
-  name: string;
-  eu: string;
-  description: string;
-  zero: number;
-  span: number;
-  kind: TipoLinhaMpc;
-  tss: number;
-  weight: number;
-  sp_limits: LimitesMpc;
-  priority: number;
-  objective: ObjetivoCv;
-  /** τ da trajetória de referência exponencial até o SP (RF-611); 0 = degrau (comportamento
-   *  de sempre). */
-  traj_tau_s: number;
-  /** Fora de AUTO o SP rastreia o PV (RF-612); `true` = comportamento anterior. */
-  track_sp: boolean;
-  fail_action: AcaoFalhaLinha;
-  /** Janela da simulação `simulate_*` (RF-613), em segundos. */
-  fail_timeout_s: number;
-  /** Banda do SP no SSTO (RF-615), % do span; `null` = sem restrição. */
-  sp_range_pct: number | null;
-  /** Tag OPC-UA de SP remoto (RF-614); `null` = SP local do operador. */
-  remote_sp_tag_id: number | null;
-};
+export type VariavelCv = CvVar;
 
-export type VariavelRestricao = {
-  id: string;
-  name: string;
-  eu: string;
-  description: string;
-  zero: number;
-  span: number;
-  kind: TipoLinhaMpc;
-  tss: number;
-  range: FaixaMpc;
-  priority: number;
-  objective: ObjetivoRestricao;
-  fail_action: AcaoFalhaLinha;
-  fail_timeout_s: number;
-};
+export type VariavelRestricao = ConstraintVar;
 
 /** `operating_point` da DV (TD-003): mesmo ponto de linearização das MVs — o builder alimenta
  *  o par com `coluna - operating_point`, então a porta de entrada da DV também fica na
  *  coordenada absoluta da planta, sem bloco Script somando constantes. `zero`/`span`
  *  (RF-609): faixa de instrumento — entra na conversão %/%→EU dos ganhos da DV. */
-export type VariavelDv = {
-  id: string;
-  name: string;
-  eu: string;
-  zero: number;
-  span: number;
-  range: FaixaMpc | null;
-  operating_point: number;
-};
+export type VariavelDv = DvVar;
 
 /** Espelho de `MpcVariables` (spec F4 §2.1): entradas do nó = cvs+constraints+dvs, saída =
  *  mvs, sempre nesta ordem (decisão A-10, `validate.py::_input_handles`/`_output_handles`). */
-export type VariaveisMpc = {
-  mvs: VariavelMv[];
-  cvs: VariavelCv[];
-  constraints: VariavelRestricao[];
-  dvs: VariavelDv[];
-};
+export type VariaveisMpc = MpcVariables;
 
 /** Par `models[linha][coluna]` (spec F4 §2.1-2); `params` genérico — a forma exata por
  *  `kind` da linha é validação do modal (tarefa 4.2), fora do escopo desta tarefa. */
-export type ParModeloMpc = { enabled: boolean; params: Record<string, number> };
+export type ParModeloMpc = PairModel;
 
 /** Espelho de `MpcConfig` (spec F4 §2.1, `mpc_config.py`): `name`/`multiplier` são chaves do
- *  config, distintas de `label` (rótulo genérico de exibição que todo bloco tem). */
-export type DadosMpc = DadosBase & {
-  name: string;
-  multiplier: number;
-  variables: VariaveisMpc;
-  models: Record<string, Record<string, ParModeloMpc>>;
-};
+ *  config, distintas de `label` (rótulo genérico de exibição que todo bloco tem). `economics`
+ *  fica de fora por enquanto: `lerNo`/`criarBloco` (case "mpc") nunca leram nem escreveram
+ *  esse campo — o editor não tem UI para o SSTO ainda; estendê-lo é fora do escopo do
+ *  ARCH-06/TD-018 (gerar a forma existente, não abrir superfície nova do editor). */
+export type DadosMpc = DadosBase & Pick<MpcConfig, "name" | "multiplier" | "variables" | "models">;
 
 export type DadosBloco =
   | DadosTag

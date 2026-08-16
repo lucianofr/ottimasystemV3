@@ -8,6 +8,10 @@
  * via `model_json_schema()`) em stdout — e traduz para TS com um gerador próprio, sem
  * dependência npm nova. Os schemas exportados são sempre planos (objetos, primitivos, enums,
  * dicts); um gerador genérico de JSON Schema seria mais código do que o contrato precisa.
+ *
+ * `node_configs` (ARCH-06/TD-018) reusa o mesmo `interfacesDeSchemas` para a forma dos configs
+ * de bloco (`MvVar`/`CvVar`/`ConstraintVar`/`DvVar`/`MpcConfig`/`ScriptConfig`/`FuzzyConfig`/
+ * `PidConfig`) que `frontend/src/features/flows/graph.ts` importa em vez de reescrever.
  */
 
 import { execFileSync } from "node:child_process";
@@ -62,12 +66,14 @@ function interfaceDe(nome, schema) {
   return `export interface ${nome} {\n${campos}\n}`;
 }
 
-/** Achata `ws_payloads` (schemas de raiz + `$defs` aninhados) numa lista de interfaces, sem
- *  repetir nome — um modelo pode ser raiz de um payload e `$defs` de outro ao mesmo tempo
- *  (ex.: `PortValue` é raiz e também `$defs` de `FlowStatus`). */
-function interfacesWsPayloads(wsPayloads) {
+/** Achata um dict `{nome: schema}` (schemas de raiz + `$defs` aninhados) numa lista de
+ *  interfaces, sem repetir nome — um modelo pode ser raiz de um payload/config e `$defs` de
+ *  outro ao mesmo tempo (ex.: `PortValue` é raiz de `ws_payloads` e também `$defs` de
+ *  `FlowStatus`; `Limits` é `$defs` tanto de `MvVar` quanto de `CvVar` em `node_configs`).
+ *  Genérico: serve tanto a `ws_payloads` quanto a `node_configs`. */
+function interfacesDeSchemas(schemas) {
   const vistos = new Map();
-  for (const [nome, schema] of Object.entries(wsPayloads)) {
+  for (const [nome, schema] of Object.entries(schemas)) {
     for (const [nomeDef, defSchema] of Object.entries(schema.$defs ?? {})) {
       if (!vistos.has(nomeDef)) vistos.set(nomeDef, interfaceDe(nomeDef, defSchema));
     }
@@ -134,7 +140,11 @@ function tabelaPortContracts(portContracts) {
 // --------------------------------------------------------------------------------------
 
 function main() {
-  const { port_contracts: portContracts, ws_payloads: wsPayloads } = rodarExportadorPython();
+  const {
+    port_contracts: portContracts,
+    ws_payloads: wsPayloads,
+    node_configs: nodeConfigs,
+  } = rodarExportadorPython();
 
   const corpo = `// GERADO — não editar; fonte: ottima_core.contracts_export
 // Regenerar: npm run generate:contracts
@@ -147,7 +157,17 @@ ${tabelaPortContracts(portContracts)}
 // Payloads do WS (JSON Schema via model_json_schema(), spec F3 §4.2 / bus.py)
 // --------------------------------------------------------------------------------------
 
-${interfacesWsPayloads(wsPayloads).join("\n\n")}
+${interfacesDeSchemas(wsPayloads).join("\n\n")}
+
+// --------------------------------------------------------------------------------------
+// Forma dos configs de bloco (JSON Schema via model_json_schema(), ARCH-06/TD-018): campos
+// de MvVar/CvVar/ConstraintVar/DvVar/MpcConfig/ScriptConfig/FuzzyConfig/PidConfig, mesmo
+// mecanismo dos payloads do WS acima (ADR-034: forma é gerada, regra travada por golden,
+// default pode continuar espelhado à mão). TfsConfig fica de fora — ver
+// contracts_export.py::_NODE_CONFIG_MODELS.
+// --------------------------------------------------------------------------------------
+
+${interfacesDeSchemas(nodeConfigs).join("\n\n")}
 `;
 
   mkdirSync(dirname(ARQUIVO_SAIDA), { recursive: true });

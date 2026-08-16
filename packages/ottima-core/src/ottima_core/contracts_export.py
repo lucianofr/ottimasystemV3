@@ -1,4 +1,5 @@
-"""Fonte única dos contratos de porta por bloco + payloads do WS, exportados como JSON.
+"""Fonte única dos contratos de porta por bloco + payloads do WS + forma dos configs de nó,
+exportados como JSON.
 
 Débito 2+4 do plano F4a: três espelhos TS mantidos à mão (`graph.ts`, `nodes/index.tsx`,
 `useFlowStatus.ts`) divergiam em silêncio de `flowgraph.py`/`bus.py`. Este módulo é a fonte
@@ -26,13 +27,33 @@ porta, ao contrário de `script`.
 ao vivo consome. `MpcVarState` (spec F4 §5.1) chega aninhado em `MpcState.vars` — não precisa
 entrar em `_WS_MODELS`: o gerador TS achata `$defs` e produz a interface própria mesmo assim.
 
+`node_configs` (ARCH-06/TD-018) é o mesmo mecanismo aplicado à forma dos campos de config por
+bloco — `MvVar`/`CvVar`/`ConstraintVar`/`DvVar`/`MpcConfig`/`ScriptConfig`/`FuzzyConfig`/
+`PidConfig`, que `frontend/src/features/flows/graph.ts` reescrevia à mão. Fronteira fixada em
+ADR-034: só a FORMA é gerada aqui — regra de negócio é travada por `mpc_golden_export`,
+default literal pode continuar espelhado à mão em TS. `TfsConfig` fica de fora (ver
+`_NODE_CONFIG_MODELS`): `TfsElement.params` é uma união não discriminada, o JSON Schema
+perde o vínculo com `kind`; só `SopdtParams`/`IopdtParams` (planas) entram.
+
 Executável como `uv run python -m ottima_core.contracts_export`.
 """
 
 import json
 
 from ottima_core.bus import FlowStatus, FuzzyState, MpcState, PortValue
-from ottima_core.flowgraph import MAX_SCRIPT_PORTS
+from ottima_core.flowgraph import (
+    MAX_SCRIPT_PORTS,
+    ConstraintVar,
+    CvVar,
+    DvVar,
+    FuzzyConfig,
+    IopdtParams,
+    MpcConfig,
+    MvVar,
+    PidConfig,
+    ScriptConfig,
+    SopdtParams,
+)
 from ottima_core.flowgraph.parse import MAX_FUZZY_FLL_LENGTH
 
 FUZZY_DEFAULT_FLL = """Engine: tsukamoto
@@ -210,11 +231,35 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
 _WS_MODELS = (FlowStatus, PortValue, MpcState, FuzzyState)
 
 
+# ARCH-06/TD-018 (ADR-034: forma é gerada, regra é travada por golden, default é espelho
+# manual). `TfsConfig`/`TfsElement` ficam de fora: `TfsElement.params: SopdtParams |
+# IopdtParams` é união NÃO discriminada (sem `Field(discriminator=...)`), então
+# `model_json_schema()` emite só `anyOf`, sem vínculo com o campo irmão `kind` — o TS gerado
+# não conseguiria estreitar `params` a partir de `kind`, o que o editor (`CamposTfs.tsx`)
+# precisa fazer hoje. `SopdtParams`/`IopdtParams` entram direto (são planas, sem esse
+# problema); `ElementoTfs`/`DadosTfs` continuam hand-typed em `graph.ts`.
+_NODE_CONFIG_MODELS = (
+    MvVar,
+    CvVar,
+    ConstraintVar,
+    DvVar,
+    MpcConfig,
+    ScriptConfig,
+    FuzzyConfig,
+    PidConfig,
+    SopdtParams,
+    IopdtParams,
+)
+
+
 def build_contracts() -> dict[str, object]:
-    """Monta o payload completo (porta + WS) — puro, sem I/O."""
+    """Monta o payload completo (porta + WS + config de nó) — puro, sem I/O."""
     return {
         "port_contracts": PORT_CONTRACTS,
         "ws_payloads": {model.__name__: model.model_json_schema() for model in _WS_MODELS},
+        "node_configs": {
+            model.__name__: model.model_json_schema() for model in _NODE_CONFIG_MODELS
+        },
     }
 
 
