@@ -22,6 +22,7 @@ import {
   type SopdtParams,
 } from "../../lib/contracts.gen";
 import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
+import { PADRAO_FIRST_ORDER, PADRAO_KALMAN, PADRAO_PID, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
 
 /**
  * Modelo do grafo do editor + as regras que o editor espelha do servidor.
@@ -70,7 +71,7 @@ type ContratoFuzzy = ContratoPortaDinamica & {
   max_fll_length: number;
 };
 
-const contratoFuzzy = PORT_CONTRACTS.fuzzy as ContratoFuzzy;
+export const contratoFuzzy = PORT_CONTRACTS.fuzzy as ContratoFuzzy;
 if (!contratoFuzzy.dynamic) throw new Error("contrato do fuzzy deveria ser dinâmico");
 
 /** Teto de portas do bloco Fuzzy — do contrato gerado (RF-541), mesma fonte única que
@@ -81,45 +82,20 @@ export const MAX_PORTAS_FUZZY = tetoDoContrato(contratoFuzzy.rules[0]);
  *  contrato, mesma fonte única: o backend reprova acima deste tamanho. */
 export const MAX_FLL_LENGTH = contratoFuzzy.max_fll_length;
 
-export const ROTULO_BLOCO: Record<TipoBloco, string> = {
-  opc_read: "Leitura OPC",
-  opc_write: "Escrita OPC",
-  script: "Script",
-  first_order: "Filtro 1ª ordem",
-  kalman: "Filtro Kalman",
-  tfs: "TFS",
-  mpc: "MPC",
-  fuzzy: "Fuzzy",
-  pid: "PID",
-};
-
-/** Defaults dos blocos de filtro (ADR-026), compartilhados por `criarBloco` e `lerNo`: o
- *  bloco recém-arrastado já nasce com uma config que passa no save (`measurement_noise` > 0),
- *  e um `graph_json` com o campo corrompido cai no mesmo valor em vez de virar `NaN`. */
-const PADRAO_FIRST_ORDER = { tau: 5 } as const;
-const PADRAO_KALMAN = { measurement_noise: 1, process_noise: 0.1 } as const;
-
-/** Defaults do PID (ADR-031, RF-551): estrutura ISA, tempos em segundos, derivativa
- *  desligada de fábrica (PI é o padrão industrial), faixa de saída 0..100 (MV em %). */
-const PADRAO_PID = {
-  kc: 1,
-  ti_seconds: 60,
-  td_seconds: 0,
-  setpoint: 0,
-  output_min: 0,
-  output_max: 100,
-  auto_mode: true,
-  proportional_on_measurement: false,
-  differential_on_measurement: true,
-  starting_output: 0,
-} as const;
+/** Rótulo por tipo (ARCH-18/TD-021): concentrado em `registro.ts` junto com
+ *  descrição/defaults/componente — reexportado aqui porque a maioria dos consumidores já
+ *  importa de `graph.ts`, e trocar 6 arquivos de import só para mover o dono não paga o
+ *  frete. `PADRAO_FIRST_ORDER`/`PADRAO_KALMAN`/`PADRAO_PID` (usados abaixo, em `lerNo`)
+ *  moraram aqui antes; também concentrados em `registro.ts` (Locality: dados do tipo
+ *  ficam juntos). */
+export { ROTULO_BLOCO };
 
 export type TipoDadoTag = "float" | "int" | "bool";
 
 /** `tag_id` das tags do projeto ativo, para o espelho de tipagem das portas. */
 export type MapaTags = ReadonlyMap<number, TipoDadoTag>;
 
-type DadosBase = { exec_order: number; label: string };
+export type DadosBase = { exec_order: number; label: string };
 
 export type DadosTag = DadosBase & { tag_id: number | null };
 /** `Pick<T, keyof T>`, não `DadosBase & ScriptConfig` puro: `ScriptConfig` é uma
@@ -496,27 +472,13 @@ export function proximoExecOrder(nodes: readonly BlocoNode[]): number {
   return candidato;
 }
 
-/** Atualiza campos comuns de `data`; id, posição e config seguem intactos (ADR-024). */
+/** Atualiza campos comuns de `data`; id, posição e config seguem intactos (ADR-024).
+ *  Sem switch (ARCH-18/TD-021): nenhum `case` fazia trabalho por tipo — todo braço era
+ *  `{...no.data, ...mudanca}` idêntico; o switch existia só porque o TS não estreita
+ *  `no.data` por `no.type` sem narrowing explícito. O cast documenta essa lacuna do
+ *  compilador, não uma lacuna de tipo real. */
 export function comDados(no: BlocoNode, mudanca: Partial<DadosBase>): BlocoNode {
-  switch (no.type) {
-    case "opc_read":
-    case "opc_write":
-      return { ...no, data: { ...no.data, ...mudanca } };
-    case "script":
-      return { ...no, data: { ...no.data, ...mudanca } };
-    case "tfs":
-      return { ...no, data: { ...no.data, ...mudanca } };
-    case "mpc":
-      return { ...no, data: { ...no.data, ...mudanca } };
-    case "first_order":
-      return { ...no, data: { ...no.data, ...mudanca } };
-    case "kalman":
-      return { ...no, data: { ...no.data, ...mudanca } };
-    case "fuzzy":
-      return { ...no, data: { ...no.data, ...mudanca } };
-    case "pid":
-      return { ...no, data: { ...no.data, ...mudanca } };
-  }
+  return { ...no, data: { ...no.data, ...mudanca } } as BlocoNode;
 }
 
 /** Ordem vigente dos ids: por `exec_order`, empate pelo id para ser determinístico. */
@@ -672,66 +634,23 @@ export function matrizPadrao(): MatrizTfs {
   ];
 }
 
+/** ARCH-18/TD-021: `REGISTRO_BLOCO[tipo].defaults()` sempre bate com o shape de
+ *  `Dados<Tipo>` — a completude vem de `Record<TipoBloco, DefinicaoBloco>` (erro de build
+ *  se um tipo faltar no registro), não de union discriminada; o TS não prova essa
+ *  correlação tipo-a-tipo sem voltar a um switch, então o cast é a única fronteira não
+ *  verificada, documentada aqui. */
 export function criarBloco(
   tipo: TipoBloco,
   id: string,
   position: XYPosition,
   exec_order: number,
 ): BlocoNode {
-  switch (tipo) {
-    case "opc_read":
-      return { id, type: "opc_read", position, data: { exec_order, label: "", tag_id: null } };
-    case "opc_write":
-      return { id, type: "opc_write", position, data: { exec_order, label: "", tag_id: null } };
-    case "script":
-      return {
-        id,
-        type: "script",
-        position,
-        data: { exec_order, label: "", n_inputs: 1, n_outputs: 1, code: "OUT1 = IN1\n", output_eu: {} },
-      };
-    case "tfs":
-      return {
-        id,
-        type: "tfs",
-        position,
-        data: { exec_order, label: "", matrix: matrizPadrao(), output_eu: {} },
-      };
-    case "mpc":
-      return {
-        id,
-        type: "mpc",
-        position,
-        data: {
-          exec_order,
-          label: "",
-          name: "",
-          multiplier: 1,
-          variables: { mvs: [], cvs: [], constraints: [], dvs: [] },
-          models: {},
-        },
-      };
-    case "first_order":
-      return { id, type: "first_order", position, data: { exec_order, label: "", ...PADRAO_FIRST_ORDER } };
-    case "kalman":
-      return { id, type: "kalman", position, data: { exec_order, label: "", ...PADRAO_KALMAN } };
-    case "fuzzy":
-      return {
-        id,
-        type: "fuzzy",
-        position,
-        data: {
-          exec_order,
-          label: "",
-          n_inputs: contratoFuzzy.default_counts.n_inputs,
-          n_outputs: contratoFuzzy.default_counts.n_outputs,
-          fll: contratoFuzzy.default_fll,
-          output_eu: {},
-        },
-      };
-    case "pid":
-      return { id, type: "pid", position, data: { exec_order, label: "", ...PADRAO_PID } };
-  }
+  return {
+    id,
+    type: tipo,
+    position,
+    data: { exec_order, label: "", ...REGISTRO_BLOCO[tipo].defaults() },
+  } as BlocoNode;
 }
 
 // --------------------------------------------------------------------------------------

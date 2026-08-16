@@ -1,21 +1,10 @@
 import { Card } from "../../components/ui/card";
 import { cn } from "../../lib/cn";
 import { ROTULO_BLOCO, TIPOS_BLOCO, type TipoBloco } from "./graph";
+import { REGISTRO_BLOCO } from "./registro";
 
 /** Tipo MIME do arraste da paleta; evita reagir a qualquer outro drop no canvas. */
 export const MIME_BLOCO = "application/x-ottima-bloco";
-
-const DESCRICAO: Record<TipoBloco, string> = {
-  opc_read: "Lê o valor corrente de uma tag do projeto",
-  opc_write: "Escreve o valor da entrada em uma tag do projeto",
-  script: "Código Python com IN1..INn e OUT1..OUTn",
-  first_order: "Suaviza o sinal por constante de tempo (τ)",
-  kalman: "Estima o valor verdadeiro de um sinal ruidoso",
-  tfs: "Matriz 2x2 de funções de transferência (SOPDT/IOPDT)",
-  mpc: "Controle preditivo multivariável — portas dinâmicas conforme o config",
-  fuzzy: "Controlador fuzzy (FLL)",
-  pid: "Controlador PID (ISA) — PV, SP e saída",
-};
 
 interface Props {
   /** Clique adiciona no centro do canvas; o arraste posiciona onde soltar. */
@@ -42,7 +31,7 @@ function ItemPaleta({ tipo, onAdicionar }: { tipo: TipoBloco; onAdicionar: Props
     >
       <span className="plaqueta block text-[11px] text-fg">{ROTULO_BLOCO[tipo]}</span>
       <span className="mt-0.5 block text-[10px] leading-tight text-fg-muted">
-        {DESCRICAO[tipo]}
+        {REGISTRO_BLOCO[tipo].descricao}
       </span>
     </button>
   );
