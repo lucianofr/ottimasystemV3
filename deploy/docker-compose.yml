@@ -90,6 +90,14 @@ services:
       OTTIMA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
       OTTIMA_REDIS_URL: redis://redis:6379/0
       OTTIMA_LOG_LEVEL: ${OTTIMA_LOG_LEVEL:-INFO}
+      # Passada explicitamente, e não por env_file: este serviço roda código de bloco Script
+      # e por isso recebe só as variáveis que precisa (ver deploy/.env.example).
+      OTTIMA_FLOW_PARTITIONS: ${OTTIMA_FLOW_PARTITIONS:-1}
+    # O default de 10 s do Docker não cobre o desmonte ordenado que a ADR-009 exige: o processo
+    # para cada flow, desarma MPC e devolve PID antes de sair, e com OTTIMA_FLOW_PARTITIONS>1 o
+    # pai ainda espera as N partições fazerem isso (em paralelo, até 15 s cada). SIGKILL antes
+    # disso deixaria malha em REMOTO sem quem a devolvesse.
+    stop_grace_period: 30s
     depends_on:
       timescaledb:
         condition: service_healthy

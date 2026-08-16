@@ -125,7 +125,7 @@ Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via
 
 ### 5.5 Motor de execução (flow-runtime)
 - **RF-401** Execução por **scan cycle**: a cada Ts, avaliação de todos os blocos **em ordem crescente de `exec_order`** com os últimos valores conhecidos (snapshot do barramento). A ordenação topológica não é usada para execução (apenas como validação no editor). Se uma aresta A→B tiver `exec_order(B) < exec_order(A)`, B consome o valor de A da **varredura anterior** (atraso de 1 scan, determinístico). (ADR-007, 024)
-- **RF-402** ~10 flows simultâneos como tasks asyncio independentes; falha de um flow não afeta os demais. (ADR-004, 006)
+- **RF-402** ~10 flows simultâneos como tasks asyncio independentes; falha de um flow não afeta os demais. Opcionalmente os flows são divididos em **N processos** (`OTTIMA_FLOW_PARTITIONS`, default 1; posse por `flow_id % N`), o que isola também o TEMPO de varredura entre partições — dentro de uma partição os flows seguem dividindo o event loop. (ADR-004, 006)
 - **RF-403** Trabalho CPU-bound (solve do MPC, `exec` de script) roda via executor; o event loop nunca bloqueia. (ADR-004)
 - **RF-404** Publica por varredura: `flow.status.<flow_id>` (rodando/parado/falha, duração do scan, overruns) e valores de portas para o canvas ao vivo.
 - **RF-405** Consome canal `flow.commands` (deploy, parar, modos, SP, MV manual) originado da API; a UI reflete **estado publicado**, nunca eco de comando.

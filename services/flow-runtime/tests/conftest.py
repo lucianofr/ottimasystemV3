@@ -38,11 +38,33 @@ from runtime_test_helpers import (  # noqa: E402
     StubPool,
 )
 
+from ottima_core.config import get_settings  # noqa: E402
 from ottima_core.snapshot import ValueSnapshot  # noqa: E402
 from ottima_flow_runtime.events import build_event_listener  # noqa: E402
 from ottima_flow_runtime.mpc.worker import worker_main  # noqa: E402
+from ottima_flow_runtime.partition import UNPARTITIONED, Partition  # noqa: E402
 from ottima_flow_runtime.state import RuntimeState  # noqa: E402
 from ottima_flow_runtime.supervisor import Supervisor  # noqa: E402
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _sem_particao_no_ambiente() -> None:
+    """Falha cedo e claro se `OTTIMA_FLOW_PARTITIONS` vazar do shell para a suíte.
+
+    `main.app` é escolhido no IMPORT do módulo (`_default_app`): com a variável acima de 1, ele
+    vira o app do PAI — sem supervisor, sem `flows` — e `test_health.py`,
+    `test_health_mpc.py` e `test_supervisor.py` quebram por um motivo que não aparece no
+    traceback. Um `export` numa sessão de terminal (ou um `.env` no diretório de trabalho) é
+    suficiente para isso acontecer, então a suíte diz o que está errado em vez de deixar
+    adivinhar.
+    """
+    particoes = get_settings().flow_partitions
+    if particoes != 1:
+        raise pytest.UsageError(
+            f"OTTIMA_FLOW_PARTITIONS={particoes} no ambiente da suíte. Os testes assumem o "
+            "runtime de um processo (main.app = app de execução). Rode sem essa variável."
+        )
+
 
 # --------------------------------------------------------------------------------------
 # Banco: o supervisor tem session_factory próprio, então o cenário é commitado de verdade
@@ -120,6 +142,7 @@ async def harness_factory(
         *,
         poll_interval_s: float = SLOW_POLL_S,
         mpc_worker_target: Callable = worker_main,
+        partition: Partition = UNPARTITIONED,
     ) -> Harness:
         state = RuntimeState()
         pool = StubPool()
@@ -132,6 +155,7 @@ async def harness_factory(
             pool=pool,
             poll_interval_s=poll_interval_s,
             mpc_worker_target=mpc_worker_target,
+            partition=partition,
         )
         # Mesma composição do lifespan de `main.py`: o assinante de `events` é quem liga o
         # contrato F2 §3.7 ao supervisor, então o arreio tem de montá-lo igual.

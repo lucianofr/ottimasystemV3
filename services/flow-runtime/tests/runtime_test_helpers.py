@@ -14,7 +14,9 @@ precisa para montá-las.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from multiprocessing.connection import Connection
@@ -34,8 +36,10 @@ from ottima_core.bus import (
 from ottima_core.models import Flow, OpcConnection, Project, Tag
 from ottima_core.script_pool import ScriptResult
 from ottima_core.snapshot import ValueSnapshot
+from ottima_flow_runtime.blocks.base import Block, PortSample
 from ottima_flow_runtime.events import ChannelListener
 from ottima_flow_runtime.mpc.worker import SolveResult
+from ottima_flow_runtime.scheduler import FlowDefinition, FlowTask
 from ottima_flow_runtime.state import RuntimeState
 from ottima_flow_runtime.supervisor import Supervisor
 from testkit.await_until import await_until
@@ -626,3 +630,62 @@ def mpc_host_slow_solve_worker(conn: Connection, config_json: str, ts_flow: floa
             )
     except (EOFError, OSError):
         return
+
+
+# --------------------------------------------------------------------------------------
+# Varredura num processo separado: alvo de `spawn` do teste de isolamento entre partições
+# --------------------------------------------------------------------------------------
+
+
+class BlocoContado(Block):
+    """Conta varreduras e, opcionalmente, segura o event loop UMA vez.
+
+    `custo_s > 0` é o custo síncrono inline que `blocks/base.py` proíbe — o substituto honesto
+    de um `engine.process()` caro de Fuzzy, que o linter não tem como ver. Igual ao bloco de
+    `test_isolamento_temporal.py`, mas aqui ele mora no helper porque `spawn` precisa importar o
+    alvo por nome de módulo.
+    """
+
+    def __init__(self, block_id: str = "b1", *, custo_s: float = 0.0) -> None:
+        super().__init__(block_id)
+        self._custo_s: float = custo_s
+        self.varreduras: int = 0
+
+    async def step(
+        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
+    ) -> dict[str, PortSample]:
+        self.varreduras += 1
+        if self._custo_s and self.varreduras == 1:
+            time.sleep(self._custo_s)  # noqa: ASYNC251 — é o sujeito do teste
+        return {}
+
+
+def varrer_em_processo(
+    conn: Connection, redis_url: str, ts_seconds: float, custo_s: float, duracao_s: float
+) -> None:
+    """Alvo de `spawn`: roda UM flow por `duracao_s` e devolve a contagem de varreduras.
+
+    Nível de módulo porque `spawn` importa o alvo por nome (mesmo idioma de
+    `script_pool._worker_main`). Nada de asyncio aqui fora: o `asyncio.run` monta o loop DESTE
+    processo — que é justamente o ponto do teste, um event loop por partição.
+    """
+    asyncio.run(_varrer(conn, redis_url, ts_seconds, custo_s, duracao_s))
+
+
+async def _varrer(
+    conn: Connection, redis_url: str, ts_seconds: float, custo_s: float, duracao_s: float
+) -> None:
+    client = Redis.from_url(redis_url, decode_responses=True)
+    bloco = BlocoContado(custo_s=custo_s)
+    task = FlowTask(
+        FlowDefinition(flow_id=1, ts_seconds=ts_seconds, blocks=(bloco,), wiring={}),
+        redis_client=client,
+    )
+    await task.start(user="teste")
+    try:
+        await asyncio.sleep(duracao_s)
+    finally:
+        await task.stop(user="teste", reason="user")
+        await client.aclose()
+    conn.send(bloco.varreduras)
+    conn.close()

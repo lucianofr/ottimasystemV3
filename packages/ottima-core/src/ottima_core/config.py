@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     health_url_calc_worker: str = "http://calc-worker:8004/health"
     # tamanho do pool de processos do ScriptPool das tags calculadas (spec tags-calculadas)
     calc_pool_size: int = 4
+    # Número de processos em que o flow-runtime divide os flows (ADR-004, "um event loop por
+    # núcleo"). 1 = runtime de um processo só, o comportamento de sempre. É knob de env, e não
+    # constante de código como `SCRIPT_POOL_SIZE`, porque o número certo depende dos núcleos do
+    # host do site (RNF-01: um único host on-prem) — ver `ottima_flow_runtime.partition`.
+    flow_partitions: int = 1
 
 
 @lru_cache

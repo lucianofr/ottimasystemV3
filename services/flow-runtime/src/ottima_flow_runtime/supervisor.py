@@ -65,6 +65,7 @@ from .events import (
 )
 from .mpc.host import MpcHost
 from .mpc.worker import worker_main
+from .partition import UNPARTITIONED, Partition
 from .scheduler import FlowTask
 from .state import RuntimeState
 from .supervisor_mpc import MpcOrchestrator
@@ -173,6 +174,7 @@ class Supervisor:
         pool: ScriptPool,
         poll_interval_s: float = POLL_INTERVAL_S,
         mpc_worker_target: Callable[[Connection, str, float], None] = worker_main,
+        partition: Partition = UNPARTITIONED,
     ) -> None:
         self._session_factory = session_factory
         self._redis = redis_client
@@ -181,6 +183,7 @@ class Supervisor:
         self._pool = pool
         self._poll_interval_s = poll_interval_s
         self._mpc_worker_target = mpc_worker_target
+        self._partition = partition
         self._runtimes: dict[int, _FlowRuntime] = {}
         # Cola de orquestração MPC extraída do Supervisor (plano F4b tarefa 5.0, spec F4 §8
         # débito #6): mesmo `self._runtimes`, delegação interna — API pública inalterada.
@@ -275,7 +278,16 @@ class Supervisor:
         await self.handle_command(command)
 
     async def handle_command(self, command: FlowCommand) -> None:
-        """Despacha um comando. Idempotente e nunca levanta (RNF-05)."""
+        """Despacha um comando. Idempotente e nunca levanta (RNF-05).
+
+        `flow.commands` é um canal só, então TODA partição recebe TODO comando: quem não é dono
+        do flow sai aqui, sem log por comando (com N partições, N-1 delas descartariam cada
+        comando e o log viraria ruído). É o único ponto de posse do runtime particionado —
+        ADR-017 garante que nenhum outro caminho sobe flow, e o índice do processo é atribuído
+        pelo pai (ver `partition.py`), então cada comando cai em exatamente um processo.
+        """
+        if not self._partition.owns(command.flow_id):
+            return
         handlers = {
             "deploy": self._deploy,
             "stop": self._stop,
@@ -314,7 +326,22 @@ class Supervisor:
         `_FlowRuntime` novo, ou `None` se o deploy foi recusado (flow desconhecido, projeto
         inativo ou grafo inválido) — os dois chamadores decidem o que fazer com a recusa:
         `_deploy` só sai (o `deploy_rejected` já saiu daqui); a retomada mantém a entrada
-        pendente para o próximo `comm_restored`."""
+        pendente para o próximo `comm_restored`.
+
+        Rede de segurança de posse: este é o ÚNICO lugar que instancia `FlowTask`, e dois
+        processos executando o mesmo flow significaria escrita duplicada na mesma tag OPC. Hoje
+        os dois chamadores já são seguros (`_deploy` passa pelo filtro de `handle_command`, e a
+        retomada só age sobre flows que ESTE processo derrubou), então o guard abaixo nunca
+        dispara — é o que impede um terceiro chamador futuro de furar a posse em silêncio.
+        """
+        if not self._partition.owns(flow_id):
+            logger.error(
+                "Deploy do flow %s recusado: não pertence à partição %s. Caminho que ignora o "
+                "filtro de posse — corrigir o chamador, não este guard.",
+                flow_id,
+                self._partition.label or "única",
+            )
+            return None
         old_runtime = self._runtimes.get(flow_id)
         async with self._session_factory() as session:
             row = await self._load(session, flow_id)
