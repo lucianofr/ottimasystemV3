@@ -10,6 +10,7 @@ from ottima_core.portability.bundle import (
 )
 from ottima_core.portability.schemas import (
     SCHEMA_VERSION,
+    BundleCalcInputRef,
     BundleConnection,
     BundleFlow,
     BundleProject,
@@ -27,6 +28,7 @@ from ottima_core.portability.tag_ref import (
 
 __all__ = [
     "SCHEMA_VERSION",
+    "BundleCalcInputRef",
     "BundleConnection",
     "BundleFlow",
     "BundleProject",
