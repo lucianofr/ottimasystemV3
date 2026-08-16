@@ -10,7 +10,7 @@ import pytest
 from do_mpc.simulator import Simulator
 
 from ottima_core.flowgraph import MpcConfig, mpc_state_dimension
-from ottima_flow_runtime.mpc.builder import BuiltMpc, build_mpc
+from ottima_flow_runtime.mpc.builder import BuiltMpc, _assemble_model, build_mpc
 
 # --------------------------------------------------------------------------------------
 # Fixtures — configs mínimas via MpcConfig.model_validate (mesmo idioma de test_mpc_config.py)
@@ -133,7 +133,7 @@ def test_dimensao_do_modelo_bate_com_mpc_state_dimension_2x2_com_theta():
         }
     )
 
-    built = build_mpc(config, ts_flow=1.0)
+    built = _assemble_model(config, ts_flow=1.0)
 
     assert built.mpc.model.n_x == mpc_state_dimension(config, ts_mpc=built.horizons.ts_mpc)
 
@@ -158,7 +158,7 @@ def test_dimensao_do_modelo_bate_com_mpc_state_dimension_com_dv():
         }
     )
 
-    built = build_mpc(config, ts_flow=1.0)
+    built = _assemble_model(config, ts_flow=1.0)
 
     assert built.mpc.model.n_x == mpc_state_dimension(config, ts_mpc=built.horizons.ts_mpc)
 
@@ -504,13 +504,13 @@ def _utarget_config(*, objective: str = "none", psv: float | None = None) -> Mpc
 def test_config_sem_objetivo_nao_cria_tvp_utarget():
     """Retrocompat estrutural: sem `objective` nenhum TVP novo aparece e o custo dinâmico
     fica bit a bit o de antes (nenhum termo a mais no grafo)."""
-    built = build_mpc(_utarget_config(), ts_flow=1.0)
+    built = _assemble_model(_utarget_config(), ts_flow=1.0)
 
     assert built.utarget_tvp_name == {}
 
 
 def test_mv_com_objetivo_psv_constroi_com_tvp_utarget():
-    built = build_mpc(_utarget_config(objective="psv", psv=42.0), ts_flow=1.0)
+    built = _assemble_model(_utarget_config(objective="psv", psv=42.0), ts_flow=1.0)
 
     assert built.utarget_tvp_name == {"mv_1": "utarget_mv_1"}
     # Âncora neutra até o primeiro SSTO: o valor inicial da MV, em TODO o horizonte.

@@ -120,8 +120,12 @@ class BuiltMpc:
     tvp_template: castools.structure3.DMStruct
 
 
-def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
-    """Monta o `do_mpc.controller.MPC` do bloco (spec F4 §3.2-3.5)."""
+def _assemble_model(config: MpcConfig, ts_flow: float) -> BuiltMpc:
+    """Monta o `Model('discrete')` + `MPC` do do-mpc com objetivo/bounds/`tvp_template`
+    prontos, SEM compilar o solver (sem `mpc.setup()` — symbolic CasADi apenas, barato).
+    Devolve um `BuiltMpc` cujo `mpc` ainda não está compilado; só metadados estruturais
+    (nomes de tvp, ordem de MVs, contagem de estados) já são válidos neste ponto —
+    `_compile_solver` fecha a compilação IPOPT/CasADi (spec F4 §3.2-3.5)."""
     cvs = config.variables.cvs
     constraints = config.variables.constraints
     mvs = config.variables.mvs
@@ -356,8 +360,6 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
             tvp_template["_tvp", :, f"utarget_{mv.id}"] = mv.initial_value
     mpc.set_tvp_fun(lambda _t_now: tvp_template)
 
-    mpc.setup()
-
     cv_ids = tuple(cv.id for cv in cvs)
     co_ids = tuple(co.id for co in constraints)
     prediction_rows = cv_ids + co_ids
@@ -380,3 +382,15 @@ def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
         pair_init=tuple(pair_inits),
         tvp_template=tvp_template,
     )
+
+
+def _compile_solver(assembled: BuiltMpc) -> BuiltMpc:
+    """Compila o solver IPOPT/CasADi (`mpc.setup()`) do controller já montado por
+    `_assemble_model` — único trecho caro da montagem do Bloco MPC."""
+    assembled.mpc.setup()
+    return assembled
+
+
+def build_mpc(config: MpcConfig, ts_flow: float) -> BuiltMpc:
+    """Monta o `do_mpc.controller.MPC` do bloco (spec F4 §3.2-3.5)."""
+    return _compile_solver(_assemble_model(config, ts_flow))
