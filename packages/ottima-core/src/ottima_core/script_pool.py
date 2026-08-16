@@ -360,7 +360,7 @@ class ScriptPool:
             # docstring dela para a interleaving exata que isso fecha (débito m3).
             await self._replace(worker, hard=True)
             raise
-        except (OSError, EOFError, ValueError):
+        except Exception:
             await self._replace(worker, hard=False)
             return ScriptResult("error", None, None, "o worker do pool morreu durante o script")
 
@@ -390,7 +390,7 @@ class ScriptPool:
         consumiria o orçamento de quem o pegasse."""
         try:
             ready = await self._off_loop(partial(_receive, worker.conn, _BOOT_TIMEOUT_S))
-        except (OSError, EOFError, ValueError):
+        except Exception:
             ready = None
         if ready == _READY and self._running:
             self._idle.put_nowait(worker)

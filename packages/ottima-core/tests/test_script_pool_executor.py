@@ -36,6 +36,7 @@ de controle logo abaixo roda com a MESMA montagem sem ocupantes — é ele que s
 """
 
 import asyncio
+import pickle
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -139,3 +140,34 @@ async def test_executor_livre_entrega_o_script_dentro_do_orcamento(pool):
     assert resultado.status == "ok"
     assert resultado.outputs == {"OUT1": 42.0}
     assert decorrido < BUDGET_S
+
+
+async def test_falha_de_recv_por_erro_de_deserializacao_repoe_worker_sem_encolher_pool(
+    pool, monkeypatch
+):
+    """`run()` só tratava `(OSError, EOFError, ValueError)` (plano 001): um erro de
+    desserialização fora dessa tupla -- `pickle.UnpicklingError` e parentes, spec §4.9,
+    mesmo defeito do host MPC -- escapava sem passar por `_replace`, e o worker
+    desaparecia de rotação (pool `size=1` aqui: a chamada SEGUINTE a `run()` travaria por
+    falta de worker livre). Injeta a falha via monkeypatch em `_receive`, mesma decisão
+    do plano 001 para `MpcHost`."""
+    from ottima_core import script_pool
+
+    receive_real = script_pool._receive
+
+    def receive_com_falha_de_deserializacao(conn, timeout_s):
+        monkeypatch.setattr(script_pool, "_receive", receive_real)
+        raise pickle.UnpicklingError("payload corrompido no pipe (simulado pelo teste)")
+
+    monkeypatch.setattr(script_pool, "_receive", receive_com_falha_de_deserializacao)
+
+    primeiro = await pool.run(
+        code=CODE, inputs={"IN1": 21.0}, state=None, n_outputs=1, timeout_s=5.0
+    )
+    assert primeiro.status == "error"
+
+    segundo = await pool.run(
+        code=CODE, inputs={"IN1": 21.0}, state=None, n_outputs=1, timeout_s=5.0
+    )
+    assert segundo.status == "ok"
+    assert segundo.outputs == {"OUT1": 42.0}
