@@ -21,7 +21,7 @@ import {
   type NoMpc,
   type NoScript,
 } from "../graph";
-import { inteiroDoCampo, matrizDoFormulario, numeroDoCampo, numeroOuNuloDoCampo } from "./campos";
+import { inteiroDoCampo, matrizDoFormulario, montarDadosPid, numeroDoCampo } from "./campos";
 import { CamposBlocoPid } from "./CamposBlocoPid";
 import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
 import { CamposTfs } from "./CamposTfs";
@@ -385,26 +385,7 @@ export function ModalConfigBloco({
         );
         break;
       case "pid":
-        onAplicar(
-          {
-            ...no,
-            data: {
-              ...no.data,
-              label,
-              kc: numeroDoCampo(campos.get("kc"), no.data.kc),
-              ti_seconds: numeroDoCampo(campos.get("ti_seconds"), no.data.ti_seconds),
-              td_seconds: numeroDoCampo(campos.get("td_seconds"), no.data.td_seconds),
-              setpoint: numeroDoCampo(campos.get("setpoint"), no.data.setpoint),
-              output_min: numeroOuNuloDoCampo(campos.get("output_min"), no.data.output_min),
-              output_max: numeroOuNuloDoCampo(campos.get("output_max"), no.data.output_max),
-              auto_mode: campos.get("auto_mode") === "on",
-              proportional_on_measurement: campos.get("proportional_on_measurement") === "on",
-              differential_on_measurement: campos.get("differential_on_measurement") === "on",
-              starting_output: numeroDoCampo(campos.get("starting_output"), no.data.starting_output),
-            },
-          },
-          execOrder,
-        );
+        onAplicar({ ...no, data: { ...montarDadosPid(no.data, campos), label } }, execOrder);
         break;
     }
     // `onClose` (linha do <dialog>) chama `onFechar`; fechar via `close()` explícito em vez

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { montarDadosPid } from "./config/campos";
 import {
   criarBloco,
   deGraphJson,
@@ -12,6 +13,7 @@ import {
   tipoPorta,
   type BlocoEdge,
   type BlocoNode,
+  type DadosPid,
   type MapaTags,
 } from "./graph";
 
@@ -180,4 +182,52 @@ test("data serializado do PID carrega só as chaves que o servidor aceita", () =
     "td_seconds",
     "ti_seconds",
   ]);
+});
+
+// --------------------------------------------------------------------------------------
+// montarDadosPid (ARCH-19/TD-020): extração pura de FormData, sem renderizar o modal
+// --------------------------------------------------------------------------------------
+
+function formulario(campos: Record<string, string>): FormData {
+  const dados = new FormData();
+  for (const [nome, valor] of Object.entries(campos)) dados.set(nome, valor);
+  return dados;
+}
+
+function dadosPid(id: string, ordem: number): DadosPid {
+  const no = pid(id, ordem);
+  if (no.type !== "pid") throw new Error("tipo preservado");
+  return no.data;
+}
+
+test("montarDadosPid: auto_mode marcado vira true, desmarcado (ausente) vira false", () => {
+  const atual = dadosPid("p1", 1);
+
+  const marcado = montarDadosPid(atual, formulario({ auto_mode: "on" }));
+  const desmarcado = montarDadosPid(atual, formulario({}));
+
+  expect(marcado.auto_mode).toBe(true);
+  expect(desmarcado.auto_mode).toBe(false);
+});
+
+test("montarDadosPid: output_min em branco vira null, preenchido vira número", () => {
+  const atual = { ...dadosPid("p1", 1), output_min: 5 };
+
+  const vazio = montarDadosPid(atual, formulario({ output_min: "" }));
+  const preenchido = montarDadosPid(atual, formulario({ output_min: "12,5" }));
+
+  expect(vazio.output_min).toBeNull();
+  expect(preenchido.output_min).toBe(12.5);
+});
+
+test("montarDadosPid: preserva os demais campos numéricos e nunca toca label/exec_order", () => {
+  const atual = dadosPid("p1", 3);
+
+  const resultado = montarDadosPid(atual, formulario({ kc: "2,5", ti_seconds: "30" }));
+
+  expect(resultado.kc).toBe(2.5);
+  expect(resultado.ti_seconds).toBe(30);
+  expect(resultado.td_seconds).toBe(atual.td_seconds);
+  expect(resultado.label).toBe(atual.label);
+  expect(resultado.exec_order).toBe(atual.exec_order);
 });
