@@ -27,15 +27,7 @@ _Debt that causes recurring problems or bugs._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
-- [ ] **TD-016**: Isolamento temporal entre Flows da mesma partição depende de disciplina de Bloco, não de estrutura
-  - **Impact:** High - um Bloco com custo síncrono inline rouba a fronteira de varredura dos irmãos; `test_isolamento_temporal.py:101` é `xfail(strict=True)` permanente
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-11
-  - **Effort:** 2-3 dias (medida por `block.step()` + evento `block_overrun`; não reabre o ADR-004)
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-15
-  - **Feito em 2026-08-16 (ARCH-11, metade de OBSERVABILIDADE — o débito continua aberto):** o `scheduler.py` passou a cronometrar CADA `block.step()` individualmente (reusando o `time.monotonic()` do mesmo `Clock` que já alimenta o `scan_ms` agregado), comparar contra um orçamento por bloco (`BLOCK_BUDGET_FRACTION = 1.0` do Ts do próprio flow, justificado no código) e emitir `block_overrun` nomeando `block_id`/`flow_id`, com dedupe/rearme no padrão do `mpc_overrun` para não virar tempestade de eventos. `blocks/base.py` ganhou parágrafo dizendo que "nenhum bloco bloqueia" é disciplina, não garantia estrutural.
-  - **Por que continua aberto:** o `xfail(strict=True)` de `test_isolamento_temporal.py` **permanece xfail**, e isso é o resultado correto, não uma pendência de execução. A auditoria supunha que ele "viraria verde"; não vira — o cronômetro só registra o custo DEPOIS que o event loop já ficou preso pelo trecho síncrono do bloco culpado. Medir e nomear o culpado é observabilidade; a perda de fronteira do Flow vizinho continua acontecendo. A correção estrutural (partição por processo) está decidida CONTRA pelo ADR-004, então este item não fecha por essa via — o que mudou é que o defeito deixou de ser invisível em produção.
-  - **Prova:** `uv run pytest services/flow-runtime/tests/test_block_overrun.py test_isolamento_temporal.py test_scheduler.py -q` → `20 passed, 1 xfailed`. O teste novo força um bloco que queima ~200 ms sozinho (Ts = 100 ms, orçamento = 100 ms) e prova exatamente um `block_overrun` com o `block_id` certo. RED: `ImportError: cannot import name 'KIND_BLOCK_OVERRUN' from 'ottima_core.bus'`.
+_Nenhum item aberto._
 
 ## Medium (Slows Development)
 
@@ -48,12 +40,8 @@ _Debt that makes development harder but doesn't block._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
-- [ ] **TD-025**: Subagente com caminho relativo escreve no checkout `main` em vez da worktree ativa
-  - **Impact:** Medium - **já causou dano duas vezes**: `stash@{2}` ("resquícios pré-merge F4: spill de `graph.ts`/`test_scheduler.py` de agentes com caminho relativo") e de novo em 2026-08-16, quando 6 arquivos de 5 agentes diferentes apareceram modificados em `main` durante um lote paralelo. A sessão do subagente resolve path relativo contra a raiz do repositório principal, mesmo tendo lido o arquivo pelo path absoluto da worktree; o agente escreve de um lado, verifica do outro, e conclui "minha edição foi revertida" — um deles queimou ~20 min perseguindo um `git reset` que nunca houve. Também suja a árvore de trabalho do usuário sem ele pedir nada
-  - **Source:** incidente do lote paralelo de 2026-08-16 (7 subagentes na worktree `fix-arch-review`)
-  - **Effort:** 2h (instrução no `CLAUDE.md` exigindo path ABSOLUTO da worktree em todo `read`/`write`/`edit` de subagente, mais verificação por `bash` com `cwd` explícito antes de qualquer relato de FEITO; a alternativa robusta é uma worktree por agente, o que também isola o `git status`)
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-16
+
+_Nenhum item aberto._
 
 ## Low (Track for Later)
 
@@ -66,15 +54,8 @@ _Known issues not currently prioritized._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
-- [ ] **TD-024**: Duplicações de apresentação no editor e nas legendas de tendência
-  - **Impact:** Low - funciona; custa uma reescrita a cada campo novo e deixa convenção de testid/ajuda divergente
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-04 (só a metade de estrutura), ARCH-20, ARCH-21
-  - **Effort:** 1 dia (linha de legenda compartilhada, `campoOpcional`, `Campo` único)
-  - **Nota 2026-08-16:** a metade de COMPORTAMENTO do ARCH-04 (valor + EU na legenda de operação) foi resolvida no TD-017; o que resta aqui é só a extração do module de apresentação comum às três telas.
-  - **Feito em 2026-08-16 (ARCH-20 e ARCH-21):** `campoOpcional(dados, campo, atual, converter)` extraído para `config/campos.ts` e aplicado nos 4 usos reais da regra "ausente preserva / vazio vira null / valor converte"; `Campo` (`config/CamposComuns.tsx`) ganhou `nome`/`testid` opcionais e absorveu o `CampoNumero` do MPC e o `<Input>` cru do TFS. **Correção de fato no levantamento:** o ARCH-21 dizia "uma IIFE por função" nas 4 `variavel*DoFormulario`; são 2 em `variavelMvDoFormulario` (`readback_tag_id`, `local_shed_mode`) e 2 em `variavelCvDoFormulario` (`remote_sp_tag_id`, `sp_range_pct`). `variavelDvDoFormulario` usa lógica DIFERENTE (par de campos, null só se AMBOS vazios) e `variavelRestricaoDoFormulario` nunca teve a IIFE (range é obrigatório) — nenhuma das duas foi convertida, porque forçar mudaria regra de negócio. Prova: `campos.check.ts` +4 (ausente/vazio/válido/inválido), `npm run test:unit` 601 → 605, `mpcLogic.golden.check.ts` verde (trava cross-language intacta), `npm run typecheck` limpo.
-  - **O que resta:** só a extração do module de apresentação da LINHA de legenda, comum às três telas (metade de estrutura do ARCH-04).
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-15
+
+_Nenhum item aberto._
 
 ---
 
@@ -193,6 +174,23 @@ _Completed tech debt items. Keep for 90 days then archive._
   - **Contagem real, corrigindo o levantamento:** a auditoria estimou "~17 pontos em 6 arquivos"; a contagem no código dá **16 antes → 12 depois**. A diferença para 17 é `tipoPorta()`, um if-chain por tipo em `graph.ts` que o relatório cita de passagem mas nunca lista como alvo, e que ficou fora deste corte. O número bruto (25% a menos) subestima o ganho: **4 dos 5 pontos eliminados colapsam numa única entrada do registro**, e essa entrada passou de "conferida à mão" para "conferida pelo compilador".
   - **Verificação:** `npm run test:unit` 607 → 627 (20 testes novos), `npm run typecheck` limpo, `npm run build` verde, `npm run generate:contracts` sem diff, e **regressão Playwright completa: 63 cenários, 0 falhas** contra o vite da worktree, com o flow 987 da planta parado pela fixture e redeployado de volta a `Rodando`. Os 132 `data-testid` referenciados em `frontend/e2e/` são idênticos antes e depois.
 
+- [x] **TD-016**: Isolamento temporal entre Flows da mesma partição depende de disciplina de Bloco, não de estrutura
+  - **Resolved:** 2026-08-16
+  - **Classificação honesta:** o DEFEITO não foi consertado, porque ele não é consertável dentro do ADR-004 — e isso agora está escrito em vez de subentendido. Num event loop cooperativo, um `step` que gasta CPU síncrona PRENDE o processo; nenhuma mudança no scheduler preempta código síncrono já em execução. As duas saídas reais (executor por bloco, partição por processo) mexem no modelo de concorrência, que o ADR-004 decidiu. O que estava aberto de verdade — o defeito ser INVISÍVEL — foi fechado nas duas pontas.
+  - **Resolution:** (a) **culpado**: `scheduler.py` cronometra cada `block.step()` e emite `block_overrun` com `block_id`/`flow_id` quando um bloco sozinho estoura o `Ts` do flow (`BLOCK_BUDGET_FRACTION = 1.0`, dedupe no padrão do `mpc_overrun`). (b) **vítima**: `flow_overrun` ganhou `atraso_ms` no payload — quanto a varredura demorou a PARTIR, calculado como `fired_at − (t0 + index·Ts)` — ao lado do `scan_ms`, com mensagem própria quando o atraso domina. Antes, o flow vizinho publicava "a varredura estourou o ciclo de 0,1 s (0,3 ms)": um número que se contradiz e mandava o engenheiro procurar lentidão no flow errado. (c) `blocks/base.py` diz que "nenhum bloco bloqueia" é disciplina, não garantia. (d) O `xfail(strict=True)` **permanece**, agora documentado como limitação do modelo e não como defeito sem dono — `strict` é deliberado: se passar, o modelo mudou e alguém precisa saber.
+  - **O suspeito nomeado foi MEDIDO, não presumido:** o comentário `ponytail:` de `blocks/fuzzy.py` dizia "sub-ms em engine típico; mover a executor se overrun aparecer". Medição (2026-08-16): `engine.process()` custa **0,49 ms** de mediana em 2in/1out/3 termos/centroid 200; 1,43 ms em 4/2/5/500; 3,80 ms em 6/3/9/1000; e **8,04 ms** (p95 9,14) num config patológico de 8in/4out/15 termos/centroid 1000. Contra o `Ts` de 2 s da planta, o pior caso ocupa **0,4% do ciclo**. Mover para executor custaria um salto de thread por varredura e uma fonte de falha nova para economizar isso. O comentário trocou a suposição pelos números e pelo gatilho real (`block_overrun`).
+  - **Prova:** `uv run pytest -q test_atraso_fronteira.py test_block_overrun.py test_isolamento_temporal.py test_scheduler.py test_fuzzy.py` → **44 passed, 1 xfailed**. `test_atraso_fronteira.py` é novo e usa relógio VIRTUAL de propósito (o TD-008 registrou o preço de decidir gate por relógio de parede quando há alternativa por causa): um par de cenários prova que a vítima publica `atraso_ms = 250 ms` com `scan_ms = 0` e mensagem "atraso de partida … segurou o event loop", e que o flow lento de verdade continua com a mensagem de sempre — sem esse par, bastaria trocar a mensagem em todo overrun para o primeiro passar. `ruff check`/`format --check` limpos.
+  - **Resíduo documentado (não é débito aberto):** dois Flows da mesma partição continuam podendo se atrapalhar se um Bloco futuro gastar CPU inline. O gatilho para reabrir o ADR-004 é objetivo e agora existe: um `block_overrun` observado em produção.
+- [x] **TD-024**: Duplicações de apresentação no editor e nas legendas de tendência
+  - **Resolved:** 2026-08-16
+  - **Resolution:** Fechado em dois cortes. **ARCH-20/21 (parte do lote anterior):** `campoOpcional` único em `config/campos.ts` e `Campo` de `CamposComuns.tsx` absorvendo o `CampoNumero` do MPC e o `<Input>` cru do TFS. **ARCH-04, metade de estrutura:** `features/trend/PainelLegendaTrend.tsx` novo — as três telas fornecem `LinhaLegenda[]` e delegam badges, valor+EU e o esqueleto da linha; a política de formatação passou a ter um dono só.
+  - **Extração PARCIAL, deliberada:** a identificação da linha (swatch + rótulo) ficou em cada tela. Trend e fuzzy desenham um `<span>` estático; a de operação desenha um checkbox mais um `<button aria-current>` que move o eixo Y, com swatch de forma diferente (`h-1` reto vs `h-1.5 rounded-pill`) e pontilhado só na pena de SP. Unificar exigiria props usadas por uma tela só — exatamente o saco de flags que o deletion test do próprio ARCH-04 manda evitar. O motivo está no cabeçalho do module.
+  - **Prova:** RED comprovado quebrando de propósito a opcionalidade de `valorEu` (o teste "valor+EU somem quando a linha omite valorEu" ficou vermelho) e revertendo. `PainelLegendaTrend.check.ts` com 6 casos de contrato. `npm run test:unit` 627 → 633, `npm run typecheck` limpo, `npm run build` verde, e **regressão Playwright completa: 63 cenários, 0 falhas** — a que importa aqui, porque legenda é DOM. `data-testid` comparados literal a literal antes/depois nas três telas (TrendPage 12, TrendFuzzy 11, LegendaOperacao 5): idênticos.
+- [x] **TD-025**: Subagente com caminho relativo escreve no checkout `main` em vez da worktree ativa
+  - **Resolved:** 2026-08-16
+  - **Resolution:** A causa raiz é da ferramenta, não do repositório — foi reportada ao harness. O que cabia aqui é a mitigação, e ela virou regra escrita no `CLAUDE.md` (seção "Subagente em worktree: caminho ABSOLUTO, sempre"): caminho absoluto em todo `read`/`write`/`edit`, `cwd` explícito em todo comando de shell, confirmação por shell depois de cada escrita (a resposta de sucesso da ferramenta de edição não é prova), `git status --porcelain` vazio no checkout principal antes de relatar conclusão, e **uma worktree por agente** quando rodam em paralelo.
+  - **Prova:** a regra foi aplicada nos dois despachos seguintes (TD-021 em `.worktrees/arch18-registro`, TD-024 em `.worktrees/td024-legenda`, cada um em worktree própria) e o checkout `main` terminou **limpo nos dois** — contra 6 arquivos de 5 agentes sujando o `main` no lote anterior, que usava worktree compartilhada e caminho relativo. As sobras daquele lote ficaram recuperáveis em `stash@{0}`; a árvore da branch tem checkpoint na tag `rede-seguranca-lote1`.
+
 ### Verificação do lote de 2026-08-16 (TD-017 a TD-022)
 
 Os itens acima foram executados em paralelo por agentes distintos, cada um com prova própria.
@@ -232,10 +230,10 @@ branch ficou com checkpoint na tag `rede-seguranca-lote1`.
 | Category | Count | Oldest |
 |----------|-------|--------|
 | Critical | 0 | - |
-| High | 1 | 2026-08-15 |
-| Medium | 1 | 2026-08-16 |
-| Low | 1 | 2026-08-15 |
-| **Total Open** | **3** | 2026-08-15 |
+| High | 0 | - |
+| Medium | 0 | - |
+| Low | 0 | - |
+| **Total Open** | **0** | - |
 
 _Last updated: 2026-08-16_
 
