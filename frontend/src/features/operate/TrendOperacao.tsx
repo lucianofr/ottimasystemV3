@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
-import "uplot/dist/uPlot.min.css";
 
 import { useCanalAoVivo } from "../../app/CanalAoVivo";
 import { Button } from "../../components/ui/button";
@@ -14,6 +13,7 @@ import {
   limparEscalas,
   type EscalaVar,
 } from "../trend/escalas";
+import { useMotorTrend } from "../trend/motorTrend";
 import { JanelaTempo } from "../trend/JanelaTempo";
 import { FORMATO_VALOR, lerTemaTrend, type TemaTrend } from "../trend/trendTheme";
 import "../trend/trend.css";
@@ -719,8 +719,10 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   const horizonteFuturoS = mpc.horizons.np * mpc.horizons.ts_mpc;
   const semPredicao = overlay.agora === null && janelaDeslizante.aoVivo;
 
-  const container = useRef<HTMLDivElement>(null);
-  const grafico = useRef<uPlot | null>(null);
+  // A casca de instância do uPlot (criação, ResizeObserver, `setData` sem recriar, destruição)
+  // é do `useMotorTrend`, compartilhado com as telas de engenharia e de fuzzy (ADR-030). Aqui
+  // ficam só as decisões próprias desta tela: as opções (bands, plugins de predição, range de
+  // eixo x pelo horizonte futuro) e a política de zoom.
   // Zoom manual em X (arrasto no gráfico): estado porque a tela precisa avisar que a vista
   // parou de seguir o relógio, e ref porque o `range` do eixo x roda DENTRO do `setScale` do
   // próprio zoom — esperar o re-render do React devolveria a janela velha e comeria o recorte.
@@ -766,52 +768,34 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     .join(",");
   const estrutura = `${String(janelaSegundos)}|${idsEstrutura.join(",")}|${escalaAssinatura}|${foco ?? ""}`;
 
-  useEffect(() => {
-    const alvo = container.current;
-    const atuais = colunasAtuais.current;
-    if (!alvo || !atuais) return;
-    const instancia = new uPlot(
-      construirOpcoesOperacao(
-        atuais,
-        tema,
-        alvo.clientWidth,
-        ALTURA,
-        agoraDivisorRef,
-        semPredicaoRef,
-        rangeXRef,
-        zoomXRef,
-        aplicarZoomX,
-        escalasUplot.scales,
-        eixoYChave,
-        eixoYCor,
-      ),
-      atuais.dados,
-      alvo,
-    );
-    grafico.current = instancia;
-    const observador = new ResizeObserver(() => {
-      instancia.setSize({ width: alvo.clientWidth, height: ALTURA });
-    });
-    observador.observe(alvo);
-    return () => {
-      observador.disconnect();
-      instancia.destroy();
-      grafico.current = null;
-    };
-    // Só a `estrutura` recria a instância: tudo o mais que entra em `construirOpcoesOperacao`
-    // é estável entre renders (refs e o setter do zoom, que `aplicarZoomX` só fecha por cima).
-    // Nunca passe daqui um valor reativo sem colocá-lo na `estrutura` — ele congelaria no
-    // fechamento da instância criada aqui.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estrutura, colunas === null]);
-
-  useEffect(() => {
-    const instancia = grafico.current;
-    if (!instancia || !colunas) return;
-    // Com zoom manual o dado novo entra sem re-ranger: re-ranger devolveria a janela da tela
-    // e apagaria o recorte que o operador está olhando.
-    instancia.setData(colunas.dados, zoomXRef.current === null);
-  }, [colunas]);
+  const motor = useMotorTrend({
+    estrutura,
+    altura: ALTURA,
+    dados: colunas === null ? null : colunas.dados,
+    montarOpcoes: (largura, altura) => {
+      const atuais = colunasAtuais.current;
+      return atuais === null
+        ? null
+        : construirOpcoesOperacao(
+            atuais,
+            tema,
+            largura,
+            altura,
+            agoraDivisorRef,
+            semPredicaoRef,
+            rangeXRef,
+            zoomXRef,
+            aplicarZoomX,
+            escalasUplot.scales,
+            eixoYChave,
+            eixoYCor,
+          );
+    },
+    // Esta tela RASTREIA o zoom em `zoomXRef` em vez de derivá-lo das escalas: o `range` do
+    // eixo x roda dentro do `setScale` do próprio arrasto, e ler as escalas ali devolveria a
+    // janela anterior. Com recorte ativo, dado novo entra sem re-ranger.
+    deveRerange: () => zoomXRef.current === null,
+  });
 
   // Tique de 1 s da linha "agora" (B-5): re-ancora no relógio de parede e reaplica a janela X
   // via `setScale`, para o redesenho (plugin `pluginLinhaAgora`) acontecer mesmo sem dado novo
@@ -821,7 +805,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   // vista não pode andar debaixo dele.
   useEffect(() => {
     const id = window.setInterval(() => {
-      const instancia = grafico.current;
+      const instancia = motor.instancia.current;
       if (!instancia) return;
       const agora = Date.now() / 1000;
       agoraDivisorRef.current = ancoraDivisorAgora(
@@ -854,11 +838,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     janelaDeslizante.reset();
     limparEscalas(chaveEscalasStorage);
     setEscalasPorVar({});
-    const instancia = grafico.current;
-    const atuais = colunasAtuais.current;
-    if (instancia && atuais) {
-      instancia.setData(atuais.dados, true);
-    }
+    motor.aplicarDadosComRerange();
   }
 
   return (
@@ -936,7 +916,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
               <span data-testid="operate-trend-secao-futura">Previsão</span>
             )}
           </div>
-          <div ref={container} className="w-full" />
+          <div ref={motor.container} className="w-full" />
           {semPredicao && (
             <p
               data-testid="operate-trend-sem-predicao"

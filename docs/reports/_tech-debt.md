@@ -33,12 +33,6 @@ _Debt that causes recurring problems or bugs._
   - **Effort:** 2-3 dias (medida por `block.step()` + evento `block_overrun`; não reabre o ADR-004)
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
-- [ ] **TD-017**: Três telas de tendência, dois motores de instância uPlot — comportamento divergente entre superfícies
-  - **Impact:** High - divergência já reportada em operação (legenda sem valor nem EU onde trend e fuzzy mostram); bug de zoom/resize exige correção replicada
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-01, ARCH-02, ARCH-03, ARCH-04
-  - **Effort:** 2-3 dias (casca de instância uPlot como module único; ADR-030 já manda reusar)
-  - **Owner:** @unassigned
-  - **Created:** 2026-08-15
 
 ## Medium (Slows Development)
 
@@ -57,7 +51,7 @@ _Debt that makes development harder but doesn't block._
   - **Effort:** 2 dias
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
-  - **Escopo reduzido em 2026-08-15:** a metade "gerar tabela de DEFAULTS" (ARCH-07) foi descartada por falhar no deletion test — `max_rate` é required e não tem default para gerar; os campos que têm default já são espelhados certo e o mecanismo golden do MPC já trava as regras. Só a geração da FORMA sobrevive.
+  - **Escopo reduzido em 2026-08-15:** a metade "gerar tabela de DEFAULTS" (ARCH-07) foi descartada por falhar no deletion test — `max_rate` é required e não tem default para gerar; os campos que têm default já são espelhados certo e o mecanismo golden do MPC já trava as regras. Só a geração da FORMA sobrevive. Fronteira registrada na [ADR-034](../adr/ADR-034-espelho-contrato-python-ts.md), que recomenda explicitamente este item e recusa a metade descartada — não confundir os dois.
 - [ ] **TD-019**: Migração de dados sobre `graph_json` (0009) reescreve o contrato sem validar e sem teste
   - **Impact:** Medium - único caminho de escrita em `graph_json` fora da validação de save da API; migração futura herda o ponto cego
   - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-08
@@ -88,6 +82,13 @@ _Debt that makes development harder but doesn't block._
   - **Effort:** 4h, mas exige decisão com ADR (CI é escolha de arquitetura, não conserto mecânico)
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
+- [ ] **TD-017**: Três telas de tendência com lógica de pena/legenda resolvida mais de uma vez
+  - **Impact:** Medium - reduzido de High em 2026-08-15: o segundo motor de instância uPlot (a metade que fazia bug de zoom/resize precisar de correção replicada) foi eliminado. O que resta é duplicação de lógica pura e de apresentação, sem risco de divergência de comportamento da instância
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-02, ARCH-03, ARCH-04
+  - **Effort:** 1-2 dias (primitivo de alinhamento de pena; acumulador de borda viva; linha de legenda compartilhada)
+  - **Owner:** @unassigned
+  - **Created:** 2026-08-15
+  - **Feito em 2026-08-15 (ARCH-01):** a casca de instância uPlot virou `features/trend/motorTrend.ts::useMotorTrend`, consumida pelas três telas; a regra de preservação de zoom saiu de dentro do efeito para `zoomX.ts::estaZoomadoEmX`, pura e testada. Verificado no browser contra a planta viva: dado vivo não recria a instância, mudança de estrutura recria exatamente uma vez, "Reset layout" preservado, zero erro. **A queixa original do usuário — legenda de operação sem valor nem EU — é o ARCH-04 e continua aberta**; era divergência de apresentação, não do motor.
 
 ## Low (Track for Later)
 
@@ -193,8 +194,8 @@ _Completed tech debt items. Keep for 90 days then archive._
 | Category | Count | Oldest |
 |----------|-------|--------|
 | Critical | 0 | - |
-| High | 2 | 2026-08-15 |
-| Medium | 6 | 2026-08-15 |
+| High | 1 | 2026-08-15 |
+| Medium | 7 | 2026-08-15 |
 | Low | 1 | 2026-08-15 |
 | **Total Open** | **9** | 2026-08-15 |
 

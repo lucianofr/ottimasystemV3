@@ -69,6 +69,47 @@ A fatia tem uma parte saudável e uma fricção real e concentrada. `escalas.ts`
 
 **Ganhos:** Um seam de instância uPlot, dois adapters reais hoje · Locality: bug de resize ou de zoom conserta uma vez · Interface rasa: plugins/bands entram, instância sai · Deleta a casca duplicada de TrendOperacao.tsx · Teste de contrato único cobre as três superfícies
 
+**Execução (2026-08-15).** Feito. A casca virou `features/trend/motorTrend.ts::useMotorTrend`
+(hook, não componente: a tela de operação precisa da instância para o tique de 1 s e tem legenda e
+layout próprios; um componente exigiria expor a instância, interface pior). O motor é dono de
+criação, `ResizeObserver`, `setData` sem recriar, destruição e do "Reset layout"; o consumidor
+fornece `estrutura`, `altura`, `dados`, `montarOpcoes` e `deveRerange`.
+
+Duas coisas que o levantamento não tinha visto e que o motor passou a absorver:
+
+- **A regra `dados === null` é do motor, não do consumidor.** A tela de operação começa sem
+  colunas, e antes disso vivia como um segundo item de dependência (`[estrutura, colunas === null]`)
+  fácil de esquecer. Agora entra na chave de criação dentro do motor.
+- **`montarOpcoes` guarda sempre a última closure.** Antes o comentário do efeito avisava "nunca
+  passe daqui um valor reativo sem colocá-lo na estrutura — ele congelaria no fechamento". Com a
+  closure em ref, o valor lido na criação é o do render corrente; o `eslint-disable` de
+  `exhaustive-deps` que a tela de operação carregava saiu.
+
+**Política de zoom ficou explícita como parâmetro**, porque as duas telas divergem de verdade: a de
+engenharia DERIVA o zoom das escalas da instância, a de operação RASTREIA em `zoomXRef` (o `range`
+do eixo x roda dentro do `setScale` do próprio arrasto, e ler as escalas ali devolveria a janela
+anterior). A regra derivada saiu de dentro do efeito e virou `zoomX.ts::estaZoomadoEmX`, pura e
+testada — módulo separado porque o runner de unidade é Node puro e não carrega o CSS do uPlot que
+`motorTrend.ts` importa.
+
+**Contagem honesta:** os dois consumidores perderam 121 linhas e ganharam 65 (`TrendChart` +29/−65,
+`TrendOperacao` +36/−56); o motor tem 111 linhas e o `zoomX` 21. O total de código subiu — o ganho
+não é volume, é ter **uma** casca em vez de duas, com as duas sutilezas acima documentadas onde
+moram.
+
+**Verificação:** comportamental, no browser, contra o stack de 9 serviços e a planta viva — a casca
+é DOM e instância, não lógica pura, então teste unitário provaria pouco. Nas duas telas: dado vivo
+por 12-14 s **não** recriou a instância (marca no canvas sobreviveu), mudança de estrutura recriou
+**exatamente uma vez** (`canvasCount: 1`, sem vazamento), "Reset layout" seguiu funcionando, zero
+erro de página. Na tela de operação, predição, divisor Histórico|Previsão e legenda com editores de
+escala continuaram desenhando, e o tique de 1 s seguiu aplicando `setScale` pela instância do motor.
+
+O trend fuzzy não foi exercitado ao vivo: o projeto ativo não tem bloco fuzzy. Ele consome
+`TrendChart` pelas props públicas, que ficaram **byte a byte idênticas** (o diff da interface é
+vazio) e `TrendFuzzy.tsx` não foi tocado. As specs Playwright das três telas ficaram de fora de
+propósito: `criarAmbiente` ativa um projeto próprio, e isso pararia o MPC que está rodando agora na
+planta — a restauração devolve o projeto ativo, mas não redeploya os flows.
+
 ---
 
 #### ARCH-02 — Alinhamento de pena no eixo compartilhado (carry-forward) implementado três vezes [Strong · in-process]
@@ -302,6 +343,11 @@ para um gerador e acrescentaria um artefato gerado, para proteger uma classe de 
 produziu zero defeitos observados. O espelho manual continua sendo a escolha barata e certa aqui.
 **O ARCH-06 (gerar a FORMA das interfaces) não cai por associação** — é outra alegação, sobre 12
 interfaces hand-typed, e segue de pé.
+
+A fronteira entre os três mecanismos que mantêm Python e TS de acordo — forma gerada, regra travada
+por golden, default à mão — ficou registrada na **ADR-034**, justamente para que nem a metade
+descartada volte a ser proposta, nem a metade válida (ARCH-06) seja morta por associação com ela.
+A ADR também dá respaldo explícito ao ARCH-22 (estender o golden para as fórmulas de Pendência).
 
 ---
 
@@ -850,7 +896,7 @@ design, então só `npm run typecheck` pega, e nada o mecaniza. Corrigido; a cau
 | Ordem | Achado | Por quê |
 |---|---|---|
 | 1 | ~~ARCH-07~~ | **executado**; alegação de severidade corrigida pelo grilling, metade do aprofundamento descartada |
-| 2 | ARCH-01 | maior retorno em fricção e a divergência de comportamento já reportada entre as telas de tendência; ADR-030 já manda reusar, não há decisão a reabrir |
+| 2 | ~~ARCH-01~~ | **executado**; casca de instância uPlot unificada em `motorTrend.ts`, verificada no browser. A queixa de legenda (valor+EU em operação) é o ARCH-04 e segue aberta |
 | 3 | ARCH-18 | ~17 edições mecânicas em 6 arquivos por Bloco novo, no eixo de extensibilidade central do produto |
 | 4 | ARCH-11 | defeito aberto e admitido via `xfail(strict=True)`; fecha a lacuna intra-partição sem reabrir o ADR-004 |
 | 5 | ARCH-12 | ataca os 37 min de suíte pela interface (`build_mpc` funde montagem e compilação IPOPT), não por infraestrutura |
