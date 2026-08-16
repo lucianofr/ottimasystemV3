@@ -1,5 +1,6 @@
 import type { MpcHistoryResponse } from "../../lib/api";
 import type { MpcPrediction, MpcVarState } from "../../lib/contracts.gen";
+import { alinharNoEixo } from "../trend/alinhamento";
 
 /**
  * Trend central com predição (spec F5 §7.4-6; plano F5b Etapa 5). Lógica pura: montagem de
@@ -151,47 +152,9 @@ export function ultimoCarimboHistorico(series: readonly SerieOperacao[]): number
   return ultimo;
 }
 
-/**
- * Coluna de uma pena no eixo x compartilhado do uPlot (união dos carimbos de todas as penas,
- * `montarColunas` em `TrendOperacao.tsx`).
- *
- * Cada variável tem carimbos próprios — quem tem tag OPC adensa a ponta viva na taxa do worker
- * (`PontoOpc`), quem não tem (CV vinda de script, MV sem readback) só existe na cadência do
- * MPC — e a predição só vive no horizonte. Nos instantes em que a pena não amostrou ela repete
- * o último valor conhecido, que é o que o valor fez de fato no processo: sem isso a pena mais
- * esparsa fica com um `null` entre cada par de carimbos alheios, vira trecho de 1 ponto e não
- * desenha nada (`spanGaps: false`, sem marcador). Três coisas cortam a repetição e as três
- * viram gap: `null` na própria série (SP dividido por `auto`, ponto sem valor), silêncio além
- * de `tetoS` (`tetoCarryForwardOperacaoS`) — flow parado, recorder fora do ar — e carimbo além
- * de `limiteS`, a fronteira do passado (`ultimoCarimboHistorico`): pena medida não entra na
- * seção futura. `tetoS = 0` desliga a repetição por inteiro, que é como a própria predição
- * entra (só nos seus carimbos, o traço entre eles é do `spanGaps` do uPlot).
- *
- * Mesma regra do trend de engenharia (`montarMatriz` em `useHistory.ts`), aqui por coluna
- * porque o eixo já vem montado (histórico + horizonte da predição). `eixoX` crescente é
- * pré-condição (uPlot já exige x monotônico): num salto para trás a diferença fica negativa e
- * o teto nunca dispararia.
- */
-export function alinharNoEixo(
-  eixoX: readonly number[],
-  t: readonly number[],
-  valores: readonly (number | null | undefined)[],
-  tetoS: number,
-  limiteS = Number.POSITIVE_INFINITY,
-): (number | null)[] {
-  const porT = new Map(t.map((ts, i) => [ts, valores[i] ?? null]));
-  let atual: number | null = null;
-  let ultimaAmostra = Number.NEGATIVE_INFINITY;
-  return eixoX.map((ts) => {
-    const amostra = porT.get(ts);
-    if (amostra !== undefined) {
-      atual = amostra;
-      ultimaAmostra = ts;
-    }
-    if (ts > limiteS) return null;
-    return ts - ultimaAmostra > tetoS ? null : atual;
-  });
-}
+/** Primitivo de alinhamento — fonte única em `../trend/alinhamento.ts` (ARCH-02); re-exportado
+ *  aqui para não mexer nos imports de `TrendOperacao.tsx`/`trendOperacao.check.ts`. */
+export { alinharNoEixo };
 
 // ----------------------------------------------------------------------------------------
 // 5.2 — Overlay de predição (spec F5 §3, §7.4-6 item 3)

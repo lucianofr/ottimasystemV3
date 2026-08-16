@@ -10,7 +10,6 @@ import {
   TETO_PENAS_OPERACAO,
   TOKENS_PENA_OPERACAO,
   TRACO_SP,
-  alinharNoEixo,
   atribuirCoresPenas,
   dividirSpPorAuto,
   emendarPlanoNoDivisor,
@@ -95,53 +94,11 @@ test("ponta viva OPC: sem pontos novos a série é idêntica à de antes", () =>
 
 // --------------------------------------------------- eixo x compartilhado (carry-forward, §7.4-6)
 
-test("eixo compartilhado: pena sem tag OPC repete o último valor nos carimbos das penas adensadas", () => {
-  // Regressão: uma CV alimentada por script (sem tag OPC) só tem carimbo na cadência do MPC,
-  // enquanto as penas com tag adensam a 4 Hz. Com `null` nos carimbos alheios, cada ponto da
-  // pena sem tag virava um trecho de 1 ponto — invisível com `spanGaps: false` e sem marcador.
-  const eixoX = [T0, T0 + 0.25, T0 + 0.5, T0 + 0.75, T0 + 1];
-  const alinhada = alinharNoEixo(eixoX, [T0, T0 + 1], [33.3, 33.4], 2);
-
-  expect(alinhada).toEqual([33.3, 33.3, 33.3, 33.3, 33.4]);
-});
-
-test("carimbo alheio antes da primeira amostra da pena fica vazio: carry-forward não anda para trás", () => {
-  const alinhada = alinharNoEixo([T0 - 1, T0, T0 + 1], [T0, T0 + 1], [1, 2], 10);
-
-  expect(alinhada).toEqual([null, 1, 2]);
-});
-
-test("carry-forward para no teto: silêncio de mais de 2 cadências vira gap, não reta contínua", () => {
-  const eixoX = [T0, T0 + 1, T0 + 2, T0 + 3, T0 + 4, T0 + 5];
-  const alinhada = alinharNoEixo(eixoX, [T0, T0 + 5], [1, 2], 2);
-
-  expect(alinhada).toEqual([1, 1, 1, null, null, 2]);
-});
-
-test("null da própria série (SP rastreado, qualidade) é o que se repete adiante: continua gap", () => {
-  // A repetição carrega o último valor conhecido, e um `null` amostrado é conhecido: o traço
-  // fica cortado até a próxima amostra com valor, em vez de voltar ao valor anterior ao gap.
-  const eixoX = [T0, T0 + 0.5, T0 + 1, T0 + 1.5, T0 + 2];
-  const alinhada = alinharNoEixo(eixoX, [T0, T0 + 1, T0 + 2], [1, null, 3], 2);
-
-  expect(alinhada).toEqual([1, 1, null, null, 3]);
-});
-
 test("teto do carry-forward escala com a cadência: Ts_mpc no raw, bucket de 1 min no agregado", () => {
   expect(tetoCarryForwardOperacaoS("raw", 1)).toBe(2);
   expect(tetoCarryForwardOperacaoS("raw", 60)).toBe(120);
   // No `1m` o bucket é de 60 s: um teto de Ts_mpc gaparia toda série agregada saudável.
   expect(tetoCarryForwardOperacaoS("1m", 1)).toBe(120);
-});
-
-test("carry-forward para na fronteira do passado: carimbo da predição nunca recebe medição repetida", () => {
-  // eixoX = 3 carimbos de histórico (0, 5, 10) + 2 carimbos só da predição (15, 20). A pena
-  // amostrou em 0 e 10; 15 e 20 estão dentro do teto de 10 s, então sem o limite o carry-forward
-  // desenharia a medição de 10 na seção futura — reta sólida atravessando a linha do "agora".
-  const eixoX = [0, 5, 10, 15, 20].map((d) => T0 + d);
-  const coluna = alinharNoEixo(eixoX, [T0, T0 + 10], [1, 2], 10, T0 + 10);
-
-  expect(coluna).toEqual([1, 1, 2, null, null]);
 });
 
 test("último carimbo histórico é o mais novo entre as penas — a esparsa ainda alcança a ponta densa", () => {
@@ -151,14 +108,6 @@ test("último carimbo histórico é o mais novo entre as penas — a esparsa ain
   expect(ultimoCarimboHistorico([esparsa, densa])).toBe(T0 + 8);
   // Sem histórico nenhum nada de medido desenha (a predição não passa por este limite).
   expect(ultimoCarimboHistorico([])).toBe(Number.NEGATIVE_INFINITY);
-});
-
-test("predição entra só nos seus próprios carimbos: teto 0 não repete o plano em carimbo alheio", () => {
-  // T0+2 é carimbo da ponta viva OPC de outra pena, entre dois pontos do plano: repetir o valor
-  // do plano ali viraria degrau numa pena de CV, que é reta entre pontos (§3.3 só a MV é degrau).
-  const eixoX = [T0, T0 + 2, T0 + 5, T0 + 10];
-
-  expect(alinharNoEixo(eixoX, [T0, T0 + 5, T0 + 10], [10, 20, 30], 0)).toEqual([10, null, 20, 30]);
 });
 
 test("emenda: o trecho já decorrido do plano sai de cena e o tracejado começa no fim do sólido (DESIGN §Overview)", () => {

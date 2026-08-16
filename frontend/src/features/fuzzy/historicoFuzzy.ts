@@ -1,5 +1,6 @@
 import type uPlot from "uplot";
 
+import { alinharNoEixo, montarEixoUniao } from "../trend/alinhamento";
 import { colunasVivas, type PontoVivo } from "../trend/bordaViva";
 import { tetoCarryForwardSegundos } from "../trend/useHistory";
 import type { FuzzyHistoryResponse } from "./types";
@@ -13,7 +14,9 @@ import type { FuzzyHistoryResponse } from "./types";
  */
 
 /** Matriz colunar do uPlot: um eixo x compartilhado por todas as penas selecionadas, na
- *  ordem de `ordem` (portas `IN1..INn`/`OUT1..OUTn`). */
+ *  ordem de `ordem` (portas `IN1..INn`/`OUT1..OUTn`) — eixo união (`montarEixoUniao`) mais
+ *  carry-forward-com-teto delegado ao primitivo único (`alinharNoEixo`,
+ *  `../trend/alinhamento.ts`, ARCH-02). */
 export function montarMatrizFuzzy(
   resposta: FuzzyHistoryResponse,
   ordem: readonly string[],
@@ -25,30 +28,8 @@ export function montarMatrizFuzzy(
   const valores = ordem.map((varId) => porVar.get(varId)?.v ?? []);
 
   const teto = tetoCarryForwardSegundos(resposta.mode);
-  const cursores = ordem.map(() => 0);
-  const atual: (number | null)[] = ordem.map(() => null);
-  const ultimaAmostra = ordem.map(() => Number.NEGATIVE_INFINITY);
-  const x: number[] = [];
-  const penas: (number | null)[][] = ordem.map(() => []);
-
-  for (;;) {
-    let instante = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < ordem.length; i++) {
-      const proximo = tempos[i][cursores[i]];
-      if (proximo !== undefined && proximo < instante) instante = proximo;
-    }
-    if (instante === Number.POSITIVE_INFINITY) break;
-
-    for (let i = 0; i < ordem.length; i++) {
-      while (cursores[i] < tempos[i].length && tempos[i][cursores[i]] === instante) {
-        atual[i] = valores[i][cursores[i]];
-        ultimaAmostra[i] = instante;
-        cursores[i]++;
-      }
-      penas[i].push(instante - ultimaAmostra[i] > teto ? null : atual[i]);
-    }
-    x.push(instante);
-  }
+  const x = montarEixoUniao(tempos);
+  const penas = tempos.map((t, i) => alinharNoEixo(x, t, valores[i], teto));
 
   return [x, ...penas];
 }

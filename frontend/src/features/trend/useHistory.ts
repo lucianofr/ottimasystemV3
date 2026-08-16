@@ -2,6 +2,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import type uPlot from "uplot";
 
 import { api, type HistoryResponse, type TagOut } from "../../lib/api";
+import { alinharNoEixo, montarEixoUniao } from "./alinhamento";
 
 /** OPC-UA: 0 good, 1 uncertain, 2 bad (spec F2 §4.2). */
 const QUALIDADE_BAD = 2;
@@ -94,16 +95,19 @@ export function useHistory(
 }
 
 /**
- * Matriz colunar do uPlot: um eixo x compartilhado por todas as penas.
+ * Matriz colunar do uPlot: um eixo x compartilhado por todas as penas (`montarEixoUniao`) e o
+ * carry-forward-com-teto de cada uma delegado ao primitivo único (`alinharNoEixo`,
+ * `./alinhamento.ts`, ARCH-02).
  *
  * Cada tag tem carimbos próprios (amostragem por exceção), então o eixo x é a união dos
  * carimbos e cada pena repete seu último valor conhecido nos instantes em que não amostrou
  * — que é o que o valor fez de fato no processo. Duas coisas cortam essa repetição, e as duas
- * viram gap: ponto com `q === 2` (a origem disse que o valor não presta) e silêncio além de
- * `tetoCarryForwardSegundos` (não chegou amostra nenhuma — recorder fora do ar, worker morto,
- * canal Redis perdido). Sem o teto, a pena morta desenharia reta com o último valor bom
- * enquanto outra pena viva continua puxando o eixo x adiante, que é exatamente a mentira que
- * a Regra do Canal Redundante (DESIGN.md) proíbe.
+ * viram gap: ponto com `q === 2` (a origem disse que o valor não presta, virado `null` aqui
+ * antes de chamar o primitivo) e silêncio além de `tetoCarryForwardSegundos` (não chegou
+ * amostra nenhuma — recorder fora do ar, worker morto, canal Redis perdido). Sem o teto, a
+ * pena morta desenharia reta com o último valor bom enquanto outra pena viva continua puxando
+ * o eixo x adiante, que é exatamente a mentira que a Regra do Canal Redundante (DESIGN.md)
+ * proíbe.
  */
 export function montarMatriz(
   resposta: HistoryResponse,
@@ -120,31 +124,8 @@ export function montarMatriz(
   });
 
   const teto = tetoCarryForwardSegundos(resposta.mode);
-  const cursores = ordem.map(() => 0);
-  const atual: (number | null)[] = ordem.map(() => null);
-  // Instante da última amostra real de cada pena; antes da primeira, silêncio infinito.
-  const ultimaAmostra = ordem.map(() => Number.NEGATIVE_INFINITY);
-  const x: number[] = [];
-  const penas: (number | null)[][] = ordem.map(() => []);
-
-  for (;;) {
-    let instante = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < ordem.length; i++) {
-      const proximo = tempos[i][cursores[i]];
-      if (proximo !== undefined && proximo < instante) instante = proximo;
-    }
-    if (instante === Number.POSITIVE_INFINITY) break;
-
-    for (let i = 0; i < ordem.length; i++) {
-      while (cursores[i] < tempos[i].length && tempos[i][cursores[i]] === instante) {
-        atual[i] = valores[i][cursores[i]];
-        ultimaAmostra[i] = instante;
-        cursores[i]++;
-      }
-      penas[i].push(instante - ultimaAmostra[i] > teto ? null : atual[i]);
-    }
-    x.push(instante);
-  }
+  const x = montarEixoUniao(tempos);
+  const penas = tempos.map((t, i) => alinharNoEixo(x, t, valores[i], teto));
 
   return [x, ...penas];
 }

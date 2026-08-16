@@ -30,21 +30,16 @@ test("teto de carry-forward escala com o modo", () => {
   expect(tetoCarryForwardSegundos("1m")).toBe(120);
 });
 
-test("raw: pena que parou de reportar vira gap enquanto a outra segue viva", () => {
-  // Duas tags a 10 s (a cadência do heartbeat). A morta cala em t=20 s; a viva segue até 120 s
-  // e é ela que continua puxando o eixo x — o cenário em que o carry-forward mentiria.
+test("raw: eixo x é a união ordenada dos carimbos de duas penas com grades diferentes", () => {
+  // Carry-forward-com-teto em si é coberto uma vez em `alinhamento.check.ts` (ARCH-02) — aqui
+  // só a construção do eixo união e a delegação por pena.
   const resp = resposta("raw", [serie(VIVA, 10, 120, 5), serie(MORTA, 10, 20, 7)]);
   const [x, viva, morta] = montarMatriz(resp, [VIVA, MORTA]);
 
   expect(x.length).toBe(13); // união = 0,10,…,120
   for (let i = 0; i < x.length; i++) expect(viva[i]).toBe(5);
-
-  // Até o teto (20 s de silêncio) o carry-forward é legítimo: o valor de fato não mudou.
-  expect(morta[2]).toBe(7); // t=20 s, amostra real
-  expect(morta[3]).toBe(7); // t=30 s, 10 s de silêncio
-  expect(morta[4]).toBe(7); // t=40 s, 20 s de silêncio = teto
-  // Passado o teto, repetir o valor seria inventar aquisição que não houve.
-  for (let i = 5; i < x.length; i++) expect(morta[i]).toBeNull();
+  expect(morta[2]).toBe(7); // t=20 s, última amostra real de MORTA
+  expect(morta[x.length - 1]).toBeNull(); // silêncio muito além do teto: delegado ao primitivo
 
   const [resumoViva, resumoMorta] = resumirSeries(resp, [VIVA, MORTA]);
   expect(resumoViva).toEqual({ tagId: VIVA, valor: 5, bad: false, semDado: false });
@@ -64,12 +59,10 @@ test("1m: série saudável de bucket de 60 s não vira gap", () => {
   }
 });
 
-test("1m: pena que parou vira gap depois de dois buckets", () => {
+test("1m: teto do modo agregado é repassado ao primitivo — pena parada vira SEM DADO na legenda", () => {
   const resp = resposta("1m", [serie(VIVA, 60, 1800, 5), serie(MORTA, 60, 300, 7)]);
   const [, , morta] = montarMatriz(resp, [VIVA, MORTA]);
 
-  expect(morta[5]).toBe(7); // t=300 s, amostra real
-  expect(morta[7]).toBe(7); // t=420 s, 120 s de silêncio = teto
-  expect(morta[8]).toBeNull(); // t=480 s, 180 s de silêncio
+  expect(morta[morta.length - 1]).toBeNull();
   expect(resumirSeries(resp, [MORTA])[0].semDado).toBe(true);
 });
