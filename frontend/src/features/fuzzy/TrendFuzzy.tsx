@@ -5,8 +5,9 @@ import { Card } from "../../components/ui/card";
 import { cn } from "../../lib/cn";
 import { referenciaPersistidaS, useBordaViva, type LeituraViva } from "../trend/bordaViva";
 import { JanelaTempo } from "../trend/JanelaTempo";
+import { type BadgeLegenda, type LinhaLegenda, PainelLegendaTrend } from "../trend/PainelLegendaTrend";
 import { TrendChart } from "../trend/TrendChart";
-import { CLASSES_PENA, FORMATO_VALOR, LIMITE_PENAS } from "../trend/trendTheme";
+import { CLASSES_PENA, LIMITE_PENAS } from "../trend/trendTheme";
 import { useJanelaDeslizante } from "../trend/useJanelaDeslizante";
 import {
   mesclarHistoricoFuzzyVivo,
@@ -221,37 +222,39 @@ export function TrendFuzzy({
           )}
 
           {resumos.length > 0 && (
-            <Card data-testid="fuzzy-trend-legend" className="divide-y divide-border">
-              {resumos.map((resumo, indice) => {
+            <PainelLegendaTrend
+              testId="fuzzy-trend-legend"
+              linhas={resumos.map((resumo, indice) => {
                 const v = porPorta.get(resumo.varId);
-                return (
-                  <div key={resumo.varId} data-testid="fuzzy-trend-legend-item" className="flex items-center gap-3 px-3 py-2">
-                    <span
-                      aria-hidden="true"
-                      className={cn("h-1 w-6 shrink-0", CLASSES_PENA[indice % CLASSES_PENA.length])}
-                    />
-                    <span className="plaqueta grow text-xs">{v ? `${v.port} — ${v.name}` : resumo.varId}</span>
-                    {resumo.semDado && (
+                const badges: BadgeLegenda[] = [];
+                if (resumo.semDado) {
+                  badges.push({
+                    testId: "fuzzy-trend-legend-sem-dado",
+                    texto: "SEM DADO",
+                    className: "plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg",
+                  });
+                }
+                const linha: LinhaLegenda = {
+                  chave: resumo.varId,
+                  testId: "fuzzy-trend-legend-item",
+                  className: "flex items-center gap-3 px-3 py-2",
+                  identificacao: (
+                    <>
                       <span
-                        data-testid="fuzzy-trend-legend-sem-dado"
-                        className="plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg"
-                      >
-                        SEM DADO
+                        aria-hidden="true"
+                        className={cn("h-1 w-6 shrink-0", CLASSES_PENA[indice % CLASSES_PENA.length])}
+                      />
+                      <span className="plaqueta grow text-xs">
+                        {v ? `${v.port} — ${v.name}` : resumo.varId}
                       </span>
-                    )}
-                    <span
-                      className={cn(
-                        "process-value w-28 text-right text-sm",
-                        resumo.semDado ? "text-fg-muted" : "text-fg",
-                      )}
-                    >
-                      {resumo.valor === null ? "—" : FORMATO_VALOR.format(resumo.valor)}
-                    </span>
-                    <span className="w-12 text-xs text-fg-muted">{v?.eu ?? ""}</span>
-                  </div>
-                );
+                    </>
+                  ),
+                  badges,
+                  valorEu: { valor: resumo.valor, eu: v?.eu ?? "", muted: resumo.semDado },
+                };
+                return linha;
               })}
-            </Card>
+            />
           )}
         </div>
       </div>

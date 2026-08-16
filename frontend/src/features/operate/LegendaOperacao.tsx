@@ -1,9 +1,11 @@
-import { Card } from "../../components/ui/card";
-import { cn } from "../../lib/cn";
 import type { MpcVarState } from "../../lib/contracts.gen";
 import { EditorEscala } from "../trend/EditorEscala";
 import { ESCALA_AUTO, type EscalaVar } from "../trend/escalas";
-import { FORMATO_VALOR } from "../trend/trendTheme";
+import {
+  type BadgeLegenda,
+  type LinhaLegenda,
+  PainelLegendaTrend,
+} from "../trend/PainelLegendaTrend";
 import {
   faixaPontilhadaSp,
   valorDaPena,
@@ -66,110 +68,102 @@ export function LegendaOperacao({
   onFocarPena,
   onMudarEscala,
 }: LegendaOperacaoProps) {
-  return (
-    <Card data-testid="operate-trend-legend" className="divide-y divide-border">
-      {defaults.map((pena) => {
-        // Nome, cor e faixa vêm da VARIÁVEL da pena: a linha de SP é do mesmo `varId` da CV.
-        const definicao = porIdDefinicao.get(pena.varId);
-        const ligada = ligadas.has(pena.id);
-        const ehSp = pena.categoria === "sp";
-        const cor = cores.get(pena.varId) ?? "transparent";
-        const valor = valorDaPena(pena, vars);
-        // O eixo Y é da VARIÁVEL: a marca fica na linha da CV, e cai para a linha do SP quando
-        // ele é a única pena daquela variável desenhada (senão o operador vê um eixo colorido
-        // sem nenhuma linha da legenda dizendo de quem ele é).
-        const donaDoEixo =
-          ligada && pena.varId === foco && (!ehSp || !ligadas.has(pena.varId));
-        return (
-          <div
-            key={pena.id}
-            data-testid="operate-trend-legend-item"
-            data-var-id={pena.id}
-            data-categoria={pena.categoria}
-            className="flex items-center gap-3 px-4 py-2 transition-colors duration-[var(--duration-fast)] hover:bg-surface-2"
-          >
-            {/* Três alvos de clique distintos na mesma linha: o checkbox alterna a pena, o
-                identificador traz o eixo Y para a variável (o operador aponta a linha de quem
-                quer ler no eixo) e o editor de escala edita a faixa. O identificador era um
-                `label` do checkbox: ali, mover o eixo exigia desmarcar e marcar a pena, o que
-                apagava a variável do gráfico no caminho. O `label` sobrou só em volta do
-                checkbox, acolchoado para o alvo chegar aos 24 px do WCAG 2.5.8 sem voltar a
-                cobrir a linha inteira; o nome acessível vem do `aria-label` porque o texto
-                visível pertence ao botão do eixo. */}
-            <label className="flex shrink-0 cursor-pointer items-center p-1.5">
-              <input
-                type="checkbox"
-                aria-label={`Plotar ${ROTULO_CATEGORIA[pena.categoria]} ${definicao?.name ?? pena.varId}`}
-                className="accent-accent"
-                checked={ligada}
-                onChange={() => {
-                  onAlternarPena(pena);
-                }}
-              />
-            </label>
-            {/* `aria-current`, não `aria-pressed`: o eixo é de uma variável só, então ligar uma
-                linha desmarca a outra sem o operador tocar nela — que é seleção única, não um
-                interruptor independente por linha. */}
-            <button
-              type="button"
-              aria-current={donaDoEixo ? "true" : undefined}
-              title="Trazer o eixo Y para esta variável"
-              className="focus-ring flex min-h-6 grow cursor-pointer items-center gap-3 text-left"
-              onClick={() => {
-                onFocarPena(pena);
+  const linhas: LinhaLegenda[] = defaults.map((pena) => {
+    // Nome, cor e faixa vêm da VARIÁVEL da pena: a linha de SP é do mesmo `varId` da CV.
+    const definicao = porIdDefinicao.get(pena.varId);
+    const ligada = ligadas.has(pena.id);
+    const ehSp = pena.categoria === "sp";
+    const cor = cores.get(pena.varId) ?? "transparent";
+    const valor = valorDaPena(pena, vars);
+    // O eixo Y é da VARIÁVEL: a marca fica na linha da CV, e cai para a linha do SP quando
+    // ele é a única pena daquela variável desenhada (senão o operador vê um eixo colorido
+    // sem nenhuma linha da legenda dizendo de quem ele é).
+    const donaDoEixo = ligada && pena.varId === foco && (!ehSp || !ligadas.has(pena.varId));
+
+    const badges: BadgeLegenda[] = [];
+    if (donaDoEixo) {
+      badges.push({ texto: "Eixo Y", className: "plaqueta text-xs text-fg-muted" });
+    }
+    if (pena.excedente && !ligada) {
+      badges.push({
+        testId: "operate-trend-legend-teto",
+        texto: "Acima do teto",
+        className: "plaqueta rounded-pill bg-warn-soft px-2 py-0.5 text-xs text-warn-fg",
+      });
+    }
+
+    return {
+      chave: pena.id,
+      testId: "operate-trend-legend-item",
+      dataAttrs: { "data-var-id": pena.id, "data-categoria": pena.categoria },
+      className:
+        "flex items-center gap-3 px-4 py-2 transition-colors duration-[var(--duration-fast)] hover:bg-surface-2",
+      identificacao: (
+        <>
+          {/* Três alvos de clique distintos na mesma linha: o checkbox alterna a pena, o
+              identificador traz o eixo Y para a variável (o operador aponta a linha de quem
+              quer ler no eixo) e o editor de escala edita a faixa. O identificador era um
+              `label` do checkbox: ali, mover o eixo exigia desmarcar e marcar a pena, o que
+              apagava a variável do gráfico no caminho. O `label` sobrou só em volta do
+              checkbox, acolchoado para o alvo chegar aos 24 px do WCAG 2.5.8 sem voltar a
+              cobrir a linha inteira; o nome acessível vem do `aria-label` porque o texto
+              visível pertence ao botão do eixo. */}
+          <label className="flex shrink-0 cursor-pointer items-center p-1.5">
+            <input
+              type="checkbox"
+              aria-label={`Plotar ${ROTULO_CATEGORIA[pena.categoria]} ${definicao?.name ?? pena.varId}`}
+              className="accent-accent"
+              checked={ligada}
+              onChange={() => {
+                onAlternarPena(pena);
               }}
-            >
-              <span
-                aria-hidden="true"
-                className="h-1.5 w-6 shrink-0 rounded-pill"
-                style={ehSp ? { backgroundImage: faixaPontilhadaSp(cor) } : { backgroundColor: cor }}
-              />
-              <span className="plaqueta grow text-xs">
-                {ROTULO_CATEGORIA[pena.categoria]} · {definicao?.name ?? pena.varId}
-              </span>
-            </button>
-            {donaDoEixo && (
-              <span className="plaqueta text-xs text-fg-muted">Eixo Y</span>
-            )}
-            {pena.excedente && !ligada && (
-              <span
-                data-testid="operate-trend-legend-teto"
-                className="plaqueta rounded-pill bg-warn-soft px-2 py-0.5 text-xs text-warn-fg"
-              >
-                Acima do teto
-              </span>
-            )}
-            {/* Valor corrente + EU na PRÓPRIA linha, no mesmo arranjo (e com as mesmas
-                larguras de coluna) das legendas de engenharia e fuzzy: as três telas de
-                tendência passam a ler igual. A linha do SP mostra o alvo da CV, não o PV —
-                `valorDaPena` é quem sabe disso. */}
+            />
+          </label>
+          {/* `aria-current`, não `aria-pressed`: o eixo é de uma variável só, então ligar uma
+              linha desmarca a outra sem o operador tocar nela — que é seleção única, não um
+              interruptor independente por linha. */}
+          <button
+            type="button"
+            aria-current={donaDoEixo ? "true" : undefined}
+            title="Trazer o eixo Y para esta variável"
+            className="focus-ring flex min-h-6 grow cursor-pointer items-center gap-3 text-left"
+            onClick={() => {
+              onFocarPena(pena);
+            }}
+          >
             <span
-              data-testid="operate-trend-legend-valor"
-              className={cn(
-                "process-value w-28 text-right text-sm",
-                valor === null ? "text-fg-muted" : "text-fg",
-              )}
-            >
-              {valor === null ? "—" : FORMATO_VALOR.format(valor)}
+              aria-hidden="true"
+              className="h-1.5 w-6 shrink-0 rounded-pill"
+              style={ehSp ? { backgroundImage: faixaPontilhadaSp(cor) } : { backgroundColor: cor }}
+            />
+            <span className="plaqueta grow text-xs">
+              {ROTULO_CATEGORIA[pena.categoria]} · {definicao?.name ?? pena.varId}
             </span>
-            <span data-testid="operate-trend-legend-eu" className="w-12 text-xs text-fg-muted">
-              {definicao?.eu ?? ""}
-            </span>
-            {/* A pena de SP desenha na escala da própria CV (mesma grandeza): editor de faixa
-                só na linha da variável, senão a tela ofereceria dois controles para a mesma
-                escala e o segundo gravaria uma faixa que ninguém lê. */}
-            {!ehSp && (
-              <EditorEscala
-                escala={escalas[pena.varId] ?? ESCALA_AUTO}
-                prefixoTestid="operate"
-                aoMudar={(escala) => {
-                  onMudarEscala(pena.varId, escala);
-                }}
-              />
-            )}
-          </div>
-        );
-      })}
-    </Card>
-  );
+          </button>
+        </>
+      ),
+      badges,
+      valorEu: {
+        valor,
+        eu: definicao?.eu ?? "",
+        muted: valor === null,
+        testIdValor: "operate-trend-legend-valor",
+        testIdEu: "operate-trend-legend-eu",
+      },
+      // A pena de SP desenha na escala da própria CV (mesma grandeza): editor de faixa só
+      // na linha da variável, senão a tela ofereceria dois controles para a mesma escala e
+      // o segundo gravaria uma faixa que ninguém lê.
+      filhoEscala: !ehSp ? (
+        <EditorEscala
+          escala={escalas[pena.varId] ?? ESCALA_AUTO}
+          prefixoTestid="operate"
+          aoMudar={(escala) => {
+            onMudarEscala(pena.varId, escala);
+          }}
+        />
+      ) : undefined,
+    };
+  });
+
+  return <PainelLegendaTrend testId="operate-trend-legend" linhas={linhas} />;
 }
