@@ -91,6 +91,12 @@ function corDessaturada(cor: string, texto: string): string {
   return `color-mix(in oklch, ${cor}, ${texto} 60%)`;
 }
 
+/** SP: pontilhado no matiz da própria CV. O Azul Único nunca codifica dado (DESIGN §Colors —
+ *  A Regra do Azul Único), e pena azul sem entrada na legenda é linha órfã na tela do
+ *  operador. Padrão distinto do tracejado da predição (`[5, 5]` em `tracoComFade`): sólido =
+ *  PV medido, pontilhado = SP comandado, tracejado = futuro. */
+const TRACO_SP = [2, 4];
+
 /** CV/Restrição tracejada: mesmo matiz mais claro, com fade ao horizonte (§7.4-6). O
  *  gradiente vai de `corClara` em "agora" a quase transparente na ponta do horizonte —
  *  sem `agora` (sem overlay) cai para a cor clara sólida, nunca desenhada de qualquer jeito
@@ -266,15 +272,17 @@ function montarColunas(
     const divisao = dividirSpPorAuto(historica.sp, historica.auto);
     pushHistorico(historica.t, divisao.comandado, {
       label: `${cv.name} SP`,
-      stroke: tema.accent,
+      stroke: cor,
       width: 1.5,
+      dash: TRACO_SP,
       points: { show: false },
       scale,
     });
     pushHistorico(historica.t, divisao.rastreado, {
       label: `${cv.name} SP rastreado`,
-      stroke: corDessaturada(tema.accent, tema.texto),
+      stroke: corDessaturada(cor, tema.texto),
       width: 1.5,
+      dash: TRACO_SP,
       points: { show: false },
       scale,
     });

@@ -35,7 +35,7 @@ A assinatura reutilizável do sistema é a **"tinta que ainda não secou"**: em 
 Estratégia **Restrained**: neutros grafite + um acento de interação; cores de severidade são funcionais, não paleta. Valores exatos `[a resolver na implementação]` dentro das faixas abaixo; o re-scan pós-código carboniza os tokens.
 
 ### Primary
-- **Azul Industrial** (`[a resolver]`; alvo OKLCH ≈ L 62–70%, C 0.08–0.12, H 230–250): seleção, foco, links, botão primário, item ativo de navegação, pena de SP em trends. Dessaturado e calibrado — jamais neon/ciano brilhante. É a única cor de interação do sistema.
+- **Azul Industrial** (`[a resolver]`; alvo OKLCH ≈ L 62–70%, C 0.08–0.12, H 230–250): seleção, foco, links, botão primário, item ativo de navegação. Dessaturado e calibrado — jamais neon/ciano brilhante. É a única cor de interação do sistema — **nunca** desenha dado, nem a pena de SP em trends (A Regra do Azul Único, abaixo).
 
 ### Neutral
 - **Grafite Campo** (alvo L 22–28%, C ≤ 0.015): fundo geral da aplicação.

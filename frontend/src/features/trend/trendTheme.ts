@@ -38,9 +38,6 @@ export interface TemaTrend {
   readonly texto: string;
   /** Pilha de fontes mono, para compor o shorthand do canvas. */
   readonly mono: string;
-  /** Azul Industrial (DESIGN §Primary) — pena de SP comandado no trend de operação
-   *  (`TrendOperacao.tsx`, spec F5 §7.4-6). */
-  readonly accent: string;
   /** Wash da banda low/high de Restrição no trend de operação. */
   readonly banda: string;
   /** Wash da seção futura do trend de operação (`secaoFutura.ts`). */
@@ -62,7 +59,6 @@ export function lerTemaTrend(): TemaTrend {
     linha: estilo.getPropertyValue("--color-well-chart-grid").trim(),
     texto: estilo.getPropertyValue("--color-well-chart-fg").trim(),
     mono: estilo.getPropertyValue("--font-mono").trim(),
-    accent: estilo.getPropertyValue("--color-accent").trim(),
     banda: estilo.getPropertyValue("--color-well-chart-band").trim(),
     secaoFutura: estilo.getPropertyValue("--color-well-chart-future").trim(),
     agora: estilo.getPropertyValue("--color-well-chart-now").trim(),

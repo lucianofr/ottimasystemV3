@@ -388,7 +388,8 @@ function distanciaPerceptual(a: string, b: string): number {
 const PISO_DISTINCAO = 0.05;
 
 /** Cores que a pena nunca pode imitar: as três de severidade (A Regra da Cor Anormal) e o Azul
- *  Único, que no trend de operação é a própria pena de SP (§7.4-6). */
+ *  Único, que é só interação/seleção (A Regra do Azul Único) — pena no matiz do acento faz o
+ *  operador ler a variável como estado de seleção. */
 const TOKENS_RESERVADOS = ["--color-alarm", "--color-warn", "--color-success", "--color-accent"];
 
 /** Faixa de matiz do Azul Único, em graus OKLCH: "existe UM azul" (DESIGN §Colors) é regra de
@@ -423,9 +424,9 @@ test("as 8 cores de pena são distinguíveis entre si nos dois temas (§6.6-5)",
 });
 
 test("nenhuma cor de pena colide com cor reservada de severidade nem com o Azul Único (§6.6-5, DESIGN §Colors)", () => {
-  // A pena de SP é o Azul Único (§7.4-6): uma pena de série no mesmo azul faz o operador ler o
-  // SP como a variável daquela posição da legenda — inclusive desligada, quando ela não desenha
-  // nada e a linha azul continua no gráfico.
+  // O Azul Único é interação, nunca dado (DESIGN §Colors): uma pena de série no mesmo azul faz
+  // a variável se passar por seleção/foco, e a seleção de zoom (`.u-select`, `trend.css`) por
+  // pena — inclusive desligada, quando ela não desenha nada.
   const colisoes: string[] = [];
   for (const tema of TEMAS) {
     for (const tokenPena of TOKENS_PENA_OPERACAO) {
@@ -443,7 +444,7 @@ test("nenhuma cor de pena colide com cor reservada de severidade nem com o Azul 
 
   // Mesmo matiz do acento com outra luminosidade ainda é "o azul": a distância perceptual acima
   // aprovaria (a pena 1 do tema claro ficava a 0.10 do acento) e o operador continuaria lendo a
-  // pena de SP como a variável da legenda que usa a pena 1.
+  // pena como o azul de interação.
   for (const tema of TEMAS) {
     const [, , matizAcento] = coordenadasOklch(valorTokenTema("--color-accent", tema));
     for (const tokenPena of TOKENS_PENA_OPERACAO) {

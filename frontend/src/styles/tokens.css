@@ -37,9 +37,9 @@
      servem o trend de engenharia (`LIMITE_PENAS`). Consumidas por JS (uPlot) e pelas faixas da
      legenda. Desenhadas sempre sobre o poço escuro do gráfico, não sobre o fundo do tema.
      A pena 1 nasceu no matiz do acento (258) e a 4 no do Âmbar Advertência: a Regra do Azul
-     Único e a Regra da Cor Anormal (DESIGN §Colors) proíbem os dois — no trend de operação o
-     acento É a pena de SP, então uma pena de série no mesmo azul faz o operador ler o SP como
-     a variável daquela posição da legenda. Matizes conferidos em `trendOperacao.check.ts`. */
+     Único e a Regra da Cor Anormal (DESIGN §Colors) proíbem os dois — o acento é só interação
+     (seleção, foco, zoom), então uma pena de série no mesmo azul faz o operador ler a variável
+     como estado de seleção. Matizes conferidos em `trendOperacao.check.ts`. */
   --color-pen-1: oklch(0.68 0.22 312);
   --color-pen-2: oklch(0.78 0.16 195);
   --color-pen-3: oklch(0.7 0.26 340);
