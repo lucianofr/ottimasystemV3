@@ -6,6 +6,52 @@
 **Recomendação de primeiro corte:** ARCH-07 — executado e reformulado pelo grilling (ver Apuração no achado). Próximo: ARCH-01
 **Débito registrado:** TD-015 a TD-024 (`_tech-debt.md`)
 
+---
+
+## Como usar este relatório (handoff para sessão nova)
+
+**Estado em `8f9fe76`:** 20 dos 22 candidatos seguem abertos. **ARCH-01 e ARCH-07 já foram
+executados** — cada um traz um bloco `Execução`/`Apuração` no próprio achado. Leia esses dois blocos
+antes de tocar em qualquer coisa: o ARCH-07 teve a alegação central **desmentida** (a regra
+`max_rate > 0` tem três camadas de enforcement) e metade do aprofundamento **descartada** por falhar
+no deletion test.
+
+**Restrição de projeto.** A [ADR-034](../../adr/ADR-034-espelho-contrato-python-ts.md) fixa a
+fronteira do espelho de contrato Python↔TS: **forma** é gerada, **regra** é travada por golden,
+**default literal** pode ser espelhado à mão. Não reproponha a tabela de defaults gerada — foi
+avaliada e recusada com motivo. O ARCH-06 (gerar a FORMA) segue recomendado e não cai por associação.
+
+**Fila de trabalho viva:** `docs/reports/_tech-debt.md`, itens TD-016 a TD-024. Este relatório é o
+**levantamento** (não muda); o `_tech-debt.md` é o **estado** (muda a cada item fechado). Ao concluir
+um candidato, atualize o TD correspondente com `Resolution` + `Prova`, no formato dos resolvidos.
+
+**Ordem recomendada:**
+
+1. **ARCH-04** — valor + EU na linha da legenda de operação. Pequeno, não depende de decisão de
+   ninguém, e é a queixa original do dono do produto: as três telas de tendência devem se comportar
+   igual. Único item pendente que um operador sente na tela.
+2. **TD-023** — mecanizar os gates. **Bloqueado numa decisão do dono** (CI é escolha de arquitetura:
+   runners, segredos, se E2E entra no pipeline). Não comece sem essa resposta.
+3. **ARCH-11** — isolamento temporal entre Flows. Único High restante. Leia com cuidado: a proposta é
+   observabilidade (medir por `block.step()`, emitir `block_overrun`), **não** correção estrutural —
+   partição por processo é decidida contra pelo ADR-004.
+4. O resto, por oportunidade. ARCH-02/03/21 são duplicação de lógica pura sem risco de divergência
+   de comportamento desde que o motor de trend foi unificado.
+
+**Precisão das citações.** Todo `arquivo:linha` deste relatório está ancorado em `e38f528`. O commit
+`70ce9e9` (`ruff format`, só espaçamento, AST idêntica em 18/18 arquivos) deslocou algumas linhas nos
+arquivos citados por **ARCH-06, ARCH-08, ARCH-10, ARCH-12, ARCH-16 e ARCH-17**. Nesses seis, **o nome
+do símbolo na citação é autoritativo, o número da linha não** — localize por símbolo. Os outros 14
+abertos têm citações intactas.
+
+**Gates.** Os comandos canônicos estão no `CLAUDE.md`. Mínimo por mudança de frontend:
+`npm run test:unit`, `npm run typecheck` e `npm run build` — o `typecheck` é **obrigatório** se tocar
+`*.check.ts`, porque esses arquivos ficam fora do typecheck do `build` por design (TD-010) e só esse
+comando os pega. Python: `uv run ruff check . && uv run ruff format --check .`. Mudança de UI exige
+verificação na superfície real (browser ou Playwright), não só teste unitário — a regressão das três
+telas de tendência é `npx playwright test trend-eng operate-trend fuzzy-operate`, e ela **para o flow
+da planta** (`fixtures.ts::criarAmbiente` ativa projeto próprio): peça autorização e redeploye depois.
+
 Auditoria de *aprofundamento*: onde um module é raso (interface quase tão complexa quanto a
 implementation) e onde a complexidade está espalhada em vez de concentrada. O vocabulário de
 arquitetura é fixo — module, interface, implementation, depth, seam, adapter, leverage, locality —
