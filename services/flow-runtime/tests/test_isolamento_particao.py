@@ -13,8 +13,9 @@ deixa de alcançar a fronteira de varredura de quem está noutra partição. Thr
 este resultado — os blocos inline são Python puro e não soltam o GIL; por isso a partição é por
 PROCESSO.
 
-Marcado `slow` (spawn de dois processos + 1,5 s de tempo de parede): fora do run default, roda com
-`-m slow`, como manda o marcador registrado no `pyproject.toml`.
+Roda no run DEFAULT, sem o marcador `slow`, mesmo custando spawn de dois processos e 1,5 s de
+tempo de parede: são ~1,3% do tempo da suíte, e o repositório não tem CI — a suíte local é o único
+portão que existe, então um marcador que a tirasse do default a tiraria de toda execução real.
 
 Não usa `PartitionParent` de propósito. O que está sob teste é a garantia FÍSICA (um event loop por
 processo), não o encanamento do pai — que `test_partition.py` cobre em `owns()`, no filtro de
@@ -25,7 +26,6 @@ de o teste falhar por motivo alheio ao que ele afirma.
 import asyncio
 import multiprocessing as mp
 
-import pytest
 from runtime_test_helpers import varrer_em_processo
 
 TS_S = 0.1
@@ -39,7 +39,7 @@ RECV_TIMEOUT_S = 30.0
 """Teto para o filho responder: spawn reimporta o mundo, e a máquina pode estar carregada."""
 
 
-@pytest.mark.slow
+
 async def test_flow_lento_numa_particao_nao_atrasa_o_flow_de_outra(redis_url: str):
     """O flow rápido mantém sua grade enquanto o flow lento gasta 1,0 s numa varredura.
 
