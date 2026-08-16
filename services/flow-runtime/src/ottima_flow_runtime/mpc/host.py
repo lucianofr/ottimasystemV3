@@ -101,12 +101,18 @@ caminhos levam a respostas sintéticas DIFERENTES."""
 
 def _receive(conn: Connection, timeout_s: float) -> Any:
     """Espera uma mensagem no pipe com timeout. Roda **numa thread** — nunca no event loop
-    (ADR-004), mesmo padrão de `script_pool._receive`."""
+    (ADR-004), mesmo padrão de `script_pool._receive`.
+
+    Captura `Exception` (não só `EOFError, OSError`, plano 001): `recv()` também levanta
+    erro de desserialização (`pickle.UnpicklingError` e parentes) num fluxo
+    corrompido-mas-completo-no-header, e para o host isso é indistinguível de "o worker
+    morreu" — os dois levam ao mesmo respawn. `BaseException` fica de fora de propósito:
+    `CancelledError`/`KeyboardInterrupt` têm de continuar propagando."""
     try:
         if not conn.poll(timeout_s):
             return None
         return conn.recv()
-    except (EOFError, OSError):
+    except Exception:
         return _CRASHED
 
 
@@ -243,6 +249,25 @@ class MpcHost:
         task = asyncio.get_running_loop().create_task(self._await_response(conn))
         self._background.add(task)
         task.add_done_callback(self._background.discard)
+
+        def _log_se_falhou(task: asyncio.Task[None]) -> None:
+            # Defesa em profundidade (plano 001): depois do try/except de
+            # `_await_response`, esta task não deveria mais levantar — o mesmo espírito
+            # de `supervisor_mpc.py::_log_se_falhou`. Sem este callback a exceção cairia
+            # no handler default do asyncio ("Task exception was never retrieved"), sem
+            # `block_id` nenhum para localizar o bloco.
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc is not None:
+                logger.error(
+                    "Task de espera de resposta do worker MPC do bloco '%s' falhou com "
+                    "exceção não tratada",
+                    self._block_id,
+                    exc_info=exc,
+                )
+
+        task.add_done_callback(_log_se_falhou)
         return True
 
     def poll(self) -> SolveResult | None:
@@ -291,9 +316,24 @@ class MpcHost:
         """Task criada por `dispatch()`: espera a resposta (ou o deadline, ou um crash) do
         pedido que acabou de ser mandado por `conn` — `conn` é passado por parâmetro, não
         lido de `self._conn`, para nunca correr atrás de um respawn concorrente que troque
-        o pipe embaixo desta espera."""
-        outcome = await self._off_loop(partial(_receive, conn, self._deadline_s))
-        self._busy = False
+        o pipe embaixo desta espera.
+
+        Defesa em profundidade (plano 001): depois do fix de `_receive`, este `await` não
+        deveria mais levantar — mas se levantar mesmo assim (ex.: o executor já desligado
+        embaixo de um `stop()` concorrente), o `try/except` trata como crash sintético em
+        vez de deixar `self._busy` preso em `True` para sempre. `self._busy = False` roda
+        em TODOS os caminhos via `finally`."""
+        try:
+            outcome = await self._off_loop(partial(_receive, conn, self._deadline_s))
+        except Exception:
+            logger.exception(
+                "Espera de resposta do worker MPC do bloco '%s' levantou exceção fora do "
+                "contrato de `_receive` — tratando como crash sintético",
+                self._block_id,
+            )
+            outcome = _CRASHED
+        finally:
+            self._busy = False
 
         if outcome is None:
             # Deadline de 0.7xTs_mpc estourado, medido do dispatch (spec §4.2).

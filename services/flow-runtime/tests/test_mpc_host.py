@@ -26,6 +26,7 @@ o bastante para manter a suíte rápida.
 from __future__ import annotations
 
 import os
+import pickle
 import signal
 from collections.abc import AsyncIterator, Callable
 
@@ -245,6 +246,74 @@ async def test_crash_em_voo_durante_dispatch_entrega_error_crash_e_respawna(
     await await_until(lambda: host.stats()["respawns"] == 1, timeout_s=10.0)
     await await_until(lambda: host.ready is True, timeout_s=10.0)
     assert host._proc.pid != old_pid  # noqa: SLF001
+
+
+# --------------------------------------------------------------------------------------
+# Falha de recv() FORA de (EOFError, OSError) -- erro de desserialização (plano 001): antes
+# do fix escapa de `_await_response` sem nunca zerar `_busy`, e todo dispatch() seguinte
+# trava em `False` para sempre (spec §4.9 cobre só EOF/erro de SO, não isto).
+# --------------------------------------------------------------------------------------
+
+
+async def test_falha_de_recv_por_erro_de_deserializacao_nao_deixa_busy_preso(
+    make_host: Callable[[Callable], MpcHost],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_receive` só tratava `(EOFError, OSError)` (plano 001): um erro de desserialização
+    num fluxo corrompido-mas-completo-no-header -- `pickle.UnpicklingError` e parentes,
+    spec §4.9 -- escapava de `_await_response` sem nunca rodar `self._busy = False`, e
+    todo `dispatch()` seguinte devolvia `False` para sempre. Injeta a falha via
+    monkeypatch em `_receive`: decisão do plano 001, testa o contrato do handler, não
+    como o erro de desserialização nasce de verdade."""
+    import ottima_flow_runtime.mpc.host as host_module
+
+    host = make_host(mpc_host_echo_worker)
+    await host.start()
+    assert host.ready is True
+
+    receive_real = host_module._receive
+
+    def receive_com_falha_de_deserializacao(conn, timeout_s):
+        monkeypatch.setattr(host_module, "_receive", receive_real)
+        raise pickle.UnpicklingError("payload corrompido no pipe (simulado pelo teste)")
+
+    monkeypatch.setattr(host_module, "_receive", receive_com_falha_de_deserializacao)
+
+    assert host.dispatch(_EMPTY_REQUEST) is True
+    # Não basta esperar `host.ready is True`: o valor de partida já é `True` (nada o
+    # derruba até a task de fundo rodar), então essa condição sozinha venceria a corrida
+    # ANTES da task de fundo sequer começar a rodar -- `respawns` só incrementa depois de
+    # `_await_response` tratar a falha e `_respawn()` concluir de verdade (mesmo padrão de
+    # `test_kill_no_deadline_mata_processo_respawna_e_entrega_overrun_sintetico`).
+    await await_until(lambda: host.stats()["respawns"] == 1, timeout_s=10.0)
+    await await_until(lambda: host.ready is True, timeout_s=10.0)
+
+    assert host.dispatch(_EMPTY_REQUEST) is True, "busy ficou preso após a falha de recv"
+
+
+async def test_falha_de_recv_por_erro_de_deserializacao_entrega_resultado_sintetico_de_erro(
+    make_host: Callable[[Callable], MpcHost],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mesma falha do teste acima; aqui o que importa é o consumidor: `poll()` tem de
+    entregar um `SolveResult` com `status == "error"` (é o que faz
+    `blocks/mpc.py::_apply_result` emitir `mpc_solver_error`), não `None` para sempre."""
+    import ottima_flow_runtime.mpc.host as host_module
+
+    host = make_host(mpc_host_echo_worker)
+    await host.start()
+
+    receive_real = host_module._receive
+
+    def receive_com_falha_de_deserializacao(conn, timeout_s):
+        monkeypatch.setattr(host_module, "_receive", receive_real)
+        raise pickle.UnpicklingError("payload corrompido no pipe (simulado pelo teste)")
+
+    monkeypatch.setattr(host_module, "_receive", receive_com_falha_de_deserializacao)
+
+    assert host.dispatch(_EMPTY_REQUEST) is True
+    result = await _wait_poll(host, timeout_s=DEADLINE_S + 5.0)
+    assert result.status == "error"
 
 
 # --------------------------------------------------------------------------------------

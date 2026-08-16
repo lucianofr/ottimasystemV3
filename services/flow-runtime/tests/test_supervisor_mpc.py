@@ -274,21 +274,30 @@ async def test_mpc_state_ts_de_execucao_bate_bit_a_bit_com_flow_status(
     """spec F5 SS2.1: `ts` do quadro do MPC nas execucoes e a fronteira de varredura —
     "mesmo relogio do ts de flow.status". Fix round 1 threou o `fired_ts` do scheduler
     (`FlowTask._scan`) ate `MpcBlock.step(inputs, ts=...)`; antes desse fix o bloco usava
-    um clock proprio desacoplado, entao os dois `ts` so coincidiam por sorte de timing."""
+    um clock proprio desacoplado, entao os dois `ts` so coincidiam por sorte de timing.
+    Round 2: a barreira espera o PAR da mesma varredura, porque `mpc.state` e `flow.status`
+    sao publicacoes independentes e fire-and-forget (ADR-002), sem ordem garantida entre
+    si — esperar "uma mensagem qualquer" comparava o quadro do MPC da varredura seguinte
+    com um conjunto que ainda terminava na anterior."""
     scenario = await _scenario(session_factory)
     flow_status = await collect(channel_flow_status(scenario["flow_id"]))
     harness = await harness_factory(mpc_worker_target=mpc_host_echo_worker)
     mpc_states = await _deploy_and_warm(harness, collect, scenario)
 
-    await await_until(lambda: len(flow_status.received) >= 1, timeout_s=AWAIT_TIMEOUT_S)
+    def tss_de_varredura():
+        quadros = [FlowStatus.model_validate_json(raw) for raw in flow_status.received]
+        # so varreduras reais, nao transicao
+        return {quadro.ts for quadro in quadros if quadro.ports}
+
+    def par_da_mesma_varredura_chegou() -> bool:
+        if not mpc_states.received:
+            return False
+        return _last_mpc_state(mpc_states).ts in tss_de_varredura()
+
+    await await_until(par_da_mesma_varredura_chegou, timeout_s=AWAIT_TIMEOUT_S)
 
     execucao = _last_mpc_state(mpc_states)
-    tss_de_varredura = {
-        FlowStatus.model_validate_json(raw).ts
-        for raw in flow_status.received
-        if FlowStatus.model_validate_json(raw).ports  # so varreduras reais, nao transicao
-    }
-    assert execucao.ts in tss_de_varredura, (
+    assert execucao.ts in tss_de_varredura(), (
         "MpcState.ts de uma execucao de fronteira precisa bater bit a bit com o ts de "
         "ALGUMA varredura publicada em flow.status — mesmo relogio (spec F5 SS2.1)"
     )
