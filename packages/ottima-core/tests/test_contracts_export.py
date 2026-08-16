@@ -67,10 +67,14 @@ def test_saida_e_deterministica_entre_execucoes(capsys):
     assert primeira.strip() != ""
 
 
-def test_main_imprime_json_valido_com_as_duas_secoes(capsys):
+def test_main_imprime_json_valido_com_as_tres_secoes(capsys):
     main()
     corpo = json.loads(capsys.readouterr().out)
-    assert set(corpo) == {"port_contracts", "ws_payloads"}
+    # `node_configs` entrou com o ARCH-06/TD-018 (ADR-034: a FORMA dos configs de bloco é
+    # gerada do Pydantic, não reescrita à mão em `graph.ts`). A asserção é de conjunto EXATO
+    # de propósito: seção nova no exportador tem de passar por aqui, porque cada uma vira
+    # um bloco gerado em `contracts.gen.ts` que o frontend importa.
+    assert set(corpo) == {"port_contracts", "ws_payloads", "node_configs"}
     assert corpo == build_contracts()
 
 
