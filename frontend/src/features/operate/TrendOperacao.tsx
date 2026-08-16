@@ -941,6 +941,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
         ligadas={ligadas}
         porIdDefinicao={porIdDefinicao}
         cores={cores}
+        vars={mpcState?.vars ?? {}}
         foco={foco}
         escalas={escalasPorVar}
         onAlternarPena={alternarPena}

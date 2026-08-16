@@ -1,8 +1,12 @@
 import { Card } from "../../components/ui/card";
+import { cn } from "../../lib/cn";
+import type { MpcVarState } from "../../lib/contracts.gen";
 import { EditorEscala } from "../trend/EditorEscala";
 import { ESCALA_AUTO, type EscalaVar } from "../trend/escalas";
+import { FORMATO_VALOR } from "../trend/trendTheme";
 import {
   faixaPontilhadaSp,
+  valorDaPena,
   type CategoriaVarOperacao,
   type PenaLegenda,
 } from "./trendOperacao";
@@ -35,8 +39,11 @@ const ROTULO_CATEGORIA: Record<CategoriaVarOperacao, string> = {
 export interface LegendaOperacaoProps {
   readonly defaults: readonly PenaLegenda[];
   readonly ligadas: ReadonlySet<string>;
-  readonly porIdDefinicao: ReadonlyMap<string, { readonly name: string }>;
+  readonly porIdDefinicao: ReadonlyMap<string, { readonly name: string; readonly eu: string }>;
   readonly cores: ReadonlyMap<string, string>;
+  /** Último quadro publicado do bloco (`mpc.state.vars`): a origem do valor corrente de cada
+   *  linha. Vazio antes do primeiro quadro — a legenda mostra travessão, não zero. */
+  readonly vars: Readonly<Record<string, MpcVarState>>;
   /** Variável focada (dona do único eixo Y visível); `null` quando nenhuma pena está ligada. */
   readonly foco: string | null;
   /** Escala Y de cada variável, chaveada pelo id; ausente = `ESCALA_AUTO`. */
@@ -52,6 +59,7 @@ export function LegendaOperacao({
   ligadas,
   porIdDefinicao,
   cores,
+  vars,
   foco,
   escalas,
   onAlternarPena,
@@ -66,6 +74,7 @@ export function LegendaOperacao({
         const ligada = ligadas.has(pena.id);
         const ehSp = pena.categoria === "sp";
         const cor = cores.get(pena.varId) ?? "transparent";
+        const valor = valorDaPena(pena, vars);
         // O eixo Y é da VARIÁVEL: a marca fica na linha da CV, e cai para a linha do SP quando
         // ele é a única pena daquela variável desenhada (senão o operador vê um eixo colorido
         // sem nenhuma linha da legenda dizendo de quem ele é).
@@ -130,6 +139,22 @@ export function LegendaOperacao({
                 Acima do teto
               </span>
             )}
+            {/* Valor corrente + EU na PRÓPRIA linha, no mesmo arranjo (e com as mesmas
+                larguras de coluna) das legendas de engenharia e fuzzy: as três telas de
+                tendência passam a ler igual. A linha do SP mostra o alvo da CV, não o PV —
+                `valorDaPena` é quem sabe disso. */}
+            <span
+              data-testid="operate-trend-legend-valor"
+              className={cn(
+                "process-value w-28 text-right text-sm",
+                valor === null ? "text-fg-muted" : "text-fg",
+              )}
+            >
+              {valor === null ? "—" : FORMATO_VALOR.format(valor)}
+            </span>
+            <span data-testid="operate-trend-legend-eu" className="w-12 text-xs text-fg-muted">
+              {definicao?.eu ?? ""}
+            </span>
             {/* A pena de SP desenha na escala da própria CV (mesma grandeza): editor de faixa
                 só na linha da variável, senão a tela ofereceria dois controles para a mesma
                 escala e o segundo gravaria uma faixa que ninguém lê. */}

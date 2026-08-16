@@ -492,4 +492,41 @@ test.describe("Tela de Operação", () => {
     await expect(page.getByTestId("operate-trend-zoom")).toHaveCount(0);
     expect(await janelaAplicadaS()).toBe(janelaCheia);
   });
+
+  test("PW-OP-12: a legenda de operação mostra valor e EU na linha, como engenharia e fuzzy", async ({
+    page,
+  }) => {
+    // A queixa do dono do produto (ARCH-04): as três telas de tendência têm de se comportar
+    // igual. Trend e fuzzy sempre mostraram valor formatado + EU na linha da pena; a de
+    // operação não mostrava nenhum dos dois.
+    const linhas = page.locator('[data-testid="operate-trend-legend-item"]');
+    const valores = page.locator('[data-testid="operate-trend-legend-valor"]');
+    const eus = page.locator('[data-testid="operate-trend-legend-eu"]');
+
+    // Uma coluna de valor e uma de EU por linha — inclusive na do SP, que não tem editor de
+    // escala e mesmo assim precisa alinhar com as demais.
+    const total = await linhas.count();
+    expect(total).toBeGreaterThan(0);
+    await expect(valores).toHaveCount(total);
+    await expect(eus).toHaveCount(total);
+
+    // O EU vem da DEFINIÇÃO da variável, então existe antes de qualquer quadro publicado.
+    const linhaCv = page.locator(
+      '[data-testid="operate-trend-legend-item"][data-var-id="cv_1"]',
+    );
+    await expect(linhaCv.getByTestId("operate-trend-legend-eu")).toHaveText("%");
+    // A pena de SP da MESMA CV herda o EU dela (mesma grandeza).
+    await expect(
+      page
+        .locator('[data-testid="operate-trend-legend-item"][data-categoria="sp"]')
+        .getByTestId("operate-trend-legend-eu"),
+    ).toHaveText("%");
+
+    // Este MPC nunca é deployado nesta suíte: `mpc.state` jamais é publicado, então nenhuma
+    // linha tem valor. O contrato aqui é NÃO inventar número — travessão, nunca um zero
+    // fabricado que o operador leria como medição.
+    for (const texto of await valores.allTextContents()) {
+      expect(texto.trim()).toBe("—");
+    }
+  });
 });

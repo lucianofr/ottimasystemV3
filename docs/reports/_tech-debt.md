@@ -85,10 +85,13 @@ _Debt that makes development harder but doesn't block._
 - [ ] **TD-017**: Três telas de tendência com lógica de pena/legenda resolvida mais de uma vez
   - **Impact:** Medium - reduzido de High em 2026-08-15: o segundo motor de instância uPlot (a metade que fazia bug de zoom/resize precisar de correção replicada) foi eliminado. O que resta é duplicação de lógica pura e de apresentação, sem risco de divergência de comportamento da instância
   - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-02, ARCH-03, ARCH-04
-  - **Effort:** 1-2 dias (primitivo de alinhamento de pena; acumulador de borda viva; linha de legenda compartilhada)
+  - **Effort:** 1 dia (primitivo de alinhamento de pena; acumulador de borda viva) — a lacuna de comportamento da legenda foi fechada em 2026-08-16
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
   - **Feito em 2026-08-15 (ARCH-01):** a casca de instância uPlot virou `features/trend/motorTrend.ts::useMotorTrend`, consumida pelas três telas; a regra de preservação de zoom saiu de dentro do efeito para `zoomX.ts::estaZoomadoEmX`, pura e testada. Verificado no browser contra a planta viva (dado vivo não recria a instância, mudança de estrutura recria exatamente uma vez, "Reset layout" preservado, zero erro) e pela regressão Playwright das três telas: **16 cenários, 0 falhas** — `trend-eng` 4/4, `operate-trend` 10/10, `fuzzy-operate` 2/2, com PW-OP-07 cobrindo o tique de 1 s e PW-OP-11 o zoom rastreado. **A queixa original do usuário — legenda de operação sem valor nem EU — é o ARCH-04 e continua aberta**; era divergência de apresentação, não do motor.
+  - **Feito em 2026-08-16 (ARCH-04, metade de COMPORTAMENTO):** a legenda de operação passou a mostrar valor corrente + EU na linha, como as de engenharia e fuzzy — fecha a queixa original do dono ("todos os gráficos de tendência devem se comportar igual"). O primitivo é `trendOperacao.ts::valorDaPena(pena, vars)`: linha de variável lê o PV do último `mpc.state`, linha de SP lê o ALVO da própria CV (a série que cada uma desenha — repetir o PV na linha do alvo faria o operador ler o número errado); variável ausente do quadro publicado devolve `null` e a legenda escreve travessão, nunca um zero fabricado. O `sp` nulo é tratado como defesa contra o tipo do contrato (`MpcVarState.sp: number | null`), não como estado real: `blocks/mpc.py` semeia `_sp` com `0.0` por CV e publica congelado em AUTO ou rastreado por PV-tracking fora dele — uma CV presente em `vars` sempre tem alvo. `porIdDefinicao` passou a exigir `eu`; larguras de coluna copiadas de `TrendPage.tsx` (`w-28`/`w-12`) para a linha de SP, que não tem editor de escala, alinhar com as demais. **A metade de ESTRUTURA (module `PainelLegendaTrend` único para as três telas) NÃO foi feita** e segue no TD-024: o deletion test do próprio achado diz que extrair a linha hoje MOVE JSX sem concentrar decisão — o que concentrava a decisão era escolher o comportamento, e isso já foi escolhido.
+    - **Prova:** RED genuíno (`SyntaxError: does not provide an export named 'valorDaPena'`), GREEN com 2 checks novos cobrindo PV vs ALVO e os dois caminhos de `null` — `npm run test:unit` 598 passed (era 596), `npm run typecheck` limpo, `npm run build` verde. Verificação na superfície real: browser contra a planta viva (MPC "coluna de naftaleno", 7 linhas de legenda) — CV LT-201 `69,255 %`, Restrição FT-204 `2,12 m3/h`, MVs `50 %`, valores acompanhando o dado ao vivo entre leituras (67,985 → 68,449 → 69,255). Com a pena de SP ligada, o traço pontilhado desenha exatamente no `0` que a legenda mostra — legenda concorda com a pena, e o `0` é valor publicado de verdade (`blocks/mpc.py:314` semeia `_sp` em `0.0`; PV-tracking só sobrescreve com o bloco em varredura válida), não coerção da UI.
+    - **Regressão Playwright das três telas: 17 cenários, 0 falhas** (`trend-eng` 4/4, `operate-trend` 11/11, `fuzzy-operate` 2/2), rodada contra o vite da worktree (`E2E_BASE_URL=http://127.0.0.1:5174`) com autorização para parar o flow da planta. A trava nova é **PW-OP-12**: conta uma coluna de valor e uma de EU por linha da legenda (inclusive na do SP, que não tem editor de escala), exige o EU vindo da DEFINIÇÃO (existe antes de qualquer quadro publicado) e — como o MPC da fixture nunca é deployado — exige travessão em TODAS as linhas, fixando o contrato de não inventar número. Efeito colateral esperado e revertido: `criarAmbiente` ativa projeto próprio e deixou o flow 987 em `desired_state = stopped`; redeployado pela tela de Flows e confirmado de volta em `Rodando`, watchdog `Vivo`, sem projeto órfão.
 
 ## Low (Track for Later)
 
@@ -103,8 +106,9 @@ _Known issues not currently prioritized._
 -->
 - [ ] **TD-024**: Duplicações de apresentação no editor e nas legendas de tendência
   - **Impact:** Low - funciona; custa uma reescrita a cada campo novo e deixa convenção de testid/ajuda divergente
-  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-04, ARCH-20, ARCH-21
+  - **Source:** [arch-review-20260815.md](arch/arch-review-20260815.md) — ARCH-04 (só a metade de estrutura), ARCH-20, ARCH-21
   - **Effort:** 1 dia (linha de legenda compartilhada, `campoOpcional`, `Campo` único)
+  - **Nota 2026-08-16:** a metade de COMPORTAMENTO do ARCH-04 (valor + EU na legenda de operação) foi resolvida no TD-017; o que resta aqui é só a extração do module de apresentação comum às três telas.
   - **Owner:** @unassigned
   - **Created:** 2026-08-15
 
@@ -199,7 +203,7 @@ _Completed tech debt items. Keep for 90 days then archive._
 | Low | 1 | 2026-08-15 |
 | **Total Open** | **9** | 2026-08-15 |
 
-_Last updated: 2026-08-15_
+_Last updated: 2026-08-16_
 
 ---
 

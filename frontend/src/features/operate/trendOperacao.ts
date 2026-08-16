@@ -340,6 +340,26 @@ export function idPenaSp(cvId: string): string {
   return `sp:${cvId}`;
 }
 
+/** Valor corrente de uma linha da legenda (ARCH-04). A pena de variável lê o PV publicado; a
+ *  pena de SP lê o ALVO da própria CV — cada uma devolve a série que ela desenha, e repetir o
+ *  PV nas duas linhas da mesma CV faria o operador ler o alvo errado justamente na linha que
+ *  existe para mostrá-lo. Devolve `null` — e a legenda escreve o travessão, como as telas de
+ *  engenharia e fuzzy já fazem — quando a variável não está no último `mpc.state` (bloco
+ *  recém-deployado, ou variável fora do quadro). O `sp` nulo é o OUTRO caminho, e hoje é só
+ *  defesa contra o tipo do contrato (`MpcVarState.sp: number | null`): no backend atual uma CV
+ *  presente em `vars` sempre tem alvo — `blocks/mpc.py` semeia `_sp` com `0.0` por CV e o
+ *  publica congelado em AUTO ou rastreado por PV-tracking fora dele, nunca apagado. Penas de
+ *  SP só existem para CV (`selecionarPenasDefault`), então o `null` de Restrição/MV/DV nunca
+ *  chega aqui por essa via. */
+export function valorDaPena(
+  pena: PenaLegenda,
+  vars: Readonly<Record<string, MpcVarState>>,
+): number | null {
+  const estado = vars[pena.varId];
+  if (estado === undefined) return null;
+  return pena.categoria === "sp" ? estado.sp : estado.v;
+}
+
 /**
  * Seleção default de penas (decisão A-11, F5R-16; emenda 2026-08-16): CVs (PV) ligam na ordem
  * do config até o teto; Restrições ligam como banda (PV conta no teto) com o que sobrar; MVs,

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import type { MpcHistoryResponse } from "../../lib/api";
-import type { MpcPrediction } from "../../lib/contracts.gen";
+import type { MpcPrediction, MpcVarState } from "../../lib/contracts.gen";
 import {
   CUSTO_PENAS,
   OPCOES_DEGRAU_MV,
@@ -22,7 +22,10 @@ import {
   tetoCarryForwardOperacaoS,
   tracoPenaSp,
   ultimoCarimboHistorico,
+  valorDaPena,
   type AmostraViva,
+  type CategoriaVarOperacao,
+  type PenaLegenda,
 } from "./trendOperacao";
 import { chaveHistoricoOperacao } from "./useHistoryMpc";
 
@@ -372,6 +375,45 @@ test("faixa da legenda do SP usa o MESMO pontilhado do traço do gráfico (canal
 
 test("teto de penas de operação é 8 (distinto do teto de 6 do trend de engenharia)", () => {
   expect(TETO_PENAS_OPERACAO).toBe(8);
+});
+
+// ------------------------------------------- valor corrente da linha da legenda (ARCH-04)
+
+function pena(varId: string, categoria: CategoriaVarOperacao): PenaLegenda {
+  const ehSp = categoria === "sp";
+  return {
+    id: ehSp ? idPenaSp(varId) : varId,
+    varId,
+    categoria,
+    ligada: true,
+    excedente: false,
+  };
+}
+
+test("valorDaPena: a linha de variável lê o PV; a do SP lê o ALVO da MESMA CV", () => {
+  const vars: Record<string, MpcVarState> = {
+    cv_1: { v: 51.2, sp: 50, status: null },
+  };
+
+  expect(valorDaPena(pena("cv_1", "cv"), vars)).toBe(51.2);
+  // Duas linhas da mesma variável: repetir o PV na linha do alvo faria o operador ler o
+  // número errado justamente na linha que existe para mostrar o alvo.
+  expect(valorDaPena(pena("cv_1", "sp"), vars)).toBe(50);
+});
+
+test("valorDaPena: sem quadro publicado — ou com `sp` nulo no contrato — a legenda não inventa número", () => {
+  const vars: Record<string, MpcVarState> = {
+    cv_1: { v: 51.2, sp: null, status: null },
+  };
+
+  // Defesa contra o TIPO do contrato (`MpcVarState.sp: number | null`), não contra um estado
+  // que o backend produz hoje: uma CV presente em `vars` sempre tem alvo (`blocks/mpc.py`
+  // semeia `_sp` em `0.0` e publica congelado ou rastreado). Se um dia vier nulo, a linha do
+  // alvo fica sem valor em vez de mostrar zero.
+  expect(valorDaPena(pena("cv_1", "sp"), vars)).toBeNull();
+  // Variável ausente do último quadro (bloco recém-deployado): nenhuma das duas linhas mente.
+  expect(valorDaPena(pena("mv_1", "mv"), vars)).toBeNull();
+  expect(valorDaPena(pena("cv_9", "sp"), {})).toBeNull();
 });
 
 // -------------------------------------------------------------------- paleta de 8 penas (§6.6-5)
