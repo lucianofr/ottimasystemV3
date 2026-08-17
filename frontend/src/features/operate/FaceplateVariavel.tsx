@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { Badge } from "../../components/ui/badge";
 import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
@@ -50,6 +51,9 @@ export type FaceplateVariavelProps = {
     tag_id?: number | null;
     /** CV com SP remoto (RF-614): o campo de SP fica desabilitado (escrita manual é 422). */
     remote_sp?: boolean;
+    /** Rank do SSTO (ADR-027 §5; só CV/Restrição — MV/DV nunca têm) — maior = mais
+     *  importante; vira o marcador numérico de prioridade no canto do faceplate. */
+    priority?: number;
   };
   valor: { v: number; sp?: number | null } | undefined;
   modos: { local_remote: "local" | "remote"; man_auto: "man" | "auto" };
@@ -77,6 +81,22 @@ export function faixaDaEscala(props: FaceplateVariavelProps): Faixa | null {
   return { min: zero, max: zero + span };
 }
 
+/** Faixa de limite operacional (comando) por tipo — a MESMA fonte do clamp de `enviar()`
+ *  (RF-704): `limits` (MV), `sp_limits` (CV), `range` (Restrição). NÃO é a escala da barra
+ *  (essa é `faixaDaEscala`, RF-609) — vira os triângulos marcadores desenhados sobre ela. DV
+ *  nunca é comandada: sem limite operacional, sem marcador. */
+export function limiteOperacional(props: FaceplateVariavelProps): Faixa | null {
+  const { tipo, definicao } = props;
+  if (tipo === "mv") return definicao.limits ?? null;
+  if (tipo === "cv") return definicao.sp_limits ?? null;
+  if (tipo === "constraint") {
+    return definicao.range != null
+      ? { min: definicao.range.low, max: definicao.range.high }
+      : null;
+  }
+  return null;
+}
+
 /** Barra vertical de instrumento (DESIGN §Shapes): escala com 10% de folga além da faixa
  *  publicada dos dois lados, para um PV fora dos limites ainda aparecer deslocado na barra em
  *  vez de grudado na borda — não é vocabulário do MPC, é só o mapeamento valor→posição desta
@@ -88,19 +108,42 @@ function percentualNaBarra(valor: number, faixa: Faixa): number {
   return Math.min(100, Math.max(0, fracao * 100));
 }
 
+/** Triângulo marcador de limite operacional: ponta encostada na borda da barra, na altura
+ *  do limite (`percentual`, mesma escala 0-100 de `percentualNaBarra`) — cor neutra (A Regra
+ *  da Cor Anormal: limite configurado não é estado anormal, é dado estático). */
+function MarcadorLimite({ percentual, testId }: { percentual: number; testId: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width="6"
+      height="8"
+      viewBox="0 0 6 8"
+      className="absolute text-fg-muted"
+      style={{ left: "-6px", bottom: `${String(percentual)}%`, transform: "translateY(50%)" }}
+      data-testid={testId}
+    >
+      <polygon points="0,0 0,8 6,4" fill="currentColor" />
+    </svg>
+  );
+}
+
 function BarraVertical({
   faixa,
   pv,
   sp,
+  limite,
   testId,
 }: {
   faixa: Faixa;
   pv: number | undefined;
   sp: number | null | undefined;
+  limite: Faixa | null;
   testId: string;
 }) {
   const pvPercentual = pv !== undefined ? percentualNaBarra(pv, faixa) : null;
   const spPercentual = sp !== null && sp !== undefined ? percentualNaBarra(sp, faixa) : null;
+  const limiteMinPercentual = limite !== null ? percentualNaBarra(limite.min, faixa) : null;
+  const limiteMaxPercentual = limite !== null ? percentualNaBarra(limite.max, faixa) : null;
   return (
     <div className="flex flex-col items-center gap-1">
       <span
@@ -109,29 +152,37 @@ function BarraVertical({
       >
         {faixa.max.toFixed(2)}
       </span>
-      <div
-        className="relative h-32 w-4 overflow-hidden rounded-pill border border-border bg-well"
-        data-testid={testId}
-      >
-        {pvPercentual !== null && (
-          <div
-            className="absolute inset-x-0 bottom-0 bg-[image:var(--gradient-accent)] opacity-25"
-            style={{ height: `${String(pvPercentual)}%` }}
-          />
+      <div className="relative h-32 w-4">
+        <div
+          className="absolute inset-0 overflow-hidden rounded-pill border border-border bg-well"
+          data-testid={testId}
+        >
+          {pvPercentual !== null && (
+            <div
+              className="absolute inset-x-0 bottom-0 bg-[image:var(--gradient-accent)] opacity-25"
+              style={{ height: `${String(pvPercentual)}%` }}
+            />
+          )}
+          {pvPercentual !== null && (
+            <div
+              className="absolute inset-x-0 h-px bg-fg"
+              style={{ bottom: `${String(pvPercentual)}%` }}
+              data-testid={`${testId}-pv`}
+            />
+          )}
+          {spPercentual !== null && (
+            <div
+              className="absolute inset-x-0 h-0.5 bg-accent"
+              style={{ bottom: `${String(spPercentual)}%` }}
+              data-testid={`${testId}-sp`}
+            />
+          )}
+        </div>
+        {limiteMinPercentual !== null && (
+          <MarcadorLimite percentual={limiteMinPercentual} testId={`${testId}-limite-min`} />
         )}
-        {pvPercentual !== null && (
-          <div
-            className="absolute inset-x-0 h-px bg-fg"
-            style={{ bottom: `${String(pvPercentual)}%` }}
-            data-testid={`${testId}-pv`}
-          />
-        )}
-        {spPercentual !== null && (
-          <div
-            className="absolute inset-x-0 h-0.5 bg-accent"
-            style={{ bottom: `${String(spPercentual)}%` }}
-            data-testid={`${testId}-sp`}
-          />
+        {limiteMaxPercentual !== null && (
+          <MarcadorLimite percentual={limiteMaxPercentual} testId={`${testId}-limite-max`} />
         )}
       </div>
       <span
@@ -241,11 +292,21 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
 
   return (
     <Card
-      className="flex w-44 shrink-0 flex-col gap-3 p-4 transition-shadow duration-[var(--duration-fast)] hover:shadow-md"
+      className="relative flex w-44 shrink-0 flex-col gap-3 p-4 transition-shadow duration-[var(--duration-fast)] hover:shadow-md"
       data-testid={`faceplate-${tipo}-${definicao.id}`}
       data-var-id={definicao.id}
       data-pendente={pendenciaAtiva !== null ? "true" : "false"}
     >
+      {definicao.priority !== undefined && (
+        <Badge
+          tone="neutral"
+          className="absolute right-2 top-2 px-1.5 py-0 text-[10px] leading-4"
+          title={`Prioridade no otimizador (SSTO): ${String(definicao.priority)}`}
+          data-testid={`faceplate-prioridade-${definicao.id}`}
+        >
+          {definicao.priority}
+        </Badge>
+      )}
       <div>
         <Label className="block">{ROTULO_TIPO[tipo]}</Label>
         <p className="truncate text-sm text-fg" title={definicao.name}>
@@ -265,6 +326,7 @@ export default function FaceplateVariavel(props: FaceplateVariavelProps) {
         {faixa !== null && (
           <BarraVertical
             faixa={faixa}
+            limite={limiteOperacional(props)}
             pv={pv}
             sp={tipo === "cv" ? (valor?.sp ?? null) : null}
             testId={`faceplate-escala-${definicao.id}`}

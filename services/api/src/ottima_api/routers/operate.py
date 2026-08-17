@@ -103,6 +103,8 @@ class CvOut(BaseModel):
     `tag_id`: tag OPC que alimenta a CV (aresta direta de um `opc_read`); `None` quando a
     origem é filtro/script — o faceplate cai para a taxa do `mpc.state`. `remote_sp`: SP
     vem de tag OPC (RF-614) — a escrita manual é recusada (422) e a UI desabilita o campo.
+    `priority`: rank do SSTO (ADR-027 §5) — maior = mais importante; o faceplate da operação
+    usa para o marcador numérico de prioridade.
     """
 
     id: str
@@ -112,13 +114,18 @@ class CvOut(BaseModel):
     zero: float = 0.0
     span: float = 100.0
     sp_limits: Limits
+    priority: int
     objective: CvObjective
     tag_id: int | None = None
     remote_sp: bool = False
 
 
 class ConstraintOut(BaseModel):
-    """Projeção de uma Restrição do bloco (spec §4.1-1) — sem `tss`/`priority`/`kind`."""
+    """Projeção de uma Restrição do bloco (spec §4.1-1) — sem `tss`/`kind` (§4.1-3).
+
+    `priority`: rank do SSTO (ADR-019/ADR-027 §5) — maior = mais importante; o faceplate da
+    operação usa para o marcador numérico de prioridade.
+    """
 
     id: str
     name: str
@@ -127,6 +134,7 @@ class ConstraintOut(BaseModel):
     zero: float = 0.0
     span: float = 100.0
     range: Range
+    priority: int
     objective: ConstraintObjective
     tag_id: int | None = None
 
@@ -408,6 +416,7 @@ def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
                                 zero=cv.zero,
                                 span=cv.span,
                                 sp_limits=cv.sp_limits,
+                                priority=cv.priority,
                                 objective=cv.objective,
                                 tag_id=tags_entrada.get(cv.id),
                                 remote_sp=cv.remote_sp_tag_id is not None,
@@ -423,6 +432,7 @@ def _mpc_nodes(flow: Flow) -> list[MpcNodeOut]:
                                 zero=co.zero,
                                 span=co.span,
                                 range=co.range,
+                                priority=co.priority,
                                 objective=co.objective,
                                 tag_id=tags_entrada.get(co.id),
                             )

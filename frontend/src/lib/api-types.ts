@@ -1036,7 +1036,10 @@ export interface components {
         };
         /**
          * ConstraintOut
-         * @description Projeção de uma Restrição do bloco (spec §4.1-1) — sem `tss`/`priority`/`kind`.
+         * @description Projeção de uma Restrição do bloco (spec §4.1-1) — sem `tss`/`kind` (§4.1-3).
+         *
+         *     `priority`: rank do SSTO (ADR-019/ADR-027 §5) — maior = mais importante; o faceplate da
+         *     operação usa para o marcador numérico de prioridade.
          */
         ConstraintOut: {
             /** Id */
@@ -1061,6 +1064,8 @@ export interface components {
              */
             span: number;
             range: components["schemas"]["Range"];
+            /** Priority */
+            priority: number;
             /**
              * Objective
              * @enum {string}
@@ -1076,6 +1081,8 @@ export interface components {
          *     `tag_id`: tag OPC que alimenta a CV (aresta direta de um `opc_read`); `None` quando a
          *     origem é filtro/script — o faceplate cai para a taxa do `mpc.state`. `remote_sp`: SP
          *     vem de tag OPC (RF-614) — a escrita manual é recusada (422) e a UI desabilita o campo.
+         *     `priority`: rank do SSTO (ADR-027 §5) — maior = mais importante; o faceplate da operação
+         *     usa para o marcador numérico de prioridade.
          */
         CvOut: {
             /** Id */
@@ -1100,6 +1107,8 @@ export interface components {
              */
             span: number;
             sp_limits: components["schemas"]["Limits"];
+            /** Priority */
+            priority: number;
             /**
              * Objective
              * @enum {string}
