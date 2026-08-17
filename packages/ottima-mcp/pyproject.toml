@@ -1,0 +1,23 @@
+[project]
+name = "ottima-mcp"
+version = "0.1.0"
+description = "OttimaSystem: servidor MCP stdio para agentes de IA (ADR-036)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "ottima-core",
+  "mcp>=2.0.0,<3",
+  "httpx>=0.27",
+  "websockets>=13",
+]
+
+# [project.scripts] entra na Fase 2, junto com src/ottima_mcp/__main__.py.
+
+[tool.uv.sources]
+ottima-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ottima_mcp"]
