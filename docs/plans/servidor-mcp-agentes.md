@@ -149,7 +149,7 @@ fases seguintes DEVEM reler os trechos citados antes de codar — não confiar d
    - `ssto_last(flow_id, block_id)` — 200 `null` = "nunca executou SSTO" em texto, não erro.
    - `trend(tag_ids: list[int], start?, end?)` → `/api/history` (máx 6 — deixar o 422 do backend falar).
    - `mpc_history(flow_id, block_id, var_ids: list[str], start?, end?)`.
-   - `events_query(severity?, origin?, start?, end?, limit?=100)` → devolve `{eventos: [...], cursor: "<ts ISO do mais recente>"}` — **cursor opaco reservado** (`# ponytail: cursor codifica ts; v2 migra events p/ coluna id e passa a codificar id sem quebrar contrato`).
+   - `events_query(severity?, origin?, start?, end?, limit?=100)` → devolve `{eventos: [...], cursor: "<ts ISO do MAIS ANTIGO da página>"}` — passar `cursor` como `end` avança para trás no tempo (backend `ORDER BY ts DESC` + `ts<=end` inclusivo, `events.py:40,48`; 1 evento duplicado por página-limite, nunca loop nem perda). **cursor opaco reservado** (`# ponytail: cursor codifica ts; v2 migra events p/ coluna id e passa a codificar id sem quebrar contrato`).
    - `system_health()` → agrega `/api/health` + `/api/health/workers`.
    - `flow_list()`, `flow_get(flow_id)` (leitura; a escrita fica na Fase 4).
    - `block_catalog()` → importa `ottima_core.contracts_export.build_contracts()` + `NODE_TYPES` de `flowgraph.parse` — nunca literais duplicados.

@@ -10,7 +10,8 @@ dependencies = [
   "websockets>=13",
 ]
 
-# [project.scripts] entra na Fase 2, junto com src/ottima_mcp/__main__.py.
+[project.scripts]
+ottima-mcp = "ottima_mcp.__main__:main"
 
 [tool.uv.sources]
 ottima-core = { workspace = true }
