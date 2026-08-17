@@ -3,6 +3,7 @@ import { Label } from "../../../components/ui/label";
 import { Select } from "../../../components/ui/select";
 import type { TagOut } from "../../../lib/api";
 import type { PidMv } from "../graph";
+import { AJUDA_PID } from "./ajudaMpc";
 import { nomeCampoVar, tagsPorDirecao } from "./mpcLogic";
 import { SelectTag } from "./SelectTag";
 
@@ -25,7 +26,7 @@ export function CamposPid({
   return (
     <div className="grid grid-cols-2 gap-3 border-t border-border pt-2">
       <div className="space-y-1">
-        <Label htmlFor={c("write")}>Tag de escrita (W)</Label>
+        <Label htmlFor={c("write")} tooltip={AJUDA_PID.writeTag}>Tag de escrita (W)</Label>
         <SelectTag
           id={c("write")}
           campo="pid_write_tag_id"
@@ -35,7 +36,7 @@ export function CamposPid({
         />
       </div>
       <div className="space-y-1">
-        <Label htmlFor={c("readback")}>Tag de readback (R)</Label>
+        <Label htmlFor={c("readback")} tooltip={AJUDA_PID.readbackTag}>Tag de readback (R)</Label>
         <SelectTag
           id={c("readback")}
           campo="pid_readback_tag_id"
@@ -45,7 +46,7 @@ export function CamposPid({
         />
       </div>
       <div className="space-y-1">
-        <Label htmlFor={c("mode-cmd")}>Tag de modo — comando (W)</Label>
+        <Label htmlFor={c("mode-cmd")} tooltip={AJUDA_PID.modeCmdTag}>Tag de modo — comando (W)</Label>
         <SelectTag
           id={c("mode-cmd")}
           campo="pid_mode_cmd_tag_id"
@@ -55,7 +56,7 @@ export function CamposPid({
         />
       </div>
       <div className="space-y-1">
-        <Label htmlFor={c("mode-read")}>Tag de modo — leitura (R, opcional)</Label>
+        <Label htmlFor={c("mode-read")} tooltip={AJUDA_PID.modeReadTag}>Tag de modo — leitura (R, opcional)</Label>
         <SelectTag
           id={c("mode-read")}
           campo="pid_mode_read_tag_id"
@@ -65,7 +66,7 @@ export function CamposPid({
         />
       </div>
       <div className="space-y-1">
-        <Label htmlFor={c("target-mode")}>Modo alvo</Label>
+        <Label htmlFor={c("target-mode")} tooltip={AJUDA_PID.targetMode}>Modo alvo</Label>
         <Select
           id={c("target-mode")}
           name={nomeCampoVar(varId, "pid_target_mode")}
@@ -78,7 +79,7 @@ export function CamposPid({
       </div>
       <div />
       <div className="space-y-1">
-        <Label htmlFor={c("mode-auto")}>Valor do modo — devolver (auto)</Label>
+        <Label htmlFor={c("mode-auto")} tooltip={AJUDA_PID.modeAuto}>Valor do modo — devolver (auto)</Label>
         <Input
           id={c("mode-auto")}
           name={nomeCampoVar(varId, "pid_mode_auto")}
@@ -89,7 +90,7 @@ export function CamposPid({
         />
       </div>
       <div className="space-y-1">
-        <Label htmlFor={c("mode-target")}>Valor do modo — assumir (target)</Label>
+        <Label htmlFor={c("mode-target")} tooltip={AJUDA_PID.modeTarget}>Valor do modo — assumir (target)</Label>
         <Input
           id={c("mode-target")}
           name={nomeCampoVar(varId, "pid_mode_target")}

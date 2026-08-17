@@ -1,12 +1,26 @@
+import { Tooltip, type TooltipContent } from "../../../components/ui/tooltip";
 import type { VariaveisMpc } from "../graph";
 import { formatarNumero } from "../useFlowStatus";
+import { AJUDA_CV, AJUDA_LINHA } from "./ajudaMpc";
 import { rotuloVariavel } from "./mpcLogic";
 
 interface Props {
   variaveis: VariaveisMpc;
 }
 
-function LinhaPeso({ id, rotulo, campo, valor }: { id: string; rotulo: string; campo: string; valor: string }) {
+function LinhaPeso({
+  id,
+  rotulo,
+  campo,
+  valor,
+  tooltip,
+}: {
+  id: string;
+  rotulo: string;
+  campo: string;
+  valor: string;
+  tooltip: TooltipContent;
+}) {
   return (
     <div
       data-var-id={id}
@@ -14,7 +28,7 @@ function LinhaPeso({ id, rotulo, campo, valor }: { id: string; rotulo: string; c
     >
       <span className="text-xs text-fg">{rotulo}</span>
       <span className="process-value text-xs text-fg-muted">
-        {campo}: {valor}
+        <Tooltip content={tooltip}>{campo}</Tooltip>: {valor}
       </span>
     </div>
   );
@@ -48,6 +62,7 @@ export function TabWeights({ variaveis }: Props) {
               rotulo={rotuloVariavel(cv)}
               campo="peso"
               valor={formatarNumero(cv.weight)}
+              tooltip={AJUDA_CV.peso}
             />
           ))}
         </div>
@@ -63,6 +78,7 @@ export function TabWeights({ variaveis }: Props) {
               rotulo={rotuloVariavel(co)}
               campo="prioridade"
               valor={String(co.priority)}
+              tooltip={AJUDA_LINHA.prioridade}
             />
           ))}
         </div>

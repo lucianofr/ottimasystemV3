@@ -1,6 +1,8 @@
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
+import { Tooltip } from "../../../components/ui/tooltip";
 import type { ParModeloMpc, TipoLinhaMpc, VariaveisMpc } from "../graph";
+import { AJUDA_MODELOS } from "./ajudaMpc";
 import { nomeCampoModelo, parModeloDoFormulario, paramsPadraoLinha } from "./mpcLogic";
 
 const ROTULO_PARAM: Record<string, string> = {
@@ -121,12 +123,12 @@ export function TabModels({ variaveis, modelos, aoMudar }: Props) {
                         }}
                         className="h-3.5 w-3.5 accent-[var(--color-accent)]"
                       />
-                      Habilitado
+                      <Tooltip content={AJUDA_MODELOS.habilitado} stopClick>Habilitado</Tooltip>
                     </label>
                     {par.enabled &&
                       nomesParam.map((param) => (
                         <div key={param} className="space-y-0.5">
-                          <Label htmlFor={`${linha.id}-${coluna.id}-${param}`}>
+                          <Label htmlFor={`${linha.id}-${coluna.id}-${param}`} tooltip={AJUDA_MODELOS[param]}>
                             {ROTULO_PARAM[param] ?? param}
                           </Label>
                           <Input

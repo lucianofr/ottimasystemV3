@@ -13,6 +13,7 @@ import { TabModels } from "./TabModels";
 import { TabSummary } from "./TabSummary";
 import { TabVariables } from "./TabVariables";
 import { TabWeights } from "./TabWeights";
+import { AJUDA_GERAL } from "./ajudaMpc";
 import {
   parModeloDoFormulario,
   validarConfigMpc,
@@ -98,6 +99,8 @@ export function MpcModal({
   onFechar,
 }: Props) {
   const dialogo = useRef<HTMLDialogElement>(null);
+  const rotuloInput = useRef<HTMLInputElement>(null);
+  const fecharBotao = useRef<HTMLButtonElement>(null);
   const formulario = useRef<HTMLFormElement>(null);
   const [aba, setAba] = useState<SlugAba>("geral");
   const [multiplier, setMultiplier] = useState(no.data.multiplier);
@@ -106,10 +109,29 @@ export function MpcModal({
 
   // `main.tsx` monta sob <StrictMode>: em dev o efeito roda duas vezes e `showModal()` num
   // <dialog> já aberto levanta InvalidStateError (mesma nota do modal genérico).
+  //
+  // Foco inicial explícito: o gatilho do tooltip (`Label` com `tooltip`, tarefa de tooltips
+  // do modal) precede o `<Input>` do Rótulo na ordem do DOM (o texto do rótulo em si é o
+  // gatilho, span com tabIndex=0) — sem isto, o algoritmo nativo de `showModal()` ("primeiro
+  // descendente focável") passaria a focar o gatilho do tooltip em vez do campo, abrindo um
+  // tooltip indesejado ao abrir o modal (achado no smoke test manual desta tarefa).
+  //
+  // `podeMutar=false` (papel operador, somente leitura — RF-003/RBAC): o `<fieldset
+  // disabled>` (linha abaixo) desabilita o `<input>` do Rótulo, e `.focus()` num elemento
+  // desabilitado é no-op — o gatilho do tooltip, que NÃO é elemento form-associado
+  // (`fieldset[disabled]` só cobre button/fieldset/input/object/select/textarea), continua
+  // focável e voltaria a ser o alvo do `showModal()`, reproduzindo a mesma regressão só no
+  // caminho somente-leitura (gap pego na revisão desta tarefa). Foca o botão Fechar em vez
+  // disso — sempre focável, sempre presente, mesmo padrão de "foco cai numa ação segura" de
+  // diálogo somente-leitura.
   useEffect(() => {
     const elemento = dialogo.current;
-    if (elemento !== null && !elemento.open) elemento.showModal();
-  }, []);
+    if (elemento !== null && !elemento.open) {
+      elemento.showModal();
+      if (podeMutar) rotuloInput.current?.focus();
+      else fecharBotao.current?.focus();
+    }
+  }, [podeMutar]);
 
   function aplicar(evento: FormEvent<HTMLFormElement>): void {
     evento.preventDefault();
@@ -226,8 +248,9 @@ export function MpcModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label htmlFor="mpc-label">Rótulo</Label>
+              <Label htmlFor="mpc-label" tooltip={AJUDA_GERAL.rotulo}>Rótulo</Label>
               <Input
+                ref={rotuloInput}
                 id="mpc-label"
                 name="label"
                 data-testid="config-label"
@@ -237,7 +260,7 @@ export function MpcModal({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="mpc-exec-order">Ordem de execução</Label>
+              <Label htmlFor="mpc-exec-order" tooltip={AJUDA_GERAL.execOrder}>Ordem de execução</Label>
               <Input
                 id="mpc-exec-order"
                 name="exec_order"
@@ -335,6 +358,7 @@ export function MpcModal({
 
         <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">
           <Button
+            ref={fecharBotao}
             type="button"
             variant="outline"
             data-testid="config-cancelar"

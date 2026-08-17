@@ -2,9 +2,11 @@ import { useState } from "react";
 
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
+import type { TooltipContent } from "../../../components/ui/tooltip";
 import { numeroDoCampo } from "../config/campos";
 import type { ParModeloMpc, VariaveisMpc } from "../graph";
 import { formatarNumero } from "../useFlowStatus";
+import { AJUDA_GERAL, AJUDA_HORIZONTES } from "./ajudaMpc";
 import { derivarHorizontes, nomeCampoVar, validarConfigMpc } from "./mpcLogic";
 
 interface LinhaTss {
@@ -41,7 +43,7 @@ function CampoTss({
   const [texto, setTexto] = useState(String(valorAtual));
   return (
     <div className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-sm border border-border bg-well p-2">
-      <Label htmlFor={`tss-${id}`} className="text-xs">
+      <Label htmlFor={`tss-${id}`} className="text-xs" tooltip={AJUDA_HORIZONTES.tss}>
         {rotulo}
       </Label>
       <Input
@@ -61,10 +63,20 @@ function CampoTss({
   );
 }
 
-function CampoDerivado({ rotulo, valor, testid }: { rotulo: string; valor: string; testid?: string }) {
+function CampoDerivado({
+  rotulo,
+  valor,
+  testid,
+  tooltip,
+}: {
+  rotulo: string;
+  valor: string;
+  testid?: string;
+  tooltip?: TooltipContent;
+}) {
   return (
     <div className="space-y-1">
-      <Label>{rotulo}</Label>
+      <Label tooltip={tooltip}>{rotulo}</Label>
       <Input
         readOnly
         disabled
@@ -162,16 +174,19 @@ export function TabHorizons({
           rotulo="Ts_mpc (derivado)"
           testid="mpc-horizontes-ts-mpc"
           valor={horizontes === null ? "—" : `${formatarNumero(horizontes.tsMpc)} s`}
+          tooltip={AJUDA_GERAL.tsMpc}
         />
         <CampoDerivado
           rotulo="Np (derivado)"
           testid="mpc-horizontes-np"
           valor={horizontes === null ? "—" : String(horizontes.np)}
+          tooltip={AJUDA_HORIZONTES.np}
         />
         <CampoDerivado
           rotulo="Nc (derivado)"
           testid="mpc-horizontes-nc"
           valor={horizontes === null ? "—" : String(horizontes.nc)}
+          tooltip={AJUDA_HORIZONTES.nc}
         />
       </div>
       <p className="text-[10px] text-fg-muted">

@@ -1,6 +1,7 @@
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
 import { formatarNumero } from "../useFlowStatus";
+import { AJUDA_GERAL } from "./ajudaMpc";
 import { tsMpcDerivado } from "./mpcLogic";
 
 interface Props {
@@ -18,13 +19,13 @@ export function TabGeneral({ nome, multiplier, tsFlowSegundos, aoMudarMultiplier
   return (
     <div data-testid="mpc-tab-geral" className="space-y-4">
       <div className="space-y-1">
-        <Label htmlFor="mpc-name">Nome</Label>
+        <Label htmlFor="mpc-name" tooltip={AJUDA_GERAL.nome}>Nome</Label>
         <Input id="mpc-name" name="mpc_name" maxLength={80} defaultValue={nome} />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
-          <Label htmlFor="mpc-multiplier">Multiplicador</Label>
+          <Label htmlFor="mpc-multiplier" tooltip={AJUDA_GERAL.multiplicador}>Multiplicador</Label>
           <Input
             id="mpc-multiplier"
             name="mpc_multiplier"
@@ -44,7 +45,7 @@ export function TabGeneral({ nome, multiplier, tsFlowSegundos, aoMudarMultiplier
         </div>
 
         <div className="space-y-1">
-          <Label htmlFor="mpc-ts">Ts_mpc (derivado)</Label>
+          <Label htmlFor="mpc-ts" tooltip={AJUDA_GERAL.tsMpc}>Ts_mpc (derivado)</Label>
           <Input
             id="mpc-ts"
             data-testid="mpc-ts-derivado"

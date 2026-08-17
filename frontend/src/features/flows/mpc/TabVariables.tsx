@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
 import { Select } from "../../../components/ui/select";
+import { Tooltip, type TooltipContent } from "../../../components/ui/tooltip";
 import type { TagOut } from "../../../lib/api";
 import type {
   AcaoFalhaLinha,
@@ -19,6 +20,7 @@ import type {
   VariavelRestricao,
 } from "../graph";
 import { Campo } from "../config/CamposComuns";
+import { AJUDA_COMUM, AJUDA_CV, AJUDA_DV, AJUDA_LINHA, AJUDA_MV, AJUDA_RESTRICAO } from "./ajudaMpc";
 import { CamposPid } from "./CamposPid";
 import {
   gerarIdVariavel,
@@ -80,11 +82,11 @@ function CampoNomeEu({ id, nome, eu }: { id: string; nome: string; eu: string })
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className="space-y-1">
-        <Label htmlFor={`${id}-name`}>Nome</Label>
+        <Label htmlFor={`${id}-name`} tooltip={AJUDA_COMUM.nome}>Nome</Label>
         <Input id={`${id}-name`} name={nomeCampoVar(id, "name")} defaultValue={nome} />
       </div>
       <div className="space-y-1">
-        <Label htmlFor={`${id}-eu`}>EU</Label>
+        <Label htmlFor={`${id}-eu`} tooltip={AJUDA_COMUM.eu}>EU</Label>
         <Input id={`${id}-eu`} name={nomeCampoVar(id, "eu")} defaultValue={eu} />
       </div>
     </div>
@@ -112,7 +114,7 @@ function CampoZeroSpan({
     <div className="grid grid-cols-3 gap-3">
       {descricao !== undefined && (
         <div className="space-y-1">
-          <Label htmlFor={`${id}-description`}>Descrição</Label>
+          <Label htmlFor={`${id}-description`} tooltip={AJUDA_COMUM.descricao}>Descrição</Label>
           <Input
             id={`${id}-description`}
             name={nomeCampoVar(id, "description")}
@@ -123,8 +125,8 @@ function CampoZeroSpan({
           />
         </div>
       )}
-      <CampoNumero id={id} campo="zero" rotulo="Zero" valor={zero} testid={`${testidPrefixo}-zero`} />
-      <CampoNumero id={id} campo="span" rotulo="Span" valor={span} testid={`${testidPrefixo}-span`} />
+      <CampoNumero id={id} campo="zero" rotulo="Zero" valor={zero} testid={`${testidPrefixo}-zero`} tooltip={AJUDA_COMUM.zero} />
+      <CampoNumero id={id} campo="span" rotulo="Span" valor={span} testid={`${testidPrefixo}-span`} tooltip={AJUDA_COMUM.span} />
     </div>
   );
 }
@@ -140,6 +142,7 @@ function CampoNumero({
   valor,
   ajuda,
   testid,
+  tooltip,
 }: {
   id: string;
   campo: string;
@@ -153,6 +156,7 @@ function CampoNumero({
    *  revisado). Sem uso, comportamento idêntico a antes (`Campo` já trata como opcional). */
   ajuda?: string;
   testid?: string;
+  tooltip?: TooltipContent;
 }) {
   return (
     <Campo
@@ -162,6 +166,7 @@ function CampoNumero({
       valor={valor}
       ajuda={ajuda}
       testid={testid}
+      tooltip={tooltip}
     />
   );
 }
@@ -264,14 +269,15 @@ function ListaMv({
             testidPrefixo="mpc-mv"
           />
           <div className="grid grid-cols-3 gap-3">
-            <CampoNumero id={mv.id} campo="limits_min" rotulo="Limite mín." valor={mv.limits.min} />
-            <CampoNumero id={mv.id} campo="limits_max" rotulo="Limite máx." valor={mv.limits.max} />
+            <CampoNumero id={mv.id} campo="limits_min" rotulo="Limite mín." valor={mv.limits.min} tooltip={AJUDA_MV.limiteMin} />
+            <CampoNumero id={mv.id} campo="limits_max" rotulo="Limite máx." valor={mv.limits.max} tooltip={AJUDA_MV.limiteMax} />
             <CampoNumero
               id={mv.id}
               campo="max_rate"
               rotulo="Taxa máx (EU/s)"
               valor={mv.max_rate}
               testid="mpc-mv-max-rate"
+              tooltip={AJUDA_MV.maxRate}
             />
             <CampoNumero
               id={mv.id}
@@ -279,6 +285,7 @@ function ListaMv({
               rotulo="Δu mínimo"
               valor={mv.du_min}
               testid="mpc-mv-du-min"
+              tooltip={AJUDA_MV.duMin}
             />
             <CampoNumero
               id={mv.id}
@@ -286,29 +293,33 @@ function ListaMv({
               rotulo="Peso de movimento"
               valor={mv.move_weight}
               testid="mpc-mv-move-weight"
+              tooltip={AJUDA_MV.moveWeight}
             />
             <CampoNumero
               id={mv.id}
               campo="initial_value"
               rotulo="Valor inicial"
               valor={mv.initial_value}
+              tooltip={AJUDA_MV.valorInicial}
             />
             <CampoNumero
               id={mv.id}
               campo="operating_point"
               rotulo="Ponto de operação"
               valor={mv.operating_point}
+              tooltip={AJUDA_MV.pontoOperacao}
             />
             <CampoNumero
               id={mv.id}
               campo="readback_tag_id"
               rotulo="Tag de posição (readback)"
               valor={mv.readback_tag_id}
+              tooltip={AJUDA_MV.readbackTag}
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label htmlFor={`${mv.id}-objective`}>Função objetivo</Label>
+              <Label htmlFor={`${mv.id}-objective`} tooltip={AJUDA_MV.objetivo}>Função objetivo</Label>
               <Select
                 id={`${mv.id}-objective`}
                 data-testid={`mpc-objective-${mv.id}`}
@@ -345,6 +356,7 @@ function ListaMv({
                 rotulo="Valor preferido (PSV)"
                 valor={mv.psv}
                 testid="mpc-mv-psv"
+                tooltip={AJUDA_MV.psv}
               />
             )}
           </div>
@@ -375,7 +387,7 @@ function ListaMv({
               }}
               className="h-3.5 w-3.5 accent-[var(--color-accent)]"
             />
-            MV com PID (RF-604) — ausente ⇒ MV direta (decisão A-8)
+            <Tooltip content={AJUDA_MV.comPid} stopClick>MV com PID (RF-604) — ausente ⇒ MV direta (decisão A-8)</Tooltip>
           </label>
           {mv.pid !== null && <CamposPid varId={mv.id} pid={mv.pid} tags={tags} />}
           <details className="space-y-2 border-t border-border pt-2">
@@ -384,7 +396,7 @@ function ListaMv({
             </summary>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label htmlFor={`${mv.id}-fail-action`}>Ação de falha</Label>
+                <Label htmlFor={`${mv.id}-fail-action`} tooltip={AJUDA_MV.failAction}>Ação de falha</Label>
                 <Select
                   id={`${mv.id}-fail-action`}
                   data-testid="mpc-mv-fail-action"
@@ -416,7 +428,7 @@ function ListaMv({
               </div>
               {mv.fail_action === "shed_local" && (
                 <div className="space-y-1" title={mv.pid === null ? "Exige MV com PID" : undefined}>
-                  <Label htmlFor={`${mv.id}-local_shed_mode`}>Modo local no shed</Label>
+                  <Label htmlFor={`${mv.id}-local_shed_mode`} tooltip={AJUDA_MV.localShedMode}>Modo local no shed</Label>
                   <Input
                     id={`${mv.id}-local_shed_mode`}
                     name={nomeCampoVar(mv.id, "local_shed_mode")}
@@ -502,7 +514,7 @@ function ListaCv({
           />
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label htmlFor={`${cv.id}-kind`}>Modelo (kind)</Label>
+              <Label htmlFor={`${cv.id}-kind`} tooltip={AJUDA_LINHA.kind}>Modelo (kind)</Label>
               <Select
                 id={`${cv.id}-kind`}
                 data-testid={`mpc-kind-${cv.id}`}
@@ -526,7 +538,7 @@ function ListaCv({
               </Select>
             </div>
             <div className="space-y-1">
-              <Label htmlFor={`${cv.id}-objective`}>Função objetivo</Label>
+              <Label htmlFor={`${cv.id}-objective`} tooltip={AJUDA_CV.objetivo}>Função objetivo</Label>
               <Select
                 id={`${cv.id}-objective`}
                 data-testid={`mpc-objective-${cv.id}`}
@@ -558,6 +570,7 @@ function ListaCv({
               rotulo="Peso"
               valor={cv.weight}
               testid="mpc-cv-weight"
+              tooltip={AJUDA_CV.peso}
             />
             <CampoNumero
               id={cv.id}
@@ -565,6 +578,7 @@ function ListaCv({
               rotulo="Prioridade"
               valor={cv.priority}
               testid="mpc-cv-priority"
+              tooltip={AJUDA_LINHA.prioridade}
             />
             <CampoNumero
               id={cv.id}
@@ -572,6 +586,7 @@ function ListaCv({
               rotulo="Trajetória τ (s)"
               valor={cv.traj_tau_s}
               testid="mpc-cv-traj-tau"
+              tooltip={AJUDA_CV.trajTau}
             />
           </div>
           <label className="flex items-center gap-2 text-xs text-fg">
@@ -585,7 +600,7 @@ function ListaCv({
               }}
               className="h-3.5 w-3.5 accent-[var(--color-accent)]"
             />
-            SP rastreia PV fora de AUTO (RF-612)
+            <Tooltip content={AJUDA_CV.trackSp} stopClick>SP rastreia PV fora de AUTO (RF-612)</Tooltip>
           </label>
           <div className="grid grid-cols-2 gap-3">
             <CampoNumero
@@ -593,12 +608,14 @@ function ListaCv({
               campo="sp_limits_min"
               rotulo="SP mín."
               valor={cv.sp_limits.min}
+              tooltip={AJUDA_CV.spMin}
             />
             <CampoNumero
               id={cv.id}
               campo="sp_limits_max"
               rotulo="SP máx."
               valor={cv.sp_limits.max}
+              tooltip={AJUDA_CV.spMax}
             />
           </div>
           <details className="space-y-2 border-t border-border pt-2">
@@ -607,7 +624,7 @@ function ListaCv({
             </summary>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label htmlFor={`${cv.id}-fail-action`}>Ação de falha</Label>
+                <Label htmlFor={`${cv.id}-fail-action`} tooltip={AJUDA_LINHA.failAction}>Ação de falha</Label>
                 <Select
                   id={`${cv.id}-fail-action`}
                   data-testid="mpc-cv-fail-action"
@@ -633,6 +650,7 @@ function ListaCv({
                   rotulo="Timeout de falha (s)"
                   valor={cv.fail_timeout_s}
                   testid="mpc-cv-fail-timeout"
+                  tooltip={AJUDA_LINHA.failTimeout}
                 />
               )}
               <CampoNumero
@@ -646,9 +664,10 @@ function ListaCv({
                     : undefined
                 }
                 testid="mpc-cv-sp-range-pct"
+                tooltip={AJUDA_CV.spRangePct}
               />
               <div className="space-y-1">
-                <Label htmlFor={`${cv.id}-remote-sp`}>SP remoto (tag R, RF-614)</Label>
+                <Label htmlFor={`${cv.id}-remote-sp`} tooltip={AJUDA_CV.remoteSp}>SP remoto (tag R, RF-614)</Label>
                 <SelectTag
                   id={`${cv.id}-remote-sp`}
                   campo="remote_sp_tag_id"
@@ -722,7 +741,7 @@ function ListaRestricao({
             testidPrefixo="mpc-restricao"
           />
           <div className="space-y-1">
-            <Label htmlFor={`${co.id}-kind`}>Modelo (kind)</Label>
+            <Label htmlFor={`${co.id}-kind`} tooltip={AJUDA_LINHA.kind}>Modelo (kind)</Label>
             <Select
               id={`${co.id}-kind`}
               data-testid={`mpc-kind-${co.id}`}
@@ -746,7 +765,7 @@ function ListaRestricao({
             </Select>
           </div>
           <div className="space-y-1">
-            <Label htmlFor={`${co.id}-objective`}>Função objetivo</Label>
+            <Label htmlFor={`${co.id}-objective`} tooltip={AJUDA_RESTRICAO.objetivo}>Função objetivo</Label>
             <Select
               id={`${co.id}-objective`}
               data-testid={`mpc-objective-${co.id}`}
@@ -773,9 +792,9 @@ function ListaRestricao({
           </div>
           {/* TSS mora só na aba Horizontes (tarefa 4.3) — mesma nota da ListaCv acima. */}
           <div className="grid grid-cols-3 gap-3">
-            <CampoNumero id={co.id} campo="range_low" rotulo="Faixa mín." valor={co.range.low} />
-            <CampoNumero id={co.id} campo="range_high" rotulo="Faixa máx." valor={co.range.high} />
-            <CampoNumero id={co.id} campo="priority" rotulo="Prioridade" valor={co.priority} />
+            <CampoNumero id={co.id} campo="range_low" rotulo="Faixa mín." valor={co.range.low} tooltip={AJUDA_RESTRICAO.faixaMin} />
+            <CampoNumero id={co.id} campo="range_high" rotulo="Faixa máx." valor={co.range.high} tooltip={AJUDA_RESTRICAO.faixaMax} />
+            <CampoNumero id={co.id} campo="priority" rotulo="Prioridade" valor={co.priority} tooltip={AJUDA_LINHA.prioridade} />
           </div>
           <details className="space-y-2 border-t border-border pt-2">
             <summary className="plaqueta cursor-pointer text-[10px] text-fg-muted">
@@ -783,7 +802,7 @@ function ListaRestricao({
             </summary>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label htmlFor={`${co.id}-fail-action`}>Ação de falha</Label>
+                <Label htmlFor={`${co.id}-fail-action`} tooltip={AJUDA_LINHA.failAction}>Ação de falha</Label>
                 <Select
                   id={`${co.id}-fail-action`}
                   data-testid="mpc-restricao-fail-action"
@@ -811,6 +830,7 @@ function ListaRestricao({
                   rotulo="Timeout de falha (s)"
                   valor={co.fail_timeout_s}
                   testid="mpc-restricao-fail-timeout"
+                  tooltip={AJUDA_LINHA.failTimeout}
                 />
               )}
             </div>
@@ -836,8 +856,8 @@ function LinhaDv({ dv, aoRemover }: { dv: VariavelDv; aoRemover: () => void }) {
         testidPrefixo="mpc-dv"
       />
       <div className="grid grid-cols-2 gap-3">
-        <CampoNumero id={dv.id} campo="range_low" rotulo="Faixa mín." valor={dv.range?.low ?? null} />
-        <CampoNumero id={dv.id} campo="range_high" rotulo="Faixa máx." valor={dv.range?.high ?? null} />
+        <CampoNumero id={dv.id} campo="range_low" rotulo="Faixa mín." valor={dv.range?.low ?? null} tooltip={AJUDA_DV.faixaMin} />
+        <CampoNumero id={dv.id} campo="range_high" rotulo="Faixa máx." valor={dv.range?.high ?? null} tooltip={AJUDA_DV.faixaMax} />
       </div>
       {/* TD-003: ponto de linearização — o modelo do MPC é incremental, então a porta de
           entrada da DV fica na coordenada absoluta da planta, sem Script somando constantes. */}
@@ -846,6 +866,7 @@ function LinhaDv({ dv, aoRemover }: { dv: VariavelDv; aoRemover: () => void }) {
         campo="operating_point"
         rotulo="Ponto de operação"
         valor={dv.operating_point}
+        tooltip={AJUDA_DV.pontoOperacao}
       />
     </LinhaVariavel>
   );

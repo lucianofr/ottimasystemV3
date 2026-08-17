@@ -1,21 +1,31 @@
+import { Tooltip, type TooltipContent } from "../../../components/ui/tooltip";
 import type { VariaveisMpc } from "../graph";
 import { formatarNumero } from "../useFlowStatus";
+import { AJUDA_CV, AJUDA_MV, AJUDA_RESTRICAO } from "./ajudaMpc";
 import { rotuloVariavel } from "./mpcLogic";
 
 interface Props {
   variaveis: VariaveisMpc;
 }
 
-function LinhaResumo({ id, rotulo, colunas }: { id: string; rotulo: string; colunas: [string, string][] }) {
+function LinhaResumo({
+  id,
+  rotulo,
+  colunas,
+}: {
+  id: string;
+  rotulo: string;
+  colunas: [string, string, TooltipContent][];
+}) {
   return (
     <div
       data-var-id={id}
       className="grid grid-cols-[1fr_repeat(4,auto)] items-center gap-3 rounded-sm border border-border bg-well p-2"
     >
       <span className="text-xs text-fg">{rotulo}</span>
-      {colunas.map(([campo, valor]) => (
-        <span key={campo} className="process-value text-xs text-fg-muted" title={campo}>
-          {campo}: {valor}
+      {colunas.map(([campo, valor, tooltip]) => (
+        <span key={campo} className="process-value text-xs text-fg-muted">
+          <Tooltip content={tooltip}>{campo}</Tooltip>: {valor}
         </span>
       ))}
     </div>
@@ -54,10 +64,10 @@ export function TabLimits({ variaveis }: Props) {
               id={mv.id}
               rotulo={rotuloVariavel(mv)}
               colunas={[
-                ["mín.", formatarNumero(mv.limits.min)],
-                ["máx.", formatarNumero(mv.limits.max)],
-                ["taxa máx. (EU/s)", formatarNumero(mv.max_rate)],
-                ["inicial", formatarNumero(mv.initial_value)],
+                ["mín.", formatarNumero(mv.limits.min), AJUDA_MV.limiteMin],
+                ["máx.", formatarNumero(mv.limits.max), AJUDA_MV.limiteMax],
+                ["taxa máx. (EU/s)", formatarNumero(mv.max_rate), AJUDA_MV.maxRate],
+                ["inicial", formatarNumero(mv.initial_value), AJUDA_MV.valorInicial],
               ]}
             />
           ))}
@@ -73,8 +83,8 @@ export function TabLimits({ variaveis }: Props) {
               id={cv.id}
               rotulo={rotuloVariavel(cv)}
               colunas={[
-                ["SP mín.", formatarNumero(cv.sp_limits.min)],
-                ["SP máx.", formatarNumero(cv.sp_limits.max)],
+                ["SP mín.", formatarNumero(cv.sp_limits.min), AJUDA_CV.spMin],
+                ["SP máx.", formatarNumero(cv.sp_limits.max), AJUDA_CV.spMax],
               ]}
             />
           ))}
@@ -90,8 +100,8 @@ export function TabLimits({ variaveis }: Props) {
               id={co.id}
               rotulo={rotuloVariavel(co)}
               colunas={[
-                ["mín.", formatarNumero(co.range.low)],
-                ["máx.", formatarNumero(co.range.high)],
+                ["mín.", formatarNumero(co.range.low), AJUDA_RESTRICAO.faixaMin],
+                ["máx.", formatarNumero(co.range.high), AJUDA_RESTRICAO.faixaMax],
               ]}
             />
           ))}
