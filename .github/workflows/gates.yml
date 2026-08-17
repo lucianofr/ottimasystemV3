@@ -67,6 +67,25 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      # Trava a regressão do plano 006: o plano 005 tirou o `@xyflow/react` do chunk inicial
+      # com `React.lazy`, e o ARCH-18 o trouxe de volta ao pôr os 9 componentes de nó em
+      # `registro.ts` — que `CanalAoVivo.tsx` alcança via `graph.ts` em TODA rota autenticada —
+      # com `npm run build` verde, typecheck limpo e 633 testes passando. Nenhum outro passo
+      # deste arquivo pega essa classe de regressão.
+      - name: React Flow fora do chunk inicial
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          chunks=(dist/assets/index-*.js)
+          if [ "${#chunks[@]}" -ne 1 ] || [ ! -e "${chunks[0]}" ]; then
+            echo "esperava exatamente um chunk inicial em dist/assets/index-*.js, achei: ${chunks[*]}" >&2
+            exit 1
+          fi
+          if grep -q xyflow "${chunks[0]}"; then
+            echo "@xyflow/react voltou ao chunk inicial (${chunks[0]}) - ver plano 006 / ARCH-18" >&2
+            exit 1
+          fi
+
       # Trava de forma prevista pelo ARCH-06/ADR-034: se um model Pydantic mudou sem o
       # `contracts.gen.ts` acompanhar, a geração produz diff e o passo falha.
       - name: Contrato gerado está em dia
