@@ -443,10 +443,13 @@ test.describe("Tela de Operação", () => {
           else fibra = (no as unknown as Record<string, unknown>)[chave];
         }
 
-        for (let f = fibra, nivel = 0; f !== null && nivel < 40; f = campo(f, "return"), nivel++) {
+        // Teto de 200 é guarda anti-loop-infinito, não orçamento de hooks: `TrendOperacao`
+        // tem dezenas de hooks e ganha mais a cada feature, e um teto perto do número real
+        // transforma "adicionar um hook" em teste vermelho — já aconteceu (`useTema`).
+        for (let f = fibra, nivel = 0; f !== null && nivel < 200; f = campo(f, "return"), nivel++) {
           for (
             let gancho = campo(f, "memoizedState"), i = 0;
-            gancho !== null && i < 40;
+            gancho !== null && i < 200;
             gancho = campo(gancho, "next"), i++
           ) {
             const janela = janelaDoGrafico(campo(campo(gancho, "memoizedState"), "current"));
