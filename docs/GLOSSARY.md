@@ -51,6 +51,11 @@
 | **Log de eventos** | Hypertable de eventos (info/warning/alarm) com retenção de 1 mês; alimenta o banner de alarmes ativos (sem ACK) e a auditoria de operação. |
 | **Hypertable** | Tabela particionada por tempo do TimescaleDB; amostras com retenção de 1 mês. |
 | **Continuous aggregate** | Agregação materializada auto-atualizada do Timescale (ex.: média por minuto) para trends. |
+| **Servidor MCP (ottima-mcp)** | Pacote Python stdio (`packages/ottima-mcp`, SDK oficial `mcp`) que expõe o sistema a agentes de IA como ferramentas MCP sobre a API REST/WS existente — um cliente da API como o frontend, sem rota nem validação próprias. Decidido no ADR-036. |
+| **Superfície curada** | Conjunto deliberado de ferramentas MCP expostas ao agente (operação, monitoramento, engenharia de flows). O token da conta `agente` alcança admin, mas usuários, certificados, escrita de conexões/tags/projetos e system-settings ficam **fora** da superfície de ferramentas. |
+| **Conta `agente`** | Usuário dedicado (papel admin) usado pelo servidor MCP. Garante atribuição de auditoria — `FlowCommand.user = "user:{id}"` e eventos `mpc_*` distinguem ações de agente das de humanos sem mudança de backend. |
+| **Comandado ≠ confirmado (agente)** | RNF-05 aplicado a ferramentas: escrita de operação responde 202 (intenção publicada em `flow.commands`); a verdade é o estado publicado no barramento. Ferramenta MCP de escrita aguarda o estado confirmado ou falha por timeout explícito — nunca reporta sucesso pelo HTTP. |
+| **Cursor de eventos (since_id)** | Contrato de paginação incremental do log de eventos nas ferramentas MCP (`events_since`): leitura sob demanda na v1, supervisão contínua na v2 sem quebra de contrato. |
 
 ## Dimensionamento-alvo
 ~10 flows simultâneos · ~100 tags OPC (R+W) · até 5 servidores OPC-UA · retenção 1 mês.
