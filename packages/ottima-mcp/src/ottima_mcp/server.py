@@ -108,6 +108,14 @@ async def _timeout_padrao(cliente: ClienteOttima, flow_id: int, block_id: str) -
     return 10.0  # bloco não encontrado aqui — a rota REST relevante devolve 404/422 de verdade
 
 
+def _origem_mpc(flow_id: int, block_id: str) -> str:
+    """Mesmo formato usado pelo runtime para `origin` de eventos de bloco MPC
+    (`mpc.py:169` `self._source`; `events.py:85` `mpc_block_origin`). O canal `events` é
+    GLOBAL — sem filtrar por `origin`, o evento de OUTRO bloco com o mesmo `kind`/`var_id`
+    confirmaria falsamente um comando que nunca foi aplicado ao bloco pedido."""
+    return f"flow:{flow_id}/block:{block_id}"
+
+
 def _erro_com_estado(erro: ErroConfirmacao) -> RuntimeError:
     if erro.ultimo_estado is None:
         return RuntimeError(erro.mensagem)
@@ -138,6 +146,7 @@ async def mpc_set_mode(
     nesse caso já vem com o diagnóstico certo, não é lentidão."""
     cliente = _cliente(ctx)
     canal = channel_mpc_state(flow_id, block_id)
+    origem = _origem_mpc(flow_id, block_id)
 
     async def _publicar() -> None:
         await cliente.post(
@@ -149,13 +158,14 @@ async def mpc_set_mode(
             return dado.get("modes", {}).get(axis) == value
         payload = dado.get("payload", {})
         return (
-            payload.get("kind") == "mpc_mode_changed"
+            dado.get("origin") == origem
+            and payload.get("kind") == "mpc_mode_changed"
             and payload.get("axis") == axis
             and payload.get("to") == value
         )
 
     def _falha(canal_msg: str, dado: dict[str, Any]) -> bool:
-        if canal_msg != CHANNEL_EVENTS:
+        if canal_msg != CHANNEL_EVENTS or dado.get("origin") != origem:
             return False
         payload = dado.get("payload", {})
         return payload.get("kind") == "mpc_arm_failed" and payload.get("axis") == axis
@@ -206,6 +216,7 @@ async def mpc_write_sp(
     como erro antes mesmo de esperar confirmação."""
     cliente = _cliente(ctx)
     canal = channel_mpc_state(flow_id, block_id)
+    origem = _origem_mpc(flow_id, block_id)
 
     async def _publicar() -> None:
         await cliente.post(
@@ -217,7 +228,11 @@ async def mpc_write_sp(
             sp_publicado = dado.get("vars", {}).get(var_id, {}).get("sp")
             return sp_publicado is not None and abs(sp_publicado - value) < 1e-9
         payload = dado.get("payload", {})
-        return payload.get("kind") == "mpc_sp_written" and payload.get("var_id") == var_id
+        return (
+            dado.get("origin") == origem
+            and payload.get("kind") == "mpc_sp_written"
+            and payload.get("var_id") == var_id
+        )
 
     prazo = timeout if timeout is not None else await _timeout_padrao(cliente, flow_id, block_id)
     try:
@@ -262,6 +277,7 @@ async def mpc_write_mv(
     como erro antes mesmo de esperar confirmação."""
     cliente = _cliente(ctx)
     canal = channel_mpc_state(flow_id, block_id)
+    origem = _origem_mpc(flow_id, block_id)
 
     async def _publicar() -> None:
         await cliente.post(
@@ -269,7 +285,7 @@ async def mpc_write_mv(
         )
 
     def _sucesso(canal_msg: str, dado: dict[str, Any]) -> bool:
-        if canal_msg != CHANNEL_EVENTS:
+        if canal_msg != CHANNEL_EVENTS or dado.get("origin") != origem:
             return False
         payload = dado.get("payload", {})
         return payload.get("kind") == "mpc_mv_written" and payload.get("var_id") == var_id

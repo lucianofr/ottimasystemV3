@@ -300,3 +300,73 @@ async def test_mpc_state_devolve_a_primeira_publicacao(cliente_com_ws) -> None:
     )
     resultado = await tarefa
     assert resultado["modes"]["man_auto"] == "auto"
+
+
+# ----------------------------------------------------------------------------------
+# Isolamento por origem: `events` é canal GLOBAL — sem filtrar `origin`, o evento de
+# OUTRO bloco com o mesmo kind/var_id confirmaria falsamente (achado de revisão).
+# ----------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_mpc_write_sp_ignora_evento_de_outro_bloco_mesmo_kind_e_var_id(
+    cliente_com_ws,
+) -> None:
+    cliente, _hub_rest, hub_ws = await cliente_com_ws(_rota_mpcs_para_timeout(0.05, 1))
+    evento_de_outro_bloco = {
+        "severity": "info",
+        "origin": "flow:1/block:mpc2",  # bloco DIFERENTE, mesmo flow
+        "message": "SP escrito",
+        "payload": {"kind": "mpc_sp_written", "var_id": "cv_a", "value": 55.0, "user": "user:7"},
+    }
+
+    async def _fluxo():
+        return await server.mpc_write_sp(1, "mpc1", "cv_a", 55.0, _ctx(cliente), timeout=0.2)
+
+    tarefa = asyncio.ensure_future(_fluxo())
+    await asyncio.sleep(0.02)
+    await hub_ws.publicar("events", evento_de_outro_bloco)
+    with pytest.raises(RuntimeError, match="REMOTO\\+AUTO"):  # tempo esgota, nao confirma
+        await tarefa
+
+
+@pytest.mark.asyncio
+async def test_mpc_write_mv_ignora_evento_de_outro_bloco_mesmo_kind_e_var_id(
+    cliente_com_ws,
+) -> None:
+    cliente, _hub_rest, hub_ws = await cliente_com_ws(_rota_mpcs_para_timeout(0.05, 1))
+    evento_de_outro_flow = {
+        "severity": "info",
+        "origin": "flow:9/block:mpc1",  # mesmo block_id, flow DIFERENTE
+        "message": "MV escrita",
+        "payload": {"kind": "mpc_mv_written", "var_id": "mv_a", "value": 80.0, "user": "user:7"},
+    }
+
+    async def _fluxo():
+        return await server.mpc_write_mv(1, "mpc1", "mv_a", 80.0, _ctx(cliente), timeout=0.2)
+
+    tarefa = asyncio.ensure_future(_fluxo())
+    await asyncio.sleep(0.02)
+    await hub_ws.publicar("events", evento_de_outro_flow)
+    with pytest.raises(RuntimeError):  # tempo esgota, nao confirma
+        await tarefa
+
+
+@pytest.mark.asyncio
+async def test_mpc_set_mode_ignora_mpc_arm_failed_de_outro_bloco(cliente_com_ws) -> None:
+    cliente, _hub_rest, hub_ws = await cliente_com_ws(_rota_mpcs_para_timeout(0.05, 1))
+    falha_de_outro_bloco = {
+        "severity": "warning",
+        "origin": "flow:1/block:mpc2",
+        "message": "armar falhou",
+        "payload": {"kind": "mpc_arm_failed", "axis": "man_auto", "reason": "cold_input"},
+    }
+
+    async def _fluxo():
+        return await server.mpc_set_mode(1, "mpc1", "man_auto", "auto", _ctx(cliente), timeout=0.2)
+
+    tarefa = asyncio.ensure_future(_fluxo())
+    await asyncio.sleep(0.02)
+    await hub_ws.publicar("events", falha_de_outro_bloco)
+    with pytest.raises(RuntimeError):  # tempo esgota (nao e falha rapida) — origem nao bate
+        await tarefa
