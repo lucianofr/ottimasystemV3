@@ -1,5 +1,6 @@
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
+import type { TooltipContent } from "../../../components/ui/tooltip";
 
 /**
  * Campo numérico compartilhado pelos formulários de bloco da janela de config.
@@ -27,6 +28,7 @@ export function Campo({
   ajuda,
   placeholder,
   testid,
+  tooltip,
 }: {
   id: string;
   /** `name` do input HTML quando diverge do `id` — a convenção `nomeCampoVar` do MPC decide
@@ -43,11 +45,15 @@ export function Campo({
    *  (convenção nova, desacoplada) e sem `testid` explícito, nenhum testid é desenhado — é o
    *  que o MPC já fazia em ~metade dos seus campos antes desta extração. */
   testid?: string;
+  /** Tooltip de ajuda completa (descrição + exemplo) no rótulo — distinto de `ajuda` (texto
+   *  curto sempre visível abaixo do campo). Só o MPC passa isto por enquanto; Kalman/Filtro/
+   *  PID/TFS continuam sem, comportamento idêntico a antes. */
+  tooltip?: TooltipContent;
 }) {
   const testidFinal = testid ?? (nome === undefined ? `config-${id.replace(/_/g, "-")}` : undefined);
   return (
     <div className="space-y-1">
-      <Label htmlFor={id}>{rotulo}</Label>
+      <Label htmlFor={id} tooltip={tooltip}>{rotulo}</Label>
       <Input
         id={id}
         name={nome ?? id}
