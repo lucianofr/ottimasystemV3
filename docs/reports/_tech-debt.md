@@ -27,7 +27,10 @@ _Debt that causes recurring problems or bugs._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
-_Nenhum item aberto._
+- [ ] **TD-026**: Regressão de comportamento da tela de operação só é detectada rodando o Playwright à mão contra um stack reconstruído
+  - **Evidência de 2026-08-16**: `PW-OP-11` (zoom em X sobrevive à troca do eixo Y) ficou vermelho ao mesclar o fix de tema em `TrendOperacao.tsx` — o helper do cenário varre a lista de hooks da fibra do React com teto fixo, e um hook novo (`useTema`) pôs o ref do uPlot fora do alcance. Passou por `ruff`, `test:unit` 633, `typecheck` e `build` **todos verdes**. Só apareceu quando alguém reconstruiu o container e rodou `operate-trend.spec.ts`.
+  - **Por que continua aberto e não é esquecimento**: a ADR-035 decidiu que a stack de 9 serviços, o `opcsim` e as credenciais de `deploy/.env` ficam fora do CI. O item registra o **custo** da decisão, para ele ser revisto de olho aberto — não a contradiz.
+  - **Mitigação em uso hoje**: rodar `cd frontend && npm run e2e` (ou o spec afetado) contra o stack reconstruído a partir da `main` antes de considerar mesclada qualquer mudança em `frontend/src/features/operate/` ou `frontend/src/features/trend/`.
 
 ## Medium (Slows Development)
 
