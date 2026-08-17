@@ -163,3 +163,34 @@ variável de decisão continua sendo só `ΔMV`. `CvVar` ganha `priority: int = 
 - UI do canvas/faceplate para editar `economics` (a estrutura de config já está pronta).
 - `GurobiBackend` (stub).
 - Termo de *ideal resting value* no objetivo dinâmico (exigiria ADR próprio: mexe no move plan).
+
+## Emenda — banda de SP por linha integradora (2026-08-17)
+
+**Contexto:** §4 fixou a linha integradora como condição de taxa nula `[−ε, +ε]`, com `ε` =
+`economics.integrating_tolerance` — um único valor por bloco, sem UI (§"Fora de escopo"), e
+sem jeito de uma CV integradora ceder espaço pros outros objetivos do SSTO a não ser via
+`priority` (a mesma folga/rank de qualquer linha soft, §6) ou baixando o `integrating_tolerance`
+global — o que afeta TODAS as linhas integradoras do bloco de uma vez, não uma só.
+
+**Decisão:** `sp_range_pct` (RF-615 — CV only, `ConstraintVar` não tem o campo) passa a valer
+também para `kind="integrating"`, reaproveitando o MESMO campo/UX da banda de nível da CV
+`selfreg` — nenhum campo novo, nenhuma mudança de schema. Reinterpretado por `kind` da linha:
+
+- `selfreg` (inalterado): trava o alvo em `SP ± pct/100 × span` (nível).
+- `integrating`: vira `ε_linha = pct/100 × span / tss` (taxa, EU/s) — o drift tolerado (`pct`%
+  do span) ao longo do horizonte de regime da própria linha (`tss`, já obrigatório e > 0 por
+  validação de grafo — nenhum "horizonte de projeção" novo). Essa `ε_linha` substitui, só para
+  essa CV, o `economics.integrating_tolerance` do bloco no MESMO dicionário de limites por
+  linha que já alimenta o mecanismo de slack/priority (§6) — nada na formulação do LP muda.
+  Sem `sp_range_pct` na CV, cai no `integrating_tolerance` do bloco: comportamento de antes
+  desta emenda, bit a bit.
+
+**Explicitamente NÃO decidido nesta emenda** (lacuna registrada, não relitigada):
+
+1. `ConstraintVar` (Restrição) não ganhou o campo — criar um exigiria mudança de schema (ao
+   contrário da CV, que só reinterpretou o campo existente). Restrição integradora continua
+   só no `integrating_tolerance` do bloco.
+2. `ε_linha` é aplicado por-ciclo, a cada solve do SSTO — não cumulativo. Nada impede deriva
+   sustentada além do `pct`% "pretendido" se o LP escolher a mesma direção em ciclos
+   consecutivos; um teto cumulativo desde o deploy exigiria termo de memória/acumulador,
+   fora do escopo desta emenda.

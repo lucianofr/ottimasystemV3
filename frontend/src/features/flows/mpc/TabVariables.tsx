@@ -138,6 +138,7 @@ function CampoNumero({
   campo,
   rotulo,
   valor,
+  ajuda,
   testid,
 }: {
   id: string;
@@ -147,6 +148,10 @@ function CampoNumero({
    *  impresso aqui volta como texto não-vazio no Aplicar e vira a faixa degenerada `{0, 0}`,
    *  que o servidor recusa (`range.low < range.high`) e deixa o flow insalvável. */
   valor: number | null;
+  /** Texto de apoio opcional (repassado a `Campo`) — usado quando o mesmo campo muda de
+   *  significado por `kind` da linha (ex.: "Faixa do SP (%)" na CV integradora, RF-615
+   *  revisado). Sem uso, comportamento idêntico a antes (`Campo` já trata como opcional). */
+  ajuda?: string;
   testid?: string;
 }) {
   return (
@@ -155,6 +160,7 @@ function CampoNumero({
       nome={nomeCampoVar(id, campo)}
       rotulo={rotulo}
       valor={valor}
+      ajuda={ajuda}
       testid={testid}
     />
   );
@@ -634,6 +640,11 @@ function ListaCv({
                 campo="sp_range_pct"
                 rotulo="Faixa do SP (%)"
                 valor={cv.sp_range_pct}
+                ajuda={
+                  cv.kind === "integrating"
+                    ? "Linha integradora: vira drift tolerado (% do span) ao longo do TSS da linha, não faixa de nível fixa."
+                    : undefined
+                }
                 testid="mpc-cv-sp-range-pct"
               />
               <div className="space-y-1">

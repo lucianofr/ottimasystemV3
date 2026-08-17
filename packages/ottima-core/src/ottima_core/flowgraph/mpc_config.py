@@ -215,8 +215,11 @@ class CvVar(BaseModel):
     `fail_action`/`fail_timeout_s`: ação em entrada inválida prolongada (RF-613);
     `simulate_*` segura o valor previsto por até `fail_timeout_s` antes da ação final.
 
-    `sp_range_pct`: banda do SP no SSTO (RF-615) — o alvo da CV fica preso a
-    `SP ± pct/100 × span`; `None` = sem restrição (comportamento anterior).
+    `sp_range_pct`: banda do SP no SSTO (RF-615, emenda ADR-027 §4) — por `kind` da
+    linha: `selfreg` trava o alvo em `SP ± pct/100 × span` (nível); `integrating` vira
+    ε de taxa `pct/100 × span/tss` (linha não tem nível de regime — RF-615 revisado).
+    `None` = sem banda por linha (comportamento anterior: `selfreg` livre nos
+    `sp_limits`; `integrating` cai no `economics.integrating_tolerance` do bloco).
 
     `remote_sp_tag_id`: tag OPC-UA de SP remoto (RF-614) — a cada varredura o SP vem da
     tag (clamp em `sp_limits`); `None` = SP local do operador.
@@ -360,8 +363,10 @@ class EconomicsConfig(BaseModel):
     `detuning_weight` (ρ): mitigação de **LP flipping** (ADR-027 §8) — `ρ > 0` acrescenta
     `ρ‖ΔMV − ΔMV_anterior‖²` ao objetivo e exige um backend QP. `0.0` mantém LP puro.
 
-    `integrating_tolerance` (ε): meia-faixa da condição de taxa nula das linhas
-    integradoras (ADR-027 §4), na EU da linha por segundo.
+    `integrating_tolerance` (ε): meia-faixa PADRÃO da condição de taxa nula das linhas
+    integradoras (ADR-027 §4), na EU da linha por segundo — vale para toda CV/Restrição
+    integradora sem `sp_range_pct` própria (RF-615 revisado); com `sp_range_pct`, a CV
+    usa o ε dela, derivado de `pct/100 × span/tss`.
     """
 
     model_config = ConfigDict(extra="forbid")

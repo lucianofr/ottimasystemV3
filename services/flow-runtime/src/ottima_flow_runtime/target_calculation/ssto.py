@@ -168,8 +168,15 @@ class SteadyStateOptimizer:
         for var in rows:
             if var.kind == "integrating":
                 # Linha integradora não tem nível de regime: o que se exige é taxa nula
-                # dentro de ±ε (ADR-027 §4).
-                self._row_limits[var.id] = (-epsilon, epsilon)
+                # dentro de ±ε (ADR-027 §4). `sp_range_pct` (só existe em CvVar) é a
+                # emenda §4: reaproveita o MESMO campo/UX da banda de nível do selfreg,
+                # convertido para ε de taxa via `pct/100 × span/tss` — o drift tolerado
+                # (% do span) ao longo do horizonte de regime da própria linha (`tss`, já
+                # obrigatório e > 0 por validação de grafo). Sem o campo, cai no
+                # `integrating_tolerance` do bloco — comportamento anterior, bit a bit.
+                pct = getattr(var, "sp_range_pct", None)
+                row_epsilon = pct / 100.0 * var.span / var.tss if pct is not None else epsilon
+                self._row_limits[var.id] = (-row_epsilon, row_epsilon)
             elif hasattr(var, "sp_limits"):
                 self._row_limits[var.id] = (var.sp_limits.min, var.sp_limits.max)
             else:
