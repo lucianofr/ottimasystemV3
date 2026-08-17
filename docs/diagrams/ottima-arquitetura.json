@@ -2,67 +2,688 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "OttimaSystem — Arquitetura de Referência",
-    "subtitle": "Plataforma on-premise de APC/MPC: serviços asyncio, barramento Redis pub/sub e OPC-UA",
+    "title": "OttimaSystem — Arquitetura do Sistema",
     "output": "docs/diagrams/ottima-arquitetura.html",
-    "visual_preset": "blueprint",
+    "quality_profile": "standard",
     "repository": {
       "url": "https://github.com/lucianofr/ottimasystemV3.git",
-      "revision": "9d5554f3b620b2d7c9e88146ce144d9fed437f78"
+      "revision": "1572849dc10e7f78af7775eacdc001338c5b1b76"
     },
-    "quality_profile": "showcase",
     "views": [
       {
-        "id": "caminho-comando",
-        "label": "Caminho do comando",
-        "focus": ["user", "frontend", "api", "redis", "flow_runtime"],
-        "note": "Operador age na UI; a API publica em flow.commands; o motor executa e publica estado."
+        "id": "operador",
+        "label": "Caminho do operador",
+        "focus": [
+          "user",
+          "frontend",
+          "api_rest",
+          "api_ws"
+        ],
+        "note": "Comandos por REST; telemetria ao vivo por WebSocket, sem replay."
       },
       {
-        "id": "dados-vivos",
-        "label": "Dados vivos da planta",
-        "focus": ["plc", "opc_worker", "redis", "api", "frontend"],
-        "note": "Leituras OPC sobem pelo barramento até faceplates, canvas e trends na UI."
+        "id": "barramento",
+        "label": "Barramento interno",
+        "focus": [
+          "redis",
+          "opc_io",
+          "fr_blocks",
+          "fr_scheduler",
+          "calc_runner",
+          "recorder",
+          "api_ws"
+        ],
+        "note": "8 canais fixos no Redis ligam todo o backend; nenhum serviço chama outro direto."
       },
       {
-        "id": "persistencia",
-        "label": "Persistência e auditoria",
-        "focus": ["redis", "recorder", "timescale", "api"],
-        "note": "O recorder assina o barramento e grava hypertables; a API serve histórico e eventos."
+        "id": "malha-mpc",
+        "label": "Malha de controle MPC",
+        "focus": [
+          "fr_blocks",
+          "fr_ssto",
+          "fr_mpc_worker",
+          "opc_io",
+          "opc_servers"
+        ],
+        "note": "SSTO calcula o alvo em regime antes de o MPC resolver o problema dinâmico e escrever no PLC."
+      },
+      {
+        "id": "historiador",
+        "label": "Persistência",
+        "focus": [
+          "redis",
+          "recorder",
+          "timescaledb"
+        ],
+        "note": "O recorder assina o barramento inteiro e grava em lote nas hypertables."
       }
     ]
   },
   "components": [
-    { "id": "user", "type": "external", "label": "Engenheiro / Operador", "sublabel": "browser — RBAC admin/operador", "pos": [40, 330], "size": [140, 60] },
-    { "id": "frontend", "type": "frontend", "label": "Frontend", "sublabel": "React + Vite · React Flow · uPlot", "pos": [260, 330], "size": [150, 60], "sources": [{ "path": "frontend/src/app/router.tsx", "label": "SPA" }] },
-    { "id": "api", "type": "backend", "label": "API", "sublabel": "FastAPI :8000 · REST + WebSocket", "tag": "JWT · RBAC", "pos": [500, 330], "size": [150, 64], "sources": [{ "path": "services/api/src/ottima_api/app.py", "label": "routers + /ws" }] },
-    { "id": "redis", "type": "messagebus", "label": "Redis pub/sub", "sublabel": "barramento fire-and-forget", "pos": [820, 330], "size": [150, 60] },
-    { "id": "flow_runtime", "type": "backend", "label": "flow-runtime", "sublabel": "scan cycle por Ts · MPC (do-mpc) · SSTO · scripts · TFS", "tag": "motor", "pos": [1100, 150], "size": [210, 66], "sources": [{ "path": "services/flow-runtime/src/ottima_flow_runtime/main.py", "label": "supervisor" }] },
-    { "id": "opc_worker", "type": "backend", "label": "opc-worker", "sublabel": "único cliente OPC-UA · subscriptions · watchdog por flow", "pos": [1100, 330], "size": [200, 64], "sources": [{ "path": "services/opc-worker/src/ottima_opc_worker/main.py", "label": "sessões + watchdog" }] },
-    { "id": "recorder", "type": "backend", "label": "recorder", "sublabel": "assina o barramento e grava amostras", "pos": [1100, 520], "size": [160, 60], "sources": [{ "path": "services/recorder/src/ottima_recorder/main.py", "label": "hypertables" }] },
-    { "id": "timescale", "type": "database", "label": "PostgreSQL + TimescaleDB", "sublabel": "cadastros · Samples · MpcSamples · SstoRun · Events", "pos": [700, 640], "size": [230, 64] },
-    { "id": "plc", "type": "external", "label": "DCS / PLC", "sublabel": "servidores OPC-UA (≤5) · PIDs regulatórios", "pos": [1420, 330], "size": [160, 64] }
+    {
+      "id": "user",
+      "type": "external",
+      "label": "Operador / Engenheiro",
+      "sublabel": "navegador",
+      "pos": [
+        40,
+        254
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "frontend",
+      "type": "frontend",
+      "label": "Console OttimaSystem",
+      "sublabel": "React + Vite",
+      "pos": [
+        240,
+        254
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/app/router.tsx",
+          "label": "rotas"
+        }
+      ]
+    },
+    {
+      "id": "api_rest",
+      "type": "backend",
+      "label": "API REST",
+      "sublabel": "FastAPI · routers",
+      "pos": [
+        460,
+        190
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "services/api/src/ottima_api/routers/flows.py"
+        },
+        {
+          "path": "services/api/src/ottima_api/routers/operate.py"
+        }
+      ]
+    },
+    {
+      "id": "api_ws",
+      "type": "backend",
+      "label": "Hub WebSocket /ws",
+      "sublabel": "fan-out ao vivo",
+      "pos": [
+        460,
+        318
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "services/api/src/ottima_api/ws.py",
+          "line": 1,
+          "end_line": 64
+        }
+      ]
+    },
+    {
+      "id": "redis",
+      "type": "messagebus",
+      "label": "Redis pub/sub",
+      "sublabel": "8 canais fixos",
+      "pos": [
+        690,
+        236
+      ],
+      "size": [
+        150,
+        100
+      ],
+      "sources": [
+        {
+          "path": "packages/ottima-core/src/ottima_core/bus.py",
+          "line": 15,
+          "end_line": 34
+        }
+      ]
+    },
+    {
+      "id": "opc_io",
+      "type": "backend",
+      "label": "Leitura & escrita de tags",
+      "sublabel": "polling + writes",
+      "pos": [
+        1060,
+        40
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "services/opc-worker/src/ottima_opc_worker/polling.py"
+        },
+        {
+          "path": "services/opc-worker/src/ottima_opc_worker/writes.py"
+        }
+      ]
+    },
+    {
+      "id": "opc_session",
+      "type": "backend",
+      "label": "Sessão OPC-UA",
+      "sublabel": "supervisor + máquina de estados",
+      "pos": [
+        1310,
+        40
+      ],
+      "size": [
+        220,
+        64
+      ],
+      "sources": [
+        {
+          "path": "services/opc-worker/src/ottima_opc_worker/connection.py",
+          "line": 1,
+          "end_line": 43
+        },
+        {
+          "path": "services/opc-worker/src/ottima_opc_worker/supervisor.py"
+        }
+      ]
+    },
+    {
+      "id": "opc_watchdog",
+      "type": "backend",
+      "label": "Watchdog & heartbeat",
+      "sublabel": "por flow",
+      "pos": [
+        1560,
+        40
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "services/opc-worker/src/ottima_opc_worker/watchdog.py"
+        },
+        {
+          "path": "services/opc-worker/src/ottima_opc_worker/heartbeat.py"
+        }
+      ]
+    },
+    {
+      "id": "opc_servers",
+      "type": "external",
+      "label": "Servidores OPC-UA / PLCs",
+      "sublabel": "conexões configuradas",
+      "pos": [
+        1310,
+        136
+      ],
+      "size": [
+        190,
+        70
+      ]
+    },
+    {
+      "id": "fr_scheduler",
+      "type": "backend",
+      "label": "Escalonador de flows",
+      "sublabel": "scan cycle · deploy/stop",
+      "pos": [
+        1060,
+        238
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "services/flow-runtime/src/ottima_flow_runtime/scheduler.py"
+        },
+        {
+          "path": "services/flow-runtime/src/ottima_flow_runtime/supervisor.py"
+        }
+      ]
+    },
+    {
+      "id": "fr_blocks",
+      "type": "backend",
+      "label": "Biblioteca de blocos",
+      "sublabel": "PID · Script · TFS · Kalman · Fuzzy · E/S OPC",
+      "pos": [
+        1060,
+        330
+      ],
+      "size": [
+        230,
+        64
+      ],
+      "sources": [
+        {
+          "path": "services/flow-runtime/src/ottima_flow_runtime/blocks/base.py"
+        },
+        {
+          "path": "services/flow-runtime/src/ottima_flow_runtime/blocks/mpc.py"
+        }
+      ]
+    },
+    {
+      "id": "fr_ssto",
+      "type": "backend",
+      "label": "SSTO",
+      "sublabel": "alvo em regime",
+      "pos": [
+        1320,
+        330
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "services/flow-runtime/src/ottima_flow_runtime/target_calculation/ssto.py"
+        }
+      ]
+    },
+    {
+      "id": "fr_mpc_worker",
+      "type": "backend",
+      "label": "Worker MPC",
+      "sublabel": "processo dedicado · IPOPT",
+      "pos": [
+        1320,
+        238
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "services/flow-runtime/src/ottima_flow_runtime/mpc/host.py",
+          "line": 139,
+          "end_line": 191
+        }
+      ]
+    },
+    {
+      "id": "calc_runner",
+      "type": "backend",
+      "label": "Executor de tags calculadas",
+      "sublabel": "1 task / tag",
+      "pos": [
+        1060,
+        422
+      ],
+      "size": [
+        200,
+        64
+      ],
+      "sources": [
+        {
+          "path": "services/calc-worker/src/ottima_calc_worker/runner.py"
+        },
+        {
+          "path": "services/calc-worker/src/ottima_calc_worker/supervisor.py"
+        }
+      ]
+    },
+    {
+      "id": "calc_scriptpool",
+      "type": "backend",
+      "label": "Pool de scripts",
+      "sublabel": "sandbox compartilhado",
+      "pos": [
+        1300,
+        422
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "packages/ottima-core/src/ottima_core/script_pool.py"
+        }
+      ]
+    },
+    {
+      "id": "recorder",
+      "type": "backend",
+      "label": "Gravador do barramento",
+      "sublabel": "recorder · :8003",
+      "pos": [
+        1060,
+        514
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "services/recorder/src/ottima_recorder/pipeline.py",
+          "line": 92,
+          "end_line": 147
+        }
+      ]
+    },
+    {
+      "id": "timescaledb",
+      "type": "database",
+      "label": "PostgreSQL + TimescaleDB",
+      "sublabel": "hypertables",
+      "pos": [
+        1270,
+        514
+      ],
+      "size": [
+        180,
+        68
+      ],
+      "sources": [
+        {
+          "path": "deploy/docker-compose.yml",
+          "line": 4,
+          "end_line": 17
+        }
+      ]
+    }
   ],
   "boundaries": [
-    { "kind": "region", "label": "on-premise · Docker Compose", "wraps": ["frontend", "api", "redis", "flow_runtime", "opc_worker", "recorder", "timescale"] },
-    { "kind": "security-group", "label": "planta industrial", "wraps": ["plc"], "pad": 14 }
+    {
+      "kind": "security-group",
+      "label": "api · :8000",
+      "wraps": [
+        "api_rest",
+        "api_ws"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "opc-worker · :8001",
+      "wraps": [
+        "opc_io",
+        "opc_session",
+        "opc_watchdog"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "flow-runtime · :8002",
+      "wraps": [
+        "fr_scheduler",
+        "fr_blocks",
+        "fr_ssto",
+        "fr_mpc_worker"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "calc-worker · :8004",
+      "wraps": [
+        "calc_runner",
+        "calc_scriptpool"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "rede OT / planta",
+      "wraps": [
+        "opc_servers"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "docker-compose · rede interna",
+      "wraps": [
+        "api_rest",
+        "api_ws",
+        "redis",
+        "opc_io",
+        "opc_session",
+        "opc_watchdog",
+        "fr_scheduler",
+        "fr_blocks",
+        "fr_ssto",
+        "fr_mpc_worker",
+        "calc_runner",
+        "calc_scriptpool",
+        "recorder",
+        "timescaledb"
+      ]
+    }
   ],
   "connections": [
-    { "from": "user", "to": "frontend", "label": "HTTP :80", "variant": "emphasis" },
-    { "from": "frontend", "to": "api", "label": "REST + /ws", "variant": "emphasis", "labelAt": [434, 322] },
-    { "from": "api", "to": "redis", "label": "flow.commands", "labelAt": [674, 322] },
-    { "from": "redis", "to": "flow_runtime", "label": "deploy · modos · SP", "labelAt": [930, 210] },
-    { "from": "flow_runtime", "to": "redis", "label": "flow.status · mpc.state", "labelAt": [920, 260] },
-    { "from": "opc_worker", "to": "redis", "label": "opc.values.<conn>", "labelAt": [1150, 465] },
-    { "from": "redis", "to": "opc_worker", "label": "opc.writes", "labelAt": [994, 404] },
-    { "from": "redis", "to": "recorder", "label": "subscribe", "labelAt": [895, 495] },
-    { "from": "opc_worker", "to": "plc", "label": "OPC-UA R/W", "variant": "emphasis" },
-    { "from": "api", "to": "timescale", "label": "SQL · histórico" },
-    { "from": "recorder", "to": "timescale", "label": "INSERT em lote" }
+    {
+      "from": "user",
+      "to": "frontend",
+      "label": "usa"
+    },
+    {
+      "from": "frontend",
+      "to": "api_rest",
+      "label": "REST /api/* (nginx)",
+      "labelAt": [
+        420,
+        185
+      ]
+    },
+    {
+      "from": "frontend",
+      "to": "api_ws",
+      "label": "WS /ws (nginx, upgrade)",
+      "labelAt": [
+        425,
+        172
+      ]
+    },
+    {
+      "from": "api_rest",
+      "to": "redis",
+      "label": "flow.commands",
+      "labelDy": -10
+    },
+    {
+      "from": "redis",
+      "to": "api_ws",
+      "label": "6 assinaturas ao vivo",
+      "labelAt": [
+        650,
+        165
+      ]
+    },
+    {
+      "from": "opc_session",
+      "to": "opc_io",
+      "label": "delega E/S",
+      "labelDy": -10
+    },
+    {
+      "from": "opc_session",
+      "to": "opc_watchdog",
+      "label": "delega vigilância",
+      "labelDy": 66
+    },
+    {
+      "from": "opc_session",
+      "to": "opc_servers",
+      "label": "sessão segura (Basic256Sha256)",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        1610,
+        150
+      ]
+    },
+    {
+      "from": "opc_io",
+      "to": "redis",
+      "label": "opc.values.<conn_id>",
+      "labelSegment": 0,
+      "labelDy": -10
+    },
+    {
+      "from": "redis",
+      "to": "opc_io",
+      "label": "opc.writes",
+      "variant": "emphasis",
+      "labelSegment": 0,
+      "labelDy": 10
+    },
+    {
+      "from": "opc_session",
+      "to": "redis",
+      "label": "events (falha/retomada)",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "labelDy": 22,
+      "labelDx": -60
+    },
+    {
+      "from": "redis",
+      "to": "opc_session",
+      "label": "events (conexão criada/alterada)",
+      "variant": "dashed",
+      "toSide": "bottom",
+      "labelDy": 10
+    },
+    {
+      "from": "fr_scheduler",
+      "to": "fr_blocks",
+      "label": "executa por exec_order",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 10
+    },
+    {
+      "from": "fr_blocks",
+      "to": "fr_ssto",
+      "label": "alimenta",
+      "labelDy": 56
+    },
+    {
+      "from": "fr_ssto",
+      "to": "fr_mpc_worker",
+      "label": "referência → solve dinâmico"
+    },
+    {
+      "from": "fr_scheduler",
+      "to": "redis",
+      "label": "flow.status.*",
+      "labelDy": 73,
+      "labelDx": -60
+    },
+    {
+      "from": "redis",
+      "to": "fr_scheduler",
+      "label": "flow.commands · events (auto-resume)",
+      "labelDy": 70,
+      "labelDx": -100
+    },
+    {
+      "from": "fr_blocks",
+      "to": "redis",
+      "label": "opc.writes · fuzzy.state.*",
+      "variant": "emphasis",
+      "labelDy": 73,
+      "labelDx": -90
+    },
+    {
+      "from": "redis",
+      "to": "fr_blocks",
+      "label": "opc.values · calc.values (espelho)",
+      "labelDy": 10
+    },
+    {
+      "from": "fr_mpc_worker",
+      "to": "redis",
+      "label": "mpc.state.* (+SSTO)",
+      "fromSide": "top",
+      "labelSegment": 0,
+      "labelDy": 20
+    },
+    {
+      "from": "calc_runner",
+      "to": "calc_scriptpool",
+      "label": "roda script sandboxed",
+      "labelDy": 56
+    },
+    {
+      "from": "redis",
+      "to": "calc_runner",
+      "label": "opc.values · calc.values (espelho)",
+      "labelDy": -10
+    },
+    {
+      "from": "calc_runner",
+      "to": "redis",
+      "label": "calc.values · events (CRUD/erro/timeout)",
+      "labelDy": 10
+    },
+    {
+      "from": "redis",
+      "to": "recorder",
+      "label": "todo o barramento (5 assinaturas)",
+      "variant": "dashed",
+      "labelDy": 40,
+      "labelDx": -110
+    },
+    {
+      "from": "recorder",
+      "to": "timescaledb",
+      "label": "INSERT em lote",
+      "labelDy": 66
+    }
   ],
   "cards": [
-    { "dot": "cyan", "title": "Serviços (asyncio, sem Celery)", "items": ["api — auth/JWT, CRUD, comandos, WebSocket e histórico", "flow-runtime — até ~10 flows como tasks; solve MPC e exec() via executor", "opc-worker — único processo que fala OPC-UA; reconexão automática", "recorder — grava Samples, MpcSamples e eventos no TimescaleDB"] },
-    { "dot": "emerald", "title": "Barramento interno (Redis)", "items": ["opc.values.<conn_id> — leituras com qualidade", "opc.writes — escritas com evento de auditoria", "flow.commands — deploy, parar, modos, SP, MV manual", "flow.status / mpc.state — estado publicado, nunca eco de comando"] },
-    { "dot": "rose", "title": "Segurança operacional", "items": ["Watchdog por flow: bit congelado > timeout ⇒ flow para", "Falha sempre para o lado seguro: PLC retoma o comando", "Assume/devolve malhas de forma bumpless", "UI reflete estado publicado; toda escrita gera auditoria"] }
+    {
+      "dot": "cyan",
+      "title": "Contrato do barramento",
+      "items": [
+        "8 canais fixos (ottima_core/bus.py) — mudar um exige ADR",
+        "calc.values reusa o schema de opc.values verbatim — recorder e /ws não traduzem",
+        "ValueSnapshot espelha opc.values.*+calc.values em memória para leitura O(1)",
+        "recorder assina os 5 fluxos em conexões Redis independentes, cada uma com buffer e teto próprios"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Padrão supervisor",
+      "items": [
+        "opc-worker, flow-runtime e calc-worker: supervisor assina events, filtra por kind, gerencia a task da entidade",
+        "opc-worker: watchdog por flow trava a escrita antes da sessão OPC-UA",
+        "MpcHost sobe um processo spawn por bloco MPC (IPOPT) — nunca bloqueia o scan cycle"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Borda e biblioteca compartilhada",
+      "items": [
+        "Só o frontend expõe porta (nginx); os demais serviços ficam na rede interna do compose",
+        "nginx faz proxy de /api/* e /ws para api:8000; login limitado a 30 req/min por IP",
+        "ottima_core: bus.py, pubsub.py, script_pool.py (Script/TFS e tags calculadas) e flowgraph/ (API e flow-runtime)",
+        "api grava certs/ (volume Docker); opc-worker monta o mesmo volume só leitura"
+      ]
+    }
   ]
 }
