@@ -769,3 +769,31 @@ def test_saida_mv_desconectada_e_aprovada():
     graph = mpc_graph(node)  # nenhuma aresta liga a saída mv_a
     tags = mpc_tags(node)
     assert result_of(graph, tags).errors == []
+
+
+def test_saida_local_e_auto_sao_portas_fixas_mesmo_com_o_minimo_de_variaveis():
+    """Portas fixas `local`/`auto` (decisão A-10 revista, spec F4 §2.1-5): existem em todo
+    bloco mpc — ligar `local` a um sumidouro numérico aprova sem erro de handle, mesmo o
+    bloco não tendo nenhuma variável além do mínimo exigido pelos tetos (regra 2)."""
+    node = mpc_node(mvs=[mv("a")])
+    graph = mpc_graph(node)
+    tags = mpc_tags(node)
+    graph["nodes"].append(
+        {
+            "id": "w1",
+            "type": "opc_write",
+            "position": {"x": 400.0, "y": 0.0},
+            "data": {"exec_order": len(graph["nodes"]) + 1, "tag_id": 700},
+        }
+    )
+    graph["edges"].append(
+        {
+            "id": "e_local",
+            "source": "m1",
+            "target": "w1",
+            "sourceHandle": "local",
+            "targetHandle": "in",
+        }
+    )
+    tags[700] = TagRef(id=700, conn_id=3, direction="w", data_type="float")
+    assert result_of(graph, tags).errors == []

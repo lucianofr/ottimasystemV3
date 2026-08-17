@@ -324,10 +324,23 @@ export function handlesEntrada(no: BlocoNode): string[] {
   return portasFixas(no.type, "input");
 }
 
+/** Portas fixas de saída do MPC (decisão A-10 REVISTA 2026-08-17, spec F4 §2.1-5): eixos
+ *  de modo do próprio bloco (RF-621), não uma variável do usuário — ao contrário das
+ *  demais portas do MPC (uma por variável), estas 2 SEMPRE existem, mesmo no nó recém-
+ *  criado sem nenhuma MV/CV. `PORTA_MPC_LOCAL`: 1 em LOCAL, 0 em REMOTO. `PORTA_MPC_AUTO`:
+ *  1 em AUTO (dentro de REMOTO), 0 em MAN. Único ponto de definição da string no frontend —
+ *  `NoMpc` (nodes/index.tsx) importa daqui. Espelha `MPC_PORT_LOCAL`/`MPC_PORT_AUTO`
+ *  (`ottima_core.flowgraph.mpc_config`), hand-mirrado (mesmo padrão de `DIRECT_PASS_RATIO`
+ *  acima): sem geração cruzada de linguagem para 2 literais. */
+export const PORTA_MPC_LOCAL = "local";
+export const PORTA_MPC_AUTO = "auto";
+
 export function handlesSaida(no: BlocoNode): string[] {
   if (no.type === "script") return portasScript("OUT", no.data.n_outputs);
   if (no.type === "fuzzy") return portasScript("OUT", no.data.n_outputs);
-  if (no.type === "mpc") return no.data.variables.mvs.map((mv) => mv.id);
+  if (no.type === "mpc") {
+    return [...no.data.variables.mvs.map((mv) => mv.id), PORTA_MPC_LOCAL, PORTA_MPC_AUTO];
+  }
   return portasFixas(no.type, "output");
 }
 

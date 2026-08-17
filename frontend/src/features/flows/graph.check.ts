@@ -191,7 +191,7 @@ test("os handles de cada tipo são exatamente os que o servidor reconhece", () =
   expect(handlesSaida(tfs("t", 1))).toEqual(["y1", "y2"]);
 });
 
-test("criarBloco('mpc', ...) nasce com config vazio e sem portas (spec F4 §2.1)", () => {
+test("criarBloco('mpc', ...) nasce com config vazio e só as 2 portas fixas de modo (spec F4 §2.1, decisão A-10 revista)", () => {
   const no = mpc("m", 1);
   if (no.type !== "mpc") throw new Error("tipo preservado");
   expect(no.data).toEqual({
@@ -203,10 +203,10 @@ test("criarBloco('mpc', ...) nasce com config vazio e sem portas (spec F4 §2.1)
     models: {},
   });
   expect(handlesEntrada(no)).toEqual([]);
-  expect(handlesSaida(no)).toEqual([]);
+  expect(handlesSaida(no)).toEqual(["local", "auto"]);
 });
 
-test("portas do MPC são dinâmicas do config: entradas CV+Restrição+DV, saída MV, na ordem (decisão A-10)", () => {
+test("portas do MPC são dinâmicas do config: entradas CV+Restrição+DV, saída MV + local/auto fixas, na ordem (decisão A-10)", () => {
   const no = mpc("m", 1, {
     variables: {
       mvs: [variavelMv("mv_1", "Vazão de refluxo", "m3/h")],
@@ -216,7 +216,17 @@ test("portas do MPC são dinâmicas do config: entradas CV+Restrição+DV, saíd
     },
   });
   expect(handlesEntrada(no)).toEqual(["cv_1", "co_1", "dv_1"]);
-  expect(handlesSaida(no)).toEqual(["mv_1"]);
+  expect(handlesSaida(no)).toEqual(["mv_1", "local", "auto"]);
+});
+
+test("podarArestasDoBloco nunca poda arestas em local/auto: portas fixas independem das variáveis (decisão A-10 revista)", () => {
+  const semVariaveis = mpc("m", 1);
+  const arestaLocal = aresta("e1", "m", "local", "w", "in");
+  const arestaAuto = aresta("e2", "m", "auto", "w2", "in");
+  expect(podarArestasDoBloco([arestaLocal, arestaAuto], semVariaveis)).toEqual([
+    arestaLocal,
+    arestaAuto,
+  ]);
 });
 
 test("tipo da porta do MPC é sempre numérico (spec F4 §2.1-5)", () => {

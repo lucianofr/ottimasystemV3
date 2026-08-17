@@ -195,6 +195,11 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy
         "direction": "output",
         "source": "ids de mvs",
         "type": "num"
+      },
+      {
+        "direction": "output",
+        "source": "portas fixas, sempre presentes mesmo sem variáveis (decisão A-10 revista): local, auto",
+        "type": "num"
       }
     ]
   }

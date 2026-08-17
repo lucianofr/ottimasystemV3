@@ -61,7 +61,16 @@ from ottima_core.bus import (
     OpcWrite,
     SstoRun,
 )
-from ottima_core.flowgraph import CvVar, MpcConfig, MvVar, PidBinding, derive_horizons
+from ottima_core.flowgraph import (
+    MPC_FIXED_OUTPUT_PORTS,
+    MPC_PORT_AUTO,
+    MPC_PORT_LOCAL,
+    CvVar,
+    MpcConfig,
+    MvVar,
+    PidBinding,
+    derive_horizons,
+)
 from ottima_core.snapshot import ValueSnapshot
 
 from ..mpc.availability import (
@@ -203,7 +212,9 @@ class MpcBlock(Block):
 
     @property
     def output_ports(self) -> tuple[str, ...]:
-        return self._mv_ids
+        """Uma por MV + as 2 portas fixas de modo (decisão A-10 revista, spec F4 §2.1-5) —
+        estas últimas SEMPRE presentes, mesmo com o bloco recém-criado sem nenhuma MV."""
+        return self._mv_ids + MPC_FIXED_OUTPUT_PORTS
 
     @property
     def host(self) -> MpcHost:
@@ -435,7 +446,7 @@ class MpcBlock(Block):
                 # mudo em `mpc.state.*` até a 1a varredura totalmente quente.
                 self._input_ok = False
                 await self._publish(self._build_state(ts))
-            return null_outputs(self._mv_ids)
+            return null_outputs(self.output_ports)
 
         # RF-613 — validez por linha: CV/Restrição com amostra ruim e `fail_action`
         # `simulate_*` DENTRO de `fail_timeout_s` recebe o valor previsto da última
@@ -489,9 +500,13 @@ class MpcBlock(Block):
         outputs = self._compute_outputs(ok=valid)
         # Saída fria (readback configurado e ainda sem valor) NÃO atualiza o hold: `_mv_last`
         # é "o último valor que a porta de fato apresentou", e um `None` não é um valor.
+        # Só as chaves de MV (`self._mv_ids`) — nunca `outputs.items()` cru: desde a decisão
+        # A-10 revista `outputs` também carrega `local`/`auto` (portas fixas de modo, sem
+        # `mv.limits`/`initial_value`), que não pertencem a este dict (contrato de
+        # `reset()`/`EstadoMpcTransplante.mv_last`: só MV).
         self._mv_last = {
-            mv_id: self._mv_last[mv_id] if sample.v is None else float(sample.v)
-            for mv_id, sample in outputs.items()
+            mv_id: self._mv_last[mv_id] if outputs[mv_id].v is None else float(outputs[mv_id].v)  # type: ignore[arg-type]
+            for mv_id in self._mv_ids
         }
         await self._write_pid(outputs, ok=valid)
 
@@ -780,6 +795,12 @@ class MpcBlock(Block):
                 plano = self._plan.get(mv.id) if self._plan is not None else None
                 v = self._mv_last[mv.id] if plano is None else plano
             outputs[mv.id] = PortSample(v, ok)
+        # Portas fixas de modo (decisão A-10 revista, spec F4 §2.1-5): eixos LOCAL/REMOTO e
+        # MAN/AUTO do próprio bloco, nunca uma variável do usuário — sempre numéricas
+        # (decisão A-5), 1.0/0.0. Mesmo `ok` do resto da varredura (decisão A-6: uma
+        # invalidez, uma flag, em toda porta do bloco).
+        outputs[MPC_PORT_LOCAL] = PortSample(1.0 if self._local_remote == "local" else 0.0, ok)
+        outputs[MPC_PORT_AUTO] = PortSample(1.0 if self._man_auto == "auto" else 0.0, ok)
         return outputs
 
     def _local_output(self, mv: MvVar) -> float | None:

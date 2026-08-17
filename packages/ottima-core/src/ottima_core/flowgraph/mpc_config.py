@@ -38,6 +38,21 @@ RowFailAction = Literal[
     "no_action", "shed_local", "manual", "simulate_manual", "simulate_shed_local"
 ]
 
+# Portas fixas de saída (decisão A-10 REVISTA 2026-08-17, spec F4 §2.1-5): ao contrário das
+# demais portas do bloco (uma por variável configurada), estas duas SEMPRE existem — mesmo
+# no nó recém-criado sem nenhuma MV/CV — porque refletem os eixos de MODO do bloco (RF-621),
+# não uma variável do usuário. Único ponto de definição da string: `validate.py`
+# (`_output_handles`) e `services/flow-runtime/.../blocks/mpc.py` (`output_ports`,
+# `_compute_outputs`) importam daqui — nunca literais duplicados.
+#
+# Valor sempre numérico (decisão A-5: toda porta do MPC é numérica, nunca bool): 1.0/0.0.
+# `MPC_PORT_LOCAL`: 1.0 em LOCAL, 0.0 em REMOTO. `MPC_PORT_AUTO`: 1.0 em AUTO (dentro de
+# REMOTO), 0.0 em MAN. Saem nulas junto com as demais saídas sob cold start das entradas
+# (padrão F3 §3.0) — mesma regra de invalidez de toda porta do bloco numa varredura ruim.
+MPC_PORT_LOCAL = "local"
+MPC_PORT_AUTO = "auto"
+MPC_FIXED_OUTPUT_PORTS: tuple[str, str] = (MPC_PORT_LOCAL, MPC_PORT_AUTO)
+
 
 def _exigir_prefixo(value: str, prefixo: str, categoria: str) -> str:
     """Confere o prefixo estável do id por categoria (spec §2.1-1); mensagem pt-BR vira 422."""

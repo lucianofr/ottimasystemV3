@@ -43,6 +43,7 @@ import json
 from ottima_core.bus import FlowStatus, FuzzyState, MpcState, PortValue
 from ottima_core.flowgraph import (
     MAX_SCRIPT_PORTS,
+    MPC_FIXED_OUTPUT_PORTS,
     ConstraintVar,
     CvVar,
     DvVar,
@@ -222,6 +223,14 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
         "rules": [
             {"direction": "input", "source": "ids de cvs + constraints + dvs", "type": "num"},
             {"direction": "output", "source": "ids de mvs", "type": "num"},
+            {
+                "direction": "output",
+                "source": (
+                    "portas fixas, sempre presentes mesmo sem variáveis (decisão A-10 "
+                    f"revista): {', '.join(MPC_FIXED_OUTPUT_PORTS)}"
+                ),
+                "type": "num",
+            },
         ],
     },
 }

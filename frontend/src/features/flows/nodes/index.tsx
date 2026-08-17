@@ -3,6 +3,8 @@ import type { NodeProps, NodeTypes } from "@xyflow/react";
 import type { TagOut } from "../../../lib/api";
 import { ROTULO_TIPO } from "../../tags/useTags";
 import {
+  PORTA_MPC_AUTO,
+  PORTA_MPC_LOCAL,
   passagemDireta,
   portasFixas,
   portasScript,
@@ -230,12 +232,17 @@ export function NoFiltroKalman({ id, data, selected }: NodeProps<NoKalman>) {
 }
 
 /** Portas dinâmicas do config (spec F4 §7.2, decisão A-10): entradas = CVs+Restrições+DVs à
- *  esquerda, saída = MVs à direita, na ordem do config; sem variáveis ⇒ sem portas
- *  (B-F4-01 passo 5). */
+ *  esquerda, saída = MVs à direita, na ordem do config; sem variáveis ⇒ sem entradas, mas
+ *  as 2 portas fixas de modo (`local`/`auto`, decisão A-10 revista) continuam saindo — não
+ *  dependem de nenhuma variável (B-F4-01 passo 5). */
 export function NoMpc({ id, data, selected }: NodeProps<NoMpcData>) {
   const { mvs, cvs, constraints, dvs } = data.variables;
   const entradas = portasMpc([...cvs, ...constraints, ...dvs]);
-  const saidas = portasMpc(mvs);
+  const saidas = [
+    ...portasMpc(mvs),
+    { id: PORTA_MPC_LOCAL, rotulo: "LOCAL" },
+    { id: PORTA_MPC_AUTO, rotulo: "AUTO" },
+  ];
   return (
     <BlocoChapa
       tipo="mpc"

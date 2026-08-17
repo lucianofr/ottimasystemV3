@@ -752,7 +752,72 @@ async def test_command_mpc_sp_so_materializa_em_auto_com_clamp_em_sp_limits() ->
 async def test_cold_start_produz_saidas_nulas() -> None:
     block, *_ = _block()
     saida = await block.step({"cv_a": PortSample(None, False)})
-    assert saida == {"mv_pid": PortSample(None, False), "mv_direto": PortSample(None, False)}
+    assert saida == {
+        "mv_pid": PortSample(None, False),
+        "mv_direto": PortSample(None, False),
+        "local": PortSample(None, False),
+        "auto": PortSample(None, False),
+    }
+
+
+# --------------------------------------------------------------------------------------
+# Portas fixas `local`/`auto` (decisão A-10 revista, spec F4 §2.1-5): eixos de modo do
+# bloco, SEMPRE presentes em output_ports — numéricas 1.0/0.0, nunca uma variável do
+# usuário.
+# --------------------------------------------------------------------------------------
+
+
+def test_output_ports_inclui_as_2_portas_fixas_apos_as_mvs() -> None:
+    block, *_ = _block()
+    assert set(block.output_ports) == {"mv_pid", "mv_direto", "local", "auto"}
+    assert block.output_ports[-2:] == ("local", "auto")
+
+
+async def test_boot_local_man_publica_local_1_e_auto_0() -> None:
+    """Deploy nasce sempre LOCAL/MAN (RF-621, RNF-03) — sem nenhum command()."""
+    block, *_ = _block()
+    saida = await block.step(entradas(20.0))
+    assert saida["local"] == PortSample(1.0, True)
+    assert saida["auto"] == PortSample(0.0, True)
+
+
+async def test_remoto_man_publica_local_0_e_auto_0() -> None:
+    block, *_ = _block()
+    await block.command("mpc_mode", {"axis": "local_remote", "value": "remote"}, OPERADOR)
+    saida = await block.step(entradas(20.0))
+    assert saida["local"] == PortSample(0.0, True)
+    assert saida["auto"] == PortSample(0.0, True)
+
+
+async def test_remoto_auto_publica_local_0_e_auto_1() -> None:
+    block, *_ = _block()
+    await _entra_remoto_auto(block)
+    saida = await block.step(entradas(20.0))
+    assert saida["local"] == PortSample(0.0, True)
+    assert saida["auto"] == PortSample(1.0, True)
+
+
+async def test_entrada_invalida_propaga_ok_false_tambem_em_local_e_auto() -> None:
+    """Decisão A-6: uma invalidez, uma flag, em TODA porta do bloco — as fixas não são
+    exceção só porque o valor não depende da CV/Restrição/DV."""
+    block, *_ = _block()
+    saida = await block.step(entradas(20.0, ok=False))
+    assert saida["local"] == PortSample(1.0, False)
+    assert saida["auto"] == PortSample(0.0, False)
+
+
+async def test_mv_last_e_mv_manual_nunca_herdam_local_ou_auto() -> None:
+    """Regressão: `_compute_outputs` inclui `local`/`auto` no dict de saída desde a decisão
+    A-10 revista; `_mv_last` (contrato: só MV — `EstadoMpcTransplante.mv_last`/`reset()`) e
+    `_mv_manual` (copiado de `_mv_last` nas transições `local_remote`/`man_auto`) não podem
+    herdar essas 2 chaves."""
+    block, *_ = _block()
+    await block.step(entradas(20.0))
+    await _entra_remoto_auto(block)  # exercita as 2 trocas `mv_manual := dict(mv_last)`
+    await block.step(entradas(20.0))
+    estado = block.snapshot_estado()
+    assert set(estado.mv_last) == {"mv_pid", "mv_direto"}
+    assert set(estado.mv_manual) == {"mv_pid", "mv_direto"}
 
 
 # --------------------------------------------------------------------------------------
@@ -926,7 +991,12 @@ async def test_cold_start_publica_frame_com_input_valid_false_na_fronteira() -> 
 
     saida = await block.step({"cv_a": PortSample(None, False)})
 
-    assert saida == {"mv_pid": PortSample(None, False), "mv_direto": PortSample(None, False)}
+    assert saida == {
+        "mv_pid": PortSample(None, False),
+        "mv_direto": PortSample(None, False),
+        "local": PortSample(None, False),
+        "auto": PortSample(None, False),
+    }
     assert len(publish.states) == 1, "fronteira em cold start precisa publicar um frame"
     estado = publish.states[0]
     assert estado.status.input_valid is False

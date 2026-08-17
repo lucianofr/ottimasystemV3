@@ -17,6 +17,9 @@ todo consumidor; ninguém fora deste pacote deve importar `ottima_core.flowgraph
 """
 
 from ottima_core.flowgraph.mpc_config import (
+    MPC_FIXED_OUTPUT_PORTS,
+    MPC_PORT_AUTO,
+    MPC_PORT_LOCAL,
     ConstraintObjective,
     ConstraintVar,
     CvObjective,
@@ -77,6 +80,9 @@ from ottima_core.flowgraph.validate import (
 __all__ = [
     "MAX_DELAY_SAMPLES",
     "MAX_SCRIPT_PORTS",
+    "MPC_FIXED_OUTPUT_PORTS",
+    "MPC_PORT_AUTO",
+    "MPC_PORT_LOCAL",
     "NODE_TYPES",
     "ConstraintObjective",
     "ConstraintVar",

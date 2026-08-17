@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from ottima_core.flowgraph.mpc_config import (
+    MPC_FIXED_OUTPUT_PORTS,
     MpcConfig,
     RowKind,
     derive_horizons,
@@ -111,10 +112,13 @@ def _output_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[
     if node.type == "tfs":
         return ("y1", "y2")
     if node.type == "mpc":
-        # Decisão A-10: uma saída por MV, handle = id estável da variável; podem ficar
-        # desconectadas (a malha real usa as tags do `pid`).
+        # Decisão A-10 revista (2026-08-17): uma saída por MV + as 2 portas fixas de modo
+        # (`MPC_FIXED_OUTPUT_PORTS`, spec F4 §2.1-5) — estas últimas existem SEMPRE, mesmo
+        # sem config (`mpc_configs.get` ausente/`None` cai no `()` de MV mas as fixas
+        # continuam). Podem ficar desconectadas (a malha real usa as tags do `pid`).
         config = mpc_configs.get(node.id)
-        return tuple(mv.id for mv in config.variables.mvs) if config else ()
+        mv_ids = tuple(mv.id for mv in config.variables.mvs) if config else ()
+        return mv_ids + MPC_FIXED_OUTPUT_PORTS
     if node.type == "pid":
         return ("out",)
     if node.type in _FILTER_TYPES:
