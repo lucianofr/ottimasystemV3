@@ -27,10 +27,7 @@ _Debt that causes recurring problems or bugs._
   - **Owner:** @unassigned
   - **Created:** 2025-01-01
 -->
-- [ ] **TD-026**: Regressão de comportamento da tela de operação só é detectada rodando o Playwright à mão contra um stack reconstruído
-  - **Evidência de 2026-08-16**: `PW-OP-11` (zoom em X sobrevive à troca do eixo Y) ficou vermelho ao mesclar o fix de tema em `TrendOperacao.tsx` — o helper do cenário varre a lista de hooks da fibra do React com teto fixo, e um hook novo (`useTema`) pôs o ref do uPlot fora do alcance. Passou por `ruff`, `test:unit` 633, `typecheck` e `build` **todos verdes**. Só apareceu quando alguém reconstruiu o container e rodou `operate-trend.spec.ts`.
-  - **Por que continua aberto e não é esquecimento**: a ADR-035 decidiu que a stack de 9 serviços, o `opcsim` e as credenciais de `deploy/.env` ficam fora do CI. O item registra o **custo** da decisão, para ele ser revisto de olho aberto — não a contradiz.
-  - **Mitigação em uso hoje**: rodar `cd frontend && npm run e2e` (ou o spec afetado) contra o stack reconstruído a partir da `main` antes de considerar mesclada qualquer mudança em `frontend/src/features/operate/` ou `frontend/src/features/trend/`.
+_Nenhum item aberto._
 
 ## Medium (Slows Development)
 
@@ -58,7 +55,18 @@ _Known issues not currently prioritized._
   - **Created:** 2025-01-01
 -->
 
-_Nenhum item aberto._
+- [ ] **TD-026**: Regressão de comportamento da tela de operação só é detectada rodando o Playwright à mão contra um stack reconstruído
+  - **Evidência de 2026-08-16**: `PW-OP-11` (zoom em X sobrevive à troca do eixo Y) ficou vermelho ao mesclar o fix de tema em `TrendOperacao.tsx` — o helper do cenário varre a lista de hooks da fibra do React com teto fixo, e um hook novo (`useTema`) pôs o ref do uPlot fora do alcance. Passou por `ruff`, `test:unit` 633, `typecheck` e `build` **todos verdes**. Só apareceu quando alguém reconstruiu o container e rodou `operate-trend.spec.ts`.
+  - **Por que continua aberto e não é esquecimento**: a ADR-035 decidiu que a stack de 9 serviços, o `opcsim` e as credenciais de `deploy/.env` ficam fora do CI. O item registra o **custo** da decisão, para ele ser revisto de olho aberto — não a contradiz.
+  - **Mitigação em uso hoje**: rodar `cd frontend && npm run e2e` (ou o spec afetado) contra o stack reconstruído a partir da `main` antes de considerar mesclada qualquer mudança em `frontend/src/features/operate/` ou `frontend/src/features/trend/`.
+  - **Rebaixado para Low em 2026-08-16, com prova:** `npm run e2e` completo contra stack reconstruída de `bc4e882` (frontend, api e flow-runtime rebuildados, 9 serviços `healthy`, flow redeployado por `scripts/setup-l3.py`): **64 passed, 2,4 min, zero failed, zero flaky**, incluindo `PW-OP-11` (7,4 s) e `PW-OP-13` (1,0 s). O código está são nesta `main`; o que permanece é a ausência de gatilho automático.
+  - **Margem medida da causa específica:** a instância do uPlot está no hook de índice **41** da fibra de `TrendOperacao`, medido na planta viva. O teto antigo da varredura (`i < 40`) errava por um; o atual (`200`) deixa ~159 hooks de folga. Recorrência daquela causa é quantificadamente improvável.
+  - **Runbook (o gatilho é de processo, não de máquina):** antes de considerar mesclada qualquer mudança em `frontend/src/features/operate/`, `frontend/src/features/trend/` ou nos contratos que elas consomem, rode nesta ordem:
+    1. `cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build --no-deps frontend api flow-runtime`
+    2. `uv run python scripts/setup-l3.py` (o restart do flow-runtime deixa o flow parado)
+    3. `cd frontend && npm run e2e` com as credenciais inline (`CLAUDE.md:168-170`)
+
+    Rodar a suíte contra um container antigo dá **verde falso** — o bundle testado é o do container, não o da árvore.
 
 ---
 
