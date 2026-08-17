@@ -55,6 +55,24 @@ class ClienteOttima:
     async def fechar(self) -> None:
         await self._http.aclose()
 
+    @property
+    def url(self) -> str:
+        return self._config.url
+
+    @property
+    def token(self) -> str | None:
+        """JWT vigente sem o prefixo `Bearer ` — para quem monta a URL do `/ws`
+        (`?token=<jwt>`, `confirmacao.py`), que não fala REST/headers."""
+        cabecalho = self._http.headers.get("Authorization")
+        return cabecalho.removeprefix("Bearer ") if cabecalho else None
+
+    async def reautenticar(self) -> None:
+        """Login de novo, forçando um JWT fresco. Uso: sessão WS fechada com 1008 (token
+        expirado) — REST já reloga sozinho em 401 (`_chamar`); o `/ws` não tem esse retry
+        embutido no protocolo, então quem espera confirmação (`confirmacao.py`) chama isto
+        explicitamente antes de tentar reconectar, exatamente uma vez."""
+        await self._login()
+
     async def get(self, path: str, **params: Any) -> Any:
         """Query params `None` são omitidos — chamadores passam filtros opcionais direto
         como kwargs (ex.: `start=None`) sem montar o dict à mão."""

@@ -1,4 +1,5 @@
-"""Servidor MCP: ferramentas de leitura sobre a API REST do OttimaSystem (ADR-036, Fase 2).
+"""Servidor MCP sobre a API REST/WS do OttimaSystem (ADR-036). Ferramentas de leitura
+(Fase 2) e de escrita de operação com confirmação publicada (Fase 3, RNF-05).
 
 Superfície curada — só operação, monitoramento e engenharia de flows; nenhuma ferramenta de
 users/certificates/connections-write/tags-write/projects-write/system-settings (ADR-036).
@@ -6,19 +7,22 @@ users/certificates/connections-write/tags-write/projects-write/system-settings (
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 from pydantic import Field
 
+from ottima_core.bus import CHANNEL_EVENTS, channel_mpc_state
 from ottima_core.contracts_export import build_contracts
 from ottima_core.flowgraph.parse import NODE_TYPES
 from ottima_mcp.cliente import ClienteOttima
 from ottima_mcp.config import Config
+from ottima_mcp.confirmacao import ErroConfirmacao, esperar_confirmacao
 
 
 @dataclass
@@ -85,6 +89,255 @@ async def ssto_last(
     if resultado is None:
         return f"Bloco '{block_id}' do flow {flow_id} ainda não executou nenhum ciclo de SSTO."
     return resultado
+
+
+# --------------------------------------------------------------------------------------
+# Operação — escrita (Fase 3). Toda escrita espera a confirmação PUBLICADA pelo runtime
+# (RNF-05: comandado ≠ confirmado) — nunca reporta sucesso só pelo 202 HTTP.
+# --------------------------------------------------------------------------------------
+
+
+async def _timeout_padrao(cliente: ClienteOttima, flow_id: int, block_id: str) -> float:
+    """`limite = max(2×ts_mpc, 10s)`; o fator 2× sobrevive a UMA publicação de fronteira
+    perdida na fila de profundidade 8 do `/ws` (`ws.py:QUEUE_MAX`)."""
+    blocos = await cliente.get("/api/operate/mpcs")
+    for bloco in blocos:
+        if bloco["flow_id"] == flow_id and bloco["block_id"] == block_id:
+            ts_mpc = bloco["flow_ts_seconds"] * bloco["multiplier"]
+            return max(2 * ts_mpc, 10.0)
+    return 10.0  # bloco não encontrado aqui — a rota REST relevante devolve 404/422 de verdade
+
+
+def _erro_com_estado(erro: ErroConfirmacao) -> RuntimeError:
+    if erro.ultimo_estado is None:
+        return RuntimeError(erro.mensagem)
+    detalhe = f"Último estado observado: {json.dumps(erro.ultimo_estado)}"
+    return RuntimeError(f"{erro.mensagem} {detalhe}")
+
+
+@mcp.tool()
+async def mpc_set_mode(
+    flow_id: Annotated[int, Field(description="Id do flow")],
+    block_id: Annotated[str, Field(description="Id do bloco MPC")],
+    axis: Annotated[
+        Literal["local_remote", "man_auto"], Field(description="Eixo de modo a comandar")
+    ],
+    value: Annotated[
+        Literal["local", "remote", "man", "auto"], Field(description="Valor alvo do eixo")
+    ],
+    ctx: Context[ContextoOttima],
+    timeout: Annotated[  # noqa: ASYNC109 - parâmetro público da ferramenta, não reimplementação de wait_for
+        float | None,
+        Field(description="Segundos a esperar a confirmação; default: derivado do Ts do MPC"),
+    ] = None,
+) -> dict[str, Any]:
+    """Troca o modo LOCAL/REMOTO ou MAN/AUTO de um MPC (ADR-010) e espera a confirmação
+    publicada pelo runtime antes de devolver — nunca reporta sucesso só pelo 202 HTTP
+    (RNF-05). `man_auto` só tem efeito com o bloco em REMOTO; comandado em LOCAL é
+    silenciosamente ignorado pelo runtime (nenhum evento, nenhum erro) — o tempo esgotado
+    nesse caso já vem com o diagnóstico certo, não é lentidão."""
+    cliente = _cliente(ctx)
+    canal = channel_mpc_state(flow_id, block_id)
+
+    async def _publicar() -> None:
+        await cliente.post(
+            f"/api/operate/{flow_id}/{block_id}/mode", json={"axis": axis, "value": value}
+        )
+
+    def _sucesso(canal_msg: str, dado: dict[str, Any]) -> bool:
+        if canal_msg == canal:
+            return dado.get("modes", {}).get(axis) == value
+        payload = dado.get("payload", {})
+        return (
+            payload.get("kind") == "mpc_mode_changed"
+            and payload.get("axis") == axis
+            and payload.get("to") == value
+        )
+
+    def _falha(canal_msg: str, dado: dict[str, Any]) -> bool:
+        if canal_msg != CHANNEL_EVENTS:
+            return False
+        payload = dado.get("payload", {})
+        return payload.get("kind") == "mpc_arm_failed" and payload.get("axis") == axis
+
+    prazo = timeout if timeout is not None else await _timeout_padrao(cliente, flow_id, block_id)
+    try:
+        estado, evento_falha = await esperar_confirmacao(
+            cliente,
+            interesses={"mpc_state": [f"{flow_id}/{block_id}"], "events": True},
+            publicar_comando=_publicar,
+            predicado_sucesso=_sucesso,
+            predicado_falha=_falha,
+            canais_relevantes=(canal, CHANNEL_EVENTS),
+            limite_segundos=prazo,
+        )
+    except ErroConfirmacao as erro:
+        modos = (erro.ultimo_estado or {}).get("modes", {})
+        if axis == "man_auto" and modos.get("local_remote") == "local":
+            raise RuntimeError(
+                "Tempo esgotado, mas o bloco está em LOCAL: MAN/AUTO só tem efeito em "
+                "REMOTO (ADR-010) — o comando foi silenciosamente ignorado pelo runtime, "
+                f"não é lentidão. Estado observado: {json.dumps(erro.ultimo_estado)}"
+            ) from erro
+        raise _erro_com_estado(erro) from erro
+    if evento_falha is not None:
+        razao = evento_falha.get("payload", {}).get("reason", evento_falha)
+        raise RuntimeError(f"Comando recusado pelo runtime (mpc_arm_failed): {razao}")
+    return estado or {}
+
+
+@mcp.tool()
+async def mpc_write_sp(
+    flow_id: Annotated[int, Field(description="Id do flow")],
+    block_id: Annotated[str, Field(description="Id do bloco MPC")],
+    var_id: Annotated[str, Field(description="Id da CV (prefixo cv_)")],
+    value: Annotated[float, Field(description="Novo SP, dentro de sp_limits")],
+    ctx: Context[ContextoOttima],
+    timeout: Annotated[  # noqa: ASYNC109 - parâmetro público da ferramenta, não reimplementação de wait_for
+        float | None,
+        Field(description="Segundos a esperar a confirmação; default: derivado do Ts do MPC"),
+    ] = None,
+) -> dict[str, Any]:
+    """Escreve o SP de uma CV — só tem efeito com o bloco em REMOTO+AUTO (spec §4.8); fora
+    disso o PV-tracking manda e o backend ignora silenciosamente (sem 422). Confirma por
+    evento `mpc_sp_written` OU pelo campo `sp` publicado (é o comando aplicado, republicado
+    a cada fronteira — cobre o evento perdido na fila do `/ws` e o retry idempotente do
+    mesmo valor, `mpc.py:1043-1044`). Valor fora de `sp_limits` é 422 do backend, propagado
+    como erro antes mesmo de esperar confirmação."""
+    cliente = _cliente(ctx)
+    canal = channel_mpc_state(flow_id, block_id)
+
+    async def _publicar() -> None:
+        await cliente.post(
+            f"/api/operate/{flow_id}/{block_id}/sp", json={"var_id": var_id, "value": value}
+        )
+
+    def _sucesso(canal_msg: str, dado: dict[str, Any]) -> bool:
+        if canal_msg == canal:
+            sp_publicado = dado.get("vars", {}).get(var_id, {}).get("sp")
+            return sp_publicado is not None and abs(sp_publicado - value) < 1e-9
+        payload = dado.get("payload", {})
+        return payload.get("kind") == "mpc_sp_written" and payload.get("var_id") == var_id
+
+    prazo = timeout if timeout is not None else await _timeout_padrao(cliente, flow_id, block_id)
+    try:
+        estado, _evento_falha = await esperar_confirmacao(
+            cliente,
+            interesses={"mpc_state": [f"{flow_id}/{block_id}"], "events": True},
+            publicar_comando=_publicar,
+            predicado_sucesso=_sucesso,
+            canais_relevantes=(canal, CHANNEL_EVENTS),
+            limite_segundos=prazo,
+        )
+    except ErroConfirmacao as erro:
+        modos = (erro.ultimo_estado or {}).get("modes", {})
+        if modos.get("local_remote") != "remote" or modos.get("man_auto") != "auto":
+            raise RuntimeError(
+                "Tempo esgotado, mas o bloco não está em REMOTO+AUTO: SP só é aplicado "
+                "nesse modo (spec §4.8) — o comando foi provavelmente ignorado "
+                f"silenciosamente pelo runtime, não é lentidão. Modo observado: {modos}"
+            ) from erro
+        raise _erro_com_estado(erro) from erro
+    return estado or {}
+
+
+@mcp.tool()
+async def mpc_write_mv(
+    flow_id: Annotated[int, Field(description="Id do flow")],
+    block_id: Annotated[str, Field(description="Id do bloco MPC")],
+    var_id: Annotated[str, Field(description="Id da MV (prefixo mv_)")],
+    value: Annotated[float, Field(description="Nova MV, dentro de limits")],
+    ctx: Context[ContextoOttima],
+    timeout: Annotated[  # noqa: ASYNC109 - parâmetro público da ferramenta, não reimplementação de wait_for
+        float | None,
+        Field(description="Segundos a esperar a confirmação; default: derivado do Ts do MPC"),
+    ] = None,
+) -> dict[str, Any]:
+    """Escreve uma MV manualmente — só tem efeito com o bloco em REMOTO+MAN (spec §4.8,
+    ADR-010: em LOCAL o sistema nunca escreve MV). Confirma **só** por evento
+    `mpc_mv_written` — NUNCA pelo campo `v` publicado: `v` é a posição fisicamente aplicada
+    (`mpc.py:1098`), rampeada por `max_rate` ao longo de vários ciclos (ADR-028); pode
+    divergir do valor comandado por vários ciclos mesmo com o comando já aceito, e usar `v`
+    como sucesso mentiria sobre isso. Valor fora de `limits` é 422 do backend, propagado
+    como erro antes mesmo de esperar confirmação."""
+    cliente = _cliente(ctx)
+    canal = channel_mpc_state(flow_id, block_id)
+
+    async def _publicar() -> None:
+        await cliente.post(
+            f"/api/operate/{flow_id}/{block_id}/mv", json={"var_id": var_id, "value": value}
+        )
+
+    def _sucesso(canal_msg: str, dado: dict[str, Any]) -> bool:
+        if canal_msg != CHANNEL_EVENTS:
+            return False
+        payload = dado.get("payload", {})
+        return payload.get("kind") == "mpc_mv_written" and payload.get("var_id") == var_id
+
+    prazo = timeout if timeout is not None else await _timeout_padrao(cliente, flow_id, block_id)
+    try:
+        estado, _evento_falha = await esperar_confirmacao(
+            cliente,
+            interesses={"mpc_state": [f"{flow_id}/{block_id}"], "events": True},
+            publicar_comando=_publicar,
+            predicado_sucesso=_sucesso,
+            canais_relevantes=(canal, CHANNEL_EVENTS),
+            limite_segundos=prazo,
+        )
+    except ErroConfirmacao as erro:
+        modos = (erro.ultimo_estado or {}).get("modes", {})
+        if modos.get("local_remote") != "remote" or modos.get("man_auto") != "man":
+            raise RuntimeError(
+                "Tempo esgotado, mas o bloco não está em REMOTO+MAN: MV manual só é "
+                "aplicada nesse modo (spec §4.8, ADR-010) — o comando foi provavelmente "
+                f"ignorado silenciosamente pelo runtime, não é lentidão. Modo observado: {modos}"
+            ) from erro
+        raise RuntimeError(
+            f"{erro.mensagem} O bloco MPC é idempotente para MV manual (mpc.py:1063-1064): "
+            "se o valor pedido já é o vigente, nenhum novo evento é emitido. Confira "
+            "`mpc_state` antes de reenviar o MESMO valor — reenviar não vai gerar novo "
+            f"evento. Último estado observado: {json.dumps(erro.ultimo_estado)}"
+            if erro.ultimo_estado is not None
+            else erro.mensagem
+        ) from erro
+    return estado or {}
+
+
+@mcp.tool()
+async def mpc_state(
+    flow_id: Annotated[int, Field(description="Id do flow")],
+    block_id: Annotated[str, Field(description="Id do bloco MPC")],
+    ctx: Context[ContextoOttima],
+    timeout: Annotated[  # noqa: ASYNC109 - parâmetro público da ferramenta, não reimplementação de wait_for
+        float | None,
+        Field(description="Segundos a esperar a 1a publicação; default: derivado do Ts do MPC"),
+    ] = None,
+) -> dict[str, Any]:
+    """Estado ao vivo de um MPC: modos, valores/SP correntes, custo, predição — a mesma
+    fonte que o faceplate usa. Leitura one-shot: espera a primeira publicação em
+    `mpc.state.<flow_id>.<block_id>` (não existe endpoint REST de estado vivo, só `/ws`)."""
+    cliente = _cliente(ctx)
+    canal = channel_mpc_state(flow_id, block_id)
+
+    async def _nao_publica_nada() -> None:
+        return None
+
+    prazo = timeout if timeout is not None else await _timeout_padrao(cliente, flow_id, block_id)
+    try:
+        estado, _evento_falha = await esperar_confirmacao(
+            cliente,
+            interesses={"mpc_state": [f"{flow_id}/{block_id}"]},
+            publicar_comando=_nao_publica_nada,
+            predicado_sucesso=lambda canal_msg, _dado: canal_msg == canal,
+            canais_relevantes=(canal,),
+            limite_segundos=prazo,
+        )
+    except ErroConfirmacao as erro:
+        raise RuntimeError(
+            "Nenhuma publicação de mpc_state chegou dentro do tempo — o flow está rodando "
+            f"e o bloco existe? {erro.mensagem}"
+        ) from erro
+    return estado or {}
 
 
 # --------------------------------------------------------------------------------------
