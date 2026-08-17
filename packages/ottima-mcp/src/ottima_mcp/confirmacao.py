@@ -32,6 +32,7 @@ from typing import Any
 import websockets
 from websockets.exceptions import ConnectionClosed
 
+from ottima_core.bus import CHANNEL_EVENTS
 from ottima_mcp.cliente import ClienteOttima
 
 Predicado = Callable[[str, dict[str, Any]], bool]
@@ -75,7 +76,7 @@ async def _tentativa(
     canais_relevantes: tuple[str, ...],
     limite_segundos: float,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    ultimo_mpc_state: dict[str, Any] | None = None
+    ultimo_estado: dict[str, Any] | None = None
     try:
         async with websockets.connect(_url_ws(cliente)) as ws:
             await ws.send(json.dumps({"subscribe": interesses}))
@@ -91,22 +92,22 @@ async def _tentativa(
                     dado = mensagem.get("data")
                     if canal not in canais_relevantes or not isinstance(dado, dict):
                         continue
-                    if canal.startswith("mpc.state."):
-                        ultimo_mpc_state = dado
+                    if canal != CHANNEL_EVENTS:
+                        ultimo_estado = dado
                     if predicado_sucesso(canal, dado):
-                        return ultimo_mpc_state, None
+                        return ultimo_estado, None
                     if predicado_falha is not None and predicado_falha(canal, dado):
-                        return ultimo_mpc_state, dado
+                        return ultimo_estado, dado
     except ConnectionClosed as fechado:
         codigo = fechado.rcvd.code if fechado.rcvd else None
         if codigo == 1008:
             raise _SessaoRecusada from None
         raise ErroConfirmacao(
-            f"Conexão WS perdida (código {codigo}) aguardando confirmação.", ultimo_mpc_state
+            f"Conexão WS perdida (código {codigo}) aguardando confirmação.", ultimo_estado
         ) from None
     except TimeoutError:
         raise ErroConfirmacao(
-            "Tempo esgotado aguardando confirmação do comando.", ultimo_mpc_state
+            "Tempo esgotado aguardando confirmação do comando.", ultimo_estado
         ) from None
 
 

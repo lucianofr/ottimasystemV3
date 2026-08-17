@@ -17,12 +17,18 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 from pydantic import Field
 
-from ottima_core.bus import CHANNEL_EVENTS, channel_mpc_state
+from ottima_core.bus import CHANNEL_EVENTS, channel_flow_status, channel_mpc_state
 from ottima_core.contracts_export import build_contracts
 from ottima_core.flowgraph.parse import NODE_TYPES
 from ottima_mcp.cliente import ClienteOttima
 from ottima_mcp.config import Config
 from ottima_mcp.confirmacao import ErroConfirmacao, esperar_confirmacao
+from ottima_mcp.grafo import flow_add_block as _grafo_add_block
+from ottima_mcp.grafo import flow_connect as _grafo_connect
+from ottima_mcp.grafo import flow_create as _grafo_create
+from ottima_mcp.grafo import flow_disconnect as _grafo_disconnect
+from ottima_mcp.grafo import flow_remove_block as _grafo_remove_block
+from ottima_mcp.grafo import flow_update_block as _grafo_update_block
 
 
 @dataclass
@@ -463,3 +469,221 @@ def block_catalog() -> dict[str, Any]:
     consultar antes de montar `config` em `flow_add_block` (Fase 4). Fonte única, gerada do
     backend (`ottima_core.contracts_export`), nunca reimplementada aqui."""
     return {"node_types": list(NODE_TYPES), **build_contracts()}
+
+
+# --------------------------------------------------------------------------------------
+# Engenharia de flows — escrita (Fase 4). Read-modify-write do graph_json (grafo.py);
+# deploy/stop seguem a mesma regra de confirmação publicada da Fase 3 (RNF-05).
+# --------------------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def flow_create(
+    project_id: Annotated[int, Field(description="Id do projeto (deve ser o ativo)")],
+    name: Annotated[str, Field(description="Nome do flow, único no projeto")],
+    ts_seconds: Annotated[
+        Literal[0.5, 1, 2, 5, 10, 30, 60], Field(description="Período de scan, em segundos")
+    ],
+    ctx: Context[ContextoOttima],
+) -> dict[str, Any]:
+    """Cria um flow novo, parado (ADR-017), com grafo vazio. Use `flow_add_block`/
+    `flow_connect` para montar o desenho e `flow_deploy` para colocar em execução."""
+    return await _grafo_create(_cliente(ctx), project_id, name, ts_seconds)
+
+
+@mcp.tool()
+async def flow_add_block(
+    flow_id: Annotated[int, Field(description="Id do flow")],
+    type: Annotated[
+        Literal[
+            "opc_read",
+            "opc_write",
+            "script",
+            "fuzzy",
+            "tfs",
+            "mpc",
+            "first_order",
+            "kalman",
+            "pid",
+        ],
+        Field(description="Tipo do bloco — ver block_catalog para os campos de config"),
+    ],
+    config: Annotated[
+        dict[str, Any], Field(description="Campos de config do bloco (forma em block_catalog)")
+    ],
+    ctx: Context[ContextoOttima],
+    position: Annotated[
+        dict[str, float] | None, Field(description="{x, y} no canvas; default (0, 0)")
+    ] = None,
+    label: Annotated[str | None, Field(description="Rótulo opcional exibido no editor")] = None,
+) -> dict[str, Any]:
+    """Adiciona um bloco ao flow (read-modify-write do `graph_json` inteiro). `exec_order`
+    é atribuído automaticamente (vai por último); use `flow_update_block` para reordenar.
+    Devolve `node_id` gerado junto com o flow salvo e `warnings` (avisos não-bloqueantes de
+    inversão de exec_order, RF-307). 422 do backend (campo de config inválido/desconhecido)
+    propagado verbatim."""
+    return await _grafo_add_block(_cliente(ctx), flow_id, type, config, position, label)
+
+
+@mcp.tool()
+async def flow_remove_block(
+    flow_id: Annotated[int, Field(description="Id do flow")],
+    block_id: Annotated[str, Field(description="Id do bloco a remover")],
+    ctx: Context[ContextoOttima],
+) -> dict[str, Any]:
+    """Remove um bloco e toda aresta conectada a ele; renumera `exec_order` 1..N do
+    restante."""
+    return await _grafo_remove_block(_cliente(ctx), flow_id, block_id)
+
+
+@mcp.tool()
+async def flow_update_block(
+    flow_id: Annotated[int, Field(description="Id do flow")],
+    block_id: Annotated[str, Field(description="Id do bloco a editar")],
+    ctx: Context[ContextoOttima],
+    config_patch: Annotated[
+        dict[str, Any] | None, Field(description="Campos de config a sobrescrever (merge raso)")
+    ] = None,
+    position: Annotated[dict[str, float] | None, Field(description="Novo {x, y}")] = None,
+    exec_order: Annotated[
+        int | None,
+        Field(description="Nova posição de execução (1..N); o resto é renumerado ao redor"),
+    ] = None,
+    label: Annotated[str | None, Field(description="Novo rótulo")] = None,
+) -> dict[str, Any]:
+    """Edita um bloco existente. `config_patch` faz merge RASO — chaves ausentes no patch
+    preservam o valor salvo; chave que o tipo do bloco não reconhece é 422."""
+    return await _grafo_update_block(
+        _cliente(ctx), flow_id, block_id, config_patch, position, exec_order, label
+    )
+
+
+@mcp.tool()
+async def flow_connect(
+    flow_id: Annotated[int, Field(description="Id do flow")],
+    source: Annotated[str, Field(description="Id do bloco de origem")],
+    source_handle: Annotated[str, Field(description="Porta de saída do bloco de origem")],
+    target: Annotated[str, Field(description="Id do bloco de destino")],
+    target_handle: Annotated[str, Field(description="Porta de entrada do bloco de destino")],
+    ctx: Context[ContextoOttima],
+) -> dict[str, Any]:
+    """Conecta a saída de um bloco à entrada de outro. Portas: ver `block_catalog` para
+    contratos fixos/dinâmicos; blocos MPC usam os ids das variáveis como porta (entrada:
+    cvs/constraints/dvs; saída: mvs + `local`/`auto` fixas). 422 se a porta não existir, o
+    tipo não bater, ou a conexão fechar um ciclo."""
+    return await _grafo_connect(
+        _cliente(ctx), flow_id, source, source_handle, target, target_handle
+    )
+
+
+@mcp.tool()
+async def flow_disconnect(
+    flow_id: Annotated[int, Field(description="Id do flow")],
+    edge_id: Annotated[str, Field(description="Id da aresta a remover")],
+    ctx: Context[ContextoOttima],
+) -> dict[str, Any]:
+    """Remove uma conexão entre blocos."""
+    return await _grafo_disconnect(_cliente(ctx), flow_id, edge_id)
+
+
+def _origem_flow(flow_id: int) -> str:
+    """Mesmo formato usado pelo runtime para `origin` de eventos de flow
+    (`services/flow-runtime/.../events.py:80-82` `flow_origin`) — mesmo motivo de
+    `_origem_mpc`: `events` é canal global, sem escopo por flow no protocolo."""
+    return f"flow:{flow_id}"
+
+
+async def _aguardar_flow(
+    cliente: ClienteOttima,
+    flow_id: int,
+    *,
+    publicar_comando: Any,
+    estado_alvo: str,
+    limite_segundos: float | None,
+) -> dict[str, Any]:
+    """`flow.status` é republicado a cada varredura enquanto o flow roda (`scheduler.py:
+    _publish_status`) — cobre o comando idempotente na origem (deploy num flow já rodando).
+    Um flow PARADO não varre e não republica sozinho: se o comando for idempotente
+    (`stop()` já parado) e nenhuma transição sair, o único jeito de saber que já está no
+    alvo é o ÚLTIMO estado observado — por isso, ao esgotar o tempo, se esse último estado
+    já bate `estado_alvo`, tratamos como sucesso, não erro."""
+    canal = channel_flow_status(flow_id)
+    origem = _origem_flow(flow_id)
+
+    def _sucesso(canal_msg: str, dado: dict[str, Any]) -> bool:
+        return canal_msg == canal and dado.get("state") == estado_alvo
+
+    def _falha(canal_msg: str, dado: dict[str, Any]) -> bool:
+        if canal_msg == canal:
+            return dado.get("state") == "failed"
+        payload = dado.get("payload", {})
+        return (
+            canal_msg == CHANNEL_EVENTS
+            and dado.get("origin") == origem
+            and payload.get("kind") in ("deploy_rejected", "reload_rejected")
+        )
+
+    prazo = limite_segundos if limite_segundos is not None else 15.0
+    try:
+        estado, evento_falha = await esperar_confirmacao(
+            cliente,
+            interesses={"flow_status": [flow_id], "events": True},
+            publicar_comando=publicar_comando,
+            predicado_sucesso=_sucesso,
+            predicado_falha=_falha,
+            canais_relevantes=(canal, CHANNEL_EVENTS),
+            limite_segundos=prazo,
+        )
+    except ErroConfirmacao as erro:
+        if erro.ultimo_estado is not None and erro.ultimo_estado.get("state") == estado_alvo:
+            return erro.ultimo_estado  # comando idempotente: já estava no alvo
+        raise _erro_com_estado(erro) from erro
+    if evento_falha is not None:
+        if evento_falha.get("state") == "failed":
+            raise RuntimeError(f"Flow entrou em falha. Estado: {json.dumps(evento_falha)}")
+        payload = evento_falha.get("payload", {})
+        razao = payload.get("reason", evento_falha)
+        raise RuntimeError(f"Comando recusado pelo runtime ({payload.get('kind')}): {razao}")
+    return estado or {}
+
+
+@mcp.tool()
+async def flow_deploy(
+    flow_id: Annotated[int, Field(description="Id do flow")],
+    ctx: Context[ContextoOttima],
+    timeout: Annotated[  # noqa: ASYNC109 - parâmetro público da ferramenta, não reimplementação de wait_for
+        float | None, Field(description="Segundos a esperar a confirmação; default 15s")
+    ] = None,
+) -> dict[str, Any]:
+    """Coloca o flow em execução e espera a confirmação publicada (`flow.status.state ==
+    'running'`) antes de devolver — nunca reporta sucesso só pelo 202 HTTP (RNF-05). Se o
+    flow já está rodando, a edição atual entra em vigor via hot-swap atômico (ADR-011), sem
+    interromper a varredura. Falha rápida em `deploy_rejected`/`reload_rejected` (projeto
+    inativo, grafo inválido) ou `state == 'failed'`."""
+    cliente = _cliente(ctx)
+
+    async def _publicar() -> None:
+        await cliente.post(f"/api/flows/{flow_id}/deploy")
+
+    return await _aguardar_flow(
+        cliente, flow_id, publicar_comando=_publicar, estado_alvo="running", limite_segundos=timeout
+    )
+
+
+@mcp.tool()
+async def flow_stop(
+    flow_id: Annotated[int, Field(description="Id do flow")],
+    ctx: Context[ContextoOttima],
+    timeout: Annotated[  # noqa: ASYNC109 - parâmetro público da ferramenta, não reimplementação de wait_for
+        float | None, Field(description="Segundos a esperar a confirmação; default 15s")
+    ] = None,
+) -> dict[str, Any]:
+    """Para o flow e espera a confirmação publicada (`flow.status.state == 'stopped'`)."""
+    cliente = _cliente(ctx)
+
+    async def _publicar() -> None:
+        await cliente.post(f"/api/flows/{flow_id}/stop")
+
+    return await _aguardar_flow(
+        cliente, flow_id, publicar_comando=_publicar, estado_alvo="stopped", limite_segundos=timeout
+    )
