@@ -592,6 +592,22 @@ def _origem_flow(flow_id: int) -> str:
     `_origem_mpc`: `events` é canal global, sem escopo por flow no protocolo."""
     return f"flow:{flow_id}"
 
+async def _estado_real_do_flow(cliente: ClienteOttima, flow_id: int) -> str | None:
+    """`GET /api/health/workers` -> `flow_runtime.flows[id].state` é a mesma leitura de
+    `FlowTask._state` que o evento `flow.status` carregaria (`state.py::to_health`,
+    `Literal["running","stopped","failed"]`) — mas legível via REST mesmo quando o comando
+    idempotente não publica nada (`_stop`/`_deploy` no-op: `supervisor.py:315-321,427-431`,
+    "nenhum evento"). Ao contrário de `desired_state` (intenção gravada, pode divergir se
+    um comando anterior se perdeu — RNF-05), isto é o estado REAL do supervisor. `None` se
+    o worker está degradado ou o flow nunca foi materializado (nunca deployado) — o
+    chamador trata como "não sei", nunca como sucesso."""
+    try:
+        resultado = await cliente.get("/api/health/workers")
+    except Exception:  # noqa: BLE001 - best-effort: falha aqui nunca mascara o erro original
+        return None
+    flows = resultado.get("flow_runtime", {}).get("flows", {})
+    return flows.get(str(flow_id), {}).get("state")
+
 
 async def _aguardar_flow(
     cliente: ClienteOttima,
@@ -604,9 +620,12 @@ async def _aguardar_flow(
     """`flow.status` é republicado a cada varredura enquanto o flow roda (`scheduler.py:
     _publish_status`) — cobre o comando idempotente na origem (deploy num flow já rodando).
     Um flow PARADO não varre e não republica sozinho: se o comando for idempotente
-    (`stop()` já parado) e nenhuma transição sair, o único jeito de saber que já está no
-    alvo é o ÚLTIMO estado observado — por isso, ao esgotar o tempo, se esse último estado
-    já bate `estado_alvo`, tratamos como sucesso, não erro."""
+    (`stop()` já parado) e nenhuma transição sair, nada chega nem no `/ws` nem no
+    `ultimo_estado` desta mesma espera — o fallback abaixo consulta `/health/workers`
+    (achado de revisão) só para o alvo `"stopped"`; para `"running"` (deploy) não serve:
+    `_deploy` num flow já rodando é no-op que NUNCA lê o grafo (`_reload`, não `_deploy`, é
+    quem hot-swapa — `supervisor.py:315-321`), então "running" no health não prova que a
+    edição do agente entrou em vigor, só que ALGUMA definição está de pé."""
     canal = channel_flow_status(flow_id)
     origem = _origem_flow(flow_id)
 
@@ -636,7 +655,11 @@ async def _aguardar_flow(
         )
     except ErroConfirmacao as erro:
         if erro.ultimo_estado is not None and erro.ultimo_estado.get("state") == estado_alvo:
-            return erro.ultimo_estado  # comando idempotente: já estava no alvo
+            return erro.ultimo_estado  # comando idempotente: já estava no alvo (visto no /ws)
+        if estado_alvo == "stopped":
+            estado_real = await _estado_real_do_flow(cliente, flow_id)
+            if estado_real == "stopped":
+                return {"state": "stopped"}  # idempotente: confirmado via /health, sem evento
         raise _erro_com_estado(erro) from erro
     if evento_falha is not None:
         if evento_falha.get("state") == "failed":
@@ -656,10 +679,15 @@ async def flow_deploy(
     ] = None,
 ) -> dict[str, Any]:
     """Coloca o flow em execução e espera a confirmação publicada (`flow.status.state ==
-    'running'`) antes de devolver — nunca reporta sucesso só pelo 202 HTTP (RNF-05). Se o
-    flow já está rodando, a edição atual entra em vigor via hot-swap atômico (ADR-011), sem
-    interromper a varredura. Falha rápida em `deploy_rejected`/`reload_rejected` (projeto
-    inativo, grafo inválido) ou `state == 'failed'`."""
+    'running'`) antes de devolver — nunca reporta sucesso só pelo 202 HTTP (RNF-05). **Se o
+    flow já está rodando, este comando é um no-op** (`_deploy` em `supervisor.py:315-321`:
+    `return` sem ler o grafo) — a confirmação vem só da varredura que já estava publicando
+    sozinha, não prova que uma edição recente entrou em vigor. Editar um flow rodando
+    (`flow_add_block`/`flow_update_block`/etc.) já aplica a mudança sozinho via hot-swap
+    (`_reload`, publicado automaticamente pelo `PUT` quando o flow está rodando —
+    `flows.py:302-303`); `flow_deploy` não precisa ser chamado de novo depois de editar.
+    Falha rápida em `deploy_rejected`/`reload_rejected` (projeto inativo, grafo inválido)
+    ou `state == 'failed'`."""
     cliente = _cliente(ctx)
 
     async def _publicar() -> None:

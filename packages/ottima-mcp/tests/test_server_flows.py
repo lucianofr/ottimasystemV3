@@ -127,30 +127,84 @@ async def test_flow_stop_confirma_por_state_stopped(cliente_com_ws) -> None:
 
 
 @pytest.mark.asyncio
-async def test_flow_stop_idempotente_ja_parado_trata_como_sucesso(cliente_com_ws) -> None:
-    """Flow já parado: `stop()` idempotente não publica nada (flow parado não varre, não
-    republica sozinho) — só o último estado observado prova que já está no alvo."""
-    cliente, _hub_rest, hub_ws = await cliente_com_ws(lambda r: httpx.Response(202))
-
-    async def _fluxo():
-        return await server.flow_stop(1, _ctx(cliente), timeout=0.2)
-
-    tarefa = asyncio.ensure_future(_fluxo())
-    await asyncio.sleep(0.02)
-    await hub_ws.publicar("flow.status.1", {"state": "stopped", "scan_ms": 0.0, "overruns": 0})
-    resultado = await tarefa
-    assert resultado["state"] == "stopped"
-
-
-@pytest.mark.asyncio
 async def test_flow_stop_timeout_genuino_sem_estado_alvo_levanta_erro(cliente_com_ws) -> None:
-    cliente, _hub_rest, _hub_ws = await cliente_com_ws(lambda r: httpx.Response(202))
+    """Nada no `/ws`, `/health/workers` com o worker degradado (`up: False`, sem `flows`) —
+    genuinamente nada a informar, continua erro."""
+
+    def _rota(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/health/workers":
+            return httpx.Response(
+                200,
+                json={
+                    "opc_worker": {"up": True},
+                    "flow_runtime": {"up": False},
+                    "recorder": {"up": True},
+                    "calc_worker": {"up": True},
+                },
+            )
+        return httpx.Response(202)
+
+    cliente, _hub_rest, _hub_ws = await cliente_com_ws(_rota)
 
     async def _fluxo():
         return await server.flow_stop(1, _ctx(cliente), timeout=0.2)
 
     with pytest.raises(RuntimeError):
         await _fluxo()
+
+
+@pytest.mark.asyncio
+async def test_flow_stop_health_mostra_ainda_rodando_nao_da_falso_sucesso(cliente_com_ws) -> None:
+    """Sanidade do fallback: `/health/workers` responde, mas mostra `state` DIFERENTE do
+    alvo — não pode virar sucesso só por a chamada ter funcionado."""
+
+    def _rota(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/health/workers":
+            return httpx.Response(
+                200,
+                json={
+                    "opc_worker": {"up": True},
+                    "flow_runtime": {"up": True, "flows": {"1": {"state": "running"}}},
+                    "recorder": {"up": True},
+                    "calc_worker": {"up": True},
+                },
+            )
+        return httpx.Response(202)
+
+    cliente, _hub_rest, _hub_ws = await cliente_com_ws(_rota)
+
+    with pytest.raises(RuntimeError):
+        await server.flow_stop(1, _ctx(cliente), timeout=0.2)
+
+
+@pytest.mark.asyncio
+async def test_flow_stop_ja_parado_sem_nenhum_evento_publicado_trata_como_sucesso(
+    cliente_com_ws,
+) -> None:
+    """Cenário REAL de `stop()` idempotente (`supervisor.py:427-431`: `runtime is None or
+    state != "running"` -> `return` SEM publicar nada, nem `/ws` nem republicação
+    periódica — ao contrário de um flow rodando). `/health/workers` prova o estado real
+    quando nenhum evento sai (mesmo `FlowTask._state` que o evento carregaria,
+    `state.py::to_health`); `desired_state` não serve pra isso (intenção, pode divergir —
+    RNF-05)."""
+
+    def _rota(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/health/workers":
+            return httpx.Response(
+                200,
+                json={
+                    "opc_worker": {"up": True},
+                    "flow_runtime": {"up": True, "flows": {"1": {"state": "stopped"}}},
+                    "recorder": {"up": True},
+                    "calc_worker": {"up": True},
+                },
+            )
+        return httpx.Response(202)
+
+    cliente, _hub_rest, _hub_ws = await cliente_com_ws(_rota)
+
+    resultado = await server.flow_stop(1, _ctx(cliente), timeout=0.2)
+    assert resultado["state"] == "stopped"
 
 
 # ----------------------------------------------------------------------------------
