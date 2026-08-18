@@ -15,9 +15,26 @@
   --xy-connectionline-stroke: var(--color-accent);
   --xy-connectionline-stroke-width: 1.5;
   --xy-attribution-background-color: transparent;
+  /* Qualidade do sinal na aresta (feature canvas-arestas-qualidade): magenta é cor
+     anormal nova, declarada no spec da feature (#ff00ff) — sem token prévio no app. */
+  --edge-bad: #ff00ff;
+  --edge-stroke-width-vivo: 3.5;
 
   background-color: var(--color-well);
   background-image: var(--gradient-mesh);
+}
+
+/* Aresta com dado ao vivo: mais grossa que a de edição (1.5). GOOD mantém a cor normal —
+   e o acento quando selecionada. BAD fica magenta mesmo selecionada: especificidade aqui
+   vence o `.selected` do base.css de propósito, para o sinal ruim não sumir sob o azul de
+   seleção (Regra do Canal Redundante). */
+.canvas-flow .react-flow__edge.aresta-boa .react-flow__edge-path {
+  stroke-width: var(--edge-stroke-width-vivo);
+}
+
+.canvas-flow .react-flow__edge.aresta-ruim .react-flow__edge-path {
+  stroke: var(--edge-bad);
+  stroke-width: var(--edge-stroke-width-vivo);
 }
 
 /* Portas: quadradinho de bisel, nunca o círculo default da biblioteca. */

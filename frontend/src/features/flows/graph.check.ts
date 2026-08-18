@@ -6,13 +6,19 @@ import {
 } from "../../lib/contracts.gen";
 import {
   avisosInversao,
+  arestaComQualidade,
   compactarExecOrder,
+  COR_ARESTA_RUIM,
   criarBloco,
   deGraphJson,
   definirExecOrder,
+  ESPESSURA_ARESTA_EDICAO,
+  ESPESSURA_ARESTA_VIVA,
+  estadoDaAresta,
   euDaPortaDeEntrada,
   handlesEntrada,
   handlesSaida,
+  ID_MARCADOR_X,
   matrizPadrao,
   motivoRecusa,
   paraGraphJson,
@@ -915,4 +921,82 @@ test("DV salva antes da F6, sem a chave range, carrega com null (compatibilidade
   expect(no.data.variables.dvs).toEqual([
     { id: "dv_1", name: "Vazão de carga", eu: "m3/h", zero: 0, span: 100, range: null, operating_point: 0 },
   ]);
+});
+
+// --------------------------------------------------------------------------------------
+// Qualidade do sinal na aresta (feature canvas-arestas-qualidade)
+// --------------------------------------------------------------------------------------
+
+test("aresta sem dado ao vivo fica em 'edicao' — ports vazio ou porta da origem ausente", () => {
+  const a = aresta("e1", "r", "out", "t", "u1");
+  expect(estadoDaAresta(a, {})).toBe("edicao");
+  expect(estadoDaAresta(a, { r: {} })).toBe("edicao");
+  expect(estadoDaAresta(a, { b: { out: { v: 1, ok: true } } })).toBe("edicao");
+});
+
+test("ok=true é 'good' e ok=false é 'bad'", () => {
+  const ports = {
+    r: { out: { v: 42.5, ok: true } },
+    b: { out: { v: null, ok: false } },
+  };
+  expect(estadoDaAresta(aresta("e1", "r", "out", "t", "u1"), ports)).toBe("good");
+  expect(estadoDaAresta(aresta("e2", "b", "out", "t", "u1"), ports)).toBe("bad");
+});
+
+test("a qualidade lida é da porta exata (nó+handle) da origem", () => {
+  const ports = {
+    r: { out: { v: 1, ok: true }, OUT1: { v: 2, ok: false } },
+    s: { OUT1: { v: 3, ok: true } },
+  };
+  expect(estadoDaAresta(aresta("e1", "r", "OUT1", "t", "u1"), ports)).toBe("bad");
+  expect(estadoDaAresta(aresta("e2", "r", "out", "t", "u1"), ports)).toBe("good");
+  expect(estadoDaAresta(aresta("e3", "s", "OUT1", "t", "u1"), ports)).toBe("good");
+});
+
+test("transição bad→good reflete o que recebe; ports vazio volta a 'edicao' (preservação é do provider)", () => {
+  const a = aresta("e1", "r", "out", "t", "u1");
+  expect(estadoDaAresta(a, { r: { out: { v: null, ok: false } } })).toBe("bad");
+  expect(estadoDaAresta(a, { r: { out: { v: 42, ok: true } } })).toBe("good");
+  expect(estadoDaAresta(a, {})).toBe("edicao");
+});
+
+test("arestaComQualidade: bad ganha classe e marcador X; good só a classe; edicao nada", () => {
+  const a = aresta("e1", "r", "out", "t", "u1");
+
+  const ruim = arestaComQualidade(a, { r: { out: { v: null, ok: false } } });
+  expect(ruim.className).toBe("aresta-ruim");
+  expect(ruim.markerStart).toBe(ID_MARCADOR_X);
+
+  const boa = arestaComQualidade(a, { r: { out: { v: 1, ok: true } } });
+  expect(boa.className).toBe("aresta-boa");
+  expect(boa.markerStart).toBeUndefined();
+
+  expect(arestaComQualidade(a, {})).toBe(a);
+});
+
+test("arestaComQualidade não muta a aresta nem os ports de entrada", () => {
+  const a = aresta("e1", "r", "out", "t", "u1");
+  const ports = { r: { out: { v: null, ok: false } } };
+  arestaComQualidade(a, ports);
+  expect(a).toEqual({ id: "e1", source: "r", sourceHandle: "out", target: "t", targetHandle: "u1" });
+  expect(ports).toEqual({ r: { out: { v: null, ok: false } } });
+});
+
+test("aresta estilizada serializa exatamente como a nua: estilo nunca vai ao servidor", () => {
+  const estilizada = arestaComQualidade(aresta("e1", "r", "out", "t", "u1"), {
+    r: { out: { v: null, ok: false } },
+  });
+  expect(paraGraphJson([], [estilizada]).edges[0]).toEqual({
+    id: "e1",
+    source: "r",
+    sourceHandle: "out",
+    target: "t",
+    targetHandle: "u1",
+  });
+});
+
+test("constantes de vestimenta: vivo mais grosso que a edição e magenta é o declarado no spec", () => {
+  expect(ESPESSURA_ARESTA_EDICAO).toBe(1.5);
+  expect(ESPESSURA_ARESTA_VIVA).toBeGreaterThan(ESPESSURA_ARESTA_EDICAO);
+  expect(COR_ARESTA_RUIM).toBe("#ff00ff");
 });

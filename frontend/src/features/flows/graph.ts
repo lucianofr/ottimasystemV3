@@ -22,6 +22,7 @@ import {
   type SopdtParams,
 } from "../../lib/contracts.gen";
 import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
+import type { PortsPorBloco } from "./canalPrimitivos";
 import { PADRAO_FIRST_ORDER, PADRAO_KALMAN, PADRAO_PID, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
 
 /**
@@ -291,6 +292,54 @@ export type BlocoEdge = Omit<Edge, "sourceHandle" | "targetHandle"> & {
 };
 
 export type GrafoEditor = { nodes: BlocoNode[]; edges: BlocoEdge[] };
+
+// --------------------------------------------------------------------------------------
+// Qualidade do sinal na aresta (feature canvas-arestas-qualidade)
+// --------------------------------------------------------------------------------------
+
+/** Espessura da aresta em modo edição — espelho do `--xy-edge-stroke-width` de
+ *  flow-canvas.css (1.5 hoje). */
+export const ESPESSURA_ARESTA_EDICAO = 1.5;
+
+/** Espessura da aresta com dado ao vivo — espelho do `--edge-stroke-width-vivo` de
+ *  flow-canvas.css. Maior que a de edição: a qualidade é informação do processo, não
+ *  decoração. */
+export const ESPESSURA_ARESTA_VIVA = 3.5;
+
+/** Magenta da aresta com sinal ruim — espelho do token `--edge-bad` de flow-canvas.css.
+ *  Cor anormal nova, declarada no spec da feature (#ff00ff). */
+export const COR_ARESTA_RUIM = "#ff00ff";
+
+/** Id do marcador SVG do X na saída (defs renderizadas no FlowEditorPage). O
+ *  `EdgeWrapper` do @xyflow/react transforma `markerStart` string em `url('#<id>')`. */
+export const ID_MARCADOR_X = "marcador-qualidade-x";
+
+export type EstadoAresta = "edicao" | "good" | "bad";
+
+/** Qualidade do sinal que sai da porta de origem da aresta. Lê apenas o que recebe:
+ *  `mesclarPorts` (provider do canal) é quem preserva valores nas publicações de
+ *  transição; ports vazio ou porta ausente é, por contrato, aresta em edição. */
+export function estadoDaAresta(
+  aresta: Pick<BlocoEdge, "source" | "sourceHandle">,
+  ports: PortsPorBloco,
+): EstadoAresta {
+  const porta = ports[aresta.source]?.[aresta.sourceHandle];
+  if (porta === undefined) return "edicao";
+  return porta.ok ? "good" : "bad";
+}
+
+/** Aresta com a vestimenta da qualidade (imutável). `edicao` devolve a mesma referência;
+ *  `good`/`bad` ganham `className` para o CSS e `bad` carrega o marcador X na saída. As
+ *  chaves de desenho nunca vão ao save: `paraGraphJson` só emite as de contrato. */
+export function arestaComQualidade(aresta: BlocoEdge, ports: PortsPorBloco): BlocoEdge {
+  const estado = estadoDaAresta(aresta, ports);
+  if (estado === "edicao") return aresta;
+  return {
+    ...aresta,
+    className: estado === "good" ? "aresta-boa" : "aresta-ruim",
+    ...(estado === "bad" ? { markerStart: ID_MARCADOR_X } : {}),
+  };
+}
 
 // --------------------------------------------------------------------------------------
 // Portas

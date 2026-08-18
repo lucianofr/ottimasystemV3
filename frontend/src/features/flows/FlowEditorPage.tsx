@@ -37,10 +37,12 @@ import { FlowPalette, MIME_BLOCO } from "./FlowPalette";
 import { FlowPropsModal } from "./FlowPropsModal";
 import {
   avisosInversao,
+  arestaComQualidade,
   compactarExecOrder,
   criarBloco,
   deGraphJson,
   definirExecOrder,
+  ID_MARCADOR_X,
   motivoRecusa,
   paraGraphJson,
   podarArestasDoBloco,
@@ -590,6 +592,17 @@ function Editor({ flowId }: { flowId: number }) {
     }
   }
 
+  /**
+   * Vestimenta da qualidade do sinal: arestas derivadas, imutáveis — o estado bruto de
+   * `edges` não carrega chave de desenho (e `paraGraphJson` só emite as de contrato de
+   * qualquer forma). Sem ports ao vivo (`valores.ports` vazio no modo edição ou antes da
+   * primeira varredura) cada aresta volta como 'edicao', exatamente como está no estado.
+   */
+  const arestasVisuais = useMemo(
+    () => edges.map((aresta) => arestaComQualidade(aresta, valores.ports)),
+    [edges, valores.ports],
+  );
+
   const inversoes = avisosInversao(nodes, edges);
   const noEmConfig = nodes.find((no) => no.id === emConfig) ?? null;
 
@@ -695,7 +708,7 @@ function Editor({ flowId }: { flowId: number }) {
             <ReactFlow
               className="canvas-flow"
               nodes={nodes}
-              edges={edges}
+              edges={arestasVisuais}
               nodeTypes={TIPOS_DE_NO}
               onNodesChange={aoMudarNos}
               onEdgesChange={aoMudarArestas}
@@ -722,6 +735,32 @@ function Editor({ flowId }: { flowId: number }) {
               }
               minZoom={0.3}
             >
+              {/* Defs do marcador X (aresta com sinal BAD): referenciado por `markerStart`
+                  via url(#id) pelo EdgeWrapper do @xyflow/react; svg 0x0, só abriga o defs.
+                  refX=-5/refY=8 com orient=auto: X 5 unidades à frente do handle e 8 ACIMA
+                  do traço (exigência do RF: X na saída, acima da linha — não sobre ela). */}
+              <svg aria-hidden="true" className="absolute h-0 w-0">
+                <defs>
+                  <marker
+                    id={ID_MARCADOR_X}
+                    viewBox="-8 -8 16 16"
+                    markerWidth="16"
+                    markerHeight="16"
+                    refX="-5"
+                    refY="8"
+                    markerUnits="userSpaceOnUse"
+                    orient="auto"
+                  >
+                    <path
+                      d="M -5,-5 L 5,5 M 5,-5 L -5,5"
+                      fill="none"
+                      strokeLinecap="round"
+                      strokeWidth="3"
+                      style={{ stroke: "var(--edge-bad)" }}
+                    />
+                  </marker>
+                </defs>
+              </svg>
               <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
               <Controls showInteractive={false} />
             </ReactFlow>
