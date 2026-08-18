@@ -26,7 +26,7 @@ samples_table = Table(
     TIMESERIES_METADATA,
     Column("ts", DateTime(timezone=True), nullable=False),
     Column("tag_id", BigInteger, nullable=False),
-    Column("value", Double, nullable=False),
+    Column("value", Double, nullable=True),  # NULL = quality=2/BAD (migration 0013, ADR-037)
     Column("quality", SmallInteger, nullable=False, server_default=text("0")),
 )
 

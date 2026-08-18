@@ -205,6 +205,13 @@ CREATE INDEX ix_events_origin_ts   ON events (origin, ts DESC);
 SELECT add_retention_policy('events', INTERVAL '1 month');           -- ADR-020: mesma política
 ```
 
+> Emenda 2026-08-17 (ADR-037): `samples.value` deixa de ser `NOT NULL` — migration 0013 relaxa
+> para `DOUBLE PRECISION` nullable. O recorder grava `NULL` em `value` quando `quality = 2`
+> (BAD) chega no payload, no lugar do valor bruto lido, para não deixar um dado possivelmente
+> sem sentido indistinguível de um dado real em `/api/history` ou em `avg`/`sum` sem filtro de
+> `quality`. `NULL`, não `NaN`: os agregados do CAgg abaixo (§3.3) ignoram `NULL` nativamente —
+> uma amostra ruim não contamina o bucket de 1 min inteiro, ao contrário do que `NaN` faria.
+
 ### 3.3 Continuous aggregate de 1 min (RF-801/802)
 
 ```sql

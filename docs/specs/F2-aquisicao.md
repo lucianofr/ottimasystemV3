@@ -151,6 +151,13 @@ services/opc-worker/src/ottima_opc_worker/
 5. **Resiliência:** banco indisponível ⇒ retry do flush com backoff (1→30 s), buffers seguram; payload malformado ⇒ log + descarte (contador); Redis caiu ⇒ reconecta, perda aceita (RNF-05).
 6. **`/health`:** `{status, buffered_samples, buffered_events, dropped_total, last_flush_ts, db_ok}` — `status` segue a semântica §2.2-8 (dependências do serviço).
 
+> Emenda 2026-08-17 (ADR-037): item 2 acima ("dumb pipe: grava o que chega") ganha uma exceção
+> estreita — `quality == 2` (BAD) no payload grava `value = NULL` na linha, não o valor bruto
+> lido; `ts`/`tag_id`/`quality` e a cadência de gravação seguem intactos, e a decisão usa só o
+> próprio campo `quality` do registro, sem validação cruzada nova. `NULL`, não `NaN` (§3.2
+> emenda, spec F1): os agregados do CAgg `samples_1m` ignoram `NULL` nativamente, sem
+> contaminar o bucket de 1 min inteiro a partir de uma única amostra ruim.
+
 ---
 
 ## 7. Canal `events`: publisher e auditoria da API
@@ -185,6 +192,10 @@ services/opc-worker/src/ottima_opc_worker/
              "t": ["…"], "v": [0.0], "q": [0]}]}
 ```
 `mode="1m"` acrescenta `"v_min": []` e `"v_max": []` por série (`v` = avg, `q` = worst_quality).
+
+> Emenda 2026-08-17 (ADR-037): `v` (e `v_min`/`v_max` no modo `1m`) podem trazer `null` no
+> lugar de um número — amostra com `quality=2` (BAD) grava `NULL` em `samples.value` (§3.2
+> emenda, spec F1); serializa como `null` nativamente, sem código de conversão na rota.
 
 ---
 

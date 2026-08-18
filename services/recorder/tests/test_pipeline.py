@@ -147,9 +147,10 @@ async def test_n_samples_publicados_geram_n_linhas(redis_client, session_factory
     async with session_factory() as session:
         rows = (await session.execute(select(samples_table).order_by(samples_table.c.ts))).all()
 
-    # ts vem do payload (timestamp da fonte, spec §2.2-7), nunca do now() do recorder
+    # ts vem do payload (timestamp da fonte, spec §2.2-7), nunca do now() do recorder.
+    # quality=2 (BAD) grava NULL em value (ADR-037) no lugar do dado bruto publicado.
     assert [(r.ts, r.tag_id, r.value, r.quality) for r in rows] == [
-        (v.ts, v.tag_id, v.value, v.quality) for v in published
+        (v.ts, v.tag_id, None if v.quality == 2 else v.value, v.quality) for v in published
     ]
     assert pipeline.last_flush_ts is not None
 

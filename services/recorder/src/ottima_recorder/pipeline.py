@@ -1,7 +1,12 @@
 """Pipeline do recorder: barramento → hypertables (RF-801, ADR-003, spec F2 §6.1–6.6).
 
 Dumb pipe: o que chega no barramento é gravado verbatim. Não interpreta `kind`, não filtra
-severidade e não valida `tag_id` contra `tags` (amostra órfã grava — spec F1 §3.4-2).
+severidade e não valida `tag_id` contra `tags` (amostra órfã grava — spec F1 §3.4-2). Única
+exceção: `samples.value` de uma amostra com `quality == QUALITY_BAD` grava NULL no lugar do
+valor bruto (ADR-037) — a linha, o `ts` e a cadência de gravação continuam inalterados, e a
+decisão usa só o próprio campo `quality` do registro, sem validação cruzada nova. NULL (e não
+NaN) porque `avg`/`sum`/`max` do SQL ignoram NULL nativamente — NaN se propagaria por eles e
+contaminaria o bucket inteiro do CAgg `samples_1m`, não só a amostra ruim.
 """
 
 import asyncio
@@ -37,6 +42,8 @@ from ottima_core.models import (
 from ottima_core.pubsub import ChannelListener, PatternListener
 
 logger = logging.getLogger(__name__)
+
+QUALITY_BAD = 2  # tri-state de OpcValue.quality (spec F1 §3.2): 0=good, 1=uncertain, 2=bad
 
 VALUES_PATTERN = "opc.values.*"
 MPC_STATE_PATTERN = "mpc.state.*"
@@ -276,7 +283,15 @@ class RecorderPipeline:
         await self._emit_backpressure()
 
     def ingest_sample(self, raw: str) -> None:
-        """Parse e enfileira uma amostra; payload inválido é descartado com log."""
+        """Parse e enfileira uma amostra; payload inválido é descartado com log.
+
+        `quality == QUALITY_BAD` grava NULL em `value` (ADR-037): a linha, o `ts` e a
+        cadência seguem intactos — só o campo numérico deixa de carregar um dado ruim
+        indistinguível de um dado real em `/api/history` e em `avg`/`max` sem filtro de
+        `quality`. NULL, não NaN: `avg`/`sum`/`max` do SQL ignoram NULL nativamente, sem
+        precisar filtrar `quality` em lugar nenhum — NaN se propagaria por eles e
+        contaminaria o bucket inteiro do CAgg `samples_1m` a partir de uma única amostra.
+        """
         value = self._parse(OpcValue, raw)
         if value is None:
             return
@@ -284,7 +299,7 @@ class RecorderPipeline:
             {
                 "ts": value.ts,
                 "tag_id": value.tag_id,
-                "value": value.value,
+                "value": None if value.quality == QUALITY_BAD else value.value,
                 "quality": value.quality,
             }
         )

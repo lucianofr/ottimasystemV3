@@ -17,10 +17,10 @@ MAX_FUZZY_VARS = 16  # IN1..IN8 + OUT1..OUT8 (ADR-030, ADR-029)
 class HistorySeries(BaseModel):
     tag_id: int
     t: list[datetime]
-    v: list[float]
+    v: list[float | None]  # None onde quality==2 (BAD) gravou NULL no lugar do valor (ADR-037)
     q: list[int]
-    v_min: list[float] | None = None  # só em mode="1m"
-    v_max: list[float] | None = None  # só em mode="1m"
+    v_min: list[float | None] | None = None  # só em mode="1m"; None por item: bucket sem
+    v_max: list[float | None] | None = None  # amostra finita (avg/min/max ignoram NULL no SQL)
 
 
 class HistoryResponse(BaseModel):

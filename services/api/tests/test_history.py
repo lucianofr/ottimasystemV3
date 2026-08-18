@@ -1,5 +1,6 @@
 """Histórico colunar (RF-802): switch raw/1m, shape uPlot, limites e papéis (ADR-015)."""
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -25,7 +26,7 @@ _REFRESH = text(
 )
 
 
-def _amostra(tag_id: int, offset_s: int, value: float, quality: int = 0) -> dict[str, Any]:
+def _amostra(tag_id: int, offset_s: int, value: float | None, quality: int = 0) -> dict[str, Any]:
     return {
         "ts": BASE + timedelta(seconds=offset_s),
         "tag_id": tag_id,
@@ -224,3 +225,76 @@ async def test_filtro_de_janela_morde(client, operator_headers, db_session):
         client, operator_headers, "3", BASE - timedelta(seconds=1), BASE + timedelta(seconds=1)
     )
     assert r.json()["series"][0]["v"] == [0.0]
+
+
+def _json_estrito(texto: str) -> Any:
+    """Defesa: um parser JSON estrito (`JSON.parse` de navegador, RFC 8259) rejeita os
+    tokens `NaN`/`Infinity` que o `json.loads` puro do Python aceitaria por padrão.
+    `parse_constant` reproduz essa rejeição, provando que o corpo não depende da tolerância
+    do parser Python para ser válido."""
+
+    def _rejeita(token: str) -> float:
+        raise ValueError(f"token {token!r} não é JSON válido (RFC 8259)")
+
+    return json.loads(texto, parse_constant=_rejeita)
+
+
+async def test_amostra_bad_quality_grava_null_e_api_devolve_json_valido(
+    client, operator_headers, db_session
+):
+    """quality=2 (BAD) grava NULL em `value` (ADR-037, migration 0013); a API devolve
+    `null` no lugar do dado bruto, com o resto da série (amostras boas, `q`) intacto, em
+    JSON válido por um parser estrito (RFC 8259)."""
+    await _inserir(
+        db_session,
+        [_amostra(5, 0, 1.0), _amostra(5, 10, None, quality=2), _amostra(5, 20, 3.0)],
+    )
+    r = await _get(client, operator_headers, "5", BASE, BASE + timedelta(seconds=30))
+    corpo = _json_estrito(r.text)
+    serie = corpo["series"][0]
+    assert serie["v"] == [1.0, None, 3.0]
+    assert serie["q"] == [0, 2, 0]
+
+
+async def test_bucket_1m_com_amostra_null_ignora_null_no_agregado(
+    client, operator_headers, seed_1m
+):
+    """Uma amostra ruim (quality=2 → NULL, ADR-037) misturada num bucket de 1 min não
+    contamina o agregado: `avg`/`min`/`max` do Postgres ignoram NULL nativamente — o bucket
+    reporta os valores finitos das três amostras boas, não NULL e não erro. `worst_quality`
+    (spec F1 §3.3, migration 0002) continua vendo a amostra ruim: `q == 2`."""
+    await seed_1m(
+        [
+            _amostra(TAG_1M, 5, 1.0),
+            _amostra(TAG_1M, 25, 2.0),
+            _amostra(TAG_1M, 35, None, quality=2),
+            _amostra(TAG_1M, 45, 3.0),
+        ],
+        BASE - timedelta(hours=1),
+        BASE + timedelta(hours=3),
+    )
+    r = await _get(client, operator_headers, str(TAG_1M), BASE, BASE + timedelta(hours=3))
+    corpo = _json_estrito(r.text)
+    serie = corpo["series"][0]
+    assert _instantes(serie) == [BASE]
+    assert serie["v"] == [2.0]
+    assert serie["q"] == [2]
+    assert serie["v_min"] == [1.0]
+    assert serie["v_max"] == [3.0]
+
+
+async def test_bucket_1m_totalmente_ruim_devolve_tudo_null(client, operator_headers, seed_1m):
+    """Bucket sem nenhuma amostra boa: `avg`/`min`/`max` são NULL de verdade (não erro, não
+    `0.0`) — o caso em que NULL, ao contrário de NaN, também deveria propagar."""
+    await seed_1m(
+        [_amostra(TAG_1M, 5, None, quality=2), _amostra(TAG_1M, 25, None, quality=2)],
+        BASE - timedelta(hours=1),
+        BASE + timedelta(hours=3),
+    )
+    r = await _get(client, operator_headers, str(TAG_1M), BASE, BASE + timedelta(hours=3))
+    corpo = _json_estrito(r.text)
+    serie = corpo["series"][0]
+    assert serie["v"] == [None]
+    assert serie["q"] == [2]
+    assert serie["v_min"] == [None]
+    assert serie["v_max"] == [None]
