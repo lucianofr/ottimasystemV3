@@ -76,3 +76,7 @@ tela" e "operar o sistema" têm o mesmo poder por superfícies diferentes.
 - Deploy/stop pelo agente faz hot-swap ao vivo (ADR-011) sem confirmação — aceito
   explicitamente nesta rodada; um gate por ferramenta (elicitation MCP) é um `if`
   reintroduzível sem quebra de contrato.
+- (−) Sem push/streaming: "supervisão contínua" (item de decisão 6) é polling orquestrado
+  pelo host do agente, nenhuma ferramenta assina/notifica sozinha; sem ferramenta composta
+  de step test (degrau→espera→coleta num call só). Detalhado em
+  `docs/plans/servidor-mcp-agentes.md` § Fora de escopo (v1) — v2.

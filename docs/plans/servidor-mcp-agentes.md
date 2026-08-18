@@ -261,13 +261,60 @@ fases seguintes DEVEM reler os trechos citados antes de codar — não confiar d
    - `grep -rn "users\|certificates\|system-settings" packages/ottima-mcp/src/ottima_mcp/server.py` — superfície curada respeitada (exceto bootstrap.py, que é utilitário fora do servidor).
 4. Smoke vivo com agente real: sessão Claude Code no repo, pedir "liste os MPCs e escreva um SP dentro da faixa" — observar comandado→confirmado e o evento auditado.
 5. Docs: ADR-036 Status Proposto→Aceito (decisão do usuário); GLOSSARY já atualizado; CHANGELOG se o projeto adotar.
+6. **Correções pós-merge (2026-08-17, achados de revisão após a Fase 6 original)**:
+   - `flow_remove_block`/`flow_disconnect` filtravam por id sem checar existência —
+     id inexistente virava no-op silencioso que ainda salvava e devolvia sucesso. Fix:
+     mesmo guard de `flow_update_block` (`if not any(... == id): raise ValueError`).
+   - `flow_stop` num flow já parado travava até o timeout e ERRAVA sempre: `_stop` no-op
+     (`supervisor.py:427-431`) não publica nada, nem `/ws` nem republicação periódica (só
+     flow RODANDO republica sozinho) — o único fallback de então (`ultimo_estado`, só de
+     mensagens vistas NESSA espera) nunca dispara sem nenhuma mensagem. Fix: fallback via
+     `GET /api/health/workers` → `flow_runtime.flows[id].state` (mesmo `FlowTask._state`
+     do evento, legível mesmo sem publicação) — escopado a `estado_alvo == "stopped"`
+     apenas; **não generalizado para `flow_deploy`** (achado de revisão: `_deploy` num
+     flow já rodando também é no-op que NUNCA lê o grafo — quem hot-swapa é `_reload`,
+     publicado automaticamente pelo `PUT` — "running" no health não provaria que a edição
+     do agente entrou em vigor, só que alguma definição está de pé; teria trocado um
+     falso-erro por um falso-sucesso pior).
+   - Docstring de `flow_deploy` corrigida: dizia que hot-swap acontece "via deploy"; na
+     verdade `_deploy` já-rodando é no-op puro — o hot-swap já acontece sozinho no `PUT`
+     de qualquer ferramenta de edição de grafo, chamar `flow_deploy` de novo não faz nada.
+   - 6 testes novos, 1 removido (mal rotulado — dizia "não publica nada" na docstring mas
+     publicava um frame no corpo, testava o caminho de transição normal, não o idempotente
+     real). 76/76 verdes no pacote após as correções.
 
 ---
 
 ## Fora de escopo (v1) — deliberado
 
-- Cursor `since_id` real no backend (migração da hypertable `events` p/ coluna id) — v2, contrato opaco já reservado.
-- Supervisão contínua (watch/stream) — v2.
+- Cursor `since_id` real no backend (migração da hypertable `events` p/ coluna id) — v2, contrato opaco já reservado (`events_query`, campo `cursor`).
 - Gate de confirmação humana (elicitation) — `if` por ferramenta, reintroduzível; suporte do cliente a verificar antes.
 - Papel `engenharia` no backend (containment do token admin) — condição para planta real.
 - WebMCP/camada visual no frontend — explicitamente rejeitado na entrevista (ADR-036).
+
+### Supervisão contínua (watch/stream) — v2
+
+Analisado em detalhe em 2026-08-17 (pergunta do usuário: o agente consegue monitorar o
+processo ao longo do tempo como um operador humano — avaliar desempenho, decidir setpoint,
+aplicar degrau, coletar resposta, analisar). Resultado: as 5 capacidades existem na v1, mas
+"tempo real" hoje é responsabilidade do HOST do agente (loop de polling), não do servidor —
+nenhuma ferramenta empurra dado sozinha. Gaps concretos para v2:
+
+1. **Push/streaming/subscribe.** Nenhuma ferramenta MCP assina e notifica; `mpc_state` é
+   sempre one-shot (abre WS, espera a próxima publicação, fecha). Loop de observação
+   contínua é inteiramente orquestrado pelo agente chamando a ferramenta repetidamente.
+2. **"Espere até a condição X".** Ex.: "avise quando a CV estabilizar dentro de 2% do SP" —
+   não existe; o agente tem que implementar o critério de convergência sozinho, sobre
+   `mpc_state`/`trend`/`mpc_history` chamados em loop.
+3. **Ferramenta composta de step test.** Não existe um `run_step_test(...)` que empacote
+   baseline → degrau → espera → trend → resumo num tool call só; é sempre orquestração
+   multi-chamada do lado do agente (`mpc_set_mode`→MAN, `mpc_write_mv`, aguardar rampa via
+   `mpc_state`/`mpc_history`, `trend` pra reconstruir a curva).
+4. **`ssto_last`**: snapshot da última execução do otimizador, não stream — mesma limitação
+   do resto do desenho, não é caso especial.
+
+O que já é suficiente hoje, sem esperar v2: decidir e escrever SP (`mpc_write_sp`), aplicar
+degrau em malha aberta (`mpc_set_mode`+`mpc_write_mv`) ou fechada (`mpc_write_sp`), coletar
+dado de resposta em resolução bruta por ciclo de scan até 2h de janela (`trend`/
+`mpc_history` — janelas maiores caem pra média de 1min). Análise é raciocínio do próprio
+agente sobre a série numérica devolvida, não gap de ferramenta.
