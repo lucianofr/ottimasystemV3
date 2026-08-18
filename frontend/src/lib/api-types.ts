@@ -1535,13 +1535,13 @@ export interface components {
             /** T */
             t: string[];
             /** V */
-            v: number[];
+            v: (number | null)[];
             /** Q */
             q: number[];
             /** V Min */
-            v_min?: number[] | null;
+            v_min?: (number | null)[] | null;
             /** V Max */
-            v_max?: number[] | null;
+            v_max?: (number | null)[] | null;
         };
         /**
          * Horizons
