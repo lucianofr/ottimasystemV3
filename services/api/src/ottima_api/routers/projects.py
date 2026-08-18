@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import ValidationError
 from redis.asyncio import Redis
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -136,6 +136,15 @@ async def delete_project(project_id: int, db: AsyncSession = Depends(get_db)) ->
     if project.is_active:
         # CASCADE removeria conexões/tags/flows do projeto em operação (spec §6.2)
         raise HTTPException(status_code=409, detail="Desative o projeto antes de excluí-lo")
+    # Ordem importa: `calculated_tag_inputs.source_tag_id -> tags.id` é RESTRICT de
+    # propósito (impede apagar uma tag que alimenta um script). A API garante que toda
+    # entrada pertence ao MESMO projeto (_validar_entradas), então remover as arestas de
+    # input do projeto antes do DELETE desobstrui o cascade do banco.
+    await db.execute(
+        delete(CalculatedTagInput).where(
+            CalculatedTagInput.calc_tag_id.in_(select(Tag.id).where(Tag.project_id == project_id))
+        )
+    )
     await db.delete(project)
     await db.commit()
 

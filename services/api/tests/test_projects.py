@@ -49,6 +49,68 @@ async def test_delete_cascateia_conexoes(client, admin_headers):
     r = await client.get(f"/api/connections?project_id={p['id']}", headers=admin_headers)
     assert r.json() == []
 
+async def test_delete_cascateia_tag_calculada_com_entradas(client, admin_headers):
+    """Regressão: tag calculada consumindo tag OPC do MESMO projeto não pode virar 500 no
+    DELETE do projeto. O RESTRICT de `calculated_tag_inputs.source_tag_id` é deliberado
+    (impede apagar uma tag que alimenta um script); a API garante input do mesmo projeto
+    (`_validar_entradas`), então as arestas de input saem junto e o cascade do banco flui."""
+    p = await _criar(client, admin_headers, "ComCalcInput")
+    c = await client.post(
+        "/api/connections",
+        json={"project_id": p["id"], "name": "plc-calc", "endpoint": "opc.tcp://10.0.0.6:4840"},
+        headers=admin_headers,
+    )
+    assert c.status_code == 201
+    opc = await client.post(
+        "/api/tags",
+        json={
+            "connection_id": c.json()["id"],
+            "name": "FT-CALC",
+            "node_id": "ns=2;s=FT-CALC",
+            "direction": "r",
+            "data_type": "float",
+        },
+        headers=admin_headers,
+    )
+    assert opc.status_code == 201
+    calc1 = await client.post(
+        "/api/calculated-tags",
+        json={
+            "project_id": p["id"],
+            "name": "CALC-1",
+            "period_seconds": 1,
+            "code": "OUT = IN1",
+            "input_tag_ids": [opc.json()["id"]],
+        },
+        headers=admin_headers,
+    )
+    assert calc1.status_code == 201, calc1.text
+    calc2 = await client.post(
+        "/api/calculated-tags",
+        json={
+            "project_id": p["id"],
+            "name": "CALC-2",
+            "period_seconds": 1,
+            "code": "OUT = IN1 + 1.0",
+            "input_tag_ids": [calc1.json()["id"]],
+        },
+        headers=admin_headers,
+    )
+    assert calc2.status_code == 201, calc2.text
+    opc_id, calc1_id = opc.json()["id"], calc1.json()["id"]
+
+    apagado = await client.delete(f"/api/projects/{p['id']}", headers=admin_headers)
+    assert apagado.status_code == 204
+    # Cascade completo: conexão, tags (OPC e calculadas) e arestas de input somem juntas.
+    conexoes = await client.get(f"/api/connections?project_id={p['id']}", headers=admin_headers)
+    assert conexoes.json() == []
+    calcs = await client.get(f"/api/calculated-tags?project_id={p['id']}", headers=admin_headers)
+    assert calcs.json() == []
+    assert (await client.get(f"/api/tags/{opc_id}", headers=admin_headers)).status_code == 404
+    assert (
+        await client.get(f"/api/calculated-tags/{calc1_id}", headers=admin_headers)
+    ).status_code == 404
+
 
 async def test_nome_duplicado_409_e_404(client, admin_headers):
     await _criar(client, admin_headers, "Unico")
