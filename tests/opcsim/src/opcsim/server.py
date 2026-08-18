@@ -83,7 +83,7 @@ _NODES: tuple[tuple[str, str, Any, ua.VariantType, bool], ...] = (
     (NODE_SINE, "sine", 0.0, ua.VariantType.Double, False),
     (NODE_COUNTER, "counter", 0, ua.VariantType.Int32, False),
     (NODE_SQUARE, "square", False, ua.VariantType.Boolean, False),
-    (NODE_STATIC, "static", 42.0, ua.VariantType.Double, False),
+    (NODE_STATIC, "static", 42.0, ua.VariantType.Double, True),
     (NODE_W_FLOAT, "w_float", 0.0, ua.VariantType.Double, True),
     (NODE_W_INT, "w_int", 0, ua.VariantType.Int32, True),
     (NODE_W_BOOL, "w_bool", False, ua.VariantType.Boolean, True),
