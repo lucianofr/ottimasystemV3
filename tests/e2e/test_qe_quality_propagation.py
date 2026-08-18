@@ -7,6 +7,8 @@ QE-2  Node com StatusCode Bad => ok=False propaga OPC-Read -> Filtro -> MPC;
       MPC pula o solve, congela as MVs, publica input_valid=false e mpc_input_invalid.
 QE-3  Node volta a Good => MPC volta a input_valid=true e resolve de novo (reversível).
 QE-4  Tag calculada com 2 entradas: UMA entrada Bad força quality=2 na publicada (pior-de-N).
+QE-5  DV com Bad NÃO invalida o MPC (ADR-038): input_valid segue true, a DV reportada
+      congela no último valor bom e volta a seguir a tag quando a qualidade volta.
 
 O cenário usa um bloco MPC mínimo (1 MV direta sem readback, 1 CV self-reg) armado até
 AUTO, e um flow com watchdog habilitado — exigência do deploy, não a feature sob teste.
@@ -30,7 +32,7 @@ import pytest
 import redis
 from asyncua import Client, ua
 
-from opcsim import NODE_SINE, NODE_STATIC, NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM
+from opcsim import NODE_SINE, NODE_STATIC, NODE_W_FLOAT, NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM
 from ottima_core.bus import KIND_MPC_INPUT_INVALID
 
 from .conftest import (
@@ -208,7 +210,7 @@ def _escrever_status(node_id: str, *, valor: float, ruim: bool) -> None:
 
 
 def _config_mpc_minimo() -> dict[str, Any]:
-    """1 MV direta (sem PID, sem readback — sempre RCAS_OK), 1 CV self-reg."""
+    """1 MV direta (sem PID, sem readback — sempre RCAS_OK), 1 CV self-reg, 1 DV."""
     return {
         "name": "MPC QE",
         "multiplier": MULTIPLIER,
@@ -235,21 +237,34 @@ def _config_mpc_minimo() -> dict[str, Any]:
                 }
             ],
             "constraints": [],
-            "dvs": [],
+            "dvs": [
+                {
+                    "id": "dv_1",
+                    "name": "DV de carga",
+                    "eu": "m3/h",
+                }
+            ],
         },
         "models": {
             "cv_1": {
                 "mv_1": {
                     "enabled": True,
                     "params": {"K": GANHO_CV, "tau1": TAU1_CV, "tau2": TAU2_CV, "theta": 0.0},
-                }
+                },
+                "dv_1": {
+                    "enabled": True,
+                    "params": {"K": 0.5, "tau1": 5.0, "tau2": 0.0, "theta": 0.0},
+                },
             }
         },
     }
 
 
-def _grafo_qe(tag_senso: int) -> dict[str, Any]:
-    """OPC-Read(node de teste) -> Filtro 1ª ordem -> MPC(cv_1). exec_order crescente."""
+def _grafo_qe(tag_senso: int, tag_dv: int) -> dict[str, Any]:
+    """OPC-Read(node de teste) -> Filtro 1ª ordem -> MPC(cv_1); OPC-Read -> MPC(dv_1).
+
+    `exec_order` contíguo 1..4 (RF-307): a leitura da DV entra direto no MPC, sem filtro —
+    o cenário QE-5 corrompe exatamente a tag que alimenta a porta da DV."""
     return {
         "nodes": [
             {
@@ -259,16 +274,22 @@ def _grafo_qe(tag_senso: int) -> dict[str, Any]:
                 "data": {"exec_order": 1, "tag_id": tag_senso},
             },
             {
+                "id": "dv_leitura",
+                "type": "opc_read",
+                "position": {"x": 0.0, "y": 0.0},
+                "data": {"exec_order": 2, "tag_id": tag_dv},
+            },
+            {
                 "id": "filtro",
                 "type": "first_order",
                 "position": {"x": 0.0, "y": 0.0},
-                "data": {"exec_order": 2, "tau": 2.0},
+                "data": {"exec_order": 3, "tau": 2.0},
             },
             {
                 "id": "mpc_qe",
                 "type": "mpc",
                 "position": {"x": 0.0, "y": 0.0},
-                "data": {"exec_order": 3, **_config_mpc_minimo()},
+                "data": {"exec_order": 4, **_config_mpc_minimo()},
             },
         ],
         "edges": [
@@ -285,6 +306,13 @@ def _grafo_qe(tag_senso: int) -> dict[str, Any]:
                 "sourceHandle": "out",
                 "target": "mpc_qe",
                 "targetHandle": "cv_1",
+            },
+            {
+                "id": "e3",
+                "source": "dv_leitura",
+                "sourceHandle": "out",
+                "target": "mpc_qe",
+                "targetHandle": "dv_1",
             },
         ],
     }
@@ -346,6 +374,7 @@ def ambiente_qe(admin: httpx.Client, opcsim_standalone: str) -> Iterator[dict[st
             return int(r.json()["id"])
 
         tag_senso = criar_tag("senso", NODE_STATIC, "r")  # node que vamos corromper
+        tag_dv = criar_tag("dv", NODE_W_FLOAT, "r")  # node da DV — corrompido só no QE-5
         tag_aux = criar_tag("aux", NODE_SINE, "r")  # entrada sempre boa da tag calculada
 
         r = admin.post(
@@ -368,7 +397,7 @@ def ambiente_qe(admin: httpx.Client, opcsim_standalone: str) -> Iterator[dict[st
         )
         assert r.status_code == 201, f"criação do flow falhou: HTTP {r.status_code} {r.text}"
         flow_id = int(r.json()["id"])
-        r = admin.put(f"/api/flows/{flow_id}", json={"graph_json": _grafo_qe(tag_senso)})
+        r = admin.put(f"/api/flows/{flow_id}", json={"graph_json": _grafo_qe(tag_senso, tag_dv)})
         assert r.status_code == 200, f"PUT do grafo falhou: HTTP {r.status_code} {r.text}"
         r = admin.put(
             f"/api/flows/{flow_id}",
@@ -389,6 +418,7 @@ def ambiente_qe(admin: httpx.Client, opcsim_standalone: str) -> Iterator[dict[st
             "conn_id": conn_id,
             "flow_id": flow_id,
             "tag_senso": tag_senso,
+            "tag_dv": tag_dv,
             "tag_aux": tag_aux,
             "tag_calc": tag_calc,
         }
@@ -596,3 +626,63 @@ def test_qe4_tag_calculada_pior_de_n(admin: httpx.Client, ambiente_qe: dict[str,
         serie_curada, timeout=60.0, intervalo=2.0, descricao="tag calculada curada"
     )
     assert set(curadas[-3:]) == {0}, f"esperado quality=0 após a cura: {curadas}"
+
+
+def test_qe5_dv_bad_congela_internamente_e_good_retoma(
+    admin: httpx.Client, ambiente_qe: dict[str, Any]
+) -> None:
+    """QE-5 (ADR-038): DV Bad => input_valid SEGUE true, a DV reportada congela no último
+    valor bom e o solve continua (feedforward parado não impacta o algoritmo); Good =>
+    a DV volta a seguir a tag."""
+    flow_id = ambiente_qe["flow_id"]
+
+    deploy_flow(admin, flow_id)
+
+    with assinar_mpc_state(admin, flow_id, "mpc_qe") as fluxo:
+        # 0) sanidade + arme até AUTO (idempotente se o QE-2 já deixou armado)
+        fluxo.esperar(
+            lambda e: e["status"].get("solver") != "building",
+            timeout=90.0,
+            descricao="host do MPC pronto",
+        )
+        armar_remoto_direto(admin, fluxo, flow_id, "mpc_qe")
+        armar_auto_com_retentativa(admin, fluxo, flow_id, "mpc_qe")
+        fluxo.esperar(
+            lambda e: e["modes"]["man_auto"] == "auto" and e["status"]["input_valid"],
+            timeout=30.0,
+            descricao="MPC em AUTO com entrada válida",
+        )
+
+        # 1) DV boa com valor distintivo: a DV reportada segue a tag
+        _escrever_status(NODE_W_FLOAT, valor=25.0, ruim=False)
+        fluxo.esperar(
+            lambda e: abs(e["vars"]["dv_1"]["v"] - 25.0) < 0.01,
+            timeout=45.0,
+            descricao="DV boa seguindo a tag (25.0)",
+        )
+
+        # 2) corrompe o node da DV: o bloco NÃO invalida, a DV congela, o solve continua
+        _escrever_status(NODE_W_FLOAT, valor=0.0, ruim=True)
+        janela = fluxo.coletar(
+            quantidade=6,
+            timeout=TS_MPC * 6 + 15.0,
+            descricao="janela com a DV ruim",
+        )
+        assert all(e["status"]["input_valid"] is True for e in janela), (
+            f"DV ruim não pode invalidar o bloco: "
+            f"{[e['status']['input_valid'] for e in janela]}"
+        )
+        dv_cauda = [e["vars"]["dv_1"]["v"] for e in janela]
+        assert all(abs(v - 25.0) < 0.01 for v in dv_cauda), (
+            f"DV reportada precisa congelar no último valor bom durante o Bad: {dv_cauda}"
+        )
+        solves = {e["status"].get("last_solve_ms") for e in janela}
+        assert len(solves) >= 2, f"solve precisa continuar rodando com DV ruim: {solves}"
+
+        # 3) cura: a DV volta a seguir a tag (valor novo flui)
+        _escrever_status(NODE_W_FLOAT, valor=33.0, ruim=False)
+        fluxo.esperar(
+            lambda e: abs(e["vars"]["dv_1"]["v"] - 33.0) < 0.01,
+            timeout=45.0,
+            descricao="DV volta a seguir a tag após a cura (33.0)",
+        )

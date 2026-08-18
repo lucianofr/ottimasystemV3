@@ -17,7 +17,9 @@ Cold start (`v=None` em qualquer CV/Restrição/DV) segue o padrão universal do
 avaliado nessa varredura. Invalidez (`ok=False`, valor conhecido) é mais branda — decisão
 A-6 da F3: o bloco segue rodando, mas pula o solve na fronteira, mantém as saídas com a
 flag ruim e suprime as escritas do `pid` (spec §4.6); dedupe por período, mesmo padrão de
-`write_suppressed`/`flow_overrun`.
+`write_suppressed`/`flow_overrun`. DV fica FORA desse gate (ADR-038): amostra ruim congela
+o último valor bom internamente e o solve segue — feedforward parado não impacta o
+algoritmo; ação default fixa, sem fail action de DV.
 
 CONTRATO VINCULANTE herdado do host (docstring de `mpc/host.py`, achado da revisão 1.1):
 um `SolveResult` com `status="no_convergence"` chega com `u_plan`/predição/`cost`
@@ -451,9 +453,11 @@ class MpcBlock(Block):
         # RF-613 — validez por linha: CV/Restrição com amostra ruim e `fail_action`
         # `simulate_*` DENTRO de `fail_timeout_s` recebe o valor previsto da última
         # predição aplicada (ou, sem predição, a última medição boa) e conta como válida
-        # para o solve. DVs seguem no gate global (não têm o que simular). Expirada a
-        # janela, a linha volta a contar como ruim e a ação final corre pelo debounce da
-        # fronteira (`_avaliar_fail_actions`).
+        # para o solve. DVs ficam FORA do gate (ADR-038): amostra ruim de DV congela
+        # internamente — o bloco segue resolvendo com o último valor bom (feedforward
+        # parado não impacta o algoritmo); ação default fixa, sem fail action de DV.
+        # Expirada a janela, a linha volta a contar como ruim e a ação final corre pelo
+        # debounce da fronteira (`_avaliar_fail_actions`).
         agora_mono = time.monotonic()
         simuladas: set[str] = set()
         for row_id in self._row_ids:
@@ -471,7 +475,7 @@ class MpcBlock(Block):
             self._last_measured[row_id] = previsto
             simuladas.add(row_id)
 
-        valid = all(samples[dv_id].ok for dv_id in self._dv_ids) and all(
+        valid = all(
             samples[row_id].ok or row_id in simuladas for row_id in self._row_ids
         )
         self._input_ok = valid
@@ -479,7 +483,9 @@ class MpcBlock(Block):
             self._input_invalid_reported = False
             for var_id, sample in samples.items():
                 if not sample.ok:
-                    continue  # linha simulada: `_last_measured` já recebeu o previsto
+                    # Linha simulada: `_last_measured` já recebeu o previsto. DV ruim
+                    # (ADR-038): congela no último valor bom — não atualiza, não invalida.
+                    continue
                 self._last_measured[var_id] = float(sample.v)  # type: ignore[arg-type]
             if not self._in_auto:
                 for cv_id in self._cv_ids:
@@ -678,7 +684,7 @@ class MpcBlock(Block):
                 # é a mesma resolução usada em LOCAL — u_applied é a mesma pergunta ("qual é
                 # o valor físico agora?"), não uma nova regra.
                 u_applied={mv_id: self._effective_value(mv) for mv_id, mv in self._mvs.items()},
-                d={dv_id: self._last_measured[dv_id] for dv_id in self._dv_ids},
+                d={dv_id: self._last_measured.get(dv_id, 0.0) for dv_id in self._dv_ids},
                 sp=dict(self._sp),
                 reinit=self._reinit_pending,
                 # ADR-028: MVs que não estão sob comando do MPC neste ciclo. O worker as
