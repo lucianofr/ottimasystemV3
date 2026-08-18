@@ -219,6 +219,29 @@ async def test_flow_disconnect_remove_apenas_a_aresta_pedida(cliente_falso) -> N
 
 
 @pytest.mark.asyncio
+async def test_flow_remove_block_id_inexistente_levanta_erro(cliente_falso) -> None:
+    """Regressão: filtrar por id sem checar existência é no-op silencioso que ainda salva —
+    falso-sucesso na superfície do agente (achado de revisão)."""
+    capturado: dict[str, Any] = {}
+    cliente, _hub = await cliente_falso(_rota_grafo(capturado))
+
+    with pytest.raises(ValueError, match="não encontrado"):
+        await grafo.flow_remove_block(cliente, 1, "inexistente")
+    assert "put_body" not in capturado  # nunca salvou
+
+
+@pytest.mark.asyncio
+async def test_flow_disconnect_edge_id_inexistente_levanta_erro(cliente_falso) -> None:
+    """Mesma regressão de `flow_remove_block`, para arestas."""
+    capturado: dict[str, Any] = {}
+    cliente, _hub = await cliente_falso(_rota_grafo(capturado))
+
+    with pytest.raises(ValueError, match="não encontrada"):
+        await grafo.flow_disconnect(cliente, 1, "inexistente")
+    assert "put_body" not in capturado  # nunca salvou
+
+
+@pytest.mark.asyncio
 async def test_flow_create_body_exato(cliente_falso) -> None:
     capturado: dict[str, Any] = {}
 

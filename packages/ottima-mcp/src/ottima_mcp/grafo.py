@@ -90,6 +90,8 @@ async def flow_add_block(
 
 async def flow_remove_block(cliente: ClienteOttima, flow_id: int, block_id: str) -> dict[str, Any]:
     grafo = await _ler_grafo(cliente, flow_id)
+    if not any(n["id"] == block_id for n in grafo["nodes"]):
+        raise ValueError(f"Bloco '{block_id}' não encontrado no flow {flow_id}.")
     grafo["nodes"] = [n for n in grafo["nodes"] if n["id"] != block_id]
     grafo["edges"] = [
         e for e in grafo["edges"] if e["source"] != block_id and e["target"] != block_id
@@ -154,5 +156,7 @@ async def flow_connect(
 
 async def flow_disconnect(cliente: ClienteOttima, flow_id: int, edge_id: str) -> dict[str, Any]:
     grafo = await _ler_grafo(cliente, flow_id)
+    if not any(e["id"] == edge_id for e in grafo["edges"]):
+        raise ValueError(f"Aresta '{edge_id}' não encontrada no flow {flow_id}.")
     grafo["edges"] = [e for e in grafo["edges"] if e["id"] != edge_id]
     return await _salvar_grafo(cliente, flow_id, grafo)
