@@ -66,3 +66,21 @@ test("1m: teto do modo agregado é repassado ao primitivo — pena parada vira S
   expect(morta[morta.length - 1]).toBeNull();
   expect(resumirSeries(resp, [MORTA])[0].semDado).toBe(true);
 });
+
+test("silêncio simultâneo de todas as penas vira gap no eixo, não reta interpolada", () => {
+  // Regressão da tela de operação (2026-08-20), coberta na raiz compartilhada: quando
+  // todas as tags calam juntas (conexão fora do ar), a união de carimbos não tem nada no
+  // silêncio e o uPlot liga as duas bordas com reta contínua. `montarMatriz` tem de
+  // plantar marca de silêncio no eixo para `alinharNoEixo` cortar o traço.
+  const t = [carimbo(0), carimbo(2), carimbo(52), carimbo(54)];
+  const resp = resposta("raw", [
+    { tag_id: 1, t, v: [5, 5, 5, 5], q: [0, 0, 0, 0] },
+    { tag_id: 2, t, v: [7, 7, 7, 7], q: [0, 0, 0, 0] },
+  ]);
+  const [x, p1, p2] = montarMatriz(resp, [1, 2]);
+
+  const iSilencio = x.indexOf(T0 + 37); // marca: meio da zona nula (2 + 20, 52)
+  expect(iSilencio).toBeGreaterThan(-1);
+  expect(p1[iSilencio]).toBeNull();
+  expect(p2[iSilencio]).toBeNull();
+});

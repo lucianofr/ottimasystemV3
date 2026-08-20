@@ -131,13 +131,13 @@ test("1m: a vista agregada também recebe a borda viva", () => {
   // mesmo comportamento. O modo escolhe a resolução do PASSADO, não se a ponta é viva.
   const resp = resposta("1m", [serie(TAG, 60, 600, 5)]);
   const mesclado = mesclarHistoricoVivo(resp, vivos({ [String(TAG)]: [{ t: T0 + 800, v: 9 }] }));
-  const [x, pena] = montarMatriz(mesclado, [TAG]);
+  const [x, pena] = montarMatriz(mesclado, [TAG], referenciaPersistidaS(resp.series));
 
   expect(x[x.length - 1]).toBe(T0 + 800);
   expect(pena[pena.length - 1]).toBe(9);
   // O passado agregado continua desenhado inteiro: a borda viva ACRESCENTA.
   expect(x[0]).toBe(T0);
-  expect(x.length).toBe(12); // 0,60,…,600 (11) + 800
+  expect(x.length).toBe(12); // 0,60,…,600 (11) + 800 — a costura vivo↔persistido não é silêncio
 });
 
 test("1m: pena viva não marca SEM DADO na vizinha saudável com bucket atrasado", () => {

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import type { PontoVivo } from "../trend/bordaViva";
+import { referenciaPersistidaS } from "../trend/bordaViva";
 import {
   mesclarHistoricoFuzzyVivo,
   montarMatrizFuzzy,
@@ -67,13 +68,13 @@ test("1m: a vista agregada do trend fuzzy também recebe a borda viva", () => {
   // têm de se comportar igual, e o trend de operação MPC mescla nos dois modos.
   const resp = resposta("1m", [serie("IN1", 60, 600, 0.4)]);
   const mesclado = mesclarHistoricoFuzzyVivo(resp, vivos({ IN1: [{ t: T0 + 800, v: 0.7 }] }));
-  const [x, entrada] = montarMatrizFuzzy(mesclado, ["IN1"]);
+  const [x, entrada] = montarMatrizFuzzy(mesclado, ["IN1"], referenciaPersistidaS(resp.series));
 
   expect(x[x.length - 1]).toBe(T0 + 800);
   expect(entrada[entrada.length - 1]).toBe(0.7);
   // O passado agregado continua desenhado inteiro: a borda viva ACRESCENTA.
   expect(x[0]).toBe(T0);
-  expect(x.length).toBe(12); // 0,60,…,600 (11) + 800
+  expect(x.length).toBe(12); // 0,60,…,600 (11) + 800 — a costura vivo↔persistido não é silêncio
 });
 
 test("porta sem amostra persistida na janela desenha só com a borda viva", () => {
@@ -91,4 +92,19 @@ test("sem borda viva a resposta fuzzy passa inalterada", () => {
   const resp = resposta("raw", [serie("IN1", 10, 100, 0.4)]);
 
   expect(mesclarHistoricoFuzzyVivo(resp, new Map())).toBe(resp);
+});
+
+test("silêncio simultâneo de todas as portas vira gap no eixo, não reta interpolada", () => {
+  // Mesma regressão das outras duas telas de trend (ARCH-02): quando todas as portas
+  // calam juntas, a união não tem carimbo no silêncio e o uPlot interpola as bordas.
+  const resp = resposta("raw", [
+    { var_id: "IN1", t: [carimbo(0), carimbo(2), carimbo(52), carimbo(54)], v: [0.4, 0.4, 0.5, 0.5] },
+    { var_id: "OUT1", t: [carimbo(0), carimbo(2), carimbo(52), carimbo(54)], v: [0.9, 0.9, 0.8, 0.8] },
+  ]);
+  const mesclado = mesclarHistoricoFuzzyVivo(resp, new Map());
+  const [x, entrada, saida] = montarMatrizFuzzy(mesclado, ["IN1", "OUT1"]);
+  const i = x.indexOf(T0 + 37); // marca: meio da zona nula (2 + 20, 52)
+  expect(i).toBeGreaterThan(-1);
+  expect(entrada[i]).toBeNull();
+  expect(saida[i]).toBeNull();
 });

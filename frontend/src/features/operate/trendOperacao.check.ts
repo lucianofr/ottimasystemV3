@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { alinharNoEixo, eixoComMarcasDeSilencio, montarEixoUniao } from "../trend/alinhamento";
 import type { MpcHistoryResponse } from "../../lib/api";
 import type { MpcPrediction, MpcVarState } from "../../lib/contracts.gen";
 import {
@@ -543,4 +544,29 @@ test("atribuirCoresPenas: id além do teto de 8 recicla por módulo — mesmo co
   const mapa = atribuirCoresPenas(ids, coresResolvidas);
 
   expect(mapa.get("v8")).toBe(mapa.get("v0"));
+});
+
+test("silêncio simultâneo de todas as penas: eixo com marcas de silêncio abre gap no alinhamento (não reta interpolada)", () => {
+  // Regressão (tela de operação, 2026-08-20): todas as variáveis do bloco calam juntas
+  // (flow parado, conexão fora) e a união de carimbos não tem nada no silêncio — o uPlot
+  // liga as duas bordas com reta contínua, a interpolação que a Regra do Canal Redundante
+  // (DESIGN.md) proíbe. Aqui o teto de operação (`tetoCarryForwardOperacaoS`) sobre o
+  // primitivo compartilhado — a montagem de `montarColunas` (TrendOperacao.tsx), que
+  // acrescenta `overlay.tAbs` e a fronteira `limiteHistoricoS`, fica fora do alcance.
+  // O teto de operação é 2×Ts_mpc (4 s), então a marca cai em (2 + 4 + 52) / 2 = 29.
+  const pontos = [
+    { d: 0, v: 5, sp: null, auto: true },
+    { d: 2, v: 5, sp: null, auto: true },
+    { d: 52, v: 6, sp: null, auto: true },
+    { d: 54, v: 6, sp: null, auto: true },
+  ];
+  const mescladas = mesclarSeriesVivas(historico("cv_1", pontos), [], ["cv_1", "mv_1"]);
+  const teto = tetoCarryForwardOperacaoS("raw", 2);
+  const eixo = eixoComMarcasDeSilencio(
+    montarEixoUniao(mescladas.map((serie) => serie.t)),
+    teto,
+  );
+  expect(eixo).toContain(T0 + 29);
+  const cv = mescladas.find((serie) => serie.id === "cv_1")!;
+  expect(alinharNoEixo(eixo, cv.t, cv.v, teto)[eixo.indexOf(T0 + 29)]).toBeNull();
 });

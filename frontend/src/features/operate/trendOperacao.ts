@@ -1,6 +1,6 @@
 import type { MpcHistoryResponse } from "../../lib/api";
 import type { MpcPrediction, MpcVarState } from "../../lib/contracts.gen";
-import { alinharNoEixo } from "../trend/alinhamento";
+import { alinharNoEixo, eixoComMarcasDeSilencio, montarEixoUniao } from "../trend/alinhamento";
 
 /**
  * Trend central com predição (spec F5 §7.4-6; plano F5b Etapa 5). Lógica pura: montagem de
@@ -152,9 +152,9 @@ export function ultimoCarimboHistorico(series: readonly SerieOperacao[]): number
   return ultimo;
 }
 
-/** Primitivo de alinhamento — fonte única em `../trend/alinhamento.ts` (ARCH-02); re-exportado
+/** Primitivos de alinhamento — fonte única em `../trend/alinhamento.ts` (ARCH-02); re-exportados
  *  aqui para não mexer nos imports de `TrendOperacao.tsx`/`trendOperacao.check.ts`. */
-export { alinharNoEixo };
+export { alinharNoEixo, eixoComMarcasDeSilencio, montarEixoUniao };
 
 // ----------------------------------------------------------------------------------------
 // 5.2 — Overlay de predição (spec F5 §3, §7.4-6 item 3)

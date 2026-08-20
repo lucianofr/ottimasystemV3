@@ -16,6 +16,7 @@ import {
 } from "../trend/escalas";
 import { useMotorTrend } from "../trend/motorTrend";
 import { JanelaTempo } from "../trend/JanelaTempo";
+import { referenciaPersistidaS } from "../trend/bordaViva";
 import { FORMATO_VALOR, lerTemaTrend, type TemaTrend } from "../trend/trendTheme";
 import "../trend/trend.css";
 import { useJanelaDeslizante } from "../trend/useJanelaDeslizante";
@@ -27,11 +28,13 @@ import {
   TETO_PENAS_OPERACAO,
   TOKENS_PENA_OPERACAO,
   alinharNoEixo,
+  eixoComMarcasDeSilencio,
   atribuirCoresPenas,
   dividirSpPorAuto,
   emendarPlanoNoDivisor,
   idPenaSp,
   mesclarSeriesVivas,
+  montarEixoUniao,
   montarOverlayPrevisao,
   selecionarPenasDefault,
   tetoCarryForwardOperacaoS,
@@ -186,16 +189,23 @@ function montarColunas(
   corPadrao: string,
   ligadas: ReadonlySet<string>,
   tetoCarryS: number,
+  referenciaMarcasS: number,
 ): ColunasOperacao {
   const porId = new Map(seriesHistoricas.map((serie) => [serie.id, serie]));
-  const eixoX = [...new Set([...seriesHistoricas.flatMap((s) => s.t), ...overlay.tAbs])].sort(
-    (a, b) => a - b,
+  // Marcas de silêncio limitadas ao histórico PERSISTIDO: a emenda entre o último
+  // carimbo do REST e a borda viva (mpc.state/opc.values) é costura normal, não silêncio
+  // — mesma referência que `resumirSeries` usa nas outras telas (`referenciaPersistidaS`).
+  // O carry-forward, por outro lado, para em `limiteHistoricoS` (abaixo): a seção futura
+  // pertence à predição.
+  const eixoX = eixoComMarcasDeSilencio(
+    montarEixoUniao([...seriesHistoricas.map((s) => s.t), overlay.tAbs]),
+    tetoCarryS,
+    referenciaMarcasS,
   );
-
-  // Fronteira do passado: `eixoX` inclui os carimbos do horizonte, então o carry-forward de
-  // `alinharNoEixo` precisa parar aqui — repetir a última medição dentro da seção futura
-  // desenhava a pena sólida atravessando a linha do "agora" e terminando à direita de onde a
-  // tracejada começa (até 2×Ts_mpc adiante, o teto do carry).
+  // Fronteira do passado do CARRY: `eixoX` inclui os carimbos do horizonte, então repetir
+  // a última medição num carimbo do horizonte desenharia a pena sólida atravessando a
+  // linha do "agora" e terminando à direita de onde a tracejada começa (até 2×Ts_mpc
+  // adiante, o teto do carry).
   const limiteHistoricoS = ultimoCarimboHistorico(seriesHistoricas);
 
   const dados: (number | null)[][] = [];
@@ -697,9 +707,19 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
   const colunas = useMemo(
     () =>
       seriesMescladas
-        ? montarColunas(mpc, seriesMescladas, overlay, tema, cores, coresPena[0], ligadas, tetoCarryS)
+        ? montarColunas(
+            mpc,
+            seriesMescladas,
+            overlay,
+            tema,
+            cores,
+            coresPena[0],
+            ligadas,
+            tetoCarryS,
+            referenciaPersistidaS(historico.data?.series ?? []),
+          )
         : null,
-    [mpc, seriesMescladas, overlay, tema, cores, coresPena, ligadas, tetoCarryS],
+    [mpc, seriesMescladas, overlay, tema, cores, coresPena, ligadas, tetoCarryS, historico.data],
   );
 
   // Escalas do uPlot pelo `varId` das penas ligadas, não pelo id delas: a pena de SP desenha na

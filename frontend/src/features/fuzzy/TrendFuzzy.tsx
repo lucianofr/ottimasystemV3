@@ -91,7 +91,14 @@ export function TrendFuzzy({
   );
 
   const dados = useMemo(
-    () => (resposta ? montarMatrizFuzzy(resposta, selecionadas) : null),
+    () =>
+      (resposta
+        ? montarMatrizFuzzy(
+            resposta,
+            selecionadas,
+            referenciaPersistidaS(historico.data?.series ?? []),
+          )
+        : null),
     [resposta, selecionadas],
   );
   // Referência de "parou de reportar" = histórico PERSISTIDO (ver `referenciaPersistidaS`).

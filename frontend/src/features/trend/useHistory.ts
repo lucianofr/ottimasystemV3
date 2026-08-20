@@ -2,7 +2,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import type uPlot from "uplot";
 
 import { api, type HistoryResponse, type TagOut } from "../../lib/api";
-import { alinharNoEixo, montarEixoUniao } from "./alinhamento";
+import { alinharNoEixo, eixoComMarcasDeSilencio, montarEixoUniao } from "./alinhamento";
 
 /** OPC-UA: 0 good, 1 uncertain, 2 bad (spec F2 §4.2). */
 const QUALIDADE_BAD = 2;
@@ -112,6 +112,7 @@ export function useHistory(
 export function montarMatriz(
   resposta: HistoryResponse,
   ordem: readonly number[],
+  referenciaPersistidaS: number = Number.POSITIVE_INFINITY,
 ): uPlot.AlignedData {
   const porTag = new Map(resposta.series.map((serie) => [serie.tag_id, serie]));
   const tempos = ordem.map((tagId) =>
@@ -124,7 +125,10 @@ export function montarMatriz(
   });
 
   const teto = tetoCarryForwardSegundos(resposta.mode);
-  const x = montarEixoUniao(tempos);
+  // Marcas de silêncio limitadas ao histórico PERSISTIDO (mesma referência de
+  // `resumirSeries` em `TrendPage.tsx`): a emenda entre o último bucket e a borda viva é
+  // costura normal (atraso de materialização do CAgg), não silêncio.
+  const x = eixoComMarcasDeSilencio(montarEixoUniao(tempos), teto, referenciaPersistidaS);
   const penas = tempos.map((t, i) => alinharNoEixo(x, t, valores[i], teto));
 
   return [x, ...penas];

@@ -77,7 +77,10 @@ export function TrendPage() {
 
   // `selecionadas` é estado: a identidade só muda quando a seleção muda de fato.
   const dados = useMemo(
-    () => (resposta ? montarMatriz(resposta, selecionadas) : null),
+    () =>
+      (resposta
+        ? montarMatriz(resposta, selecionadas, referenciaPersistidaS(historico.data?.series ?? []))
+        : null),
     [resposta, selecionadas],
   );
   // A referência de "parou de reportar" é a do histórico PERSISTIDO, não da resposta mesclada:

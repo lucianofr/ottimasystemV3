@@ -58,3 +58,41 @@ export function alinharNoEixo(
     return ts - ultimaAmostra > tetoS ? null : atual;
   });
 }
+
+/**
+ * Eixo x com marcas de silêncio (carry-forward-com-teto, parte 2). `alinharNoEixo` só
+ * produz `null` nos carimbos que EXISTEM no eixo compartilhado — mas a união
+ * (`montarEixoUniao`) não tem carimbo nenhum num silêncio em que TODAS as penas calam
+ * juntas (flow parado, conexão fora do ar, recorder morto), e o uPlot então liga as duas
+ * bordas do silêncio com reta contínua: a interpolação que a Regra do Canal Redundante
+ * (DESIGN.md) proíbe. Plantar uma marca dentro de cada gap maior que `tetoS` dá a
+ * `alinharNoEixo` um carimbo em que nenhuma pena amostrou ⇒ `null`, e o traço corta
+ * exatamente como corta quando só uma pena cala (`spanGaps: false`: um único `null` já
+ * parte o segmento).
+ *
+ * A marca cai no MEIO da zona nula `(a + tetoS, b)`: em `a + tetoS` exato o carry ainda
+ * vale (`alinharNoEixo` testa `> tetoS`, estrito — marcar ali não abriria gap nenhum), e
+ * qualquer ponto estritamente depois já é `null` por teto. Uma marca por gap basta — a
+ * zona é contínua, e grade de múltiplos carimbos só acrescentaria `null` onde o traço já
+ * está cortado. Silêncio de exatamente `tetoS` não ganha marca: é a própria fronteira do
+ * carry, comportamento anterior. Marcas além de `limiteS` são descartadas: a seção futura
+ * pertence à predição (`spanGaps: true`), e medição marcada ali mentiria nela. Todo
+ * carimbo da união tem pelo menos uma amostra, então o silêncio é derivável só do eixo —
+ * `tempos` não entra aqui.
+ */
+export function eixoComMarcasDeSilencio(
+  eixoX: readonly number[],
+  tetoS: number,
+  limiteS = Number.POSITIVE_INFINITY,
+): number[] {
+  if (eixoX.length === 0 || tetoS <= 0) return [...eixoX];
+  const marcas: number[] = [];
+  for (let i = 1; i < eixoX.length; i++) {
+    const anterior = eixoX[i - 1];
+    if (eixoX[i] - anterior <= tetoS) continue;
+    const marca = (anterior + tetoS + eixoX[i]) / 2;
+    if (marca <= limiteS) marcas.push(marca);
+  }
+  if (marcas.length === 0) return [...eixoX];
+  return [...eixoX, ...marcas].sort((a, b) => a - b);
+}

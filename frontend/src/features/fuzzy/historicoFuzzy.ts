@@ -1,6 +1,6 @@
 import type uPlot from "uplot";
 
-import { alinharNoEixo, montarEixoUniao } from "../trend/alinhamento";
+import { alinharNoEixo, eixoComMarcasDeSilencio, montarEixoUniao } from "../trend/alinhamento";
 import { colunasVivas, type PontoVivo } from "../trend/bordaViva";
 import { tetoCarryForwardSegundos } from "../trend/useHistory";
 import type { FuzzyHistoryResponse } from "./types";
@@ -20,6 +20,7 @@ import type { FuzzyHistoryResponse } from "./types";
 export function montarMatrizFuzzy(
   resposta: FuzzyHistoryResponse,
   ordem: readonly string[],
+  referenciaPersistidaS: number = Number.POSITIVE_INFINITY,
 ): uPlot.AlignedData {
   const porVar = new Map(resposta.series.map((serie) => [serie.var_id, serie]));
   const tempos = ordem.map((varId) =>
@@ -28,7 +29,7 @@ export function montarMatrizFuzzy(
   const valores = ordem.map((varId) => porVar.get(varId)?.v ?? []);
 
   const teto = tetoCarryForwardSegundos(resposta.mode);
-  const x = montarEixoUniao(tempos);
+  const x = eixoComMarcasDeSilencio(montarEixoUniao(tempos), teto, referenciaPersistidaS);
   const penas = tempos.map((t, i) => alinharNoEixo(x, t, valores[i], teto));
 
   return [x, ...penas];
