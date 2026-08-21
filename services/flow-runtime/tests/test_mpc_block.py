@@ -21,7 +21,7 @@ próprio instante.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -48,7 +48,12 @@ FLOW_ID = 1
 
 
 def _config(
-    *, multiplier: int = 1, readback_direto: int | None = None, mode_read: int | None = None
+    *,
+    multiplier: int = 1,
+    readback_direto: int | None = None,
+    mode_read: int | None = None,
+    track_sp: bool = True,
+    sp_limits: dict[str, float] | None = None,
 ) -> MpcConfig:
     """1 CV + 2 MVs (uma com `pid`, outra direta) — cobre a tabela de modos inteira.
 
@@ -99,7 +104,10 @@ def _config(
                         "kind": "selfreg",
                         "tss": 30.0,
                         "weight": 1.0,
-                        "sp_limits": {"min": 0.0, "max": 200.0},
+                        "sp_limits": sp_limits
+                        if sp_limits is not None
+                        else {"min": 0.0, "max": 200.0},
+                        "track_sp": track_sp,
                     }
                 ],
                 "constraints": [],
@@ -213,6 +221,9 @@ def _block(
     readback_direto: int | None = None,
     mode_read: int | None = None,
     escreve_sem_watchdog: bool = False,
+    track_sp: bool = True,
+    sp_seed: dict[str, float] | None = None,
+    persist_sp: Callable[[str, float], Awaitable[None]] | None = None,
 ) -> tuple[MpcBlock, FakeHost, FakeSnapshot, Publishes, Writes, Events]:
     host = FakeHost()
     snapshot = FakeSnapshot()
@@ -221,7 +232,12 @@ def _block(
     emit_event = Events()
     block = MpcBlock(
         "m1",
-        config=_config(multiplier=multiplier, readback_direto=readback_direto, mode_read=mode_read),
+        config=_config(
+            multiplier=multiplier,
+            readback_direto=readback_direto,
+            mode_read=mode_read,
+            track_sp=track_sp,
+        ),
         ts_flow=TS_FLOW,
         snapshot=snapshot,
         host=host,
@@ -231,6 +247,8 @@ def _block(
         emit_event=emit_event,
         now=now,
         escreve_sem_watchdog=escreve_sem_watchdog,
+        sp_seed=sp_seed,
+        persist_sp=persist_sp,
     )
     return block, host, snapshot, publish, write_opc, emit_event
 
@@ -1197,3 +1215,116 @@ async def test_dispatch_ocupado_nao_atualiza_o_instante_guardado() -> None:
     assert publish.states[-1].prediction.ts == ts_dispatch_aceito, (
         "a fronteira recusada (frame 1) não pode ter sobrescrito o instante guardado"
     )
+
+
+# --------------------------------------------------------------------------------------
+# Persistência do SP do operador — semente no reset + callback de gravação no comando
+# (decisão do orch-change-feature 2026-08-20: SP do operador sobrevive a restart/redeploy;
+# emenda da decisão A-4 da spec F4 — o número persiste, os modos seguem voláteis)
+# --------------------------------------------------------------------------------------
+
+
+class _SpPersistido:
+    """Coletor do callback `persist_sp` — registra `(var_id, valor)` de cada gravação.
+    `falhar` simula queda do banco: o comando de SP não pode morrer junto (laço de
+    controle nunca cai por telemetria de persistência)."""
+
+    def __init__(self, *, falhar: bool = False) -> None:
+        self.chamadas: list[tuple[str, float]] = []
+        self.falhar = falhar
+
+    async def __call__(self, var_id: str, value: float) -> None:
+        self.chamadas.append((var_id, value))
+        if self.falhar:
+            raise RuntimeError("banco indisponível")
+
+
+async def test_sp_seed_semeia_o_reset_com_clamp_em_sp_limits() -> None:
+    """SP persistido volta como semente de `reset()` — clampado aos `sp_limits` vigentes
+    (a faixa pode ter sido estreitada na config entre a gravação e o boot) e ignorando
+    CVs que não existem mais na config."""
+    block, _, _, publish, _, _ = _block(sp_seed={"cv_a": 500.0, "cv_fantasma": 7.0})
+
+    await block.step(entradas(None))  # publica o frame frio com o SP semeado
+
+    assert publish.states[-1].vars["cv_a"].sp == pytest.approx(200.0), (
+        "semente fora da faixa precisa nascer clampada, não crua"
+    )
+
+
+async def test_reset_devolve_o_sp_semeado_nao_zero() -> None:
+    """`reset()` (stop/deploy novo) volta à semente persistida — não a 0.0, o defeito
+    original que esta mudança fecha."""
+    block, _, _, _, _, _ = _block(sp_seed={"cv_a": 77.0})
+    block.reset()
+    assert block._sp["cv_a"] == pytest.approx(77.0)  # noqa: SLF001
+
+
+async def test_command_sp_materializado_chama_persist_sp_clampado() -> None:
+    """Escrita de SP do operador em AUTO dispara `persist_sp` com o valor JÁ clampado —
+    o banco guarda exatamente o que o bloco materializou."""
+    persistido = _SpPersistido()
+    block, _, _, _, _, _ = _block(persist_sp=persistido)
+    await _entra_remoto_auto(block)
+
+    await block.command("mpc_sp", {"var_id": "cv_a", "value": 9999.0}, OPERADOR)
+
+    assert persistido.chamadas == [("cv_a", 200.0)]
+
+
+async def test_command_sp_fora_de_auto_nao_persiste() -> None:
+    """Fora de AUTO o comando não materializa (§4.8) — então também não persiste: o
+    banco só conhece SP que o operador de fato assumiu."""
+    persistido = _SpPersistido()
+    block, _, _, _, _, _ = _block(persist_sp=persistido)
+
+    await block.command("mpc_sp", {"var_id": "cv_a", "value": 55.0}, OPERADOR)
+
+    assert persistido.chamadas == []
+
+
+async def test_command_sp_idempotente_nao_regrava() -> None:
+    """Repetir o mesmo SP não regrava no banco (mesma idempotência do evento/estado)."""
+    persistido = _SpPersistido()
+    block, _, _, _, _, _ = _block(persist_sp=persistido)
+    await _entra_remoto_auto(block)
+
+    await block.command("mpc_sp", {"var_id": "cv_a", "value": 60.0}, OPERADOR)
+    await block.command("mpc_sp", {"var_id": "cv_a", "value": 60.0}, OPERADOR)
+
+    assert persistido.chamadas == [("cv_a", 60.0)]
+
+
+async def test_falha_do_persist_sp_nao_impede_o_comando() -> None:
+    """Banco indisponível: o SP materializa, o evento sai, o quadro publica — só a
+    persistência falha (fire-and-forget; telemetria nunca derruba laço de controle)."""
+    persistido = _SpPersistido(falhar=True)
+    block, _, _, publish, _, emit_event = _block(persist_sp=persistido)
+    await _entra_remoto_auto(block)
+
+    await block.command("mpc_sp", {"var_id": "cv_a", "value": 88.0}, OPERADOR)
+
+    assert persistido.chamadas == [("cv_a", 88.0)]
+    assert block._sp["cv_a"] == pytest.approx(88.0)  # noqa: SLF001
+    assert len(emit_event.of_kind(KIND_MPC_SP_WRITTEN)) == 1
+    assert publish.states[-1].vars["cv_a"].sp == pytest.approx(88.0)
+
+
+async def test_seed_de_track_sp_true_segue_rastreando_pv_fora_de_auto() -> None:
+    """A semente só adia o tracking: com `track_sp=True` (default), a primeira varredura
+    quente fora de AUTO volta a colar o SP no PV — comportamento RF-612 intacto."""
+    block, _, _, publish, _, _ = _block(sp_seed={"cv_a": 77.0})
+
+    await block.step(entradas(41.0))
+
+    assert publish.states[-1].vars["cv_a"].sp == pytest.approx(41.0)
+
+
+async def test_seed_de_track_sp_false_segura_o_sp_do_operador() -> None:
+    """CV com `track_sp=False`: a semente É o SP fora de AUTO — o operador não precisa
+    entrar em AUTO de novo só para ver o SP que ele deixou."""
+    block, _, _, publish, _, _ = _block(track_sp=False, sp_seed={"cv_a": 65.0})
+
+    await block.step(entradas(41.0))
+
+    assert publish.states[-1].vars["cv_a"].sp == pytest.approx(65.0)

@@ -19,13 +19,17 @@ com `mpc` no stage) morreu nesta tarefa: o grafo agora instancia normalmente.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from multiprocessing.connection import Connection
-from typing import Any
+from typing import Any, Final
 
 from redis.asyncio import Redis
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ottima_core.bus import (
     CHANNEL_OPC_WRITES,
@@ -37,6 +41,7 @@ from ottima_core.bus import (
     publish_event,
 )
 from ottima_core.flowgraph import FlowGraph, FlowNode, MpcConfig, TagRef
+from ottima_core.models import MpcSetpoint
 from ottima_core.script_pool import ScriptPool
 from ottima_core.snapshot import ValueSnapshot
 
@@ -55,6 +60,15 @@ from .mpc.worker import worker_main
 from .scheduler import FlowDefinition
 
 _TAG_TYPES = frozenset({"opc_read", "opc_write"})
+
+
+PERSIST_SP_TIMEOUT_S: Final[float] = 2.0
+"""Teto do upsert de `mpc_setpoints` (achado HIGH da revisão): `persist_sp` roda sob o
+`Supervisor._lock` (que serializa deploy/stop/reload/watermark da partição inteira) e o
+engine não tem statement timeout — um Postgres parado congelaria a fila de comandos de
+TODOS os flows. O `wait_for` degrada a parada para no máximo este teto; o `MpcBlock`
+captura o `TimeoutError` como qualquer falha de persistência (fire-and-forget, RNF-05).
+Upsert de uma linha é sub-10 ms em regime — 2 s é margem de commit lento, não de espera."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +100,8 @@ def build_definition(
     snapshot: ValueSnapshot,
     watchdog_enabled: bool = False,
     mpc_worker_target: Callable[[Connection, str, float], None] = worker_main,
+    sp_seeds: Mapping[str, Mapping[str, float]] | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> StagedDefinition:
     """Instancia os blocos do grafo (reaproveitando os que não mudaram) e monta a fiação.
 
@@ -114,6 +130,8 @@ def build_definition(
                 write_opc=write_opc,
                 mpc_worker_target=mpc_worker_target,
                 watchdog_enabled=watchdog_enabled,
+                sp_seed=(sp_seeds or {}).get(node.id),
+                session_factory=session_factory,
             )
             # TD-006: config mudou (ou o bloco é novo) — quando o bloco velho é um
             # `MpcBlock` e o conjunto de MVs é IDÊNTICO, o novo transplanta o estado do
@@ -197,6 +215,8 @@ def _instantiate(
     write_opc: Callable[[OpcWrite], Awaitable[None]],
     mpc_worker_target: Callable[[Connection, str, float], None],
     watchdog_enabled: bool,
+    sp_seed: Mapping[str, float] | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> Block:
     """Instancia o bloco com os serviços do runtime. Bloco novo nasce zerado (§4.1-3)."""
     config: Any = node.config
@@ -233,6 +253,8 @@ def _instantiate(
             write_opc=write_opc,
             worker_target=mpc_worker_target,
             escreve_sem_watchdog=not watchdog_enabled,
+            sp_seed=sp_seed,
+            session_factory=session_factory,
         )
     if node.type == "first_order":
         return FirstOrderBlock(node.id, tau=config.tau, ts_seconds=ts_seconds)
@@ -272,6 +294,8 @@ def _instantiate_mpc(
     write_opc: Callable[[OpcWrite], Awaitable[None]],
     worker_target: Callable[[Connection, str, float], None],
     escreve_sem_watchdog: bool = False,
+    sp_seed: Mapping[str, float] | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> MpcBlock:
     config = MpcConfig.model_validate(node.config.model_dump())
     host = MpcHost(node.id, config, ts_seconds, worker_target=worker_target)
@@ -282,6 +306,27 @@ def _instantiate_mpc(
 
     async def emit_event(**kwargs: Any) -> None:
         await publish_event(redis_client, ts=datetime.now(UTC), **kwargs)
+
+    async def persist_sp(var_id: str, value: float) -> None:
+        """Upsert do SP materializado em `mpc_setpoints` — sessão própria, commit próprio,
+        com teto de `PERSIST_SP_TIMEOUT_S` (fire-and-forget visto do bloco: o `MpcBlock`
+        captura exceção E timeout e só loga; o comando nunca fica refém do banco)."""
+        if session_factory is None:
+            return
+        stmt = pg_insert(MpcSetpoint).values(
+            flow_id=flow_id, block_id=node.id, var_id=var_id, value=value
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["flow_id", "block_id", "var_id"],
+            set_={"value": stmt.excluded.value, "updated_at": func.now()},
+        )
+
+        async def _grava() -> None:
+            async with session_factory() as session:
+                await session.execute(stmt)
+                await session.commit()
+
+        await asyncio.wait_for(_grava(), timeout=PERSIST_SP_TIMEOUT_S)
 
     return MpcBlock(
         node.id,
@@ -294,6 +339,8 @@ def _instantiate_mpc(
         write_opc=write_opc,
         emit_event=emit_event,
         escreve_sem_watchdog=escreve_sem_watchdog,
+        sp_seed=sp_seed,
+        persist_sp=persist_sp,
     )
 
 
@@ -357,3 +404,18 @@ def _mpc_pid_tag_ids(node: FlowNode) -> Iterator[int]:
         yield mv.pid.readback_tag_id
         if mv.pid.mode_read_tag_id is not None:
             yield mv.pid.mode_read_tag_id
+
+
+async def carregar_sp_seeds(session: AsyncSession, flow_id: int) -> dict[str, dict[str, float]]:
+    """`{block_id: {var_id: valor}}` persistido em `mpc_setpoints` para o flow — semente
+    de `reset()` dos blocos `mpc` no deploy/redeploy (persistência do SP do operador;
+    os modos seguem voláteis, RNF-03)."""
+    resultado = await session.execute(
+        select(MpcSetpoint.block_id, MpcSetpoint.var_id, MpcSetpoint.value).where(
+            MpcSetpoint.flow_id == flow_id
+        )
+    )
+    seeds: dict[str, dict[str, float]] = {}
+    for block_id, var_id, value in resultado.all():
+        seeds.setdefault(block_id, {})[var_id] = float(value)
+    return seeds

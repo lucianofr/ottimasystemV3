@@ -40,6 +40,7 @@ mudar o comportamento desta tarefa (achado da tarefa 2.2, documentado no relató
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -84,6 +85,8 @@ from ..mpc.availability import (
 from ..mpc.host import MpcHost
 from ..mpc.worker import SolveRequest, SolveResult
 from .base import Block, PortSample, has_cold_input, null_outputs
+
+logger = logging.getLogger(__name__)
 
 _LocalRemote = Literal["local", "remote"]
 _ManAuto = Literal["man", "auto"]
@@ -145,6 +148,8 @@ class MpcBlock(Block):
         emit_event: Callable[..., Awaitable[None]],
         now: Callable[[], datetime] | None = None,
         escreve_sem_watchdog: bool = False,
+        sp_seed: Mapping[str, float] | None = None,
+        persist_sp: Callable[[str, float], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__(block_id)
         self._snapshot = snapshot
@@ -157,6 +162,12 @@ class MpcBlock(Block):
         # supervisor materializar um comando que o `writes.py` do opc-worker recusaria de
         # qualquer forma (somente leitura de fato).
         self._escreve_sem_watchdog = escreve_sem_watchdog
+        # Persistência do SP do operador (emenda da decisão A-4 da spec F4): `sp_seed` é o
+        # que `mpc_setpoints` guarda deste bloco — semente de `reset()` (deploy/redeploy/
+        # stop/restart), clampada na própria `reset()` aos `sp_limits` vigentes. `persist_sp`
+        # é o upsert fire-and-forget (fechado em `definition.py`); os MODOS seguem voláteis.
+        self._sp_seed: Mapping[str, float] = dict(sp_seed) if sp_seed is not None else {}
+        self._persist_sp = persist_sp
         # Clock injetável (spec F5 §2.1, achado da tarefa 1.2): fallback para quando `step()`
         # não recebe `ts` do scheduler (publicações imediatas, que não têm fronteira; e
         # testes de unidade que chamam `step()` direto). Em produção o scheduler SEMPRE passa
@@ -324,7 +335,16 @@ class MpcBlock(Block):
         self._mv_manual: dict[str, float] = {mv.id: mv.initial_value for mv in self._mvs.values()}
         self._mv_last: dict[str, float] = {mv.id: mv.initial_value for mv in self._mvs.values()}
         self._plan: dict[str, float] | None = None
-        self._sp: dict[str, float] = dict.fromkeys(self._cv_ids, 0.0)
+        # SP nasce da semente persistida quando existe (clampado aos `sp_limits` vigentes —
+        # a faixa pode ter sido estreitada na config entre a gravação e este reset); CV sem
+        # semente (ou com CV removido da config) nasce 0.0 como antes. Sem semente, o
+        # comportamento é bit a bit o anterior.
+        self._sp: dict[str, float] = {
+            cv_id: _clamp(float(self._sp_seed[cv_id]), cv.sp_limits.min, cv.sp_limits.max)
+            if cv_id in self._sp_seed
+            else 0.0
+            for cv_id, cv in self._cvs.items()
+        }
         self._last_measured: dict[str, float] = {}
         # ADR-028 — disponibilidade por MV, reapurada a cada varredura. Nasce VAZIO de
         # propósito: a primeira classificação é a linha de base e não emite evento de
@@ -475,9 +495,7 @@ class MpcBlock(Block):
             self._last_measured[row_id] = previsto
             simuladas.add(row_id)
 
-        valid = all(
-            samples[row_id].ok or row_id in simuladas for row_id in self._row_ids
-        )
+        valid = all(samples[row_id].ok or row_id in simuladas for row_id in self._row_ids)
         self._input_ok = valid
         if valid:
             self._input_invalid_reported = False
@@ -1049,6 +1067,15 @@ class MpcBlock(Block):
         if self._sp.get(var_id) == clamped:
             return  # idempotente
         self._sp[var_id] = clamped
+        if self._persist_sp is not None:
+            try:
+                await self._persist_sp(var_id, clamped)
+            except Exception:
+                # Persistência é telemetria do estado do operador: o banco cair não pode
+                # derrubar o laço de controle nem desfazer o SP materializado (RNF-05).
+                logger.exception(
+                    "Falha ao persistir SP de '%s' do bloco MPC '%s'", var_id, self.block_id
+                )
         await self._emit_event(
             origin=self._source,
             severity="info",

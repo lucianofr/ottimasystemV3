@@ -55,7 +55,7 @@ from ottima_core.tags import project_tags
 
 from .blocks.base import Block
 from .blocks.mpc import MpcBlock
-from .definition import StagedDefinition, build_definition
+from .definition import StagedDefinition, build_definition, carregar_sp_seeds
 from .events import (
     ChannelListener,
     publish_flow_deployed,
@@ -361,7 +361,8 @@ class Supervisor:
                 return None
             try:
                 # Deploy nasce zerado: `state` de bloco zera ao parar (RF-512), então não há
-                # o que preservar de uma execução anterior.
+                # o que preservar de uma execução anterior — exceção única: o SP do operador
+                # volta como semente de `mpc_setpoints` (`carregar_sp_seeds` em `_build`).
                 staged = await self._build(session, flow, reuse={})
             except _Rejected as rejected:
                 await self._reject(
@@ -553,6 +554,8 @@ class Supervisor:
             snapshot=self._snapshot,
             watchdog_enabled=flow.watchdog_enabled,
             mpc_worker_target=self._mpc_worker_target,
+            sp_seeds=await carregar_sp_seeds(session, flow.id),
+            session_factory=self._session_factory,
         )
 
     # ----------------------------------------------------------------------------------
