@@ -20,7 +20,6 @@ import pytest
 from opcsim import NODE_SINE, NODE_W_FLOAT
 
 from .conftest import (
-    OPCSIM_URL,
     RUN_ID,
     EventStream,
     assinar_mpc_state,
@@ -43,7 +42,7 @@ cita mais a conexão (watchdog não é dela), é sempre o mesmo, por flow."""
 
 
 @pytest.fixture(scope="module")
-def conexao_base(admin: httpx.Client) -> Iterator[dict[str, Any]]:
+def conexao_base(admin: httpx.Client, opcsim_standalone: str) -> Iterator[dict[str, Any]]:
     """Projeto ativo com uma conexão e o par de tags r/w que o cenário usa.
 
     ADR-009 revisado: watchdog não é mais conceito de conexão nenhuma — toda conexão nasce
@@ -66,7 +65,7 @@ def conexao_base(admin: httpx.Client) -> Iterator[dict[str, Any]]:
             json={
                 "project_id": projeto["id"],
                 "name": f"opcsim-{sufixo}",
-                "endpoint": OPCSIM_URL,
+                "endpoint": opcsim_standalone,
                 "security_policy": "none",
                 "security_mode": "none",
                 "auth_mode": "anonymous",

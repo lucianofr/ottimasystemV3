@@ -20,8 +20,6 @@ expõe "desativar", e ativar outro projeto para tudo na mesma transação.
 
 from __future__ import annotations
 
-import json
-import socket
 import subprocess
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -36,10 +34,7 @@ from opcsim import NODE_SINE, NODE_STATIC, NODE_W_FLOAT, NODE_WD_FROM_SYSTEM, NO
 from ottima_core.bus import KIND_MPC_INPUT_INVALID
 
 from .conftest import (
-    COMPOSE,
-    DEPLOY_DIR,
     OPCSIM_HOST_URL,
-    OPCSIM_URL,
     RUN_ID,
     EventStream,
     _health_do_runtime,
@@ -56,10 +51,8 @@ from .conftest import (
 
 pytestmark = pytest.mark.e2e
 
-# O compose real está de pé SEM o overlay e2e (sem serviço `opcsim`): o simulador sobe
-# standalone no host. Host: teste via 127.0.0.1; containers via gateway da rede `ottima_*`.
-OPCSIM_HOST_PORT = 4840
-OPCSIM_HOST = "127.0.0.1"
+# O simulador OPC-UA saiu da stack do compose: o conftest o sobe standalone no host e
+# entrega o endpoint de dentro da rede (via gateway da rede `ottima_*`).
 
 SUFIXO = f"qe-quality-{RUN_ID}"
 
@@ -98,84 +91,6 @@ def redis_bus() -> Iterator[redis.Redis]:
     yield cliente
     cliente.close()
 
-
-def _porta_ocupada(porta: int) -> bool:
-    with socket.socket() as sock:
-        return sock.connect_ex((OPCSIM_HOST, porta)) == 0
-
-
-def _compor(*args: str) -> str:
-    proc = subprocess.run(
-        [*COMPOSE, *args],
-        cwd=DEPLOY_DIR,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=True,
-    )
-    return proc.stdout
-
-
-def _gateway_da_rede_otima() -> str:
-    """Gateway da rede do compose — rota dos containers ao opcsim standalone do host."""
-    ids = _compor("ps", "-q").split()
-    assert ids, "nenhum container do compose `ottima` de pé"
-    redes = json.loads(
-        subprocess.run(
-            ["docker", "inspect", ids[0], "--format", "{{json .NetworkSettings.Networks}}"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=True,
-        ).stdout
-    )
-    for nome, dados in redes.items():
-        if nome.startswith("ottima") and dados.get("Gateway"):
-            return dados["Gateway"]
-    raise AssertionError("rede do compose `ottima` sem gateway — opcsim inalcançável")
-
-
-@pytest.fixture(scope="session")
-def opcsim_standalone() -> Iterator[str]:
-    """opcsim: reusa o serviço do overlay e2e se a porta canônica já estiver ocupada (setup
-    documentado via `OTTIMA_E2E=1 bash deploy/smoke.sh`, onde `docker-compose.e2e.yml`
-    publica exatamente 127.0.0.1:4840 -> opcsim:4840) — não sobe nem derruba nada nosso
-    nesse caso, e devolve o endpoint de dentro da rede do compose (`OPCSIM_URL`, resolvido
-    pelo nome do serviço). Só sobe standalone no host, com teardown próprio, quando a porta
-    está livre (dev sem overlay)."""
-    if _porta_ocupada(OPCSIM_HOST_PORT):
-        yield OPCSIM_URL
-        return
-    gateway = _gateway_da_rede_otima()
-    proc = subprocess.Popen(
-        [
-            ".venv/bin/python",
-            "-m",
-            "opcsim",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            str(OPCSIM_HOST_PORT),
-        ],
-        cwd=str(DEPLOY_DIR.parent),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.STDOUT,
-    )
-    try:
-        esperar_ate(
-            lambda: True if _porta_ocupada(OPCSIM_HOST_PORT) else None,
-            timeout=30.0,
-            intervalo=0.5,
-            descricao="opcsim standalone ouvindo",
-        )
-        yield f"opc.tcp://{gateway}:{OPCSIM_HOST_PORT}/ottima/opcsim/"
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=10)
 
 
 def _historico(

@@ -27,13 +27,13 @@ from .conftest import (
     armar_ate_remoto,
     armar_auto_com_retentativa,
     assinar_mpc_state,
-    compose,
     deploy_flow,
     esperar_ate,
     evento_de,
     evento_mpc,
     grafo_mpc_tfs,
     operar_sp,
+    religar_opcsim,
     resetar_atuador_mpc,
 )
 
@@ -111,7 +111,7 @@ def test_e2e_td_04_flow_retoma_sozinho_com_modos_e_sps_de_antes(
             descricao="flow_failed derivado da queda de comunicação",
         )
 
-        compose("start", "opcsim")
+        religar_opcsim()
         eventos.esperar(
             evento_de(KIND_COMM_RESTORED, conn_id),
             timeout=TIMEOUT_RELIGA_S,
@@ -186,7 +186,7 @@ def test_e2e_td_05_stop_durante_a_queda_impede_a_retomada(
             descricao="desired_state gravado como stopped",
         )
 
-        compose("start", "opcsim")
+        religar_opcsim()
         eventos.esperar(
             evento_de(KIND_COMM_RESTORED, conn_id),
             timeout=TIMEOUT_RELIGA_S,

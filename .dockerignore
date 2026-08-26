@@ -1,6 +1,6 @@
-# Contexto de build dos Dockerfiles que usam a raiz do repositorio
-# (deploy/Dockerfile.python e tests/opcsim/Dockerfile). O build do frontend tem contexto
-# proprio (../frontend) e nao e afetado por este arquivo.
+# Contexto de build do Dockerfile que usa a raiz do repositorio
+# (deploy/Dockerfile.python). O build do frontend tem contexto proprio (../frontend)
+# e nao e afetado por este arquivo.
 .git
 .gitignore
 .venv
@@ -11,8 +11,8 @@
 .ruff_cache
 frontend
 docs
-deploy/.env
-deploy/e2e-certs
+deploy/.e2e-certs
+
 .superpowers
 .serena
 .claude

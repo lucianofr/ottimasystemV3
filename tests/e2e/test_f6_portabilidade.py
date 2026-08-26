@@ -9,7 +9,6 @@ import httpx
 import pytest
 
 from tests.e2e.conftest import (
-    OPCSIM_URL,
     RUN_ID,
     SENTINELA,
 )
@@ -94,7 +93,7 @@ def operator_client(admin: httpx.Client) -> httpx.Client:
 
 
 @pytest.fixture(scope="module")
-def projeto_simples(admin: httpx.Client) -> dict[str, Any]:
+def projeto_simples(admin: httpx.Client, opcsim_standalone: str) -> dict[str, Any]:
     """Fixture de projeto portável compartilhada por todos os 3 cenários.
     Monta: 3 conexões, tags homônimas, flow com grafo (opc_read).
     Usa as rotas corretas: /api/connections + project_id, /api/tags + connection_id.
@@ -114,7 +113,7 @@ def projeto_simples(admin: httpx.Client) -> dict[str, Any]:
         json={
             "project_id": projeto_id,
             "name": f"conn1-{RUN_ID}",
-            "endpoint": OPCSIM_URL,
+            "endpoint": opcsim_standalone,
             "security_policy": "none",
             "security_mode": "none",
             "auth_mode": "anonymous",

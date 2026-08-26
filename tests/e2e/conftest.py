@@ -1,8 +1,10 @@
-"""Fixtures da camada L2 da F2 (spec F2 §11.2): API, barramento e opcsim do compose real.
+"""Fixtures da camada L2 da F2 (spec F2 §11.2): API, barramento e opcsim standalone.
 
-Nada aqui sobe ou derruba o stack: a suíte assume o compose de pé (`OTTIMA_E2E=1 bash
-deploy/smoke.sh`). O único serviço que os testes mexem é o `opcsim`, e só com
-`stop`/`start` — `down` e `prune` são proibidos porque a máquina hospeda outros projetos.
+Nada aqui sobe ou derruba o stack: a suíte assume o compose de pé (ADR-023). O
+simulador OPC-UA não é mais serviço do compose — esta suíte o sobe como processo
+standalone no host (teardown próprio) e o derruba/religa só com `parar_opcsim`/
+`religar_opcsim`. `down` e `prune` são proibidos porque a máquina hospeda outros
+projetos.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ import asyncio
 import itertools
 import json
 import os
+import socket
 import subprocess
 import time
 from collections.abc import Callable, Iterator
@@ -91,13 +94,21 @@ ADMIN_PASS = _conf("E2E_ADMIN_PASSWORD", _conf("OTTIMA_ADMIN_PASSWORD", ""))
 REDIS_PORT = _conf("OTTIMA_E2E_REDIS_PORT", "6379")
 REDIS_URL = _conf("E2E_REDIS_URL", f"redis://127.0.0.1:{REDIS_PORT}/0")
 
-# Endpoint de DENTRO da rede do compose: é o que vai no cadastro da conexão.
-OPCSIM_URL = _conf("E2E_OPCSIM_URL", "opc.tcp://opcsim:4840")
-# Endpoint do HOST: é por onde o teste fala OPC direto com o simulador.
-OPCSIM_HOST_URL = _conf("E2E_OPCSIM_HOST_URL", "opc.tcp://127.0.0.1:4840")
-OPCSIM_CERT = Path(_conf("E2E_OPCSIM_CERT", "deploy/e2e-certs/opcsim.der"))
+# O simulador não é mais serviço do compose: a suíte o sobe standalone no host. O
+# endpoint de cadastro da conexão é o de DENTRO da rede do compose (via gateway,
+# `opcsim_standalone`); o do host serve ao cliente OPC direto dos testes.
+OPCSIM_HOST = "127.0.0.1"
+# A 4840 do host pode estar ocupada por outro projeto: parametrizada como a porta do
+# Redis (`OTTIMA_E2E_REDIS_PORT`) — aponte para uma porta livre em deploy/.env.
+OPCSIM_HOST_PORT = int(_conf("OTTIMA_E2E_OPCSIM_PORT", "4840"))
+OPCSIM_HOST_URL = _conf("E2E_OPCSIM_HOST_URL", f"opc.tcp://{OPCSIM_HOST}:{OPCSIM_HOST_PORT}")
+# Certificado do servidor do simulador, gerado no boot do processo standalone (pinning
+# do E2E-F2-07). Override via E2E_OPCSIM_CERT para simulador externo.
+OPCSIM_CERT = Path(_conf("E2E_OPCSIM_CERT", "deploy/.e2e-certs/opcsim.der"))
 if not OPCSIM_CERT.is_absolute():
     OPCSIM_CERT = REPO_ROOT / OPCSIM_CERT
+# Endpoint de DENTRO da rede fixado pelo usuário (simulador externo numa rede própria).
+OPCSIM_URL_EXPLICITO = os.environ.get("E2E_OPCSIM_URL") or _DEPLOY.get("E2E_OPCSIM_URL")
 
 COMPOSE = ("docker", "compose", "-f", "docker-compose.yml", "-f", "docker-compose.e2e.yml")
 
@@ -126,6 +137,117 @@ def compose(*args: str, timeout: float = 90.0) -> str:
         check=True,
     )
     return proc.stdout
+
+
+def _porta_ocupada(host: str, porta: int) -> bool:
+    with socket.socket() as sock:
+        return sock.connect_ex((host, porta)) == 0
+
+
+def _gateway_da_rede_ottima() -> str:
+    """Gateway da rede do compose — rota dos containers ao opcsim standalone do host."""
+    ids = compose("ps", "-q").split()
+    assert ids, "nenhum container do compose `ottima` de pé"
+    redes = json.loads(
+        subprocess.run(
+            ["docker", "inspect", ids[0], "--format", "{{json .NetworkSettings.Networks}}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout
+    )
+    for nome, dados in redes.items():
+        if nome.startswith("ottima") and dados.get("Gateway"):
+            return dados["Gateway"]
+    raise AssertionError("rede do compose `ottima` sem gateway — opcsim inalcançável")
+
+
+def _endpoint_na_rede() -> str:
+    """Endpoint do opcsim de dentro da rede do compose, para o cadastro da conexão."""
+    if OPCSIM_URL_EXPLICITO:
+        return OPCSIM_URL_EXPLICITO
+    return f"opc.tcp://{_gateway_da_rede_ottima()}:{OPCSIM_HOST_PORT}/ottima/opcsim/"
+
+
+class _OpcSimProcesso:
+    """opcsim standalone no host: `python -m opcsim` com Basic256Sha256 e cert-dir fixo.
+
+    `start()` é idempotente (religa depois de `parar_opcsim`); o cert-dir é o mesmo em
+    todo restart — o boot novo sobrescreve o DER antigo e o pinning do E2E-F2-07
+    continua válido porque aquele cenário não religa o processo no meio.
+    """
+
+    def __init__(self, cert_dir: Path) -> None:
+        self._cert_dir = cert_dir
+        self._proc: subprocess.Popen[str] | None = None
+
+    def start(self) -> None:
+        if self._proc is not None and self._proc.poll() is None:
+            return
+        # Certificado novo a cada boot: o par anterior é inválido assim que o servidor
+        # para. Apagar antes de subir faz o `esperar_ate` do DER abaixo esperar de fato
+        # pelo certificado do boot NOVO (sem o apagamento, o arquivo antigo satisfaria a
+        # espera na hora e o pinning do E2E-F2-07 poderia ler um cert morto).
+        for nome in ("opcsim.der", "opcsim.key.pem"):
+            (self._cert_dir / nome).unlink(missing_ok=True)
+        self._proc = subprocess.Popen(
+            [
+                ".venv/bin/python",
+                "-m",
+                "opcsim",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                str(OPCSIM_HOST_PORT),
+                "--security",
+                "basic256sha256",
+                "--cert-dir",
+                str(self._cert_dir),
+            ],
+            cwd=str(REPO_ROOT),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
+        esperar_ate(
+            lambda: True if _porta_ocupada(OPCSIM_HOST, OPCSIM_HOST_PORT) else None,
+            timeout=30.0,
+            intervalo=0.5,
+            descricao="opcsim standalone ouvindo",
+        )
+        # O certificado (RSA 2048) demora ~2 s depois da porta abrir: o E2E-F2-07 faz o
+        # pinning com ele logo em seguida — não pode haver janela em que ainda não exista.
+        esperar_ate(
+            lambda: True if (self._cert_dir / "opcsim.der").exists() else None,
+            timeout=30.0,
+            intervalo=0.5,
+            descricao="certificado do opcsim standalone gerado",
+        )
+
+    def stop(self) -> None:
+        proc, self._proc = self._proc, None
+        if proc is None:
+            return
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=10)
+
+
+# Processo standalone da suíte; None quando o simulador é externo (porta já ocupada).
+_SIM_PROCESSO: _OpcSimProcesso | None = None
+
+
+def religar_opcsim() -> None:
+    """Religa o opcsim standalone depois de uma queda proposital (F2-06, TD-04/05)."""
+    if _SIM_PROCESSO is None:
+        raise RuntimeError(
+            f"opcsim é externo (porta {OPCSIM_HOST_PORT} já ocupada): sem processo para religar — "
+            "pare o simulador externo e rode a suíte com a porta livre"
+        )
+    _SIM_PROCESSO.start()
 
 
 def worker_health() -> dict[str, Any]:
@@ -299,7 +421,7 @@ def revivar_watchdog_de_flow(
         timeout=60.0,
         descricao="comm_failure da queda de sessão que força um watchdog de flow novo",
     )
-    compose("start", "opcsim")
+    religar_opcsim()
     eventos.esperar(
         evento_de(KIND_COMM_RESTORED, conn_id),
         timeout=180.0,
@@ -385,7 +507,28 @@ def eventos(redis_bus: redis.Redis) -> Iterator[EventStream]:
 
 
 @pytest.fixture(scope="session")
-def opcsim_client() -> OpcSim:
+def opcsim_standalone() -> Iterator[str]:
+    """Servidor opcsim standalone do host; devolve o endpoint de dentro da rede do compose.
+
+    A stack não tem mais o serviço `opcsim` (fora do compose): o processo sobe aqui com
+    teardown próprio. Porta canônica já ocupada ⇒ assume simulador externo e não
+    gerencia o ciclo de vida (`parar_opcsim`/`religar_opcsim` falham com mensagem clara).
+    """
+    global _SIM_PROCESSO
+    externo = _porta_ocupada(OPCSIM_HOST, OPCSIM_HOST_PORT)
+    if not externo:
+        _SIM_PROCESSO = _OpcSimProcesso(cert_dir=OPCSIM_CERT.parent)
+        _SIM_PROCESSO.start()
+    try:
+        yield _endpoint_na_rede()
+    finally:
+        if _SIM_PROCESSO is not None:
+            _SIM_PROCESSO.stop()
+            _SIM_PROCESSO = None
+
+
+@pytest.fixture(scope="session")
+def opcsim_client(opcsim_standalone: str) -> OpcSim:
     return OpcSim(OPCSIM_HOST_URL)
 
 
@@ -403,16 +546,22 @@ def congelar_watchdog(opcsim_client: OpcSim) -> Iterator[Callable[[bool], None]]
 
 
 @pytest.fixture
-def parar_opcsim() -> Iterator[Callable[[], None]]:
-    """Para o opcsim; o teardown religa SEMPRE, inclusive se o teste falhar no meio."""
+def parar_opcsim(opcsim_standalone: str) -> Iterator[Callable[[], None]]:
+    """Para o opcsim standalone; o teardown religa SEMPRE, inclusive se o teste falhar."""
 
     def parar() -> None:
-        compose("stop", "opcsim")
+        if _SIM_PROCESSO is None:
+            raise RuntimeError(
+                f"opcsim é externo (porta {OPCSIM_HOST_PORT} já ocupada): sem processo para "
+                "parar — pare o simulador externo e rode a suíte com a porta livre"
+            )
+        _SIM_PROCESSO.stop()
 
     try:
         yield parar
     finally:
-        compose("start", "opcsim")
+        if _SIM_PROCESSO is not None:
+            _SIM_PROCESSO.start()
 
 
 def _ativar_sentinela(admin: httpx.Client) -> None:
@@ -441,7 +590,9 @@ def _criar_tag(admin: httpx.Client, conn_id: int, nome: str, node_id: str, direc
 
 
 @pytest.fixture(scope="module")
-def projeto_com_conexao(admin: httpx.Client, request: pytest.FixtureRequest) -> Iterator[Ambiente]:
+def projeto_com_conexao(
+    admin: httpx.Client, request: pytest.FixtureRequest, opcsim_standalone: str
+) -> Iterator[Ambiente]:
     """Projeto ativo + conexão ao opcsim + tags + um flow com watchdog habilitado (ADR-009
     revisado: watchdog é por flow, não por conexão) no par 1 do opcsim, tudo já `up` e com
     o watchdog do flow vivo.
@@ -463,7 +614,7 @@ def projeto_com_conexao(admin: httpx.Client, request: pytest.FixtureRequest) -> 
             json={
                 "project_id": projeto["id"],
                 "name": f"opcsim-{sufixo}",
-                "endpoint": OPCSIM_URL,
+                "endpoint": opcsim_standalone,
                 "security_policy": "none",
                 "security_mode": "none",
                 "auth_mode": "anonymous",
@@ -558,7 +709,9 @@ class AmbienteMpc:
 
 
 @pytest.fixture(scope="module")
-def ambiente_mpc(admin: httpx.Client, request: pytest.FixtureRequest) -> Iterator[AmbienteMpc]:
+def ambiente_mpc(
+    admin: httpx.Client, request: pytest.FixtureRequest, opcsim_standalone: str
+) -> Iterator[AmbienteMpc]:
     """Projeto ativo + conexão ao opcsim + as tags do `pid` de `mv_pid` — mesmo padrão de
     `projeto_com_conexao`, módulo à parte porque o F4b usa 4 tags diferentes das da F2 (dois
     pares w/espelho: float pra posição, int pra modo)."""
@@ -573,7 +726,7 @@ def ambiente_mpc(admin: httpx.Client, request: pytest.FixtureRequest) -> Iterato
             json={
                 "project_id": projeto["id"],
                 "name": f"opcsim-{sufixo}",
-                "endpoint": OPCSIM_URL,
+                "endpoint": opcsim_standalone,
                 "security_policy": "none",
                 "security_mode": "none",
                 "auth_mode": "anonymous",

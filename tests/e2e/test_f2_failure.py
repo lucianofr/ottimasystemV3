@@ -18,11 +18,11 @@ from .conftest import (
     Ambiente,
     EventStream,
     OpcSim,
-    compose,
     esperar_ate,
     esperar_conexao,
     evento_de,
     publicar_escrita,
+    religar_opcsim,
     revivar_watchdog_de_flow,
     valor_unico,
 )
@@ -149,7 +149,7 @@ def test_e2e_f2_06_queda_dura_do_opcsim(
     )
     assert falha["payload"]["reason"] == "session_lost"
 
-    compose("start", "opcsim")
+    religar_opcsim()
     eventos.esperar(
         evento_de(KIND_COMM_RESTORED, conn_id),
         timeout=180.0,
