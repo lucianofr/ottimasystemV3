@@ -49,6 +49,19 @@ async def check_database(session_factory, app: FastAPI) -> None:
         app.state.db_ok = False
 
 
+def configure_worker_logging(level: str) -> None:
+    """`setup_logging` + silencia o asyncua.
+
+    A biblioteca loga o teardown dela em ERROR com traceback completo a cada
+    tentativa de reconexão recusada (loop §2.2-2, ~15 s por tentativa): toneladas
+    de log e CPU à toa. O diagnóstico compacto já é nosso (`connection.fail`,
+    uma linha por tentativa) — CRITICAL desliga o ruído da biblioteca sem esconder
+    nenhuma falha do worker.
+    """
+    setup_logging(level, SERVICE_NAME)
+    logging.getLogger("asyncua").setLevel(logging.CRITICAL)
+
+
 async def _heartbeat_loop(client, session_factory, app: FastAPI) -> None:
     """Repete as checagens de dependência a cada HEARTBEAT_INTERVAL_S segundos."""
     while True:
@@ -61,7 +74,7 @@ async def _heartbeat_loop(client, session_factory, app: FastAPI) -> None:
 async def lifespan(app: FastAPI):
     """Sobe Redis, banco, supervisor e heartbeat; encerra na ordem inversa."""
     settings = get_settings()
-    setup_logging(settings.log_level, SERVICE_NAME)
+    configure_worker_logging(settings.log_level)
     # decode_responses=True é contrato do barramento na F2: consumidor recebe str
     client = redis.from_url(settings.redis_url, decode_responses=True)
     engine = create_engine(settings.database_url)
