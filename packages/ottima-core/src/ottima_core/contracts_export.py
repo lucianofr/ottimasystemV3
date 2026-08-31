@@ -233,6 +233,21 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
             },
         ],
     },
+    "pid_loop": {
+        "dynamic": False,
+        "ports": [
+            {"name": "in", "direction": "input", "type": "num"},
+            {"name": "cas_in", "direction": "input", "type": "num"},
+            {"name": "rcas_in", "direction": "input", "type": "num"},
+            {"name": "rout_in", "direction": "input", "type": "num"},
+            {"name": "bkcal_in", "direction": "input", "type": "num"},
+            {"name": "bias_in", "direction": "input", "type": "num"},
+            {"name": "trk_in_d", "direction": "input", "type": "num"},
+            {"name": "lo_in_d", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+            {"name": "bkcal_out", "direction": "output", "type": "num"},
+        ],
+    },
 }
 
 # MpcVarState (tarefa 1.3) vem aninhado no schema de MpcState (`vars: dict[str, MpcVarState]`)

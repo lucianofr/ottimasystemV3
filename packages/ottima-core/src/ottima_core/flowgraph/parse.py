@@ -12,7 +12,16 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 NodeType = Literal[
-    "opc_read", "opc_write", "script", "fuzzy", "tfs", "mpc", "first_order", "kalman", "pid"
+    "opc_read",
+    "opc_write",
+    "script",
+    "fuzzy",
+    "tfs",
+    "mpc",
+    "first_order",
+    "kalman",
+    "pid",
+    "pid_loop",
 ]
 NODE_TYPES: tuple[str, ...] = (
     "opc_read",
@@ -24,6 +33,7 @@ NODE_TYPES: tuple[str, ...] = (
     "first_order",
     "kalman",
     "pid",
+    "pid_loop",
 )
 
 MAX_SCRIPT_PORTS = 8  # spec §3.3
@@ -53,6 +63,43 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
         "proportional_on_measurement",
         "differential_on_measurement",
         "starting_output",
+    ),
+    "pid_loop": (
+        "permitted",
+        "normal",
+        "shed_opt",
+        "shed_no_return",
+        "direct_acting",
+        "sp_pv_track_in_man",
+        "use_pv_for_bkcal",
+        "track_enable",
+        "track_in_manual",
+        "sp_hi_lim",
+        "sp_lo_lim",
+        "sp_rate_up",
+        "sp_rate_dn",
+        "out_hi_lim",
+        "out_lo_lim",
+        "out_rate_up",
+        "out_rate_dn",
+        "out_scale_lo",
+        "out_scale_hi",
+        "out_startup",
+        "pv_ftime",
+        "trk_val",
+        "lo_val",
+        "ff_scale_lo",
+        "ff_scale_hi",
+        "ff_gain",
+        "ff_enable",
+        "kc",
+        "ti_seconds",
+        "td_seconds",
+        "n",
+        "beta",
+        "gamma",
+        "gap_band",
+        "gap_gain",
     ),
 }
 # Blocos de filtro (ADR-026): config é só um punhado de escalares, e o valor do dicionário
@@ -230,6 +277,74 @@ class PidConfig(BaseModel):
     starting_output: float
 
 
+class LoopBaseConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    permitted: list[str] = Field(default_factory=lambda: ["oos", "man", "auto"])
+    normal: str = "auto"
+    shed_opt: Literal["shed_to_auto", "shed_to_man", "shed_to_normal"] = "shed_to_auto"
+    shed_no_return: bool = False
+    direct_acting: bool = False
+    sp_pv_track_in_man: bool = True
+    use_pv_for_bkcal: bool = False
+    track_enable: bool = False
+    track_in_manual: bool = False
+    sp_hi_lim: float
+    sp_lo_lim: float
+    sp_rate_up: float | None = Field(default=None, gt=0)
+    sp_rate_dn: float | None = Field(default=None, gt=0)
+    out_hi_lim: float = 100.0
+    out_lo_lim: float = 0.0
+    out_rate_up: float | None = Field(default=None, gt=0)
+    out_rate_dn: float | None = Field(default=None, gt=0)
+    out_scale_lo: float = 0.0
+    out_scale_hi: float = 100.0
+    out_startup: float = 0.0
+    pv_ftime: float = Field(default=0.0, ge=0)
+    trk_val: float = 0.0
+    lo_val: float = 0.0
+    ff_scale_lo: float = 0.0
+    ff_scale_hi: float = 100.0
+    ff_gain: float = 1.0
+    ff_enable: bool = False
+
+    @model_validator(mode="after")
+    def _faixas(self) -> "LoopBaseConfig":
+        if self.sp_lo_lim >= self.sp_hi_lim:
+            raise ValueError("sp_lo_lim precisa ser menor que sp_hi_lim")
+        if self.out_lo_lim >= self.out_hi_lim:
+            raise ValueError("out_lo_lim precisa ser menor que out_hi_lim")
+        if self.out_scale_lo >= self.out_scale_hi:
+            raise ValueError("out_scale_lo precisa ser menor que out_scale_hi")
+        if not (self.out_lo_lim <= self.out_startup <= self.out_hi_lim):
+            raise ValueError("out_startup precisa estar entre out_lo_lim e out_hi_lim")
+        modos = {"oos", "iman", "lo", "man", "auto", "cas", "rcas", "rout"}
+        invalidos = sorted(set(self.permitted) - modos)
+        if invalidos:
+            raise ValueError(f"modos invalidos em permitted: {', '.join(invalidos)}")
+        if self.normal not in {"man", "auto", "cas", "rcas"}:
+            raise ValueError("normal precisa ser man, auto, cas ou rcas")
+        return self
+
+
+class PidLoopConfig(LoopBaseConfig):
+    kc: float = Field(gt=0)
+    ti_seconds: float = Field(default=0.0, ge=0)
+    td_seconds: float = Field(default=0.0, ge=0)
+    n: float = Field(default=8.0, gt=0)
+    beta: float = Field(default=1.0, ge=0, le=1)
+    gamma: float = Field(default=0.0, ge=0, le=1)
+    gap_band: float = Field(default=0.0, ge=0)
+    gap_gain: float = Field(default=1.0, ge=0, le=1)
+
+
+LOOP_STRUCTURAL_KEYS: frozenset[str] = frozenset({"type", "fll", "out_scale_lo", "out_scale_hi"})
+
+
+def loop_structural(functional: dict[str, Any]) -> dict[str, Any]:
+    """Subconjunto ESTRUTURAL do functional_config (ADR-039 D11): mudou -> re-instancia."""
+    return {k: v for k, v in functional.items() if k in LOOP_STRUCTURAL_KEYS}
+
+
 class MpcRawConfig(BaseModel):
     """Payload bruto do bloco `mpc` (spec §2.1).
 
@@ -254,6 +369,7 @@ NodeConfig = (
     | FirstOrderConfig
     | KalmanConfig
     | PidConfig
+    | PidLoopConfig
 )
 
 
@@ -437,6 +553,8 @@ def _parse_config(where: str, node_type: str, data: dict, errors: list[str]) -> 
         return _parse_mpc_config(data)
     if node_type == "pid":
         return _parse_pid_config(where, data, errors)
+    if node_type == "pid_loop":
+        return _parse_loop_config(where, PidLoopConfig, data, errors)
     if node_type in _FILTER_KEYS:
         return _parse_filter_config(where, node_type, data, errors)
     return _parse_tfs_config(where, data, errors)
@@ -565,6 +683,19 @@ def _parse_pid_config(where: str, data: dict, errors: list[str]) -> PidConfig | 
     if not ok:
         return None
     return PidConfig(**values)
+
+
+def _parse_loop_config(
+    where: str, modelo: type[BaseModel], data: dict, errors: list[str]
+) -> NodeConfig | None:
+    """Config de bloco malha (ADR-039): modelo pydantic, um erro por problema."""
+    try:
+        return modelo.model_validate(data)
+    except ValidationError as exc:
+        for erro in exc.errors():
+            campo = ".".join(str(loc) for loc in erro["loc"])
+            errors.append(f"{where}: '{campo}': {erro['msg']}")
+        return None
 
 
 def _parse_mpc_config(data: dict) -> MpcRawConfig:
