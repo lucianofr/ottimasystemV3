@@ -295,6 +295,9 @@ class Supervisor:
             "mpc_mode": self._mpc.mpc_command,
             "mpc_sp": self._mpc.mpc_command,
             "mpc_mv": self._mpc.mpc_command,
+            "loop_mode": self._loop_command,
+            "loop_sp": self._loop_command,
+            "loop_out": self._loop_command,
         }
         handler = handlers.get(command.cmd)
         if handler is None:
@@ -311,6 +314,11 @@ class Supervisor:
                 logger.exception(
                     "Falha ao processar o comando '%s' do flow %s", command.cmd, command.flow_id
                 )
+
+    async def _loop_command(self, command: FlowCommand) -> None:
+        from .supervisor_loop import loop_command_dispatch
+
+        await loop_command_dispatch(self._runtimes, command)
 
     async def _deploy(self, command: FlowCommand) -> None:
         flow_id = command.flow_id
