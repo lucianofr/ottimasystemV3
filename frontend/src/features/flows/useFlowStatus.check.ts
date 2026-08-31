@@ -29,6 +29,7 @@ const ESTADO_VAZIO: EstadoDoCanal = {
   flowStatus: new Map(),
   mpcStates: new Map(),
   fuzzyStates: new Map(),
+  loopStates: new Map(),
   eventos: [],
   tagValues: new Map(),
 };

@@ -513,6 +513,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operate/{flow_id}/{block_id}/out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Out
+         * @description Escrita do MAN_OUT (%) de bloco malha — so malha aceita (422 senao).
+         */
+        post: operations["set_out_api_operate__flow_id___block_id__out_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operate/mpcs": {
         parameters: {
             query?: never;
@@ -572,6 +592,46 @@ export interface paths {
          *     `ValueError` de `introspect_fll`.
          */
         get: operations["get_fuzzy_detail_api_operate_fuzzy__flow_id___block_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operate/loop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Loops
+         * @description Discovery de blocos malha do projeto ativo (espelho de `GET /mpcs`).
+         */
+        get: operations["list_loops_api_operate_loop_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operate/loop/{flow_id}/{block_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Loop Detail
+         * @description Config resumida do bloco malha para o faceplate (permitted/limites/escala/sintonia).
+         */
+        get: operations["get_loop_detail_api_operate_loop__flow_id___block_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -660,6 +720,27 @@ export interface paths {
          *     inexistente ou não-`fuzzy`) — mesma ordem de `get_history_mpc`.
          */
         get: operations["get_history_fuzzy_api_history_fuzzy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/history/loop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get History Loop
+         * @description Histórico do bloco malha (ADR-039 4.10): pv/sp/out a cada varredura + transicoes de
+         *     mode (passo-a-passo) — mesma forma e ordem de validação de `get_history_fuzzy`.
+         */
+        get: operations["get_history_loop_api_history_loop_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1585,6 +1666,123 @@ export interface components {
             /** Expires In */
             expires_in: number;
             user: components["schemas"]["UserOut"];
+        };
+        /**
+         * LoopDetailOut
+         * @description Config resumida de um bloco malha para o faceplate: permitted, limites, escala e
+         *     sintonia vigente (somente leitura — sintonia é edição de engenharia, ADR-039).
+         */
+        LoopDetailOut: {
+            /** Flow Id */
+            flow_id: number;
+            /** Flow Name */
+            flow_name: string;
+            /** Block Id */
+            block_id: string;
+            /** Label */
+            label: string;
+            /** Permitted */
+            permitted: string[];
+            /** Sp Lo Lim */
+            sp_lo_lim: number;
+            /** Sp Hi Lim */
+            sp_hi_lim: number;
+            /** Out Lo Lim */
+            out_lo_lim: number;
+            /** Out Hi Lim */
+            out_hi_lim: number;
+            /** Out Scale Lo */
+            out_scale_lo: number;
+            /** Out Scale Hi */
+            out_scale_hi: number;
+            tuning: components["schemas"]["LoopTuningOut"];
+        };
+        /** LoopHistoryResponse */
+        LoopHistoryResponse: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "raw" | "1m";
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Series */
+            series: components["schemas"]["LoopHistorySeries"][];
+        };
+        /**
+         * LoopHistorySeries
+         * @description Mesma forma de `FuzzyHistorySeries` (ADR-039 4.10): `var_id` em pv|sp|out|mode;
+         *     `v` nullavel — PV com qualidade ruim grava NULL (mesmo idiom de samples, ADR-037).
+         */
+        LoopHistorySeries: {
+            /** Var Id */
+            var_id: string;
+            /** T */
+            t: string[];
+            /** V */
+            v: (number | null)[];
+            /** V Min */
+            v_min?: (number | null)[] | null;
+            /** V Max */
+            v_max?: (number | null)[] | null;
+        };
+        /** LoopModeCommand */
+        LoopModeCommand: {
+            /**
+             * Target
+             * @enum {string}
+             */
+            target: "oos" | "man" | "auto" | "cas" | "rcas" | "rout";
+        };
+        /**
+         * LoopNodeOut
+         * @description Um bloco malha projetado (ADR-039 §4.10) — discovery para o faceplate.
+         */
+        LoopNodeOut: {
+            /** Flow Id */
+            flow_id: number;
+            /** Flow Name */
+            flow_name: string;
+            /** Block Id */
+            block_id: string;
+            /** Label */
+            label: string;
+            /** Type */
+            type: string;
+        };
+        /** LoopTuningOut */
+        LoopTuningOut: {
+            /** Kc */
+            kc: number;
+            /** Ti Seconds */
+            ti_seconds: number;
+            /** Td Seconds */
+            td_seconds: number;
+            /** N */
+            n: number;
+            /** Beta */
+            beta: number;
+            /** Gamma */
+            gamma: number;
+            /** Gap Band */
+            gap_band: number;
+            /** Gap Gain */
+            gap_gain: number;
+            /** Direct Acting */
+            direct_acting: boolean;
+        };
+        /** LoopValueCommand */
+        LoopValueCommand: {
+            /** Value */
+            value: number;
         };
         /** ModeCommand */
         ModeCommand: {
@@ -3320,7 +3518,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ModeCommand"];
+                "application/json": components["schemas"]["ModeCommand"] | components["schemas"]["LoopModeCommand"];
             };
         };
         responses: {
@@ -3356,7 +3554,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SpCommand"];
+                "application/json": components["schemas"]["SpCommand"] | components["schemas"]["LoopValueCommand"];
             };
         };
         responses: {
@@ -3393,6 +3591,42 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["MvCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_out_api_operate__flow_id___block_id__out_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoopValueCommand"];
             };
         };
         responses: {
@@ -3475,6 +3709,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FuzzyDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_loops_api_operate_loop_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoopNodeOut"][];
+                };
+            };
+        };
+    };
+    get_loop_detail_api_operate_loop__flow_id___block_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoopDetailOut"];
                 };
             };
             /** @description Validation Error */
@@ -3613,6 +3899,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FuzzyHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_history_loop_api_history_loop_get: {
+        parameters: {
+            query: {
+                flow_id: number;
+                block_id: string;
+                var_ids: string;
+                start?: string | null;
+                end?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoopHistoryResponse"];
                 };
             };
             /** @description Validation Error */

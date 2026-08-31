@@ -53,6 +53,21 @@ const EVENTO = {
   payload: {},
 };
 
+const LOOP_STATE = {
+  ts: "2026-08-04T12:00:00Z",
+  target: "auto",
+  actual: "man",
+  permitted: ["oos", "man", "auto"],
+  pv: 50,
+  pv_ok: true,
+  sp: 55,
+  out: 210,
+  u_pct: 52.5,
+  man_out: 52.5,
+  hi_limited: false,
+  lo_limited: false,
+};
+
 // ----------------------------------------------------------------------------------------
 // Agregação de interesses de N páginas: refcount, deltas mínimos
 // ----------------------------------------------------------------------------------------
@@ -68,6 +83,7 @@ function D(parcial: Partial<DeltaInteresse>): DeltaInteresse {
     flow_status: parcial.flow_status ?? [],
     mpc_state: parcial.mpc_state ?? [],
     fuzzy_state: parcial.fuzzy_state ?? [],
+    loop_state: parcial.loop_state ?? [],
     opc_values: parcial.opc_values ?? [],
   };
 }
@@ -119,6 +135,16 @@ test("opc_values tem refcount próprio: entra e sai do agregado por tag", () => 
   expect(registro.remover({ opc_values: [8] })).toEqual(D({}));
   expect(registro.agregado()).toEqual(D({ opc_values: [7, 8] }));
   expect(registro.remover({ opc_values: [7, 8] })).toEqual(D({ opc_values: [7, 8] }));
+  expect(registro.agregado()).toEqual(D({}));
+});
+
+test("loop_state tem refcount próprio: entra e sai do agregado por bloco", () => {
+  const registro = criarRegistroInteresses();
+
+  expect(registro.adicionar({ loop_state: ["2/m"] })).toEqual(D({ loop_state: ["2/m"] }));
+  expect(registro.adicionar({ loop_state: ["2/m"] })).toEqual(D({}));
+  expect(registro.remover({ loop_state: ["2/m"] })).toEqual(D({}));
+  expect(registro.remover({ loop_state: ["2/m"] })).toEqual(D({ loop_state: ["2/m"] }));
   expect(registro.agregado()).toEqual(D({}));
 });
 
@@ -186,6 +212,23 @@ test("events vira mensagem de evento com os 5 campos do contrato", () => {
     expect(msg.evento.message).toBe("Falha");
     expect(msg.evento.severity).toBe("warning");
   }
+});
+
+test("loop.state.<flowId>.<blockId> vira mensagem de loop_state com a chave flowId/blockId", () => {
+  const msg = analisarMensagemCanal(envelope("loop.state.2.m1", LOOP_STATE));
+
+  expect(msg?.canal).toBe("loop_state");
+  if (msg?.canal === "loop_state") {
+    expect(msg.chave).toBe("2/m1");
+    expect(msg.state.actual).toBe("man");
+    expect(msg.state.sp).toBe(55);
+  }
+});
+
+test("loop.state malformado ou sem flowId numérico é descartado", () => {
+  expect(analisarMensagemCanal(envelope("loop.state.abc.m1", LOOP_STATE))).toBeNull();
+  expect(analisarMensagemCanal(envelope("loop.state.2.", LOOP_STATE))).toBeNull();
+  expect(analisarMensagemCanal(envelope("loop.state.2.m1", { ...LOOP_STATE, actual: 3 }))).toBeNull();
 });
 
 test("canal fora do vocabulário, sufixo não numérico ou payload inválido são descartados", () => {
@@ -344,6 +387,7 @@ const ESTADO_INICIAL: EstadoDoCanal = {
   flowStatus: new Map(),
   mpcStates: new Map(),
   fuzzyStates: new Map(),
+  loopStates: new Map(),
   eventos: [],
   tagValues: new Map(),
 };
