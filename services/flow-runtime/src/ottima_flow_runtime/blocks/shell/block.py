@@ -6,15 +6,23 @@ de transicao aqui e defeito de projeto (ADR-039 secao 4.7).
 """
 
 import math
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
+from ottima_core.bus import LoopState
 from ottima_flow_runtime.blocks.base import Block, PortSample
 from ottima_flow_runtime.blocks.shell.config import ShellCfg, clamp, scale_pct, unscale_pct
 from ottima_flow_runtime.blocks.shell.kernel import ControlKernel
-from ottima_flow_runtime.blocks.shell.mode import CALCULATING_MODES, MODE_NAMES, Mode, ModeBlock
+from ottima_flow_runtime.blocks.shell.mode import (
+    CALCULATING_MODES,
+    MODE_NAMES,
+    Mode,
+    ModeBlock,
+    mode_from_name,
+)
 from ottima_flow_runtime.blocks.shell.signal import (
     Quality,
     Substatus,
@@ -28,9 +36,11 @@ KIND_LOOP_MODE_REJECTED = "loop_mode_rejected"
 KIND_LOOP_ALARM = "loop_alarm"
 KIND_LOOP_LIMITED = "loop_limited"
 
+LOOP_STATE_MIN_INTERVAL_S = 0.25
+
 EmitEvent = Callable[..., Awaitable[None]]
 PublishState = Callable[[Any], Awaitable[None]]
-PersistOp = Callable[[str, float], Awaitable[None]]
+PersistOp = Callable[[str, float | str], Awaitable[None]]
 
 _SHED_DESTINO = {"shed_to_auto": Mode.AUTO, "shed_to_man": Mode.MAN}
 
@@ -106,6 +116,7 @@ class BlockShell(Block):
         self.u_int = self.u
         self.u_prev = self.u
         self.sp = self.sp_op
+        self._last_publish = 0.0
 
     # -- portas -------------------------------------------------------------
     @property
@@ -143,6 +154,36 @@ class BlockShell(Block):
 
     def write_out(self, value: float) -> None:
         self.man_out = clamp(value, self.cfg.out_lo_lim, self.cfg.out_hi_lim)
+
+    async def command(self, cmd: str, args: dict[str, Any], user: str | None) -> None:
+        """Comandos de operacao (RNF-05): a API publica, o runtime materializa e audita."""
+        if cmd == "loop_mode":
+            alvo = mode_from_name(str(args["target"]))
+            if self.write_target(alvo):
+                await self._audit("loop_target_written", user, {"target": args["target"]})
+                if self._persist_op is not None:
+                    await self._persist_op("target", str(args["target"]))
+        elif cmd == "loop_sp":
+            self.write_sp(float(args["value"]))
+            await self._audit("loop_sp_written", user, {"value": self.sp_op})
+            if self._persist_op is not None:
+                await self._persist_op("sp", self.sp_op)
+        elif cmd == "loop_out":
+            self.write_out(float(args["value"]))
+            await self._audit("loop_out_written", user, {"value": self.man_out})
+            if self._persist_op is not None:
+                await self._persist_op("man_out", self.man_out)
+
+    async def _audit(self, kind: str, user: str | None, payload: dict[str, Any]) -> None:
+        if self._emit_event is None:
+            return
+        await self._emit_event(
+            kind=kind,
+            severity="info",
+            message=f"Escrita de operacao ({kind}) por {user or 'desconhecido'}",
+            origin=f"bloco:{self.block_id}",
+            payload={"block_id": self.block_id, "user": user, **payload},
+        )
 
     def apply_tuning(self, cfg: ShellCfg, kernel_cfg: Any | None = None) -> None:
         """Classe de sintonia do hot-swap (ADR-039 D11): in-place, sem perder estado."""
@@ -387,6 +428,11 @@ class BlockShell(Block):
             )
             self._prev_actual = m
         await self._flush_events()
+        if self._publish_state is not None:
+            agora = time.monotonic()
+            if agora - self._last_publish >= LOOP_STATE_MIN_INTERVAL_S:
+                self._last_publish = agora
+                await self._publish_state(self._loop_state())
         return self._emit()
 
     def _emit(self) -> dict[str, PortSample]:
@@ -410,6 +456,24 @@ class BlockShell(Block):
             lo_limited=hi if d else lo,
         )
         return {"out": out, "bkcal_out": bkcal}
+
+    def _loop_state(self) -> LoopState:
+        cfg = self.cfg
+        return LoopState(
+            ts=datetime.now(UTC),
+            target=MODE_NAMES[self.mode.target],
+            actual=MODE_NAMES[self.mode.actual],
+            permitted=[MODE_NAMES[m] for m in Mode if m & cfg.permitted],
+            pv=self.pv,
+            pv_ok=self.pv_ok,
+            sp=self.sp,
+            out=scale_pct(self.u, cfg.out_scale_lo, cfg.out_scale_hi),
+            u_pct=self.u,
+            man_out=self.man_out,
+            hi_limited=self.u >= cfg.out_hi_lim,
+            lo_limited=self.u <= cfg.out_lo_lim,
+            diag=dict(self.diag),
+        )
 
     def _defer_event(self, **kwargs: Any) -> None:
         self._pendentes.append(kwargs)

@@ -55,7 +55,7 @@ from ottima_core.tags import project_tags
 
 from .blocks.base import Block
 from .blocks.mpc import MpcBlock
-from .definition import StagedDefinition, build_definition, carregar_sp_seeds
+from .definition import StagedDefinition, build_definition, carregar_loop_seeds, carregar_sp_seeds
 from .events import (
     ChannelListener,
     publish_flow_deployed,
@@ -555,6 +555,7 @@ class Supervisor:
             watchdog_enabled=flow.watchdog_enabled,
             mpc_worker_target=self._mpc_worker_target,
             sp_seeds=await carregar_sp_seeds(session, flow.id),
+            loop_seeds=await carregar_loop_seeds(session, flow.id),
             session_factory=self._session_factory,
         )
 

@@ -24,7 +24,7 @@ from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from multiprocessing.connection import Connection
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
 from redis.asyncio import Redis
 from sqlalchemy import func, select
@@ -34,14 +34,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ottima_core.bus import (
     CHANNEL_OPC_WRITES,
     FuzzyState,
+    LoopState,
     MpcState,
     OpcWrite,
     channel_fuzzy_state,
+    channel_loop_state,
     channel_mpc_state,
     publish_event,
 )
-from ottima_core.flowgraph import FlowGraph, FlowNode, MpcConfig, TagRef
-from ottima_core.models import MpcSetpoint
+from ottima_core.flowgraph import (
+    FlowGraph,
+    FlowNode,
+    LoopBaseConfig,
+    MpcConfig,
+    PidLoopConfig,
+    TagRef,
+    loop_structural,
+)
+from ottima_core.models import LoopSetpoint, MpcSetpoint
 from ottima_core.script_pool import ScriptPool
 from ottima_core.snapshot import ValueSnapshot
 
@@ -49,15 +59,27 @@ from .blocks.base import Block
 from .blocks.first_order import FirstOrderBlock
 from .blocks.fuzzy import FuzzyBlock
 from .blocks.kalman import KalmanBlock
+from .blocks.kernels.pid import PidKernel, PidKernelCfg
 from .blocks.mpc import MpcBlock
 from .blocks.opc_read import OpcReadBlock
 from .blocks.opc_write import OpcWriteBlock
 from .blocks.pid import PidBlock
 from .blocks.script import ScriptBlock
+from .blocks.shell.block import BlockShell
+from .blocks.shell.config import ShellCfg
+from .blocks.shell.mode import Mode, mode_from_name
 from .blocks.tfs import TfsBlock
 from .mpc.host import MpcHost
 from .mpc.worker import worker_main
 from .scheduler import FlowDefinition
+
+LOOP_TYPES: frozenset[str] = frozenset({"pid_loop"})
+
+
+class LoopSeed(NamedTuple):
+    sp: float | None
+    man_out: float | None
+
 
 _TAG_TYPES = frozenset({"opc_read", "opc_write"})
 
@@ -102,6 +124,7 @@ def build_definition(
     mpc_worker_target: Callable[[Connection, str, float], None] = worker_main,
     sp_seeds: Mapping[str, Mapping[str, float]] | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    loop_seeds: Mapping[str, LoopSeed] | None = None,
 ) -> StagedDefinition:
     """Instancia os blocos do grafo (reaproveitando os que não mudaram) e monta a fiação.
 
@@ -118,7 +141,22 @@ def build_definition(
         kept = reuse.get(node.id)
         if kept is not None and kept[0] == functional:
             block = kept[1]
+        elif (
+            kept is not None
+            and node.type in LOOP_TYPES
+            and isinstance(kept[1], BlockShell)
+            and loop_structural(kept[0]) == loop_structural(functional)
+        ):
+            # Classe de sintonia (ADR-039 D11): in-place, estado preservado.
+            block = kept[1]
+            kernel_cfg = pid_kernel_cfg_from(node.config) if node.type == "pid_loop" else None
+            block.apply_tuning(shell_cfg_from(node.config, ts_seconds), kernel_cfg)
         else:
+            # TD-006 MPC abaixo. Estrutural de malha (D11): o predecessor carrega
+            # u/sp/man e aterrissa em MAN se a instancia velha calculava.
+            predecessor: BlockShell | None = None
+            if kept is not None and isinstance(kept[1], BlockShell):
+                predecessor = kept[1]
             block = _instantiate(
                 node,
                 flow_id=flow_id,
@@ -132,6 +170,8 @@ def build_definition(
                 watchdog_enabled=watchdog_enabled,
                 sp_seed=(sp_seeds or {}).get(node.id),
                 session_factory=session_factory,
+                loop_seed=(loop_seeds or {}).get(node.id),
+                predecessor=predecessor,
             )
             # TD-006: config mudou (ou o bloco é novo) — quando o bloco velho é um
             # `MpcBlock` e o conjunto de MVs é IDÊNTICO, o novo transplanta o estado do
@@ -217,6 +257,8 @@ def _instantiate(
     watchdog_enabled: bool,
     sp_seed: Mapping[str, float] | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    loop_seed: LoopSeed | None = None,
+    predecessor: BlockShell | None = None,
 ) -> Block:
     """Instancia o bloco com os serviços do runtime. Bloco novo nasce zerado (§4.1-3)."""
     config: Any = node.config
@@ -266,6 +308,16 @@ def _instantiate(
         )
     if node.type == "fuzzy":
         return _instantiate_fuzzy(node, flow_id=flow_id, redis_client=redis_client)
+    if node.type == "pid_loop":
+        return _instantiate_loop(
+            node,
+            flow_id=flow_id,
+            ts_seconds=ts_seconds,
+            redis_client=redis_client,
+            session_factory=session_factory,
+            seed=loop_seed,
+            predecessor=predecessor,
+        )
     if node.type == "pid":
         return PidBlock(
             node.id,
@@ -419,3 +471,115 @@ async def carregar_sp_seeds(session: AsyncSession, flow_id: int) -> dict[str, di
     for block_id, var_id, value in resultado.all():
         seeds.setdefault(block_id, {})[var_id] = float(value)
     return seeds
+
+
+def shell_cfg_from(config: LoopBaseConfig, ts_seconds: float) -> ShellCfg:
+    permitted = Mode(0)
+    for nome in config.permitted:
+        permitted |= mode_from_name(nome)
+    return ShellCfg(
+        sp_hi_lim=config.sp_hi_lim,
+        sp_lo_lim=config.sp_lo_lim,
+        max_dt=10.0 * ts_seconds,
+        permitted=permitted,
+        normal=mode_from_name(config.normal),
+        shed_opt=config.shed_opt,
+        shed_no_return=config.shed_no_return,
+        direct_acting=config.direct_acting,
+        sp_pv_track_in_man=config.sp_pv_track_in_man,
+        use_pv_for_bkcal=config.use_pv_for_bkcal,
+        track_enable=config.track_enable,
+        track_in_manual=config.track_in_manual,
+        sp_rate_up=config.sp_rate_up,
+        sp_rate_dn=config.sp_rate_dn,
+        out_hi_lim=config.out_hi_lim,
+        out_lo_lim=config.out_lo_lim,
+        out_rate_up=config.out_rate_up,
+        out_rate_dn=config.out_rate_dn,
+        out_scale_lo=config.out_scale_lo,
+        out_scale_hi=config.out_scale_hi,
+        out_startup=config.out_startup,
+        pv_ftime=config.pv_ftime,
+        trk_val=config.trk_val,
+        lo_val=config.lo_val,
+        ff_scale_lo=config.ff_scale_lo,
+        ff_scale_hi=config.ff_scale_hi,
+        ff_gain=config.ff_gain,
+        ff_enable=config.ff_enable,
+    )
+
+
+def pid_kernel_cfg_from(config: PidLoopConfig) -> PidKernelCfg:
+    return PidKernelCfg(
+        kc=config.kc,
+        ti=config.ti_seconds,
+        td=config.td_seconds,
+        n=config.n,
+        beta=config.beta,
+        gamma=config.gamma,
+        gap_band=config.gap_band,
+        gap_gain=config.gap_gain,
+        direct_acting=config.direct_acting,
+    )
+
+
+async def carregar_loop_seeds(session: AsyncSession, flow_id: int) -> dict[str, LoopSeed]:
+    """`{block_id: LoopSeed(sp, man_out)}` persistido em `loop_setpoints` para o flow —
+    semente de SP e MAN_OUT no deploy (ADR-039 §4.10); TARGET persiste so para auditoria."""
+    resultado = await session.execute(
+        select(LoopSetpoint.sp, LoopSetpoint.man_out, LoopSetpoint.block_id).where(
+            LoopSetpoint.flow_id == flow_id
+        )
+    )
+    return {block_id: LoopSeed(sp=sp, man_out=man_out) for sp, man_out, block_id in resultado.all()}
+
+
+def _instantiate_loop(
+    node: FlowNode,
+    *,
+    flow_id: int,
+    ts_seconds: float,
+    redis_client: Redis,
+    session_factory: async_sessionmaker[AsyncSession] | None,
+    seed: LoopSeed | None,
+    predecessor: BlockShell | None,
+) -> BlockShell:
+    config: Any = node.config
+    channel = channel_loop_state(flow_id, node.id)
+
+    async def publish(state: LoopState) -> None:
+        await redis_client.publish(channel, state.model_dump_json())
+
+    async def emit_event(**kwargs: Any) -> None:
+        await publish_event(redis_client, ts=datetime.now(UTC), **kwargs)
+
+    async def persist_op(field: str, value: float | str) -> None:
+        """Upsert do valor de operacao em `loop_setpoints` — mesmo teto e postura
+        fire-and-forget do `persist_sp` do MPC (RNF-05)."""
+        if session_factory is None:
+            return
+        stmt = pg_insert(LoopSetpoint).values(flow_id=flow_id, block_id=node.id, **{field: value})
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["flow_id", "block_id"],
+            set_={field: value, "updated_at": func.now()},
+        )
+
+        async def _grava() -> None:
+            async with session_factory() as session:
+                await session.execute(stmt)
+                await session.commit()
+
+        await asyncio.wait_for(_grava(), timeout=PERSIST_SP_TIMEOUT_S)
+
+    kernel = PidKernel(pid_kernel_cfg_from(config))
+    return BlockShell(
+        node.id,
+        kernel=kernel,
+        cfg=shell_cfg_from(config, ts_seconds),
+        emit_event=emit_event,
+        publish_state=publish,
+        persist_op=persist_op,
+        sp_seed=seed.sp if seed else None,
+        man_out_seed=seed.man_out if seed else None,
+        carry=predecessor.carry_state() if predecessor is not None else None,
+    )
