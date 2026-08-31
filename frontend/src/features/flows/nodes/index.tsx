@@ -15,6 +15,7 @@ import {
   type NoLeitura,
   type NoMpc as NoMpcData,
   type NoPid as NoPidData,
+  type NoPidLoop as NoPidLoopData,
   type NoScript,
   type NoTfs,
   type TipoBloco,
@@ -321,6 +322,34 @@ export function NoPid({ id, data, selected }: NodeProps<NoPidData>) {
   );
 }
 
+/** PID Malha (ADR-039): nós com chassis padrão e o resumo dos três ganhos ISA — o modal de
+ *  sintonia completa (permitted/modos/limites/FF) vem com o plano fuzzy-loop. */
+export function NoPidLoop({ id, data, selected }: NodeProps<NoPidLoopData>) {
+  return (
+    <BlocoChapa
+      tipo="pid_loop"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("pid_loop", "input"))}
+      saidas={portas(portasFixas("pid_loop", "output"))}
+      blockId={id}
+    >
+      <div className="space-y-0.5">
+        <LinhaResumo rotulo="Ganho KC" valor={FORMATO_PARAM.format(data.kc)} />
+        <LinhaResumo
+          rotulo="Tempo integral Ti"
+          valor={data.ti_seconds === 0 ? "desligada" : `${FORMATO_PARAM.format(data.ti_seconds)} s`}
+        />
+        <LinhaResumo
+          rotulo="Tempo derivativo Td"
+          valor={data.td_seconds === 0 ? "desligada" : `${FORMATO_PARAM.format(data.td_seconds)} s`}
+        />
+      </div>
+    </BlocoChapa>
+  );
+}
+
 /** Mapa de COMPONENTES por tipo (ARCH-18/TD-021). Mora AQUI, não em `registro.ts`: o
  *  registro é alcançado pelo chunk inicial via `CanalAoVivo.tsx` → `graph.ts` →
  *  `registro.ts`, e tocar os componentes de nó dali arrastaria o `@xyflow/react` de volta
@@ -342,4 +371,5 @@ export const TIPOS_DE_NO: Record<TipoBloco, ComponenteNo> = {
   mpc: NoMpc,
   fuzzy: NoFuzzy,
   pid: NoPid,
+  pid_loop: NoPidLoop,
 };

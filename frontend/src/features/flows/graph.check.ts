@@ -180,6 +180,29 @@ function aresta(
   return { id, source, sourceHandle, target, targetHandle };
 }
 
+/** PID Malha (ADR-039) minimalista para as mesas de ciclo/retorno. */
+function pidLoop(id: string, ordem: number, permitted: readonly string[] = ["oos", "man", "auto"]): BlocoNode {
+  return {
+    id,
+    type: "pid_loop",
+    position: POS,
+    data: {
+      exec_order: ordem,
+      label: "",
+      sp_hi_lim: 100,
+      sp_lo_lim: 0,
+      out_scale_lo: 0,
+      out_scale_hi: 100,
+      permitted: [...permitted],
+      normal: "auto",
+      direct_acting: false,
+      kc: 1,
+      ti_seconds: 60,
+      td_seconds: 0,
+    },
+  };
+}
+
 function ordens(nodes: readonly BlocoNode[]): Record<string, number> {
   return Object.fromEntries(nodes.map((no) => [no.id, no.data.exec_order]));
 }
@@ -999,4 +1022,72 @@ test("constantes de vestimenta: vivo mais grosso que a edição e magenta é o d
   expect(ESPESSURA_ARESTA_EDICAO).toBe(1.5);
   expect(ESPESSURA_ARESTA_VIVA).toBeGreaterThan(ESPESSURA_ARESTA_EDICAO);
   expect(COR_ARESTA_RUIM).toBe("#ff00ff");
+});
+
+// --------------------------------------------------------------------------------------
+// PID Malha — aresta de retorno da cascata (ADR-039 D6)
+// --------------------------------------------------------------------------------------
+
+test("aresta de retorno (bkcal_in) não conta como ciclo", () => {
+  const nodes = [pidLoop("lic", 1), pidLoop("fic", 2, ["oos", "man", "auto", "cas"])];
+  const edges = [aresta("e1", "lic", "out", "fic", "cas_in")];
+  expect(
+    motivoRecusa(
+      { source: "fic", sourceHandle: "bkcal_out", target: "lic", targetHandle: "bkcal_in" },
+      nodes,
+      edges,
+      TAGS,
+    ),
+  ).toBeNull();
+});
+
+test("aresta de retorno não gera aviso de inversão", () => {
+  const nodes = [pidLoop("lic", 1), pidLoop("fic", 2, ["oos", "man", "auto", "cas"])];
+  const edges = [
+    aresta("e1", "lic", "out", "fic", "cas_in"),
+    aresta("e2", "fic", "bkcal_out", "lic", "bkcal_in"),
+  ];
+  expect(avisosInversao(nodes, edges)).toEqual([]);
+});
+
+test("aresta de retorno em edicao ganha a classe tracejada", () => {
+  const retorno = aresta("e2", "fic", "bkcal_out", "lic", "bkcal_in");
+  expect(arestaComQualidade(retorno, { fic: { bkcal_out: { v: 50, ok: true } } }).className).toBe(
+    "aresta-boa aresta-retorno",
+  );
+  expect(arestaComQualidade(retorno, { fic: { bkcal_out: { v: 50, ok: false } } }).className).toBe(
+    "aresta-ruim aresta-retorno",
+  );
+});
+
+test("ciclo comum por aresta de dados continua recusado", () => {
+  const nodes = [
+    pidLoop("a", 1, ["oos", "man", "auto", "cas"]),
+    pidLoop("b", 2, ["oos", "man", "auto", "cas"]),
+  ];
+  const edges = [aresta("e1", "a", "out", "b", "cas_in")];
+  expect(
+    motivoRecusa(
+      { source: "b", sourceHandle: "out", target: "a", targetHandle: "cas_in" },
+      nodes,
+      edges,
+      TAGS,
+    ),
+  ).toContain("ciclo");
+});
+
+test("pid_loop nasce com as portas fixas do contrato e defaults válidos", () => {
+  expect(handlesEntrada(pidLoop("m", 1))).toEqual([
+    "in",
+    "cas_in",
+    "rcas_in",
+    "rout_in",
+    "bkcal_in",
+    "bias_in",
+    "trk_in_d",
+    "lo_in_d",
+  ]);
+  expect(handlesSaida(pidLoop("m", 1))).toEqual(["out", "bkcal_out"]);
+  const novo = criarBloco("pid_loop", "novo", POS, 1);
+  expect(novo.type).toBe("pid_loop");
 });

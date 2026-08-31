@@ -7,6 +7,7 @@ import {
   type DadosKalman,
   type DadosMpc,
   type DadosPid,
+  type DadosPidLoop,
   type DadosScript,
   type DadosTag,
   type DadosTfs,
@@ -46,7 +47,8 @@ type ConfigDoBloco =
   | Omit<DadosFirstOrder, keyof DadosBase>
   | Omit<DadosKalman, keyof DadosBase>
   | Omit<DadosFuzzy, keyof DadosBase>
-  | Omit<DadosPid, keyof DadosBase>;
+  | Omit<DadosPid, keyof DadosBase>
+  | Omit<DadosPidLoop, keyof DadosBase>;
 
 export interface DefinicaoBloco {
   rotulo: string;
@@ -80,6 +82,22 @@ export const PADRAO_PID = {
   differential_on_measurement: true,
   starting_output: 0,
 } as const;
+
+/** Defaults do PID Malha (ADR-039): o mínimo que o servidor exige (limites de SP e KC) mais
+ *  a escala padrão de OUT e a sintonia PI conservadora — o bloco recém-arrastado passa no
+ *  save; os demais campos do `PidLoopConfig` ficam nos defaults do servidor. */
+export const PADRAO_PID_LOOP = {
+  sp_hi_lim: 100,
+  sp_lo_lim: 0,
+  out_scale_lo: 0,
+  out_scale_hi: 100,
+  permitted: ["oos", "man", "auto"],
+  normal: "auto",
+  direct_acting: false,
+  kc: 1,
+  ti_seconds: 60,
+  td_seconds: 0,
+};
 
 export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
   opc_read: {
@@ -136,6 +154,11 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
     rotulo: "PID",
     descricao: "Controlador PID (ISA) — PV, SP e saída",
     defaults: () => ({ ...PADRAO_PID }),
+  },
+  pid_loop: {
+    rotulo: "PID Malha",
+    descricao: "PID industrial com modos, cascata e tracking (ADR-039)",
+    defaults: () => ({ ...PADRAO_PID_LOOP }),
   },
 };
 

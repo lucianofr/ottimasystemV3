@@ -16,6 +16,7 @@ import {
   type PairModel,
   type PidBinding,
   type PidConfig,
+  type PidLoopConfig,
   type Range,
   type RegraPortaDinamica,
   type ScriptConfig,
@@ -23,7 +24,7 @@ import {
 } from "../../lib/contracts.gen";
 import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
 import type { PortsPorBloco } from "./canalPrimitivos";
-import { PADRAO_FIRST_ORDER, PADRAO_KALMAN, PADRAO_PID, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
+import { PADRAO_FIRST_ORDER, PADRAO_KALMAN, PADRAO_PID, PADRAO_PID_LOOP, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
 
 /**
  * Modelo do grafo do editor + as regras que o editor espelha do servidor.
@@ -48,6 +49,7 @@ export const TIPOS_BLOCO = [
   "mpc",
   "fuzzy",
   "pid",
+  "pid_loop",
 ] as const;
 export type TipoBloco = (typeof TIPOS_BLOCO)[number];
 
@@ -160,6 +162,25 @@ export type DadosKalman = DadosBase & { measurement_noise: number; process_noise
  *  não serializáveis em JSON. */
 export type DadosPid = DadosBase & Pick<PidConfig, keyof PidConfig>;
 
+/** PID Malha (ADR-039): o editor conhece só os campos que expõe — limites de SP, escala de
+ *  OUT (estrutural, D11), permitted/normal/direct_acting e a sintonia PID. Os demais campos
+ *  do `PidLoopConfig` ficam nos defaults do servidor; edição completa deles vem com o modal
+ *  de sintonia (plano fuzzy-loop). */
+export type DadosPidLoop = DadosBase &
+  Pick<
+    PidLoopConfig,
+    | "sp_hi_lim"
+    | "sp_lo_lim"
+    | "out_scale_lo"
+    | "out_scale_hi"
+    | "permitted"
+    | "normal"
+    | "direct_acting"
+    | "kc"
+    | "ti_seconds"
+    | "td_seconds"
+  >;
+
 /** `LimitesMpc`/`FaixaMpc`/`ValoresModoPid`/`PidMv` abaixo viram alias do tipo gerado
  *  (ARCH-06/TD-018): `Limits`/`Range`/`ModeValues`/`PidBinding` de `mpc_config.py`, mesmo
  *  mecanismo de `contracts_export.py::build_contracts()["node_configs"]`.
@@ -259,7 +280,8 @@ export type DadosBloco =
   | DadosFirstOrder
   | DadosKalman
   | DadosFuzzy
-  | DadosPid;
+  | DadosPid
+  | DadosPidLoop;
 
 /** `type` é opcional em `Node`; aqui ele é o discriminante e nunca falta. */
 type Bloco<D extends Record<string, unknown>, T extends TipoBloco> = Node<D, T> & { type: T };
@@ -273,6 +295,7 @@ export type NoFirstOrder = Bloco<DadosFirstOrder, "first_order">;
 export type NoKalman = Bloco<DadosKalman, "kalman">;
 export type NoFuzzy = Bloco<DadosFuzzy, "fuzzy">;
 export type NoPid = Bloco<DadosPid, "pid">;
+export type NoPidLoop = Bloco<DadosPidLoop, "pid_loop">;
 
 export type BlocoNode =
   | NoLeitura
@@ -283,7 +306,8 @@ export type BlocoNode =
   | NoFirstOrder
   | NoKalman
   | NoFuzzy
-  | NoPid;
+  | NoPid
+  | NoPidLoop;
 
 /** Toda aresta do editor nasce de um par de handles resolvidos; `null` nunca chega ao save. */
 export type BlocoEdge = Omit<Edge, "sourceHandle" | "targetHandle"> & {
@@ -334,9 +358,13 @@ export function estadoDaAresta(
 export function arestaComQualidade(aresta: BlocoEdge, ports: PortsPorBloco): BlocoEdge {
   const estado = estadoDaAresta(aresta, ports);
   if (estado === "edicao") return aresta;
+  const classes = [
+    estado === "good" ? "aresta-boa" : "aresta-ruim",
+    ...(aresta.targetHandle === "bkcal_in" ? ["aresta-retorno"] : []),
+  ].join(" ");
   return {
     ...aresta,
-    className: estado === "good" ? "aresta-boa" : "aresta-ruim",
+    className: classes,
     ...(estado === "bad" ? { markerStart: ID_MARCADOR_X } : {}),
   };
 }
@@ -413,7 +441,7 @@ export function tipoPorta(no: BlocoNode, tags: MapaTags): TipoPorta {
   if (no.type === "mpc") return "num";
   if (no.type === "first_order" || no.type === "kalman") return "num";
   if (no.type === "fuzzy") return "num";
-  if (no.type === "pid") return "num";
+  if (no.type === "pid" || no.type === "pid_loop") return "num";
   if (no.data.tag_id === null) return "desconhecido";
   const dado = tags.get(no.data.tag_id);
   if (dado === undefined) return "desconhecido";
@@ -477,7 +505,11 @@ export function motivoRecusa(
   if (source === target) {
     return "Um bloco não pode alimentar a si mesmo: o fluxo de dados precisa ser acíclico.";
   }
-  if (alcanca(target, source, edges)) {
+  // Aresta de retorno `bkcal_in` fecha o ciclo da cascata de proposito (ADR-039 D6):
+  // não entra na checagem de ciclo nem no aviso de inversão — o espelho do save é o de
+  // `validate.py`.
+  const arestaRetorno = targetHandle === "bkcal_in";
+  if (!arestaRetorno && alcanca(target, source, edges)) {
     return (
       `Ligação recusada: fecharia um ciclo — '${rotuloDe(destino)}' já alimenta ` +
       `'${rotuloDe(origem)}'. O fluxo de dados precisa ser acíclico.`
@@ -507,6 +539,7 @@ export function avisosInversao(nodes: readonly BlocoNode[], edges: readonly Bloc
   const porId = new Map(nodes.map((no) => [no.id, no]));
   const avisos: string[] = [];
   for (const aresta of edges) {
+    if (aresta.targetHandle === "bkcal_in") continue;
     const origem = porId.get(aresta.source);
     const destino = porId.get(aresta.target);
     if (origem === undefined || destino === undefined) continue;
@@ -941,6 +974,30 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           starting_output: numero(dados.starting_output, PADRAO_PID.starting_output),
         },
       };
+    case "pid_loop": {
+      const permittedCru = Array.isArray(dados.permitted) ? dados.permitted : PADRAO_PID_LOOP.permitted;
+      const permitted = permittedCru.filter((p: unknown): p is string => typeof p === "string");
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          sp_hi_lim: numero(dados.sp_hi_lim, PADRAO_PID_LOOP.sp_hi_lim),
+          sp_lo_lim: numero(dados.sp_lo_lim, PADRAO_PID_LOOP.sp_lo_lim),
+          out_scale_lo: numero(dados.out_scale_lo, PADRAO_PID_LOOP.out_scale_lo),
+          out_scale_hi: numero(dados.out_scale_hi, PADRAO_PID_LOOP.out_scale_hi),
+          permitted,
+          normal: typeof dados.normal === "string" ? dados.normal : PADRAO_PID_LOOP.normal,
+          direct_acting:
+            typeof dados.direct_acting === "boolean" ? dados.direct_acting : PADRAO_PID_LOOP.direct_acting,
+          kc: numero(dados.kc, PADRAO_PID_LOOP.kc),
+          ti_seconds: numero(dados.ti_seconds, PADRAO_PID_LOOP.ti_seconds),
+          td_seconds: numero(dados.td_seconds, PADRAO_PID_LOOP.td_seconds),
+        },
+      };
+    }
   }
 }
 

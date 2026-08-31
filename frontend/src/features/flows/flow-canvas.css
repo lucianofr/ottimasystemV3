@@ -37,6 +37,12 @@
   stroke-width: var(--edge-stroke-width-vivo);
 }
 
+/* Aresta de retorno da cascata (`bkcal_in`, ADR-039 D6): tracejada para o engenheiro
+   distinguir o fluxo de dados do retrocálculo. */
+.canvas-flow .react-flow__edge.aresta-retorno .react-flow__edge-path {
+  stroke-dasharray: 6 4;
+}
+
 /* Portas: quadradinho de bisel, nunca o círculo default da biblioteca. */
 .canvas-flow .react-flow__handle {
   width: 9px;

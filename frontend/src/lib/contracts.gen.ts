@@ -526,6 +526,44 @@ export interface PidConfig {
   starting_output: number;
 }
 
+export interface PidLoopConfig {
+  permitted: string[];
+  normal: string;
+  shed_opt: "shed_to_auto" | "shed_to_man" | "shed_to_normal";
+  shed_no_return: boolean;
+  direct_acting: boolean;
+  sp_pv_track_in_man: boolean;
+  use_pv_for_bkcal: boolean;
+  track_enable: boolean;
+  track_in_manual: boolean;
+  sp_hi_lim: number;
+  sp_lo_lim: number;
+  sp_rate_up: number | null;
+  sp_rate_dn: number | null;
+  out_hi_lim: number;
+  out_lo_lim: number;
+  out_rate_up: number | null;
+  out_rate_dn: number | null;
+  out_scale_lo: number;
+  out_scale_hi: number;
+  out_startup: number;
+  pv_ftime: number;
+  trk_val: number;
+  lo_val: number;
+  ff_scale_lo: number;
+  ff_scale_hi: number;
+  ff_gain: number;
+  ff_enable: boolean;
+  kc: number;
+  ti_seconds: number;
+  td_seconds: number;
+  n: number;
+  beta: number;
+  gamma: number;
+  gap_band: number;
+  gap_gain: number;
+}
+
 export interface SopdtParams {
   K: number;
   tau1: number;

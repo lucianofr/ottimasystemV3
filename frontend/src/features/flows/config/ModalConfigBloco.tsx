@@ -387,6 +387,12 @@ export function ModalConfigBloco({
       case "pid":
         onAplicar({ ...no, data: { ...montarDadosPid(no.data, campos), label } }, execOrder);
         break;
+      case "pid_loop":
+        // Malha (ADR-039): o modal v1 aplica só rótulo e ordem — a sintonia completa
+        // (permitted/modos/limites/FF) vem com o plano fuzzy-loop; os demais campos
+        // sobrevivem nos defaults do servidor.
+        onAplicar({ ...no, data: { ...no.data, label } }, execOrder);
+        break;
     }
     // `onClose` (linha do <dialog>) chama `onFechar`; fechar via `close()` explícito em vez
     // de chamar `onFechar()` direto evita que o desmonte (estado -> null) derrube o <dialog>
