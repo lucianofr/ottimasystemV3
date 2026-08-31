@@ -37,6 +37,10 @@ def channel_fuzzy_state(flow_id: int, block_id: str) -> str:
     return f"fuzzy.state.{flow_id}.{block_id}"
 
 
+def channel_loop_state(flow_id: int, block_id: str) -> str:
+    return f"loop.state.{flow_id}.{block_id}"
+
+
 class OpcValue(BaseModel):
     tag_id: int
     ts: datetime
@@ -207,6 +211,26 @@ class FuzzyState(BaseModel):
     outputs: list[FuzzyVarState]
 
 
+class LoopState(BaseModel):
+    """Publicado em `loop.state.<flow_id>.<block_id>` apos cada varredura do shell
+    (ADR-039 §4.10), com throttle na origem — anima o faceplate da malha e alimenta o
+    recorder. `out` ja sai escalado por OUT_SCALE (EU); `u_pct` e o % interno."""
+
+    ts: datetime
+    target: str  # nomes de MODE_NAMES: "oos"|"iman"|"lo"|"man"|"auto"|"cas"|"rcas"|"rout"
+    actual: str
+    permitted: list[str]
+    pv: float | None
+    pv_ok: bool
+    sp: float  # EU
+    out: float  # EU (ja escalado por OUT_SCALE)
+    u_pct: float  # % interno
+    man_out: float  # %
+    hi_limited: bool
+    lo_limited: bool
+    diag: dict[str, float] = {}
+
+
 class EventMessage(BaseModel):
     ts: datetime
     severity: Literal["info", "warning", "alarm"]
@@ -264,6 +288,17 @@ KIND_MPC_INPUT_INVALID = "mpc_input_invalid"
 # relaxamento por rank NÃO gera evento — é operação normal e fica registrado em
 # `ssto_runs.given_up`; alarme por varredura afogaria o log de eventos (ADR-020).
 KIND_SSTO_INFEASIBLE = "ssto_infeasible"
+
+# Vocabulario `kind` novo do shell de malha (ADR-039 §4.10): os literais precisam bater
+# com os de `ottima_flow_runtime.blocks.shell.block` (travado por test_bus_loop).
+KIND_LOOP_MODE_CHANGED = "loop_mode_changed"
+KIND_LOOP_SHED = "loop_shed"
+KIND_LOOP_MODE_REJECTED = "loop_mode_rejected"
+KIND_LOOP_ALARM = "loop_alarm"
+KIND_LOOP_LIMITED = "loop_limited"
+KIND_LOOP_TARGET_WRITTEN = "loop_target_written"
+KIND_LOOP_SP_WRITTEN = "loop_sp_written"
+KIND_LOOP_OUT_WRITTEN = "loop_out_written"
 
 # Vocabulário `kind` novo da F5 (spec F5 §7.2-2, F5R-02b).
 KIND_SCRIPT_RECOVERED = "script_recovered"  # severity "info"
