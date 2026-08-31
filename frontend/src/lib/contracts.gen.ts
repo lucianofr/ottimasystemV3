@@ -40,7 +40,7 @@ export interface ContratoPortaDinamicaComDefault extends ContratoPortaDinamica {
 
 export type ContratoPorta = ContratoPortaFixa | ContratoPortaDinamica | ContratoPortaDinamicaComDefault;
 
-export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy" | "first_order" | "kalman" | "pid" | "tfs" | "mpc", ContratoPorta> = {
+export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy" | "first_order" | "kalman" | "pid" | "tfs" | "mpc" | "pid_loop", ContratoPorta> = {
   "opc_read": {
     "dynamic": false,
     "ports": [
@@ -202,6 +202,61 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy
         "type": "num"
       }
     ]
+  },
+  "pid_loop": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "cas_in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "rcas_in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "rout_in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "bkcal_in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "bias_in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "trk_in_d",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "lo_in_d",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      },
+      {
+        "name": "bkcal_out",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
   }
 };
 
@@ -297,6 +352,22 @@ export interface FuzzyState {
   inputs: FuzzyVarState[];
   rules: number[];
   outputs: FuzzyVarState[];
+}
+
+export interface LoopState {
+  ts: string;
+  target: string;
+  actual: string;
+  permitted: string[];
+  pv: number | null;
+  pv_ok: boolean;
+  sp: number;
+  out: number;
+  u_pct: number;
+  man_out: number;
+  hi_limited: boolean;
+  lo_limited: boolean;
+  diag: Record<string, number>;
 }
 
 // --------------------------------------------------------------------------------------

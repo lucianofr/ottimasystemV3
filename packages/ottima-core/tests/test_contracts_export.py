@@ -21,7 +21,13 @@ def test_schemas_ws_presentes():
     # MpcVarState (spec F4 §5.1, tarefa 1.3) vem aninhado no schema de MpcState
     # (`vars: dict[str, MpcVarState]`) — não é chave própria de `ws_payloads`.
     contratos = build_contracts()
-    assert set(contratos["ws_payloads"]) == {"FlowStatus", "PortValue", "MpcState", "FuzzyState"}
+    assert set(contratos["ws_payloads"]) == {
+        "FlowStatus",
+        "PortValue",
+        "MpcState",
+        "FuzzyState",
+        "LoopState",
+    }
     for schema in contratos["ws_payloads"].values():
         assert schema["type"] == "object"
         assert "properties" in schema
