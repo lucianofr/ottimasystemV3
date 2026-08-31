@@ -554,7 +554,7 @@ def _parse_config(where: str, node_type: str, data: dict, errors: list[str]) -> 
     if node_type == "pid":
         return _parse_pid_config(where, data, errors)
     if node_type == "pid_loop":
-        return _parse_loop_config(where, PidLoopConfig, data, errors)
+        return _parse_loop_config(where, node_type, PidLoopConfig, data, errors)
     if node_type in _FILTER_KEYS:
         return _parse_filter_config(where, node_type, data, errors)
     return _parse_tfs_config(where, data, errors)
@@ -686,11 +686,12 @@ def _parse_pid_config(where: str, data: dict, errors: list[str]) -> PidConfig | 
 
 
 def _parse_loop_config(
-    where: str, modelo: type[BaseModel], data: dict, errors: list[str]
+    where: str, node_type: str, modelo: type[BaseModel], data: dict, errors: list[str]
 ) -> NodeConfig | None:
     """Config de bloco malha (ADR-039): modelo pydantic, um erro por problema."""
+    payload = {key: data[key] for key in _CONFIG_KEYS[node_type] if key in data}
     try:
-        return modelo.model_validate(data)
+        return modelo.model_validate(payload)
     except ValidationError as exc:
         for erro in exc.errors():
             campo = ".".join(str(loc) for loc in erro["loc"])

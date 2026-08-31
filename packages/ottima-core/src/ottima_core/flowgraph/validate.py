@@ -88,14 +88,18 @@ def validate_graph(
     _check_tfs_delay(graph.nodes, ts_seconds, errors)
     _check_script_code(graph.nodes, errors)
     _check_fuzzy_nodes(graph.nodes, errors)
+    _check_loop_nodes(graph.nodes, graph.edges, errors)
 
     linked = _check_edge_endpoints(graph.edges, by_id, errors)
     resolved = _check_handles(linked, by_id, mpc_configs, errors)
     _check_fan_in(resolved, errors)
     _check_port_types(resolved, by_id, tags, errors)
     _check_required_inputs(graph.nodes, resolved, mpc_configs, errors)
-    _check_cycles(graph.nodes, linked, errors)
-    _collect_inversion_warnings(linked, by_id, warnings)
+    # Aresta de retorno `bkcal_in` fecha ciclo no grafo bruto de proposito (ADR-039 D6):
+    # isenta da deteccao de ciclo e do aviso de inversao.
+    dataflow = [e for e in linked if e.target_handle != "bkcal_in"]
+    _check_cycles(graph.nodes, dataflow, errors)
+    _collect_inversion_warnings(dataflow, by_id, warnings)
 
     _check_mpc_nodes(graph.nodes, mpc_configs, tags, ts_seconds, errors, warnings)
 
@@ -121,6 +125,8 @@ def _output_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[
         return mv_ids + MPC_FIXED_OUTPUT_PORTS
     if node.type == "pid":
         return ("out",)
+    if node.type in LOOP_TYPES:
+        return ("out", "bkcal_out")
     if node.type in _FILTER_TYPES:
         return ("out",)
     return ()
@@ -150,6 +156,17 @@ def _input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[s
         )
     if node.type == "pid":
         return ("pv", "sp")
+    if node.type in LOOP_TYPES:
+        return (
+            "in",
+            "cas_in",
+            "rcas_in",
+            "rout_in",
+            "bkcal_in",
+            "bias_in",
+            "trk_in_d",
+            "lo_in_d",
+        )
     if node.type in _FILTER_TYPES:
         return ("in",)
     return ()
@@ -388,6 +405,31 @@ def _valida_fuzzy(node: FlowNode, errors: list[str]) -> None:
             )
 
 
+# --------------------------------------------------------------------------------------
+# Blocos malha (ADR-039): portas remotas exigidas por modo em permitted
+# --------------------------------------------------------------------------------------
+
+LOOP_TYPES: frozenset[str] = frozenset({"pid_loop"})
+_LOOP_REMOTE_PORT = {"cas": "cas_in", "rcas": "rcas_in", "rout": "rout_in"}
+
+
+def _check_loop_nodes(nodes: list[FlowNode], edges: list[FlowEdge], errors: list[str]) -> None:
+    """Modos remotos em permitted exigem a porta correspondente ligada (ADR-039 4.3)."""
+    ligadas: dict[str, set[str]] = {}
+    for edge in edges:
+        ligadas.setdefault(edge.target, set()).add(edge.target_handle)
+    for node in nodes:
+        if node.type not in LOOP_TYPES:
+            continue
+        conectadas = ligadas.get(node.id, set())
+        for modo, porta in _LOOP_REMOTE_PORT.items():
+            if modo in node.config.permitted and porta not in conectadas:
+                errors.append(
+                    f"nó '{node.id}' ({node.type}): modo '{modo}' em permitted exige a "
+                    f"porta '{porta}' ligada"
+                )
+
+
 def _check_edge_endpoints(
     edges: list[FlowEdge], by_id: dict[str, FlowNode], errors: list[str]
 ) -> list[FlowEdge]:
@@ -504,6 +546,9 @@ def _required_input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -
     if node.type == "pid":
         # RF-552: só `pv` é obrigatória — `sp` é opcional (ausente, `config.setpoint` supre).
         return ("pv",)
+    if node.type in LOOP_TYPES:
+        # Malha (ADR-039): so a PV e obrigatoria; o resto e por modo/opcao.
+        return ("in",)
     # 'in' do Write, IN1..INn do Script e uma por CV/Restrição/DV do MPC (decisão A-10) são
     # sempre obrigatórias (RF-302).
     return _input_handles(node, mpc_configs)
