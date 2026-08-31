@@ -224,6 +224,10 @@ class BlockShell(Block):
             if not kernel_errors and dt is None:
                 self.mode.actual = self._resolve_mode(inputs, kernel_errors)
                 m = self.mode.actual
+                # Partida: o SP operacional e o alvo do align (SPEC_PID §3.2) — sem isto,
+                # um write_sp antes do primeiro scan fica invisivel ao kernel e o primeiro
+                # AUTO carrega um chute proporcional fantasma (ep_prev alinhado em sp=0).
+                self.sp = clamp(self.sp_op, self.cfg.sp_lo_lim, self.cfg.sp_hi_lim)
                 self._entrar_em_man_inicializa_man_out(m)
                 forced = self._forced_output(m, inputs)
                 if forced is not None:
