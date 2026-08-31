@@ -49,6 +49,7 @@ async def test_delete_cascateia_conexoes(client, admin_headers):
     r = await client.get(f"/api/connections?project_id={p['id']}", headers=admin_headers)
     assert r.json() == []
 
+
 async def test_delete_cascateia_tag_calculada_com_entradas(client, admin_headers):
     """Regressão: tag calculada consumindo tag OPC do MESMO projeto não pode virar 500 no
     DELETE do projeto. O RESTRICT de `calculated_tag_inputs.source_tag_id` é deliberado

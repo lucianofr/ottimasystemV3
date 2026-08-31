@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from ottima_api import API_VERSION
 from ottima_api.routers.health import heartbeat_loop
-from ottima_api.validacao import traduzir_erro_de_validacao
+from ottima_api.validacao import melhor_erro, traduzir_erro_de_validacao
 from ottima_api.ws import FlowStatusHub
 from ottima_api.ws import router as ws_router
 from ottima_core.config import Settings, get_settings, validate_secrets
@@ -24,10 +24,10 @@ async def _validation_exception_handler(
 ) -> JSONResponse:
     """Handler global de `RequestValidationError` (spec F5 §4.3-1): `detail` sempre string
     única, primeiro erro da lista — mesmo contrato dos 422 de domínio (`api.ts` descarta
-    `detail` que não seja string)."""
+    `detail` que não seja string). `melhor_erro` resolve bodies em union (ADR-039 4.10)."""
     return JSONResponse(
         status_code=422,
-        content={"detail": traduzir_erro_de_validacao(exc.errors()[0])},
+        content={"detail": traduzir_erro_de_validacao(melhor_erro(exc.errors()))},
     )
 
 

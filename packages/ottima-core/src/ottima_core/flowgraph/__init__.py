@@ -72,6 +72,7 @@ from ottima_core.flowgraph.parse import (
     parse_graph,
 )
 from ottima_core.flowgraph.validate import (
+    LOOP_TYPES,
     MAX_DELAY_SAMPLES,
     PortKind,
     TagRef,
@@ -85,6 +86,7 @@ __all__ = [
     "MAX_SCRIPT_PORTS",
     "MPC_FIXED_OUTPUT_PORTS",
     "MPC_PORT_AUTO",
+    "LOOP_TYPES",
     "MPC_PORT_LOCAL",
     "NODE_TYPES",
     "ConstraintObjective",

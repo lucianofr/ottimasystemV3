@@ -50,6 +50,28 @@ def traduzir_erro_de_validacao(erro: dict[str, Any]) -> str:
     return f"{campo}: {motivo}"
 
 
+def melhor_erro(errors: list[dict[str, Any]]) -> dict[str, Any]:
+    """O erro do membro de union que melhor casa com o corpo recebido (body em union,
+    ADR-039 4.10): agrupa pelos membros que o Pydantic reporta no `loc`, escolhe o grupo
+    com menos erros `missing` (mais chaves casaram; empate vence o primeiro emitido) e
+    remove o nome do membro do `loc` — o detalhe pt-BR nunca expõe nome de classe."""
+    grupos: dict[str | None, list[dict[str, Any]]] = {}
+    for erro in errors:
+        loc = erro["loc"]
+        chave = loc[1] if len(loc) >= 3 and loc[0] == "body" and isinstance(loc[1], str) else None
+        grupos.setdefault(chave, []).append(erro)
+
+    def _missing(itens: list[dict[str, Any]]) -> int:
+        return sum(1 for e in itens if e["type"] == "missing")
+
+    chave, escolhidos = min(grupos.items(), key=lambda par: _missing(par[1]))
+    erro = escolhidos[0]
+    if chave is None:
+        return erro
+    loc = erro["loc"]
+    return {**erro, "loc": (loc[0], *loc[2:])}
+
+
 def problemas_de_validacao(exc: ValidationError, *, prefixo: str = "") -> list[str]:
     """Todos os erros de `exc.errors()` traduzidos e formatados como `"<caminho>:
     <motivo pt-BR>"` (reusa `traduzir_erro_de_validacao`, não reimplementa a tradução).

@@ -57,6 +57,8 @@ BlockId = Annotated[str, Path(min_length=1)]
 Axis = Literal["local_remote", "man_auto"]
 AxisValue = Literal["local", "remote", "man", "auto"]
 
+_LOOP_TYPES_API: frozenset[str] = frozenset({"pid_loop", "fuzzy_loop"})
+
 _VALORES_DO_EIXO: dict[Axis, frozenset[AxisValue]] = {
     "local_remote": frozenset({"local", "remote"}),
     "man_auto": frozenset({"man", "auto"}),
@@ -75,6 +77,14 @@ class SpCommand(BaseModel):
 
 class MvCommand(BaseModel):
     var_id: str
+    value: float
+
+
+class LoopModeCommand(BaseModel):
+    target: Literal["oos", "man", "auto", "cas", "rcas", "rout"]
+
+
+class LoopValueCommand(BaseModel):
     value: float
 
 
@@ -201,6 +211,46 @@ class FuzzyNodeOut(BaseModel):
     outputs: list[FuzzyOutputPortOut]
 
 
+class LoopNodeOut(BaseModel):
+    """Um bloco malha projetado (ADR-039 §4.10) — discovery para o faceplate."""
+
+    flow_id: int
+    flow_name: str
+    block_id: str
+    label: str
+    type: str
+
+
+class LoopTuningOut(BaseModel):
+    kc: float
+    ti_seconds: float
+    td_seconds: float
+    n: float
+    beta: float
+    gamma: float
+    gap_band: float
+    gap_gain: float
+    direct_acting: bool
+
+
+class LoopDetailOut(BaseModel):
+    """Config resumida de um bloco malha para o faceplate: permitted, limites, escala e
+    sintonia vigente (somente leitura — sintonia é edição de engenharia, ADR-039)."""
+
+    flow_id: int
+    flow_name: str
+    block_id: str
+    label: str
+    permitted: list[str]
+    sp_lo_lim: float
+    sp_hi_lim: float
+    out_lo_lim: float
+    out_hi_lim: float
+    out_scale_lo: float
+    out_scale_hi: float
+    tuning: LoopTuningOut
+
+
 class FuzzyDetailOut(BaseModel):
     """Detalhe completo de um bloco `fuzzy` (ADR-030): introspecção com curvas de
     pertinência, normas e texto das regras, para a página FUZZY OPERATE."""
@@ -231,6 +281,45 @@ async def _mpc_config(db: AsyncSession, flow_id: int, block_id: str) -> MpcConfi
     if node.type != "mpc":
         raise _reprovado(f"Bloco '{block_id}' não é um bloco MPC")
     return MpcConfig.model_validate(node.config.model_dump())
+
+
+async def _node_do_flow(db: AsyncSession, flow_id: int, block_id: str) -> FlowNode:
+    """No do graph_json persistido, ou 404 (flow) / 422 (bloco)."""
+    flow = await db.get(Flow, flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail=MSG_FLOW_NAO_ENCONTRADO)
+    graph = parse_graph(flow.graph_json)
+    try:
+        return graph.node(block_id)
+    except KeyError:
+        raise _reprovado(f"Bloco '{block_id}' não encontrado no flow") from None
+
+
+async def _loop_config(db: AsyncSession, flow_id: int, block_id: str):
+    """Config tipada do bloco malha, ou 404/422 se nao existir ou nao for malha."""
+    node = await _node_do_flow(db, flow_id, block_id)
+    if node.type not in _LOOP_TYPES_API:
+        raise _reprovado(f"Bloco '{block_id}' não é um bloco malha")
+    return node.config
+
+
+def _validar_comando_loop(config, cmd: str, body) -> None:
+    """Validacao estatica do comando de malha (ADR-039 4.10): PERMITTED e faixas.
+
+    O runtime defende de novo ao materializar — a API so recusa o que o graph_json
+    ja garante ser invalido."""
+    if isinstance(body, LoopModeCommand):
+        if body.target not in config.permitted:
+            raise _reprovado(f"Modo '{body.target}' fora de PERMITTED")
+        return
+    if cmd == "loop_sp" and not (config.sp_lo_lim <= body.value <= config.sp_hi_lim):
+        raise _reprovado(
+            f"Valor {body.value} fora da faixa de SP ({config.sp_lo_lim}..{config.sp_hi_lim})"
+        )
+    if cmd == "loop_out" and not (config.out_lo_lim <= body.value <= config.out_hi_lim):
+        raise _reprovado(
+            f"Valor {body.value} fora da faixa de OUT ({config.out_lo_lim}..{config.out_hi_lim})"
+        )
 
 
 def _cv_do_bloco(config: MpcConfig, var_id: str) -> CvVar:
@@ -267,12 +356,28 @@ async def _publicar_comando(
 async def set_mode(
     flow_id: FlowId,
     block_id: BlockId,
-    body: ModeCommand,
+    body: ModeCommand | LoopModeCommand,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_operator),
     redis_client: Redis = Depends(get_redis),
 ) -> Response:
-    await _mpc_config(db, flow_id, block_id)
+    node = await _node_do_flow(db, flow_id, block_id)
+    if node.type in _LOOP_TYPES_API:
+        if not isinstance(body, LoopModeCommand):
+            raise _reprovado("Bloco malha exige body {'target': <modo>}")
+        _validar_comando_loop(node.config, "loop_mode", body)
+        await _publicar_comando(
+            redis_client,
+            user,
+            flow_id,
+            "loop_mode",
+            {"block_id": block_id, "target": body.target},
+        )
+        return Response(status_code=202)
+    if node.type != "mpc":
+        raise _reprovado(f"Bloco '{block_id}' não é um bloco MPC")
+    if not isinstance(body, ModeCommand):
+        raise _reprovado("Bloco MPC exige body {'axis': ..., 'value': ...}")
     if body.value not in _VALORES_DO_EIXO[body.axis]:
         raise _reprovado(f"Valor '{body.value}' não é válido para o eixo '{body.axis}'")
     await _publicar_comando(
@@ -289,12 +394,29 @@ async def set_mode(
 async def set_sp(
     flow_id: FlowId,
     block_id: BlockId,
-    body: SpCommand,
+    body: SpCommand | LoopValueCommand,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_operator),
     redis_client: Redis = Depends(get_redis),
 ) -> Response:
-    config = await _mpc_config(db, flow_id, block_id)
+    node = await _node_do_flow(db, flow_id, block_id)
+    if node.type in _LOOP_TYPES_API:
+        if not isinstance(body, LoopValueCommand):
+            raise _reprovado("Bloco malha exige body {'value': <float>}")
+        _validar_comando_loop(node.config, "loop_sp", body)
+        await _publicar_comando(
+            redis_client,
+            user,
+            flow_id,
+            "loop_sp",
+            {"block_id": block_id, "value": body.value},
+        )
+        return Response(status_code=202)
+    if node.type != "mpc":
+        raise _reprovado(f"Bloco '{block_id}' não é um bloco MPC")
+    if not isinstance(body, SpCommand):
+        raise _reprovado("Bloco MPC exige body {'var_id': ..., 'value': ...}")
+    config = MpcConfig.model_validate(node.config.model_dump())
     cv = _cv_do_bloco(config, body.var_id)
     if cv.remote_sp_tag_id is not None:
         raise _reprovado("SP desta CV é remoto (tag OPC)")
@@ -335,6 +457,28 @@ async def set_mv(
         flow_id,
         "mpc_mv",
         {"block_id": block_id, "var_id": body.var_id, "value": body.value},
+    )
+    return Response(status_code=202)
+
+
+@router.post("/{flow_id}/{block_id}/out", status_code=202)
+async def set_out(
+    flow_id: FlowId,
+    block_id: BlockId,
+    body: LoopValueCommand,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_operator),
+    redis_client: Redis = Depends(get_redis),
+) -> Response:
+    """Escrita do MAN_OUT (%) de bloco malha — so malha aceita (422 senao)."""
+    config = await _loop_config(db, flow_id, block_id)
+    _validar_comando_loop(config, "loop_out", body)
+    await _publicar_comando(
+        redis_client,
+        user,
+        flow_id,
+        "loop_out",
+        {"block_id": block_id, "value": body.value},
     )
     return Response(status_code=202)
 
@@ -578,4 +722,83 @@ async def get_fuzzy_detail(
         block_name=node.label or node.id,
         output_eu=node.config.output_eu,
         introspection=intro,
+    )
+
+
+def _loop_nodes(flow: Flow) -> list[LoopNodeOut]:
+    """Projeta os blocos malha de um flow — mesma postura melhor-esforço de `_mpc_nodes`."""
+    saida: list[LoopNodeOut] = []
+    try:
+        graph = parse_graph(flow.graph_json)
+        for node in graph.nodes:
+            if node.type not in _LOOP_TYPES_API:
+                continue
+            saida.append(
+                LoopNodeOut(
+                    flow_id=flow.id,
+                    flow_name=flow.name,
+                    block_id=node.id,
+                    label=node.label or node.id,
+                    type=node.type,
+                )
+            )
+    except GraphParseError:
+        logger.warning(
+            "Flow %s ('%s') com graph_json inválido; ignorado na projeção de malhas",
+            flow.id,
+            flow.name,
+        )
+        return []
+    return saida
+
+
+@router.get("/loop", response_model=list[LoopNodeOut], dependencies=[Depends(require_operator)])
+async def list_loops(db: AsyncSession = Depends(get_db)) -> list[LoopNodeOut]:
+    """Discovery de blocos malha do projeto ativo (espelho de `GET /mpcs`)."""
+    project_id = await db.scalar(select(Project.id).where(Project.is_active))
+    if project_id is None:
+        return []
+    flows = list(
+        await db.scalars(select(Flow).where(Flow.project_id == project_id).order_by(Flow.name))
+    )
+    return [no for flow in flows for no in _loop_nodes(flow)]
+
+
+@router.get(
+    "/loop/{flow_id}/{block_id}",
+    response_model=LoopDetailOut,
+    dependencies=[Depends(require_operator)],
+)
+async def get_loop_detail(
+    flow_id: FlowId, block_id: BlockId, db: AsyncSession = Depends(get_db)
+) -> LoopDetailOut:
+    """Config resumida do bloco malha para o faceplate (permitted/limites/escala/sintonia)."""
+    node = await _node_do_flow(db, flow_id, block_id)
+    if node.type not in _LOOP_TYPES_API:
+        raise _reprovado(f"Bloco '{block_id}' não é um bloco malha")
+    flow = await db.get(Flow, flow_id)
+    config = node.config
+    return LoopDetailOut(
+        flow_id=flow_id,
+        flow_name=flow.name,
+        block_id=node.id,
+        label=node.label or node.id,
+        permitted=list(config.permitted),
+        sp_lo_lim=config.sp_lo_lim,
+        sp_hi_lim=config.sp_hi_lim,
+        out_lo_lim=config.out_lo_lim,
+        out_hi_lim=config.out_hi_lim,
+        out_scale_lo=config.out_scale_lo,
+        out_scale_hi=config.out_scale_hi,
+        tuning=LoopTuningOut(
+            kc=config.kc,
+            ti_seconds=config.ti_seconds,
+            td_seconds=config.td_seconds,
+            n=config.n,
+            beta=config.beta,
+            gamma=config.gamma,
+            gap_band=config.gap_band,
+            gap_gain=config.gap_gain,
+            direct_acting=config.direct_acting,
+        ),
     )
