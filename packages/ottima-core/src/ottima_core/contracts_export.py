@@ -52,6 +52,7 @@ from ottima_core.flowgraph import (
     MpcConfig,
     MvVar,
     PidConfig,
+    PidLoopConfig,
     ScriptConfig,
     SopdtParams,
 )
@@ -271,6 +272,7 @@ _NODE_CONFIG_MODELS = (
     ScriptConfig,
     FuzzyConfig,
     PidConfig,
+    PidLoopConfig,
     SopdtParams,
     IopdtParams,
 )
