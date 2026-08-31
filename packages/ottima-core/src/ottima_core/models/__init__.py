@@ -5,6 +5,7 @@ from ottima_core.models.calculated_tag import CalculatedTag, CalculatedTagInput
 from ottima_core.models.connection import OpcConnection
 from ottima_core.models.flow import Flow
 from ottima_core.models.history_retention import HistoryRetentionSettings
+from ottima_core.models.loop_setpoint import LoopSetpoint
 from ottima_core.models.mpc_setpoint import MpcSetpoint
 from ottima_core.models.project import Project
 from ottima_core.models.system_settings import SystemSettings
@@ -29,6 +30,7 @@ __all__ = [
     "CalculatedTagInput",
     "Flow",
     "MpcSetpoint",
+    "LoopSetpoint",
     "HistoryRetentionSettings",
     "SystemSettings",
     "samples_table",

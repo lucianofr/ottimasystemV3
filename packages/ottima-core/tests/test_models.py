@@ -11,6 +11,7 @@ def test_metadata_tem_todas_as_tabelas_relacionais():
         "calculated_tag_inputs",
         "flows",
         "mpc_setpoints",
+        "loop_setpoints",
         "history_retention_settings",
         "system_settings",
     }
