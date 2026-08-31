@@ -57,6 +57,11 @@ FUZZY OPERATE, ADR-030)."""
 
 FUZZY_STATE_PREFIX = "fuzzy.state."
 
+LOOP_STATE_PATTERN = "loop.state.*"
+"""Quinta assinatura do hub: um só padrão cobre `loop.state.<flow_id>.<block_id>` (ADR-039 4.10)."""
+
+LOOP_STATE_PREFIX = "loop.state."
+
 QUEUE_MAX = 8
 """Mensagens em espera por socket. O Ts mínimo é 0,5 s (ADR-007), então 8 mensagens são ~4 s
 de folga por flow inscrito — cobre soluço de rede sem deixar um cliente travado acumular
@@ -73,6 +78,7 @@ class Subscriber:
         self.flow_ids: set[int] = set()
         self.mpc_ids: set[tuple[int, str]] = set()
         self.fuzzy_ids: set[tuple[int, str]] = set()
+        self.loop_ids: set[tuple[int, str]] = set()
         self.tags: set[int] = set()
         self.events: bool = False
         self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=QUEUE_MAX)
@@ -154,6 +160,12 @@ class FlowStatusHub:
             self._dispatch_fuzzy_state,
             name="api-fuzzy-state-hub",
         )
+        self._loop_listener = PatternListener(
+            redis_client,
+            LOOP_STATE_PATTERN,
+            self._dispatch_loop_state,
+            name="api-loop-state-hub",
+        )
         self._events_listener = ChannelListener(
             redis_client, CHANNEL_EVENTS, self._dispatch_events, name="api-events-hub"
         )
@@ -170,6 +182,7 @@ class FlowStatusHub:
         await self._opc_listener.start()
         await self._calc_listener.start()
         await self._fuzzy_listener.start()
+        await self._loop_listener.start()
         await self._events_listener.start()
 
     async def stop(self) -> None:
@@ -179,6 +192,7 @@ class FlowStatusHub:
         await self._opc_listener.stop()
         await self._calc_listener.stop()
         await self._fuzzy_listener.stop()
+        await self._loop_listener.stop()
         await self._events_listener.stop()
         subs, self._subs = self._subs, set()
         for sub in subs:
@@ -208,6 +222,11 @@ class FlowStatusHub:
         fuzzy_id = _fuzzy_id_of(channel)
         if fuzzy_id is not None:
             await self._fanout(channel, raw, "fuzzy_ids", fuzzy_id)
+
+    async def _dispatch_loop_state(self, channel: str, raw: str) -> None:
+        loop_id = _loop_id_of(channel)
+        if loop_id is not None:
+            await self._fanout(channel, raw, "loop_ids", loop_id)
 
     async def _dispatch_calc_values(self, raw: str) -> None:
         """`ChannelListener` entrega só `data` (canal fixo `calc.values`, ADR-033): reusa o
@@ -285,6 +304,14 @@ def _fuzzy_id_of(channel: str) -> tuple[int, str] | None:
     return None
 
 
+def _loop_id_of(channel: str) -> tuple[int, str] | None:
+    suffix = channel.removeprefix(LOOP_STATE_PREFIX)
+    flow_id_str, sep, block_id = suffix.partition(".")
+    if sep and flow_id_str.isdigit() and block_id:
+        return int(flow_id_str), block_id
+    return None
+
+
 def _flow_ids(ids: Any) -> set[int]:
     """Só inteiros: item de forma inesperada é ignorado, não derruba a conexão."""
     if not isinstance(ids, list):
@@ -326,6 +353,10 @@ def _fuzzy_ids(ids: Any) -> set[tuple[int, str]]:
     return _pair_ids(ids, "fuzzy_state")
 
 
+def _loop_ids(ids: Any) -> set[tuple[int, str]]:
+    return _pair_ids(ids, "loop_state")
+
+
 def _apply_events(sub: Subscriber, action: str, value: Any) -> None:
     """Ramo booleano do canal `events` (§5, F5R-15): só o literal `True` liga/desliga —
     qualquer outro valor é logado e ignorado, sem inverter a ação."""
@@ -362,6 +393,8 @@ def _apply_client_message(sub: Subscriber, raw: str) -> None:
                 attr_name, parse = "mpc_ids", _mpc_ids
             elif key == "fuzzy_state":
                 attr_name, parse = "fuzzy_ids", _fuzzy_ids
+            elif key == "loop_state":
+                attr_name, parse = "loop_ids", _loop_ids
             elif key == "opc_values":
                 attr_name, parse = "tags", _tag_ids
             elif key == "events":

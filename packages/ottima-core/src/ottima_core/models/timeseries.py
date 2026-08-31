@@ -90,3 +90,13 @@ fuzzy_samples_table = Table(
     Column("var_id", Text, nullable=False),
     Column("v", Double, nullable=False),
 )
+
+loop_samples_table = Table(
+    "loop_samples",
+    TIMESERIES_METADATA,
+    Column("ts", DateTime(timezone=True), nullable=False),
+    Column("flow_id", BigInteger, nullable=False),
+    Column("block_id", Text, nullable=False),
+    Column("var_id", Text, nullable=False),
+    Column("v", Double, nullable=True),  # NULL = valor ausente (migration 0015)
+)

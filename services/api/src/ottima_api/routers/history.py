@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ottima_api.deps import get_db, require_operator
 from ottima_api.messages import MSG_FLOW_NAO_ENCONTRADO
 from ottima_core.bus import SstoRun
-from ottima_core.flowgraph import parse_graph
+from ottima_core.flowgraph import LOOP_TYPES, parse_graph
 from ottima_core.models import Flow, mpc_samples_table, samples_table
 from ottima_core.schemas.flows import MAX_BIGINT
 from ottima_core.schemas.history import (
@@ -24,6 +24,8 @@ from ottima_core.schemas.history import (
     FuzzyHistorySeries,
     HistoryResponse,
     HistorySeries,
+    LoopHistoryResponse,
+    LoopHistorySeries,
     MpcHistoryResponse,
     MpcHistorySeries,
     SstoLastOut,
@@ -104,6 +106,28 @@ fuzzy_samples_1m = table(
     column("v_max"),
 )
 
+# Hypertable/CAgg do bloco malha (migration 0015, ADR-039 4.10) — mesmo raciocínio dos
+# construtos acima: handle leve, só para SELECT (o INSERT é do recorder).
+loop_samples = table(
+    "loop_samples",
+    column("ts"),
+    column("flow_id"),
+    column("block_id"),
+    column("var_id"),
+    column("v"),
+)
+
+loop_samples_1m = table(
+    "loop_samples_1m",
+    column("bucket"),
+    column("flow_id"),
+    column("block_id"),
+    column("var_id"),
+    column("v"),
+    column("v_min"),
+    column("v_max"),
+)
+
 FlowIdFilter = Annotated[int, Query(ge=1, le=MAX_BIGINT)]
 
 MAX_TAG_ID = 2**63 - 1  # tag_id é BIGINT no banco
@@ -121,6 +145,13 @@ ERRO_FUZZY_VAR_IDS_MALFORMADO = (
 )
 
 _FUZZY_VAR_ID_RE = re.compile(r"^(IN|OUT)[1-8]$")
+
+ERRO_LOOP_VAR_IDS_VAZIO = "var_ids não pode ser vazio"
+ERRO_LOOP_VAR_IDS_MALFORMADO = (
+    "var_ids deve conter apenas pv, sp, out ou mode separados por vírgula"
+)
+
+_LOOP_VAR_IDS = frozenset({"pv", "sp", "out", "mode"})
 
 router = APIRouter()
 
@@ -199,6 +230,17 @@ def _parse_fuzzy_var_ids(bruto: str) -> list[str]:
             status_code=422, detail=f"no máximo {MAX_FUZZY_VARS} variáveis por consulta"
         )
     return ids
+
+
+def _parse_loop_var_ids(bruto: str) -> list[str]:
+    """Lista separada por vírgula, deduplicada — cada item tem de ser pv/sp/out/mode
+    (variáveis do bloco malha, ADR-039 4.10): fora do conjunto é 422, nunca 5xx."""
+    if not bruto.strip():
+        raise HTTPException(status_code=422, detail=ERRO_LOOP_VAR_IDS_VAZIO)
+    itens = [p.strip() for p in bruto.split(",")]
+    if any(item not in _LOOP_VAR_IDS for item in itens):
+        raise HTTPException(status_code=422, detail=ERRO_LOOP_VAR_IDS_MALFORMADO)
+    return list(dict.fromkeys(itens))
 
 
 @router.get(
@@ -459,6 +501,97 @@ async def get_history_fuzzy(
         end=end,
         series=[
             FuzzyHistorySeries(
+                var_id=var_id,
+                t=[linha.ts for linha in linhas],
+                v=[linha.v for linha in linhas],
+                v_min=[linha.v_min for linha in linhas] if downsample else None,
+                v_max=[linha.v_max for linha in linhas] if downsample else None,
+            )
+            for var_id, linhas in por_var.items()
+        ],
+    )
+
+
+@router.get(
+    "/loop",
+    response_model=LoopHistoryResponse,
+    response_model_exclude_none=True,  # v_min/v_max somem do JSON no modo raw
+    dependencies=[Depends(require_operator)],
+)
+async def get_history_loop(
+    flow_id: FlowIdFilter,
+    block_id: str,
+    var_ids: str,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> LoopHistoryResponse:
+    """Histórico do bloco malha (ADR-039 4.10): pv/sp/out a cada varredura + transicoes de
+    mode (passo-a-passo) — mesma forma e ordem de validação de `get_history_fuzzy`."""
+    ids = _parse_loop_var_ids(var_ids)
+    end = _as_utc(end) or datetime.now(UTC)
+    start = _as_utc(start) or end - timedelta(hours=1)
+    if start >= end:
+        raise HTTPException(status_code=422, detail="start deve ser anterior a end")
+    if end - start > timedelta(days=MAX_WINDOW_DAYS):
+        raise HTTPException(
+            status_code=422, detail=f"janela não pode exceder {MAX_WINDOW_DAYS} dias"
+        )
+
+    flow = await db.get(Flow, flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail=MSG_FLOW_NAO_ENCONTRADO)
+    graph = parse_graph(flow.graph_json)
+    try:
+        node = graph.node(block_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=422, detail=f"Bloco '{block_id}' não encontrado no flow"
+        ) from None
+    if node.type not in LOOP_TYPES:
+        raise HTTPException(status_code=422, detail=f"Bloco '{block_id}' não é um bloco malha")
+
+    downsample = end - start > timedelta(hours=RAW_WINDOW_HOURS)
+    if downsample:
+        var_col, ts_col = loop_samples_1m.c.var_id, loop_samples_1m.c.bucket
+        flow_col, block_col = loop_samples_1m.c.flow_id, loop_samples_1m.c.block_id
+        colunas = [
+            var_col,
+            ts_col.label("ts"),
+            loop_samples_1m.c.v.label("v"),
+            loop_samples_1m.c.v_min.label("v_min"),
+            loop_samples_1m.c.v_max.label("v_max"),
+        ]
+    else:
+        var_col, ts_col = loop_samples.c.var_id, loop_samples.c.ts
+        flow_col, block_col = loop_samples.c.flow_id, loop_samples.c.block_id
+        colunas = [
+            var_col,
+            ts_col.label("ts"),
+            loop_samples.c.v.label("v"),
+        ]
+
+    stmt = (
+        select(*colunas)
+        .where(
+            flow_col == flow_id,
+            block_col == block_id,
+            var_col.in_(ids),
+            ts_col >= start,
+            ts_col <= end,
+        )
+        .order_by(var_col, ts_col)
+    )
+    por_var: dict[str, list[Row[Any]]] = {var_id: [] for var_id in ids}
+    for linha in (await db.execute(stmt)).all():
+        por_var[linha.var_id].append(linha)
+
+    return LoopHistoryResponse(
+        mode="1m" if downsample else "raw",
+        start=start,
+        end=end,
+        series=[
+            LoopHistorySeries(
                 var_id=var_id,
                 t=[linha.ts for linha in linhas],
                 v=[linha.v for linha in linhas],

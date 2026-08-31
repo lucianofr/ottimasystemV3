@@ -27,6 +27,7 @@ from ottima_core.bus import (
     KIND_RECORDER_BACKPRESSURE,
     EventMessage,
     FuzzyState,
+    LoopState,
     MpcState,
     OpcValue,
     publish_event,
@@ -35,6 +36,7 @@ from ottima_core.config import get_settings
 from ottima_core.models import (
     events_table,
     fuzzy_samples_table,
+    loop_samples_table,
     mpc_samples_table,
     samples_table,
     ssto_runs_table,
@@ -48,6 +50,7 @@ QUALITY_BAD = 2  # tri-state de OpcValue.quality (spec F1 §3.2): 0=good, 1=unce
 VALUES_PATTERN = "opc.values.*"
 MPC_STATE_PATTERN = "mpc.state.*"
 FUZZY_STATE_PATTERN = "fuzzy.state.*"
+LOOP_STATE_PATTERN = "loop.state.*"
 FLUSH_INTERVAL_S = 1.0
 # Gatilhos de ciclo: buffer com esse tanto de linhas não espera o intervalo para gravar.
 SAMPLES_FLUSH_ROWS = 1000
@@ -60,6 +63,19 @@ EVENTS_QUEUE_MAX = 10_000
 SSTO_QUEUE_MAX = 10_000
 # Mesma ordem de grandeza de samples: um bloco fuzzy publica um quadro por varredura.
 FUZZY_QUEUE_MAX = 100_000
+# Mesma ordem de grandeza do fuzzy: o shell publica um LoopState por varredura (throttled).
+LOOP_QUEUE_MAX = 100_000
+# Bit FF do Mode como float (recorder nao depende do flow-runtime; ADR-039 §4.2).
+_MODE_VALUE = {
+    "oos": 128.0,
+    "iman": 64.0,
+    "lo": 32.0,
+    "man": 16.0,
+    "auto": 8.0,
+    "cas": 4.0,
+    "rcas": 2.0,
+    "rout": 1.0,
+}
 RETRY_INITIAL_S = 1.0
 RETRY_MAX_S = 30.0
 MAX_BIND_PARAMS = 32_000  # asyncpg aceita no máximo 32767 parâmetros por statement
@@ -96,9 +112,9 @@ class RecorderPipeline:
     """Barramento → hypertables. Único escritor de `samples`/`events`/`mpc_samples`/
     `fuzzy_samples` (spec F2 §6, F5 §2.3, ADR-030).
 
-    Cinco assinaturas independentes (`opc.values.*`, `calc.values`, `events`, `mpc.state.*` e
-    `fuzzy.state.*`), cada uma no seu próprio `PatternListener`/`ChannelListener` do laço
-    resiliente compartilhado — os cinco tipos de dado têm buffers, tetos e contadores de
+    Seis assinaturas independentes (`opc.values.*`, `calc.values`, `events`, `mpc.state.*`,
+    `fuzzy.state.*` e `loop.state.*`), cada uma no seu próprio `PatternListener`/`ChannelListener`
+    do laço resiliente compartilhado — os seis tipos de dado têm buffers, tetos e contadores de
     descarte próprios (spec §6.4), então nada aqui depende de ordem entre canal e padrão:
     uma conexão a menos era só economia, não contrato.
     """
@@ -115,6 +131,7 @@ class RecorderPipeline:
         mpc_queue_max: int | None = None,
         ssto_queue_max: int = SSTO_QUEUE_MAX,
         fuzzy_queue_max: int = FUZZY_QUEUE_MAX,
+        loop_queue_max: int = LOOP_QUEUE_MAX,
     ) -> None:
         self._redis = redis_client
         self._session_factory = session_factory
@@ -128,6 +145,9 @@ class RecorderPipeline:
         )
         self._ssto = _DropOldestBuffer(ssto_queue_max)
         self._fuzzy = _DropOldestBuffer(fuzzy_queue_max)
+        self._loop = _DropOldestBuffer(loop_queue_max)
+        # Transicao de modo por (flow_id, block_id): `mode` grava so quando o actual muda.
+        self._last_mode: dict[tuple[int, str], str] = {}
         self._malformed_total = 0
         self._dropped_reported = 0
         self._flush_failures = 0
@@ -150,6 +170,9 @@ class RecorderPipeline:
         )
         self._fuzzy_listener = PatternListener(
             redis_client, FUZZY_STATE_PATTERN, self._on_fuzzy_state, name="recorder-fuzzy"
+        )
+        self._loop_listener = PatternListener(
+            redis_client, LOOP_STATE_PATTERN, self._on_loop_state, name="recorder-loop"
         )
         self._flush_task: asyncio.Task[None] | None = None
 
@@ -174,6 +197,10 @@ class RecorderPipeline:
         return len(self._fuzzy)
 
     @property
+    def buffered_loop_samples(self) -> int:
+        return len(self._loop)
+
+    @property
     def dropped_total(self) -> int:
         """Samples+eventos+mpc_samples+ssto_runs+fuzzy_samples descartados por overflow;
         nunca zera.
@@ -184,6 +211,7 @@ class RecorderPipeline:
             + self._mpc.dropped
             + self._ssto.dropped
             + self._fuzzy.dropped
+            + self._loop.dropped
         )
 
     @property
@@ -211,6 +239,7 @@ class RecorderPipeline:
             await self._calc_listener.start()
             await self._mpc_listener.start()
             await self._fuzzy_listener.start()
+            await self._loop_listener.start()
         except BaseException:
             # Uma das assinaturas falhou depois de outra já ter subido: sem este desmonte
             # cruzado, a que deu certo ficaria pendurada no servidor — não há laço de fundo
@@ -220,6 +249,7 @@ class RecorderPipeline:
             await self._calc_listener.stop()
             await self._mpc_listener.stop()
             await self._fuzzy_listener.stop()
+            await self._loop_listener.stop()
             raise
         self._flush_task = asyncio.create_task(self._flush_loop())
 
@@ -244,6 +274,7 @@ class RecorderPipeline:
         await self._calc_listener.stop()
         await self._mpc_listener.stop()
         await self._fuzzy_listener.stop()
+        await self._loop_listener.stop()
         try:
             await self.flush()
         except Exception:
@@ -265,6 +296,7 @@ class RecorderPipeline:
             and not len(self._mpc)
             and not len(self._ssto)
             and not len(self._fuzzy)
+            and not len(self._loop)
         ):
             return
         try:
@@ -273,6 +305,7 @@ class RecorderPipeline:
             await self._write_buffer(samples_table, self._samples)
             await self._write_buffer(mpc_samples_table, self._mpc)
             await self._write_buffer(fuzzy_samples_table, self._fuzzy)
+            await self._write_buffer(loop_samples_table, self._loop)
         except Exception:
             self._db_ok = False
             self._flush_failures += 1
@@ -419,6 +452,36 @@ class RecorderPipeline:
                     self._fuzzy.dropped,
                 )
 
+    def ingest_loop_state(self, channel: str, raw: str) -> None:
+        """Parse e enfileira um estado de malha; payload inválido é descartado com log.
+
+        `pv`/`sp`/`out` gravam a cada mensagem; `mode` (valor = bit FF do Mode) só na
+        transição de `actual` (cache `_last_mode`) — o modo muda raramente e a série
+        passo-a-passo reconstrói o resto.
+        """
+        state = self._parse(LoopState, raw)
+        if state is None:
+            return
+        flow_id_raw, block_id = channel.removeprefix("loop.state.").split(".", 1)
+        flow_id = int(flow_id_raw)
+        for var_id, v in (("pv", state.pv), ("sp", state.sp), ("out", state.out)):
+            self._append_loop(state.ts, flow_id, block_id, var_id, v)
+        if self._last_mode.get((flow_id, block_id)) != state.actual:
+            self._last_mode[(flow_id, block_id)] = state.actual
+            self._append_loop(state.ts, flow_id, block_id, "mode", _MODE_VALUE[state.actual])
+
+    def _append_loop(
+        self, ts: datetime, flow_id: int, block_id: str, var_id: str, v: float | None
+    ) -> None:
+        overflow = self._loop.append(
+            {"ts": ts, "flow_id": flow_id, "block_id": block_id, "var_id": var_id, "v": v}
+        )
+        if overflow:
+            logger.warning(
+                "Buffer de loop_samples cheio: amostra mais antiga descartada (total %d)",
+                self._loop.dropped,
+            )
+
     async def _on_sample(self, channel: str, raw: str) -> None:
         self.ingest_sample(raw)
 
@@ -435,6 +498,9 @@ class RecorderPipeline:
 
     async def _on_fuzzy_state(self, channel: str, raw: str) -> None:
         self.ingest_fuzzy_state(channel, raw)
+
+    async def _on_loop_state(self, channel: str, raw: str) -> None:
+        self.ingest_loop_state(channel, raw)
 
     async def _flush_loop(self) -> None:
         """Flush a cada `flush_interval_s`, quando um buffer enche ou no backoff do retry."""

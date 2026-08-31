@@ -68,6 +68,24 @@ class FuzzyHistoryResponse(BaseModel):
     series: list[FuzzyHistorySeries]
 
 
+class LoopHistorySeries(BaseModel):
+    """Mesma forma de `FuzzyHistorySeries` (ADR-039 4.10): `var_id` em pv|sp|out|mode;
+    `v` nullavel — PV com qualidade ruim grava NULL (mesmo idiom de samples, ADR-037)."""
+
+    var_id: str
+    t: list[datetime]
+    v: list[float | None]
+    v_min: list[float | None] | None = None  # so em mode="1m"
+    v_max: list[float | None] | None = None  # so em mode="1m"
+
+
+class LoopHistoryResponse(BaseModel):
+    mode: Literal["raw", "1m"]
+    start: datetime
+    end: datetime
+    series: list[LoopHistorySeries]
+
+
 class SstoLastOut(BaseModel):
     """Última execução do SSTO de um bloco (`GET /api/history/ssto/last`) — cold-start do
     sumário do otimizador na Operação, sem esperar o próximo ciclo do MPC."""
