@@ -75,6 +75,12 @@ class BlockShell(Block):
         self._bias = 0.0
         self._rebase_bias = False
         self._pendentes: list[dict[str, Any]] = []
+        # Edge-trigger dos alarmes de NIVEL (ADR-039: evento por transicao, nao por scan):
+        # cada flag dispara uma vez por episodio e rearma quando a condicao sana
+        # (mesmo padrao de _overrun_reported/_fail_fired de mpc.py).
+        self._shed_fired = False
+        self._scan_lost_fired = False
+        self._kernel_invalid_fired = False
 
         if carry is not None:
             self.u = clamp(carry.u, cfg.out_lo_lim, cfg.out_hi_lim)
@@ -166,12 +172,14 @@ class BlockShell(Block):
 
         if dt is None or not (0.0 < dt <= self.cfg.max_dt):
             if dt is not None:
-                self._defer_event(
-                    kind=KIND_LOOP_ALARM,
-                    severity="warning",
-                    message=f"Scan perdido (dt={dt:.3f}s)",
-                    payload={"block_id": self.block_id, "code": "scan_lost", "dt": dt},
-                )
+                if not self._scan_lost_fired:
+                    self._scan_lost_fired = True
+                    self._defer_event(
+                        kind=KIND_LOOP_ALARM,
+                        severity="warning",
+                        message=f"Scan perdido (dt={dt:.3f}s)",
+                        payload={"block_id": self.block_id, "code": "scan_lost", "dt": dt},
+                    )
             if not kernel_errors and dt is None:
                 self.mode.actual = self._resolve_mode(inputs, kernel_errors)
                 m = self.mode.actual
@@ -184,6 +192,7 @@ class BlockShell(Block):
             self.kernel.align(self.u, self.sp, pv_k)
             return await self._finish(inputs)
 
+        self._scan_lost_fired = False  # scan com dt valido: rearma o alarme
         self.mode.actual = self._resolve_mode(inputs, kernel_errors)
         m = self.mode.actual
         self.sp = self._resolve_sp(m, inputs, dt)
@@ -203,15 +212,17 @@ class BlockShell(Block):
 
         du_dt = self.kernel.compute(self.sp, pv_k, dt)
         if not math.isfinite(du_dt):
-            self._defer_event(
-                kind=KIND_LOOP_ALARM,
-                severity="warning",
-                message="Kernel devolveu resultado invalido; OUT mantido",
-                payload={"block_id": self.block_id, "code": "kernel_invalid_output"},
-            )
+            if not self._kernel_invalid_fired:
+                self._kernel_invalid_fired = True
+                self._defer_event(
+                    kind=KIND_LOOP_ALARM,
+                    severity="warning",
+                    message="Kernel devolveu resultado invalido; OUT mantido",
+                    payload={"block_id": self.block_id, "code": "kernel_invalid_output"},
+                )
             self.kernel.align(self.u, self.sp, pv_k)
             return await self._finish(inputs)
-
+        self._kernel_invalid_fired = False  # du/dt finito: rearma o alarme
         u = self._rate_limit(self.u_int + du_dt * dt + bias, dt)
         self.u = clamp(u, self.cfg.out_lo_lim, self.cfg.out_hi_lim)
         self.u_int = self.u - bias
@@ -246,27 +257,35 @@ class BlockShell(Block):
         cfg = self.cfg
         target = self.mode.target
         if kernel_errors or target is Mode.OOS:
-            return Mode.OOS
+            return self._sem_shed(Mode.OOS)
         efetivo = target if (target & cfg.permitted) else self.mode.normal
         bk = inputs.get("bkcal_in")
         if bk is not None and bk.v is not None and as_signal(bk).init_request:
-            return Mode.IMAN
+            return self._sem_shed(Mode.IMAN)
         lo = inputs.get("lo_in_d")
         if lo is not None and bool(lo.v) and lo.ok:
-            return Mode.LO
+            return self._sem_shed(Mode.LO)
         if not self.pv_ok and efetivo in CALCULATING_MODES:
-            return Mode.MAN
+            return self._sem_shed(Mode.MAN)
         for modo, porta in ((Mode.CAS, "cas_in"), (Mode.RCAS, "rcas_in"), (Mode.ROUT, "rout_in")):
             if efetivo is modo:
                 fonte = inputs.get(porta)
                 if fonte is None or fonte.v is None or not as_signal(fonte).is_good:
                     return self._shed(efetivo)
-        return efetivo
+        return self._sem_shed(efetivo)
+
+    def _sem_shed(self, modo: Mode) -> Mode:
+        """Resolucao sem shed: rearma o edge-trigger do alarme de shed."""
+        self._shed_fired = False
+        return modo
 
     def _shed(self, alvo: Mode) -> Mode:
         destino = _SHED_DESTINO.get(self.cfg.shed_opt, self.mode.normal)
         if self.cfg.shed_no_return and self.mode.target is alvo:
             self.mode.target = destino
+        if self._shed_fired:
+            return destino
+        self._shed_fired = True
         self._defer_event(
             kind=KIND_LOOP_SHED,
             severity="warning",
