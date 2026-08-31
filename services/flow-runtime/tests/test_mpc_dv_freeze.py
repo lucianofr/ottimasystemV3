@@ -164,9 +164,7 @@ def _block(
     return block, host, publish, emit_event
 
 
-def entradas(
-    cv_a: float, *, dv: float | None = 7.0, dv_ok: bool = True
-) -> dict[str, PortSample]:
+def entradas(cv_a: float, *, dv: float | None = 7.0, dv_ok: bool = True) -> dict[str, PortSample]:
     return {"cv_a": PortSample(cv_a, True), "dv_1": PortSample(dv, dv_ok)}
 
 
