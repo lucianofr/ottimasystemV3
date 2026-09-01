@@ -139,6 +139,17 @@ class FuzzyKernel:
 
     def compute(self, sp: float, pv: float, dt: float) -> float:
         c = self.cfg
+        if not (math.isfinite(sp) and math.isfinite(pv)):
+            # Entrada nao-finita sai por NaN SEM tocar estado nem LUT. Duas razoes:
+            # (1) `_interp_bilinear` faria `int(nan)` e levantaria ValueError, que sobe por
+            #     `step()` ate `_handle_loop_failure` e derruba o FLOW INTEIRO — a inferencia
+            #     devolveria NaN e o shell so seguraria o OUT; a mesma entrada nao pode ter
+            #     dois destinos;
+            # (2) gravar `e_prev = nan` deixaria `de` NaN para sempre, muito depois da
+            #     entrada ter voltado ao normal.
+            # O shell ja barra PV nao-finito (`_update_pv` -> shed), entao isto e a segunda
+            # linha de defesa, no lugar onde a consequencia de errar e queda de flow.
+            return math.nan
         e = self._error(sp, pv)
         de = (e - self.e_prev) / dt
 
@@ -148,12 +159,15 @@ class FuzzyKernel:
 
         e_n = _sat(e * c.ke, -1.0, 1.0)
         de_n = _sat(self.de_f * c.kde, -1.0, 1.0)
+        # INVARIANTE: todo valor de `diag` e finito. `LoopState.diag` e `dict[str, float]` e
+        # o recorder REVALIDA o JSON (`_parse(LoopState, raw)`) — `model_dump_json` emite NaN
+        # como `null`, mas `model_validate_json` rejeita null, e o quadro inteiro e contado
+        # como malformado e descartado: a tendencia perde o ponto sem erro visivel.
         self.diag = {"e_n": e_n, "de_n": de_n}
         if self.lut is not None:
             du_n = self._interp_bilinear(e_n, de_n)
-            # `rule_fire_count` FICA DE FORA: sem inferencia no scan nao existe grau de
-            # ativacao, e NaN ali viajaria como `null` num campo tipado `float` no espelho
-            # TS. Ausente, o faceplate cai no proprio fallback.
+            # `rule_fire_count` fica de fora: sem inferencia no scan nao existe grau de
+            # ativacao. Ausente (nunca NaN), o faceplate cai no proprio fallback.
         else:
             self._e_in.value = e_n
             self._de_in.value = de_n
@@ -162,9 +176,9 @@ class FuzzyKernel:
             # defuzzify — mesma normalizacao do bloco `fuzzy` (ADR-029).
             du_n = float(np.asarray(self._du_out.value).reshape(-1)[-1])
             self.diag["rule_fire_count"] = self._rule_fire_count()
-        self.diag["du_n"] = du_n
         if not math.isfinite(du_n):
-            return math.nan  # o shell trata: segura OUT e alarma
+            return math.nan  # regiao sem regra: o shell segura OUT e alarma
+        self.diag["du_n"] = du_n
         return c.ku * du_n
 
     def _interp_bilinear(self, e_n: float, de_n: float) -> float:

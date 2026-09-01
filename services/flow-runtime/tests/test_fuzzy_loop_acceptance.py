@@ -160,3 +160,22 @@ async def test_diag_com_lut_nao_carrega_rule_fire_count_para_o_estado_publicado(
     assert set(estado.diag) == {"e_n", "de_n", "du_n"}
     # e o quadro segue serializavel sem NaN (ADR-030)
     assert "NaN" not in estado.model_dump_json()
+
+
+async def test_quadro_publicado_faz_round_trip_de_validacao() -> None:
+    """O recorder revalida o JSON (`_parse(LoopState, raw)`): quadro que nao volta e
+    descartado em silencio, e a tendencia perde o ponto. Vale para os dois caminhos."""
+    from ottima_core.bus import LoopState
+
+    for lut in (False, True):
+        b = _malha(lut_enabled=lut)
+        t = 0.0
+        await passo(b, t, **{"in": amostra(40.0)})
+        b.write_sp(50.0)
+        b.write_target(Mode.AUTO)
+        for _ in range(3):
+            t += 1.0
+            await passo(b, t, **{"in": amostra(40.0)})
+        bruto = b._loop_state().model_dump_json()
+        assert "null" not in bruto.split('"diag"')[1], f"lut={lut}: {bruto}"
+        LoopState.model_validate_json(bruto)  # levanta ValidationError se houver null

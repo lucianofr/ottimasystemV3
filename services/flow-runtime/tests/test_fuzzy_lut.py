@@ -176,3 +176,44 @@ def test_sintonia_que_nao_toca_a_lut_nao_paga_reamostragem() -> None:
     antes = k.lut
     k.cfg = FuzzyKernelCfg(ke=0.05, kde=0.0, ku=9.0, lut_enabled=True)
     assert k.lut is antes
+
+
+# --------------------------------------------------------------------------------------
+# Invariante do diag: TODO valor finito, nos dois caminhos
+# --------------------------------------------------------------------------------------
+
+
+def test_entrada_nao_finita_devolve_nan_nos_dois_caminhos() -> None:
+    """Paridade obrigatoria: a interpolacao fazia `int(nan)` e levantava ValueError, que sobe
+    por `step()` ate `_handle_loop_failure` e derruba o FLOW INTEIRO — enquanto a inferencia
+    devolvia NaN e o shell so segurava o OUT. A mesma entrada nao pode ter dois destinos."""
+    for lut in (False, True):
+        k = _kernel_lut(lut_enabled=lut)
+        k.align(0.0, 0.0, 0.0)
+        assert math.isnan(k.compute(sp=math.nan, pv=0.0, dt=1.0)), f"lut={lut}"
+        assert math.isnan(k.compute(sp=0.0, pv=math.nan, dt=1.0)), f"lut={lut}"
+
+
+def test_entrada_nao_finita_nao_contamina_o_estado_do_filtro() -> None:
+    """`e_prev`/`de_f` intocados: sem isso um NaN unico deixaria `de` NaN para sempre."""
+    k = _kernel_lut()
+    k.align(0.0, 10.0, 10.0)
+    k.compute(sp=math.nan, pv=10.0, dt=1.0)
+    assert k.e_prev == 0.0 and k.de_f == 0.0
+    assert abs(k.compute(sp=10.0, pv=10.0, dt=1.0)) < 1e-9  # segue calculando normalmente
+
+
+def test_diag_nunca_carrega_valor_nao_finito() -> None:
+    """`LoopState.diag` e `dict[str, float]`: `model_dump_json` emite NaN como `null`, mas
+    `model_validate_json` REJEITA null — o recorder conta o quadro como malformado e o
+    DESCARTA, sem linha em `loop_samples` e sem erro visivel. Logo o diag tem de ser finito
+    na origem, nao contar com null ser tolerado."""
+    com_buraco = FUZZY_LOOP_DEFAULT_FLL
+    for regra in ("  rule: if e is PP then du is PP\n", "  rule: if e is PG then du is PG\n"):
+        com_buraco = com_buraco.replace(regra, "")
+    for lut in (False, True):
+        cfg = FuzzyKernelCfg(ke=1.0, kde=0.0, ku=1.0, lut_enabled=lut)
+        k = build_fuzzy_kernel(com_buraco, cfg)
+        k.align(0.0, 0.0, 0.0)
+        assert math.isnan(k.compute(sp=1.0, pv=0.0, dt=1.0)), f"lut={lut}"
+        assert all(math.isfinite(v) for v in k.diag.values()), f"lut={lut}: {k.diag}"
