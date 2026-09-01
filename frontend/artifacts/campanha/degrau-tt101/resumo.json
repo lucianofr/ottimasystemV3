@@ -1,0 +1,39 @@
+{
+  "etapa": "degrau-tt101",
+  "capturado_em": "2026-08-10T23:53:52.401Z",
+  "mpc_state_hidratado": true,
+  "plaqueta": "MPC Debutanizadora · Controle-MPC-Debutanizadora",
+  "ts_mpc": "Ts MPC 120 s",
+  "horizontes": "Np 60 (120 min) · Nc 15",
+  "modos": {
+    "local_remote": "REMOTO",
+    "man_auto": "AUTO"
+  },
+  "overruns": "0",
+  "last_solve_ms": "1120,162",
+  "lampadas": {
+    "flow": "Rodando",
+    "solver": "Ok",
+    "input_valido": "Entradas válidas"
+  },
+  "janela_selecionada": "8 h",
+  "legenda_ids": [
+    "cv_tt101",
+    "co_tt102",
+    "co_lt101",
+    "co_lt102",
+    "mv_xv101",
+    "mv_xv102",
+    "mv_xv103",
+    "mv_sc102",
+    "dv_ft100",
+    "dv_at100"
+  ],
+  "legenda_contagem": 10,
+  "secao_futura_visivel": true,
+  "sem_predicao_visivel": false,
+  "relogio": {
+    "inicial": "10/08/2026 20:53:50",
+    "final": "10/08/2026 20:53:51"
+  }
+}
