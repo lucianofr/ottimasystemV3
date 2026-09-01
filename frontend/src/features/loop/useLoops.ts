@@ -1,7 +1,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 
 import { api } from "../../lib/api";
-import type { LoopDetailOut, LoopNodeOut } from "./types";
+import type { LoopDetailOut, LoopNodeOut, LoopSurfaceOut } from "./types";
 
 export type { LoopNodeOut } from "./types";
 
@@ -21,6 +21,23 @@ export function useLoops(): UseQueryResult<LoopNodeOut[]> {
   return useQuery({
     queryKey: CHAVE,
     queryFn: () => api<LoopNodeOut[]>("/api/operate/loop"),
+  });
+}
+
+/** Superfície de controle amostrada no servidor (SPEC_FUZZY §5.1) — só existe para
+ *  `fuzzy_loop`. `staleTime: Infinity`: a superfície só muda quando o `.fll` muda, e trocar
+ *  o `.fll` é hot-swap estrutural (novo deploy), nunca algo que acontece no meio de uma
+ *  sessão de faceplate. */
+export function useLoopSurface(
+  flowId: number,
+  blockId: string,
+): UseQueryResult<LoopSurfaceOut> {
+  return useQuery({
+    queryKey: [...CHAVE, "surface", flowId, blockId],
+    queryFn: () =>
+      api<LoopSurfaceOut>(`/api/operate/loop/${String(flowId)}/${blockId}/surface`),
+    enabled: blockId !== "",
+    staleTime: Infinity,
   });
 }
 

@@ -8,6 +8,7 @@ import { Badge } from "../../components/ui/badge";
 import { Card } from "../../components/ui/card";
 import { Select } from "../../components/ui/select";
 import { cn } from "../../lib/cn";
+import { HeatmapSuperficie } from "./HeatmapSuperficie";
 import { rotuloLoop, useLoops, useLoopConfig } from "./useLoops";
 import type { LoopNodeOut } from "./types";
 
@@ -137,6 +138,9 @@ function LoopResolvido({ flowId, blockId }: { flowId: number; blockId: string })
   }
 
   const sintonia = config.data?.tuning;
+  // A sintonia e por TIPO de malha (o backend devolve uma das duas formas); `type` no
+  // detalhe e o discriminante — tambem decide se a aba de superficie existe.
+  const eFuzzy = config.data?.type === "fuzzy_loop";
 
   return (
     <div className="space-y-4 p-4" data-testid="loop-faceplate">
@@ -215,21 +219,40 @@ function LoopResolvido({ flowId, blockId }: { flowId: number; blockId: string })
         <Card className="max-w-md p-4" data-testid="loop-sintonia">
           <h3 className="mb-2 text-xs text-fg-muted">Sintonia vigente (leitura)</h3>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <dt>KC</dt>
-            <dd className="process-value">{formatar(sintonia.kc)}</dd>
-            <dt>TI</dt>
-            <dd className="process-value">
-              {sintonia.ti_seconds === 0 ? "desligada" : `${formatar(sintonia.ti_seconds)} s`}
-            </dd>
-            <dt>TD</dt>
-            <dd className="process-value">
-              {sintonia.td_seconds === 0 ? "desligada" : `${formatar(sintonia.td_seconds)} s`}
-            </dd>
+            {"kc" in sintonia ? (
+              <>
+                <dt>KC</dt>
+                <dd className="process-value">{formatar(sintonia.kc)}</dd>
+                <dt>TI</dt>
+                <dd className="process-value">
+                  {sintonia.ti_seconds === 0 ? "desligada" : `${formatar(sintonia.ti_seconds)} s`}
+                </dd>
+                <dt>TD</dt>
+                <dd className="process-value">
+                  {sintonia.td_seconds === 0 ? "desligada" : `${formatar(sintonia.td_seconds)} s`}
+                </dd>
+              </>
+            ) : (
+              <>
+                <dt>KE</dt>
+                <dd className="process-value">{formatar(sintonia.ke)}</dd>
+                <dt>KDE</dt>
+                <dd className="process-value">
+                  {sintonia.kde === 0 ? "desligada" : formatar(sintonia.kde)}
+                </dd>
+                <dt>KU</dt>
+                <dd className="process-value">{formatar(sintonia.ku)} %/s</dd>
+                <dt>TF_DE</dt>
+                <dd className="process-value">{formatar(sintonia.tf_de)} s</dd>
+              </>
+            )}
             <dt>Ação</dt>
             <dd>{sintonia.direct_acting ? "direta" : "reversa"}</dd>
           </dl>
         </Card>
       )}
+
+      {eFuzzy && <HeatmapSuperficie flowId={flowId} blockId={blockId} estado={estado} />}
     </div>
   );
 }

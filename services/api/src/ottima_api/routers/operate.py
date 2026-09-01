@@ -14,8 +14,9 @@ Sucesso publica `FlowCommand{cmd: mpc_mode|mpc_sp|mpc_mv}` em `flow.commands` e 
 
 import asyncio
 import logging
+import math
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Response
 from pydantic import BaseModel
@@ -43,6 +44,7 @@ from ottima_core.flowgraph import (
     derive_horizons,
     parse_graph,
 )
+from ottima_core.flowgraph.fuzzy_surface import sample_surface
 from ottima_core.flowgraph.introspect import FuzzyIntrospection, introspect_fll
 from ottima_core.models import Flow, Project, User
 from ottima_core.schemas.flows import MAX_BIGINT
@@ -233,14 +235,28 @@ class LoopTuningOut(BaseModel):
     direct_acting: bool
 
 
+class FuzzyLoopTuningOut(BaseModel):
+    """Sintonia de um `fuzzy_loop` (SPEC_FUZZY §6.2): os ganhos do kernel, não KC/TI/TD."""
+
+    ke: float
+    kde: float
+    ku: float
+    tf_de: float
+    direct_acting: bool
+
+
 class LoopDetailOut(BaseModel):
     """Config resumida de um bloco malha para o faceplate: permitted, limites, escala e
-    sintonia vigente (somente leitura — sintonia é edição de engenharia, ADR-039)."""
+    sintonia vigente (somente leitura — sintonia é edição de engenharia, ADR-039).
+
+    `tuning` é por TIPO de malha e `type` é o discriminante que o faceplate usa para
+    escolher a forma (e para decidir se a aba de superfície aparece)."""
 
     flow_id: int
     flow_name: str
     block_id: str
     label: str
+    type: str
     permitted: list[str]
     sp_lo_lim: float
     sp_hi_lim: float
@@ -248,7 +264,7 @@ class LoopDetailOut(BaseModel):
     out_hi_lim: float
     out_scale_lo: float
     out_scale_hi: float
-    tuning: LoopTuningOut
+    tuning: LoopTuningOut | FuzzyLoopTuningOut
 
 
 class FuzzyDetailOut(BaseModel):
@@ -783,6 +799,7 @@ async def get_loop_detail(
         flow_name=flow.name,
         block_id=node.id,
         label=node.label or node.id,
+        type=node.type,
         permitted=list(config.permitted),
         sp_lo_lim=config.sp_lo_lim,
         sp_hi_lim=config.sp_hi_lim,
@@ -790,15 +807,61 @@ async def get_loop_detail(
         out_hi_lim=config.out_hi_lim,
         out_scale_lo=config.out_scale_lo,
         out_scale_hi=config.out_scale_hi,
-        tuning=LoopTuningOut(
-            kc=config.kc,
-            ti_seconds=config.ti_seconds,
-            td_seconds=config.td_seconds,
-            n=config.n,
-            beta=config.beta,
-            gamma=config.gamma,
-            gap_band=config.gap_band,
-            gap_gain=config.gap_gain,
-            direct_acting=config.direct_acting,
-        ),
+        tuning=_loop_tuning(node.type, config),
     )
+
+
+def _loop_tuning(node_type: str, config: Any) -> LoopTuningOut | FuzzyLoopTuningOut:
+    if node_type == "fuzzy_loop":
+        return FuzzyLoopTuningOut(
+            ke=config.ke,
+            kde=config.kde,
+            ku=config.ku,
+            tf_de=config.tf_de,
+            direct_acting=config.direct_acting,
+        )
+    return LoopTuningOut(
+        kc=config.kc,
+        ti_seconds=config.ti_seconds,
+        td_seconds=config.td_seconds,
+        n=config.n,
+        beta=config.beta,
+        gamma=config.gamma,
+        gap_band=config.gap_band,
+        gap_gain=config.gap_gain,
+        direct_acting=config.direct_acting,
+    )
+
+
+class LoopSurfaceOut(BaseModel):
+    """Superfície de controle amostrada no SERVIDOR (SPEC_FUZZY §5.1/§8).
+
+    `values[i][j]` é `du_n` em (`de_n` = eixo i, `e_n` = eixo j), ambos varrendo `[-1, 1]`.
+    `None` onde nenhuma regra dispara: JSON não tem NaN, e mandar 0.0 ali mentiria sobre uma
+    região que na verdade segura o OUT (mesma regra do ADR-030).
+
+    A resolução é constante de servidor — sem query param (FUZZY-SEC): 257 pontos por eixo
+    já são 66k avaliações de motor por requisição."""
+
+    resolution: int
+    values: list[list[float | None]]
+
+
+@router.get(
+    "/loop/{flow_id}/{block_id}/surface",
+    response_model=LoopSurfaceOut,
+    dependencies=[Depends(require_operator)],
+)
+async def get_loop_surface(
+    flow_id: FlowId, block_id: BlockId, db: AsyncSession = Depends(get_db)
+) -> LoopSurfaceOut:
+    """Grade (e_n, de_n) -> du_n do FLL vigente, para o heatmap de comissionamento."""
+    node = await _node_do_flow(db, flow_id, block_id)
+    if node.type != "fuzzy_loop":
+        raise _reprovado(f"Bloco '{block_id}' não é um bloco fuzzy_loop")
+    fll = node.config.fll
+    # `sample_surface` é CPU-bound (um process() sobre 65x65 pontos): fora do event loop,
+    # mesma postura da introspecção do ADR-030.
+    grade = await asyncio.to_thread(sample_surface, fll)
+    valores = [[None if math.isnan(valor) else float(valor) for valor in linha] for linha in grade]
+    return LoopSurfaceOut(resolution=len(valores), values=valores)

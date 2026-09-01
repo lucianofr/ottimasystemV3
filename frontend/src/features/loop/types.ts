@@ -12,3 +12,5 @@ export type { LoopState } from "../../lib/contracts.gen";
 export type LoopNodeOut = components["schemas"]["LoopNodeOut"];
 export type LoopDetailOut = components["schemas"]["LoopDetailOut"];
 export type LoopTuningOut = components["schemas"]["LoopTuningOut"];
+export type FuzzyLoopTuningOut = components["schemas"]["FuzzyLoopTuningOut"];
+export type LoopSurfaceOut = components["schemas"]["LoopSurfaceOut"];

@@ -640,6 +640,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operate/loop/{flow_id}/{block_id}/surface": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Loop Surface
+         * @description Grade (e_n, de_n) -> du_n do FLL vigente, para o heatmap de comissionamento.
+         */
+        get: operations["get_loop_surface_api_operate_loop__flow_id___block_id__surface_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/events": {
         parameters: {
             query?: never;
@@ -1453,6 +1473,22 @@ export interface components {
             rule_blocks: components["schemas"]["FuzzyRuleBlockOut"][];
         };
         /**
+         * FuzzyLoopTuningOut
+         * @description Sintonia de um `fuzzy_loop` (SPEC_FUZZY §6.2): os ganhos do kernel, não KC/TI/TD.
+         */
+        FuzzyLoopTuningOut: {
+            /** Ke */
+            ke: number;
+            /** Kde */
+            kde: number;
+            /** Ku */
+            ku: number;
+            /** Tf De */
+            tf_de: number;
+            /** Direct Acting */
+            direct_acting: boolean;
+        };
+        /**
          * FuzzyNodeOut
          * @description Um bloco `fuzzy` projetado (ADR-030, ADR-029) — nomes de porta vêm de `introspect_fll`
          *     (o frontend nunca parseia FLL). Curvas de pertinência descartadas na listagem: só a
@@ -1671,6 +1707,9 @@ export interface components {
          * LoopDetailOut
          * @description Config resumida de um bloco malha para o faceplate: permitted, limites, escala e
          *     sintonia vigente (somente leitura — sintonia é edição de engenharia, ADR-039).
+         *
+         *     `tuning` é por TIPO de malha e `type` é o discriminante que o faceplate usa para
+         *     escolher a forma (e para decidir se a aba de superfície aparece).
          */
         LoopDetailOut: {
             /** Flow Id */
@@ -1681,6 +1720,8 @@ export interface components {
             block_id: string;
             /** Label */
             label: string;
+            /** Type */
+            type: string;
             /** Permitted */
             permitted: string[];
             /** Sp Lo Lim */
@@ -1695,7 +1736,8 @@ export interface components {
             out_scale_lo: number;
             /** Out Scale Hi */
             out_scale_hi: number;
-            tuning: components["schemas"]["LoopTuningOut"];
+            /** Tuning */
+            tuning: components["schemas"]["LoopTuningOut"] | components["schemas"]["FuzzyLoopTuningOut"];
         };
         /** LoopHistoryResponse */
         LoopHistoryResponse: {
@@ -1757,6 +1799,23 @@ export interface components {
             label: string;
             /** Type */
             type: string;
+        };
+        /**
+         * LoopSurfaceOut
+         * @description Superfície de controle amostrada no SERVIDOR (SPEC_FUZZY §5.1/§8).
+         *
+         *     `values[i][j]` é `du_n` em (`de_n` = eixo i, `e_n` = eixo j), ambos varrendo `[-1, 1]`.
+         *     `None` onde nenhuma regra dispara: JSON não tem NaN, e mandar 0.0 ali mentiria sobre uma
+         *     região que na verdade segura o OUT (mesma regra do ADR-030).
+         *
+         *     A resolução é constante de servidor — sem query param (FUZZY-SEC): 257 pontos por eixo
+         *     já são 66k avaliações de motor por requisição.
+         */
+        LoopSurfaceOut: {
+            /** Resolution */
+            resolution: number;
+            /** Values */
+            values: (number | null)[][];
         };
         /** LoopTuningOut */
         LoopTuningOut: {
@@ -3761,6 +3820,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoopDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_loop_surface_api_operate_loop__flow_id___block_id__surface_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoopSurfaceOut"];
                 };
             };
             /** @description Validation Error */
