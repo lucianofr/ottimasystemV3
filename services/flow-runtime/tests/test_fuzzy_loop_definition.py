@@ -46,6 +46,16 @@ def test_fll_degradado_instancia_broken_kernel() -> None:
     assert quebrado.validate() != []
 
 
+def test_lut_habilitada_carrega_a_grade_na_instanciacao() -> None:
+    """`lut_enabled` amostra a superficie UMA vez (SPEC secao 5.2): o scan so interpola."""
+    from ottima_flow_runtime.definition import _build_loop_kernel
+
+    sem_lut = _build_loop_kernel("fuzzy_loop", _config())
+    com_lut = _build_loop_kernel("fuzzy_loop", _config(lut_enabled=True, lut_resolution=33))
+    assert sem_lut.lut is None
+    assert com_lut.lut is not None and com_lut.lut.shape == (33, 33)
+
+
 async def test_f10_troca_de_ku_em_auto_sem_degrau() -> None:
     b = _malha(_config())
     t = 0.0

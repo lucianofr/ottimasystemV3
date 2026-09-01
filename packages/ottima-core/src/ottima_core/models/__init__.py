@@ -4,6 +4,7 @@ from ottima_core.models.base import Base, TimestampMixin
 from ottima_core.models.calculated_tag import CalculatedTag, CalculatedTagInput
 from ottima_core.models.connection import OpcConnection
 from ottima_core.models.flow import Flow
+from ottima_core.models.fuzzy_surface_lut import FuzzySurfaceLut
 from ottima_core.models.history_retention import HistoryRetentionSettings
 from ottima_core.models.loop_setpoint import LoopSetpoint
 from ottima_core.models.mpc_setpoint import MpcSetpoint
@@ -31,6 +32,7 @@ __all__ = [
     "CalculatedTagInput",
     "Flow",
     "MpcSetpoint",
+    "FuzzySurfaceLut",
     "LoopSetpoint",
     "HistoryRetentionSettings",
     "SystemSettings",

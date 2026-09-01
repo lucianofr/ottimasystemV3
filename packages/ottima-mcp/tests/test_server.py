@@ -17,9 +17,7 @@ def _ctx(cliente: Any) -> Any:
     """Duck-type do `Context[ContextoOttima]`: `server._cliente(ctx)` só acessa
     `ctx.request_context.lifespan_context.cliente` — nada mais do SDK é necessário aqui."""
     return SimpleNamespace(
-        request_context=SimpleNamespace(
-            lifespan_context=SimpleNamespace(cliente=cliente)
-        )
+        request_context=SimpleNamespace(lifespan_context=SimpleNamespace(cliente=cliente))
     )
 
 

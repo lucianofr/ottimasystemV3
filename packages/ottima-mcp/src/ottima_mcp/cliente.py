@@ -110,9 +110,7 @@ class ClienteOttima:
         resposta = await self._http.request(metodo, path, params=params, json=json)
         if resposta.status_code == 401 and not _apos_relogin:
             await self._login()
-            return await self._chamar(
-                metodo, path, params=params, json=json, _apos_relogin=True
-            )
+            return await self._chamar(metodo, path, params=params, json=json, _apos_relogin=True)
         if resposta.status_code >= 400:
             raise ErroOttima(_extrair_detail(resposta), resposta.status_code)
         if resposta.status_code in (202, 204) or not resposta.content:

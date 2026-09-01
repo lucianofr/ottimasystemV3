@@ -373,9 +373,7 @@ async def trend(
         list[int], Field(description="Ids de tag OPC a consultar (máx. 6 por chamada)")
     ],
     ctx: Context[ContextoOttima],
-    start: Annotated[
-        str | None, Field(description="Início ISO-8601 (default: 1h atrás)")
-    ] = None,
+    start: Annotated[str | None, Field(description="Início ISO-8601 (default: 1h atrás)")] = None,
     end: Annotated[str | None, Field(description="Fim ISO-8601 (default: agora)")] = None,
 ) -> dict[str, Any]:
     """Série histórica de tags OPC. Downsample automático: dado bruto até 2h de janela,
@@ -591,6 +589,7 @@ def _origem_flow(flow_id: int) -> str:
     (`services/flow-runtime/.../events.py:80-82` `flow_origin`) — mesmo motivo de
     `_origem_mpc`: `events` é canal global, sem escopo por flow no protocolo."""
     return f"flow:{flow_id}"
+
 
 async def _estado_real_do_flow(cliente: ClienteOttima, flow_id: int) -> str | None:
     """`GET /api/health/workers` -> `flow_runtime.flows[id].state` é a mesma leitura de

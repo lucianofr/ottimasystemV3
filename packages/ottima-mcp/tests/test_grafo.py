@@ -129,9 +129,7 @@ async def test_flow_update_block_config_patch_e_merge_raso(cliente_falso) -> Non
     capturado: dict[str, Any] = {}
     cliente, _hub = await cliente_falso(_rota_grafo(capturado))
 
-    await grafo.flow_update_block(
-        cliente, 1, "s1", {"code": "OUT1 = IN1 * 3"}, None, None, None
-    )
+    await grafo.flow_update_block(cliente, 1, "s1", {"code": "OUT1 = IN1 * 3"}, None, None, None)
     put_grafo = capturado["put_body"]["graph_json"]
     s1 = next(n for n in put_grafo["nodes"] if n["id"] == "s1")
     assert s1["data"]["code"] == "OUT1 = IN1 * 3"
@@ -248,9 +246,7 @@ async def test_flow_create_body_exato(cliente_falso) -> None:
     def _rota(request: httpx.Request) -> httpx.Response:
         if request.method == "POST" and request.url.path == "/api/flows":
             capturado["body"] = json.loads(request.content)
-            return httpx.Response(
-                201, json={"id": 42, "graph_json": {"nodes": [], "edges": []}}
-            )
+            return httpx.Response(201, json={"id": 42, "graph_json": {"nodes": [], "edges": []}})
         return httpx.Response(404)
 
     cliente, _hub = await cliente_falso(_rota)

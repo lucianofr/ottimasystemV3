@@ -12,6 +12,7 @@ def test_metadata_tem_todas_as_tabelas_relacionais():
         "flows",
         "mpc_setpoints",
         "loop_setpoints",
+        "fuzzy_surface_lut",
         "history_retention_settings",
         "system_settings",
     }

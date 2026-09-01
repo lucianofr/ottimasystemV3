@@ -14,9 +14,11 @@ from ottima_mcp.cliente import ErroOttima
 @pytest.mark.asyncio
 async def test_login_seta_bearer_automatico(cliente_falso) -> None:
     cliente, hub = await cliente_falso(
-        lambda r: httpx.Response(200, json={"ok": True})
-        if r.headers.get("authorization") == "Bearer tok1"
-        else httpx.Response(401, json={"detail": "Sessão inválida ou expirada"})
+        lambda r: (
+            httpx.Response(200, json={"ok": True})
+            if r.headers.get("authorization") == "Bearer tok1"
+            else httpx.Response(401, json={"detail": "Sessão inválida ou expirada"})
+        )
     )
     resultado = await cliente.get("/api/qualquer")
     assert resultado == {"ok": True}
@@ -28,9 +30,11 @@ async def test_401_faz_exatamente_um_relogin_e_um_retry(cliente_falso) -> None:
     # token da conexão inicial (tok1) já "expirou" do ponto de vista do backend: só tok2
     # (emitido pelo relogin dentro de `_chamar`) é aceito.
     cliente, hub = await cliente_falso(
-        lambda r: httpx.Response(200, json={"dado": 42})
-        if r.headers.get("authorization") == "Bearer tok2"
-        else httpx.Response(401, json={"detail": "Sessão inválida ou expirada"})
+        lambda r: (
+            httpx.Response(200, json={"dado": 42})
+            if r.headers.get("authorization") == "Bearer tok2"
+            else httpx.Response(401, json={"detail": "Sessão inválida ou expirada"})
+        )
     )
     resultado = await cliente.get("/api/protegido")
     assert resultado == {"dado": 42}

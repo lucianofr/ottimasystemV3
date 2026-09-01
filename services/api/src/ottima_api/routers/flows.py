@@ -1,6 +1,7 @@
 """CRUD de flows (RF-302/306/307): leitura para operador, escrita para admin (ADR-015)."""
 
 import asyncio
+import hashlib
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -30,7 +31,7 @@ from ottima_core.flowgraph import (
     parse_graph,
     validate_graph,
 )
-from ottima_core.models import Flow, OpcConnection, Project, User
+from ottima_core.models import Flow, FuzzySurfaceLut, OpcConnection, Project, User
 from ottima_core.schemas.flows import (
     MAX_BIGINT,
     FlowCreate,
@@ -96,6 +97,42 @@ def _validar_grafo(
     if aviso is None:
         return resultado
     return ValidationResult(errors=resultado.errors, warnings=[*resultado.warnings, aviso])
+
+
+async def _gravar_luts(db: AsyncSession, graph_json: dict) -> None:
+    """Materializa a superfície de cada `fuzzy_loop` com `lut_enabled` (SPEC_FUZZY §5.2).
+
+    Content-addressed por `sha256(fll)`: hash já presente é hit de dedupe e não paga
+    amostragem nenhuma — dois blocos com a mesma base de regras compartilham a linha, e não
+    existe o que invalidar quando a sintonia muda (`ke`/`ku` não entram no hash porque não
+    entram na superfície).
+
+    Roda DEPOIS de `validate_graph`, que já reprovou superfície que não passa nos portões
+    (§5.3): o que chega aqui é grade sã. A amostragem vai para thread — é CPU-bound
+    (65×65 avaliações de motor por bloco novo).
+    """
+    nos = [
+        node
+        for node in parse_graph(graph_json).nodes
+        if node.type == "fuzzy_loop" and node.config.lut_enabled
+    ]
+    if not nos:
+        return
+    from ottima_core.flowgraph.fuzzy_surface import sample_surface
+
+    for node in nos:
+        fll_hash = hashlib.sha256(node.config.fll.encode()).hexdigest()
+        if await db.get(FuzzySurfaceLut, fll_hash) is not None:
+            continue  # dedupe: mesma base de regras, mesma superfície
+        resolution = node.config.lut_resolution
+        grade = await asyncio.to_thread(sample_surface, node.config.fll, resolution)
+        db.add(
+            FuzzySurfaceLut(
+                fll_hash=fll_hash,
+                resolution=resolution,
+                payload=grade.astype("float32").tobytes(),
+            )
+        )
 
 
 def _tem_alvo_de_escrita(grafo: FlowGraph) -> bool:
@@ -282,6 +319,7 @@ async def update_flow(
     # Gravado verbatim: o editor é o dono do JSON e guarda nele estado de layout que a
     # validação ignora de propósito.
     flow.graph_json = graph_json
+    await _gravar_luts(db, graph_json)
     try:
         await db.commit()
     except IntegrityError:

@@ -429,13 +429,26 @@ def _valida_fuzzy_loop(node: FlowNode, errors: list[str]) -> None:
         errors.append(f"{where}: FLL inválido — {erro}")
         return
 
-    for codigo in validate_fll_contract(engine):
+    violacoes = validate_fll_contract(engine)
+    for codigo in violacoes:
         errors.append(f"{where}: contrato FLL violado — {codigo}")
 
     engine_errors: list[str] = []
-    if not engine.is_ready(engine_errors):
+    pronto = engine.is_ready(engine_errors)
+    if not pronto:
         detalhe = "; ".join(str(item) for item in engine_errors)
         errors.append(f"{where}: motor fuzzy não está pronto — {detalhe}")
+
+    # Portões de superfície (SPEC_FUZZY §5.3): só fazem sentido sobre um FLL que já satisfaz
+    # o contrato e monta pronto — fora disso `sample_surface` levantaria, e o erro útil (o
+    # código do contrato) já está na lista acima.
+    if not violacoes and pronto:
+        from ottima_core.flowgraph.fuzzy_surface import sample_surface
+        from ottima_core.flowgraph.lut_gates import run_lut_gates
+
+        grade = sample_surface(node.config.fll, resolution=node.config.lut_resolution)
+        for codigo in run_lut_gates(grade, direct_acting=node.config.direct_acting):
+            errors.append(f"{where}: portão de superfície reprovado — {codigo}")
 
     # Mesmo teto FUZZY-SEC-01 do bloco `fuzzy`: defuzzificador integral sem limite de
     # resolução trava o event loop do flow-runtime a cada varredura.

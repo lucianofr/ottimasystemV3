@@ -22,6 +22,7 @@ import fuzzylite as fl
 import numpy as np
 
 from ottima_core.flowgraph.fll_contract import validate_fll_contract
+from ottima_core.flowgraph.fuzzy_surface import sample_surface
 
 
 def _sat(v: float, lo: float, hi: float) -> float:
@@ -66,11 +67,17 @@ class BrokenKernel:
 class FuzzyKernel:
     """Kernel fuzzy incremental. Contrato: ADR-039 secao 4.5."""
 
-    def __init__(self, engine: fl.Engine, cfg: FuzzyKernelCfg) -> None:
+    def __init__(
+        self, engine: fl.Engine, cfg: FuzzyKernelCfg, lut: np.ndarray | None = None
+    ) -> None:
         self.eng, self.cfg = engine, cfg
         self._e_in = engine.input_variable("e")
         self._de_in = engine.input_variable("de")
         self._du_out = engine.output_variable("du")
+        # LUT ativa SUBSTITUI a inferencia por scan (SPEC secao 5.2): o custo passa a ser
+        # quatro leituras e tres multiplicacoes, independente do defuzzificador. O Engine
+        # fica carregado so para revalidacao/regeracao.
+        self.lut = lut
         self.diag: dict[str, float] = {}
         self.reset()
 
@@ -106,22 +113,49 @@ class FuzzyKernel:
 
         e_n = _sat(e * c.ke, -1.0, 1.0)
         de_n = _sat(self.de_f * c.kde, -1.0, 1.0)
-        self._e_in.value = e_n
-        self._de_in.value = de_n
-        self.eng.process()
-
-        # `OutputVariable.value` pode vir float ou array numpy shape (1,) depois do
-        # defuzzify — mesma normalizacao do bloco `fuzzy` (ADR-029).
-        du_n = float(np.asarray(self._du_out.value).reshape(-1)[-1])
+        if self.lut is not None:
+            du_n = self._interp_bilinear(e_n, de_n)
+            disparos = math.nan  # sem inferencia no scan, nao existe grau de ativacao
+        else:
+            self._e_in.value = e_n
+            self._de_in.value = de_n
+            self.eng.process()
+            # `OutputVariable.value` pode vir float ou array numpy shape (1,) depois do
+            # defuzzify — mesma normalizacao do bloco `fuzzy` (ADR-029).
+            du_n = float(np.asarray(self._du_out.value).reshape(-1)[-1])
+            disparos = self._rule_fire_count()
         self.diag = {
             "e_n": e_n,
             "de_n": de_n,
             "du_n": du_n,
-            "rule_fire_count": self._rule_fire_count(),
+            "rule_fire_count": disparos,
         }
         if not math.isfinite(du_n):
             return math.nan  # o shell trata: segura OUT e alarma
         return c.ku * du_n
+
+    def _interp_bilinear(self, e_n: float, de_n: float) -> float:
+        """`du_n` interpolado na LUT; saturacao nas bordas (SPEC secao 5.2).
+
+        NaN em qualquer um dos quatro vizinhos contamina o resultado de proposito: a LUT nao
+        pode "consertar" regiao sem regra por interpolacao — o buraco tem de continuar
+        visivel como `kernel_invalid_output` (F3).
+        """
+        lut = self.lut
+        assert lut is not None  # so chamado quando a LUT esta ativa
+        n = lut.shape[0]
+        passo = 2.0 / (n - 1)
+        # de_n -> eixo 0, e_n -> eixo 1 (mesma orientacao de `sample_surface`)
+        fi = _sat((de_n + 1.0) / passo, 0.0, float(n - 1))
+        fj = _sat((e_n + 1.0) / passo, 0.0, float(n - 1))
+        i0, j0 = int(fi), int(fj)
+        i1, j1 = min(i0 + 1, n - 1), min(j0 + 1, n - 1)
+        ti, tj = fi - i0, fj - j0
+        v00, v01 = float(lut[i0, j0]), float(lut[i0, j1])
+        v10, v11 = float(lut[i1, j0]), float(lut[i1, j1])
+        baixo = v00 + (v01 - v00) * tj
+        alto = v10 + (v11 - v10) * tj
+        return baixo + (alto - baixo) * ti
 
     def _rule_fire_count(self) -> float:
         """Regras com grau de ativacao > 0 no ultimo scan (SPEC secao 6.2).
@@ -155,11 +189,20 @@ class FuzzyKernel:
         return errs
 
 
-def build_fuzzy_kernel(fll: str, cfg: FuzzyKernelCfg) -> FuzzyKernel | BrokenKernel:
+def build_fuzzy_kernel(
+    fll: str,
+    cfg: FuzzyKernelCfg,
+    *,
+    lut_enabled: bool = False,
+    lut_resolution: int = 65,
+) -> FuzzyKernel | BrokenKernel:
     """Monta o kernel a partir do texto FLL, ou um `BrokenKernel` se a config nao presta.
 
     Uma `Engine` por chamada, nunca compartilhada nem com o mesmo texto (SPEC secao 4.2):
     a Engine guarda o valor corrente dentro das variaveis, e portanto nao e reentrante.
+
+    Com `lut_enabled`, a superficie e amostrada UMA vez aqui (na instanciacao do bloco) e o
+    scan passa a interpolar: tempo de execucao deixa de depender do defuzzificador.
     """
     try:
         engine = fl.FllImporter().from_string(fll)
@@ -168,4 +211,9 @@ def build_fuzzy_kernel(fll: str, cfg: FuzzyKernelCfg) -> FuzzyKernel | BrokenKer
     erros = validate_fll_contract(engine)
     if erros or not engine.is_ready():
         return BrokenKernel(erros or ["ENGINE_NOT_READY"], cfg)
-    return FuzzyKernel(engine, cfg)
+    lut = None
+    if lut_enabled:
+        # Amostrada de uma Engine PROPRIA (a funcao monta a sua): a Engine deste kernel nao
+        # pode voltar do save com array nas variaveis (SPEC secao 4.2, nao reentrante).
+        lut = sample_surface(fll, resolution=lut_resolution)
+    return FuzzyKernel(engine, cfg, lut)

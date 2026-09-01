@@ -114,6 +114,39 @@ def test_save_recusa_fll_com_sintaxe_invalida() -> None:
     assert any("fic" in e and "FLL" in e for e in erros)
 
 
+def test_f4_save_recusa_superficie_com_sinal_invertido() -> None:
+    """Portao de superficie bloqueia o save (SPEC_FUZZY secao 5.3), nao so o contrato FLL."""
+    fll = FUZZY_LOOP_DEFAULT_FLL.replace(
+        "rule: if e is PG then du is PG", "rule: if e is PG then du is NG"
+    )
+    erros = _malha_valida(fll=fll).errors
+    assert any("SIGN_CONSISTENCY" in e for e in erros)
+
+
+def test_save_recusa_superficie_com_buraco() -> None:
+    """Regiao sem regra reprova em NO_NAN: no bloco comissionado o buraco nao passa."""
+    fll = FUZZY_LOOP_DEFAULT_FLL
+    for regra in ("  rule: if e is PP then du is PP\n", "  rule: if e is PG then du is PG\n"):
+        fll = fll.replace(regra, "")
+    erros = _malha_valida(fll=fll).errors
+    assert any("NO_NAN" in e for e in erros)
+
+
+def test_acao_direta_e_avaliada_no_sentido_certo() -> None:
+    """Em acao direta a superficie correta e a espelhada — o portao usa `direct_acting`."""
+    assert _malha_valida(direct_acting=True).errors != []
+    espelhado = FUZZY_LOOP_DEFAULT_FLL
+    for de_, para in (
+        ("du is NG", "du is __PG"),
+        ("du is NP", "du is __PP"),
+        ("du is PP", "du is NP"),
+        ("du is PG", "du is NG"),
+    ):
+        espelhado = espelhado.replace(f"then {de_}", f"then {para}")
+    espelhado = espelhado.replace("du is __PG", "du is PG").replace("du is __PP", "du is PP")
+    assert _malha_valida(fll=espelhado, direct_acting=True).errors == []
+
+
 def test_contrato_de_portas_espelha_o_pid_loop() -> None:
     fuzzy_loop = PORT_CONTRACTS["fuzzy_loop"]
     assert fuzzy_loop["ports"] == PORT_CONTRACTS["pid_loop"]["ports"]

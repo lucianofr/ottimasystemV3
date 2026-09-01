@@ -157,21 +157,53 @@ async def test_superficie_recusa_bloco_que_nao_e_fuzzy_loop(
 
 
 async def test_superficie_com_buraco_serializa_nan_como_null(
-    client, admin_headers, operator_headers
+    client, admin_headers, operator_headers, db_session
 ):
-    """JSON nao tem NaN (ADR-030): regiao sem regra viaja como `null`, nunca como 0."""
-    pid = await _projeto(client, admin_headers, "sup-buraco")
-    r = await client.post(
-        "/api/flows",
-        json={"project_id": pid, "name": "sup-buraco", "ts_seconds": 1},
-        headers=admin_headers,
-    )
-    flow_id = r.json()["id"]
-    cid = await _conexao(client, admin_headers, pid, "plc-buraco")
-    tag_id = await _tag(client, admin_headers, cid, "PV-buraco")
+    """JSON nao tem NaN (ADR-030): regiao sem regra viaja como `null`, nunca como 0.
+
+    O `graph_json` e gravado DIRETO no banco de proposito: desde a fase K3 o portao NO_NAN
+    reprova FLL com buraco no save (`PUT /api/flows`), e essa rede da rota continua sendo
+    necessaria porque os portoes amostram em `lut_resolution` e a rota amostra em 65 — um
+    buraco estreito pode aparecer so na malha mais fina.
+    """
+    from sqlalchemy import select
+
+    from ottima_core.models import Flow
+
+    flow_id, _ = await _cenario(client, admin_headers, "sup-buraco")
     com_buraco = FUZZY_LOOP_DEFAULT_FLL
     for regra in ("  rule: if e is PP then du is PP\n", "  rule: if e is PG then du is PG\n"):
         com_buraco = com_buraco.replace(regra, "")
+    flow = await db_session.scalar(select(Flow).where(Flow.id == flow_id))
+    grafo = dict(flow.graph_json)
+    grafo["nodes"] = [
+        {**no, "data": {**no["data"], "fll": com_buraco}} if no["id"] == "fl1" else no
+        for no in grafo["nodes"]
+    ]
+    flow.graph_json = grafo
+    await db_session.commit()
+
+    r = await client.get(f"/api/operate/loop/{flow_id}/fl1/surface", headers=operator_headers)
+    assert r.status_code == 200, r.text
+    valores = r.json()["values"]
+    assert valores[32][64] is None  # e_n = +1 sem regra
+    assert valores[32][0] is not None  # o lado negativo segue coberto
+
+
+# --------------------------------------------------------------- LUT content-addressed (K3)
+
+
+async def _grafo_com_lut(client, admin_headers, nome: str, *, ku: float = 2.0) -> int:
+    """Flow com um `fuzzy_loop` de `lut_enabled`, salvo — o save e quem gera a LUT."""
+    pid = await _projeto(client, admin_headers, nome)
+    cid = await _conexao(client, admin_headers, pid, f"plc-{nome}")
+    r = await client.post(
+        "/api/flows",
+        json={"project_id": pid, "name": nome, "ts_seconds": 1},
+        headers=admin_headers,
+    )
+    flow_id = r.json()["id"]
+    tag_id = await _tag(client, admin_headers, cid, f"PV-{nome}")
     graph = {
         "nodes": [
             {
@@ -189,8 +221,8 @@ async def test_superficie_com_buraco_serializa_nan_como_null(
                     "sp_hi_lim": 100.0,
                     "sp_lo_lim": 0.0,
                     "ke": 0.05,
-                    "ku": 2.0,
-                    "fll": com_buraco,
+                    "ku": ku,
+                    "lut_enabled": True,
                 },
             },
         ],
@@ -198,8 +230,40 @@ async def test_superficie_com_buraco_serializa_nan_como_null(
     }
     r = await client.put(f"/api/flows/{flow_id}", json={"graph_json": graph}, headers=admin_headers)
     assert r.status_code == 200, r.text
-    r = await client.get(f"/api/operate/loop/{flow_id}/fl1/surface", headers=operator_headers)
-    assert r.status_code == 200, r.text
-    valores = r.json()["values"]
-    assert valores[32][64] is None  # e_n = +1 sem regra
-    assert valores[32][0] is not None  # o lado negativo segue coberto
+    return flow_id
+
+
+async def test_save_persiste_a_lut_por_hash_do_fll(client, admin_headers, db_session):
+    from sqlalchemy import select
+
+    from ottima_core.models import FuzzySurfaceLut
+
+    await _grafo_com_lut(client, admin_headers, "lut-grava")
+    linhas = list(await db_session.scalars(select(FuzzySurfaceLut)))
+    assert len(linhas) == 1
+    linha = linhas[0]
+    assert linha.resolution == 65
+    assert len(linha.payload) == 65 * 65 * 4  # float32 C-order
+    assert len(linha.fll_hash) == 64  # sha256 hex
+
+
+async def test_lut_dedupa_entre_blocos_com_o_mesmo_fll(client, admin_headers, db_session):
+    """Content-addressed (ADR-039 D11): mesmo `.fll` em flows diferentes = uma linha só."""
+    from sqlalchemy import func, select
+
+    from ottima_core.models import FuzzySurfaceLut
+
+    await _grafo_com_lut(client, admin_headers, "lut-dedupe-a", ku=2.0)
+    await _grafo_com_lut(client, admin_headers, "lut-dedupe-b", ku=9.0)  # sintonia difere
+    total = await db_session.scalar(select(func.count()).select_from(FuzzySurfaceLut))
+    assert total == 1
+
+
+async def test_lut_nao_e_gerada_quando_desabilitada(client, admin_headers, db_session):
+    from sqlalchemy import func, select
+
+    from ottima_core.models import FuzzySurfaceLut
+
+    await _cenario(client, admin_headers, "lut-off")  # lut_enabled fica no default (False)
+    total = await db_session.scalar(select(func.count()).select_from(FuzzySurfaceLut))
+    assert total == 0
