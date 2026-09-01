@@ -92,7 +92,6 @@ def redis_bus() -> Iterator[redis.Redis]:
     cliente.close()
 
 
-
 def _historico(
     admin: httpx.Client, tag_id: int, *, start: datetime | None = None
 ) -> dict[str, Any]:
@@ -584,8 +583,7 @@ def test_qe5_dv_bad_congela_internamente_e_good_retoma(
             descricao="janela com a DV ruim",
         )
         assert all(e["status"]["input_valid"] is True for e in janela), (
-            f"DV ruim não pode invalidar o bloco: "
-            f"{[e['status']['input_valid'] for e in janela]}"
+            f"DV ruim não pode invalidar o bloco: {[e['status']['input_valid'] for e in janela]}"
         )
         dv_cauda = [e["vars"]["dv_1"]["v"] for e in janela]
         assert all(abs(v - 25.0) < 0.01 for v in dv_cauda), (
