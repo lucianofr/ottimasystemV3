@@ -36,6 +36,11 @@ class FuzzyKernelCfg:
     ku: float = 1.0  # %span/s, > 0 -> ganho de saida (velocidade maxima de atuacao)
     tf_de: float = 1.0  # s, > 0       -> filtro da derivada do erro
     direct_acting: bool = False
+    # LUT mora AQUI, nao na instancia: SPEC secao 6.3 classifica LUT_ENABLED/LUT_RESOLUTION
+    # como classe de SINTONIA (hot-swap in-place), e `apply_tuning` do shell so troca o
+    # `cfg` — LUT fora do cfg tornava o toggle silenciosamente inocuo.
+    lut_enabled: bool = False
+    lut_resolution: int = 65
 
 
 @dataclass(slots=True)
@@ -67,19 +72,49 @@ class BrokenKernel:
 class FuzzyKernel:
     """Kernel fuzzy incremental. Contrato: ADR-039 secao 4.5."""
 
-    def __init__(
-        self, engine: fl.Engine, cfg: FuzzyKernelCfg, lut: np.ndarray | None = None
-    ) -> None:
-        self.eng, self.cfg = engine, cfg
+    def __init__(self, engine: fl.Engine, cfg: FuzzyKernelCfg, fll: str) -> None:
+        self.eng = engine
+        self._fll = fll  # texto de origem: insumo de `sample_surface` na regeracao da LUT
         self._e_in = engine.input_variable("e")
         self._de_in = engine.input_variable("de")
         self._du_out = engine.output_variable("du")
         # LUT ativa SUBSTITUI a inferencia por scan (SPEC secao 5.2): o custo passa a ser
         # quatro leituras e tres multiplicacoes, independente do defuzzificador. O Engine
         # fica carregado so para revalidacao/regeracao.
-        self.lut = lut
+        self.lut: np.ndarray | None = None
+        self._cfg = cfg
+        self._reconciliar_lut()
         self.diag: dict[str, float] = {}
         self.reset()
+
+    @property
+    def cfg(self) -> FuzzyKernelCfg:
+        return self._cfg
+
+    @cfg.setter
+    def cfg(self, novo: FuzzyKernelCfg) -> None:
+        """Aplicar sintonia nova reconcilia a LUT (SPEC secao 6.3).
+
+        O shell chama exatamente isto em `apply_tuning`; deixar a reconciliacao aqui mantem
+        o shell alheio a LUT e faz o toggle valer sem re-instanciar o bloco.
+        """
+        self._cfg = novo
+        self._reconciliar_lut()
+
+    def _reconciliar_lut(self) -> None:
+        """Materializa, descarta ou reescala a grade conforme o cfg corrente.
+
+        So reamostra quando (`lut_enabled`, `lut_resolution`) mudou de fato: trocar KE/KU
+        nao toca a superficie, e reamostrar a cada sintonia gastaria alguns ms por bloco
+        sem mudar um numero.
+        """
+        c = self._cfg
+        if not c.lut_enabled:
+            self.lut = None
+            return
+        if self.lut is not None and self.lut.shape[0] == c.lut_resolution:
+            return
+        self.lut = sample_surface(self._fll, resolution=c.lut_resolution)
 
     def reset(self) -> None:
         self.e_prev = 0.0
@@ -113,9 +148,12 @@ class FuzzyKernel:
 
         e_n = _sat(e * c.ke, -1.0, 1.0)
         de_n = _sat(self.de_f * c.kde, -1.0, 1.0)
+        self.diag = {"e_n": e_n, "de_n": de_n}
         if self.lut is not None:
             du_n = self._interp_bilinear(e_n, de_n)
-            disparos = math.nan  # sem inferencia no scan, nao existe grau de ativacao
+            # `rule_fire_count` FICA DE FORA: sem inferencia no scan nao existe grau de
+            # ativacao, e NaN ali viajaria como `null` num campo tipado `float` no espelho
+            # TS. Ausente, o faceplate cai no proprio fallback.
         else:
             self._e_in.value = e_n
             self._de_in.value = de_n
@@ -123,13 +161,8 @@ class FuzzyKernel:
             # `OutputVariable.value` pode vir float ou array numpy shape (1,) depois do
             # defuzzify — mesma normalizacao do bloco `fuzzy` (ADR-029).
             du_n = float(np.asarray(self._du_out.value).reshape(-1)[-1])
-            disparos = self._rule_fire_count()
-        self.diag = {
-            "e_n": e_n,
-            "de_n": de_n,
-            "du_n": du_n,
-            "rule_fire_count": disparos,
-        }
+            self.diag["rule_fire_count"] = self._rule_fire_count()
+        self.diag["du_n"] = du_n
         if not math.isfinite(du_n):
             return math.nan  # o shell trata: segura OUT e alarma
         return c.ku * du_n
@@ -189,20 +222,14 @@ class FuzzyKernel:
         return errs
 
 
-def build_fuzzy_kernel(
-    fll: str,
-    cfg: FuzzyKernelCfg,
-    *,
-    lut_enabled: bool = False,
-    lut_resolution: int = 65,
-) -> FuzzyKernel | BrokenKernel:
+def build_fuzzy_kernel(fll: str, cfg: FuzzyKernelCfg) -> FuzzyKernel | BrokenKernel:
     """Monta o kernel a partir do texto FLL, ou um `BrokenKernel` se a config nao presta.
 
     Uma `Engine` por chamada, nunca compartilhada nem com o mesmo texto (SPEC secao 4.2):
     a Engine guarda o valor corrente dentro das variaveis, e portanto nao e reentrante.
 
-    Com `lut_enabled`, a superficie e amostrada UMA vez aqui (na instanciacao do bloco) e o
-    scan passa a interpolar: tempo de execucao deixa de depender do defuzzificador.
+    Com `cfg.lut_enabled`, a superficie e amostrada na construcao e o scan passa a
+    interpolar: tempo de execucao deixa de depender do defuzzificador.
     """
     try:
         engine = fl.FllImporter().from_string(fll)
@@ -211,9 +238,6 @@ def build_fuzzy_kernel(
     erros = validate_fll_contract(engine)
     if erros or not engine.is_ready():
         return BrokenKernel(erros or ["ENGINE_NOT_READY"], cfg)
-    lut = None
-    if lut_enabled:
-        # Amostrada de uma Engine PROPRIA (a funcao monta a sua): a Engine deste kernel nao
-        # pode voltar do save com array nas variaveis (SPEC secao 4.2, nao reentrante).
-        lut = sample_surface(fll, resolution=lut_resolution)
-    return FuzzyKernel(engine, cfg, lut)
+    # `FuzzyKernel` amostra de uma Engine PROPRIA (`sample_surface` monta a sua): a Engine
+    # deste kernel nao pode ficar com array nas variaveis (SPEC secao 4.2, nao reentrante).
+    return FuzzyKernel(engine, cfg, fll)

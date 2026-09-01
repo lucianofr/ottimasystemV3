@@ -38,7 +38,10 @@ MAMDANI = _mamdani()
 def test_f8_lut_coincide_com_inferencia_em_10k_pontos() -> None:
     cfg = FuzzyKernelCfg(ke=1.0, kde=1.0, ku=100.0)  # e/de ja normalizados no teste
     direto = build_fuzzy_kernel(FUZZY_LOOP_DEFAULT_FLL, cfg)
-    com_lut = build_fuzzy_kernel(FUZZY_LOOP_DEFAULT_FLL, cfg, lut_enabled=True, lut_resolution=65)
+    com_lut = build_fuzzy_kernel(
+        FUZZY_LOOP_DEFAULT_FLL,
+        FuzzyKernelCfg(ke=1.0, kde=1.0, ku=100.0, lut_enabled=True, lut_resolution=65),
+    )
     rng = random.Random(1)
     pior = 0.0
     for _ in range(10_000):
@@ -55,7 +58,10 @@ def test_f8_lut_tambem_coincide_fora_da_linha_de_zero() -> None:
     """Varre as DUAS entradas: um bug de eixo trocado passaria calado no teste de `de = 0`."""
     cfg = FuzzyKernelCfg(ke=1.0, kde=1.0, ku=100.0)
     direto = build_fuzzy_kernel(MAMDANI, cfg)
-    com_lut = build_fuzzy_kernel(MAMDANI, cfg, lut_enabled=True, lut_resolution=129)
+    com_lut = build_fuzzy_kernel(
+        MAMDANI,
+        FuzzyKernelCfg(ke=1.0, kde=1.0, ku=100.0, lut_enabled=True, lut_resolution=129),
+    )
     rng = random.Random(7)
     pior, maior_de_n = 0.0, 0.0
     for _ in range(2_000):
@@ -75,8 +81,9 @@ def test_f8_lut_tambem_coincide_fora_da_linha_de_zero() -> None:
 
 
 def test_lut_satura_nas_bordas_em_vez_de_indexar_fora() -> None:
-    cfg = FuzzyKernelCfg(ke=10.0, kde=0.0, ku=1.0)  # ke alto: e_n satura em +1
-    com_lut = build_fuzzy_kernel(FUZZY_LOOP_DEFAULT_FLL, cfg, lut_enabled=True)
+    # ke alto: e_n satura em +1
+    cfg = FuzzyKernelCfg(ke=10.0, kde=0.0, ku=1.0, lut_enabled=True)
+    com_lut = build_fuzzy_kernel(FUZZY_LOOP_DEFAULT_FLL, cfg)
     com_lut.align(0.0, 0.0, 0.0)
     assert abs(com_lut.compute(sp=50.0, pv=0.0, dt=1.0) - 1.0) < 1e-6
 
@@ -86,7 +93,7 @@ def test_lut_com_buraco_propaga_nan() -> None:
     com_buraco = FUZZY_LOOP_DEFAULT_FLL
     for regra in ("  rule: if e is PP then du is PP\n", "  rule: if e is PG then du is PG\n"):
         com_buraco = com_buraco.replace(regra, "")
-    k = build_fuzzy_kernel(com_buraco, FuzzyKernelCfg(ke=1.0, kde=0.0, ku=1.0), lut_enabled=True)
+    k = build_fuzzy_kernel(com_buraco, FuzzyKernelCfg(ke=1.0, kde=0.0, ku=1.0, lut_enabled=True))
     k.align(0.0, 0.0, 0.0)
     assert math.isnan(k.compute(sp=1.0, pv=0.0, dt=1.0))
 
@@ -103,3 +110,69 @@ def test_f9_50_blocos_mamdani_centroid_em_meio_segundo() -> None:
         b.compute(sp=3.0, pv=0.0, dt=0.5)
     total = time.perf_counter() - inicio
     assert total < 0.5 * 0.30  # soma dos steps < 30% do periodo de 0.5 s
+
+
+# --------------------------------------------------------------------------------------
+# LUT como classe de SINTONIA (SPEC_FUZZY §6.3): ligar/desligar/reescalar in-place
+# --------------------------------------------------------------------------------------
+
+
+def _kernel_lut(**over):
+    cfg = FuzzyKernelCfg(ke=0.05, kde=0.0, ku=2.0)
+    for k, v in over.items():
+        setattr(cfg, k, v)
+    return build_fuzzy_kernel(FUZZY_LOOP_DEFAULT_FLL, cfg)
+
+
+def test_rule_fire_count_ausente_com_lut_em_vez_de_nan() -> None:
+    """Sem inferencia no scan nao existe grau de ativacao — a chave sai do diag.
+
+    NaN ali viajaria como `null` num campo tipado `float` no espelho TS (mentira de tipo);
+    ausente, o faceplate cai no proprio fallback e o contrato continua honesto.
+    """
+    k = _kernel_lut(lut_enabled=True)
+    k.align(0.0, 0.0, 0.0)
+    k.compute(sp=10.0, pv=0.0, dt=1.0)
+    assert "rule_fire_count" not in k.diag
+    assert set(k.diag) == {"e_n", "de_n", "du_n"}
+    sem_lut = _kernel_lut()
+    sem_lut.align(0.0, 0.0, 0.0)
+    sem_lut.compute(sp=10.0, pv=0.0, dt=1.0)
+    assert sem_lut.diag["rule_fire_count"] >= 1.0
+
+
+def test_ligar_a_lut_por_sintonia_materializa_a_grade() -> None:
+    """SPEC §6.3 lista LUT_ENABLED como classe de SINTONIA: in-place, sem re-instanciar.
+
+    Regressao: a LUT morava na instancia e nao no `cfg`, entao `apply_tuning` trocava so o
+    `cfg` e o toggle era silenciosamente inocuo — a config dizia LUT ligada e o runtime
+    seguia inferindo.
+    """
+    k = _kernel_lut()
+    assert k.lut is None
+    k.cfg = FuzzyKernelCfg(ke=0.05, kde=0.0, ku=2.0, lut_enabled=True)
+    assert k.lut is not None and k.lut.shape == (65, 65)
+
+
+def test_reescalar_a_lut_por_sintonia_regenera_a_grade() -> None:
+    k = _kernel_lut(lut_enabled=True, lut_resolution=33)
+    assert k.lut is not None and k.lut.shape == (33, 33)
+    k.cfg = FuzzyKernelCfg(ke=0.05, kde=0.0, ku=2.0, lut_enabled=True, lut_resolution=129)
+    assert k.lut is not None and k.lut.shape == (129, 129)
+
+
+def test_desligar_a_lut_volta_para_a_inferencia() -> None:
+    k = _kernel_lut(lut_enabled=True)
+    k.cfg = FuzzyKernelCfg(ke=0.05, kde=0.0, ku=2.0, lut_enabled=False)
+    assert k.lut is None
+    k.align(0.0, 0.0, 0.0)
+    k.compute(sp=10.0, pv=0.0, dt=1.0)
+    assert k.diag["rule_fire_count"] >= 1.0
+
+
+def test_sintonia_que_nao_toca_a_lut_nao_paga_reamostragem() -> None:
+    """Trocar KU nao pode regerar a superficie: a grade e a MESMA (identidade preservada)."""
+    k = _kernel_lut(lut_enabled=True)
+    antes = k.lut
+    k.cfg = FuzzyKernelCfg(ke=0.05, kde=0.0, ku=9.0, lut_enabled=True)
+    assert k.lut is antes

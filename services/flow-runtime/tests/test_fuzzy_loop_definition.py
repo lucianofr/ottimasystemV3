@@ -193,3 +193,30 @@ async def test_build_definition_hotswap_de_fll_aterrissa_em_man_se_calculava() -
     assert isinstance(novo, BlockShell)
     assert novo.mode.target is Mode.MAN  # aterrissou em MAN
     assert abs(novo.u - u_antes) < 1e-9  # com u mantido, sem degrau
+
+
+async def test_ligar_a_lut_por_hot_swap_de_sintonia_no_caminho_do_shell() -> None:
+    """O caminho REAL do toggle: `build_definition` -> `apply_tuning` -> `kernel.cfg`.
+
+    Classe de sintonia (SPEC §6.3): a malha nao pode nem re-instanciar nem sair de AUTO.
+    """
+    antes = _build(_graph())
+    bloco = antes.blocks["m"][1]
+    assert isinstance(bloco, BlockShell)
+    t = 0.0
+    await passo(bloco, t, **{"in": amostra(50.0)})
+    bloco.write_sp(60.0)
+    bloco.write_target(Mode.AUTO)
+    for _ in range(3):
+        t += 1.0
+        await passo(bloco, t, **{"in": amostra(50.0)})
+    assert bloco.kernel.lut is None
+    u_antes = bloco.u
+
+    depois = _build(_graph(lut_enabled=True, lut_resolution=33), reuse=antes.blocks)
+    assert depois.blocks["m"][1] is bloco  # in-place, sem re-instanciar
+    assert bloco.kernel.lut is not None and bloco.kernel.lut.shape == (33, 33)
+    assert bloco.mode.actual is Mode.AUTO  # nao caiu para MAN
+    t += 1.0
+    await passo(bloco, t, **{"in": amostra(50.0)})
+    assert abs(bloco.u - u_antes) <= 2.0 * 1.0 + EPS  # sem degrau: so o incremento do scan

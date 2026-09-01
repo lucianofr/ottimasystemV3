@@ -117,3 +117,46 @@ async def test_diag_do_kernel_chega_ao_estado_publicado() -> None:
     estado = b._loop_state()
     assert abs(estado.diag["e_n"] - 0.5) < 1e-9  # erro 10 EU * ke 0.05
     assert estado.diag["rule_fire_count"] >= 1.0
+
+
+async def test_malha_fechada_com_lut_converge_como_a_inferencia() -> None:
+    """A LUT e caminho de PRODUCAO opt-in: tem de controlar, nao so interpolar num teste.
+
+    Mesmo processo e mesma sintonia do F5, com `lut_enabled`: o regime tem de ser o mesmo e
+    o sobressinal tem de continuar dentro do critério.
+    """
+
+    async def corre(lut: bool) -> tuple[float, float]:
+        b = _malha(ku=1.0, lut_enabled=lut)
+        pv, t, pico = 40.0, 0.0, 0.0
+        await passo(b, t, **{"in": amostra(pv)})
+        b.write_sp(50.0)
+        b.write_target(Mode.AUTO)
+        for _ in range(600):
+            t += 1.0
+            await passo(b, t, **{"in": amostra(pv)})
+            pv += (b.u - pv) / 8.0
+            pico = max(pico, pv)
+        return pico, pv
+
+    pico_inf, pv_inf = await corre(False)
+    pico_lut, pv_lut = await corre(True)
+    assert pico_lut <= 50.0 + 1.0  # criterio F5 vale para os dois caminhos
+    assert abs(pv_lut - 50.0) <= 1.0
+    assert abs(pv_lut - pv_inf) <= 0.1  # mesmo regime
+    assert abs(pico_lut - pico_inf) <= 0.1  # mesma trajetoria
+
+
+async def test_diag_com_lut_nao_carrega_rule_fire_count_para_o_estado_publicado() -> None:
+    b = _malha(lut_enabled=True)
+    t = 0.0
+    await passo(b, t, **{"in": amostra(40.0)})
+    b.write_sp(50.0)
+    b.write_target(Mode.AUTO)
+    t += 1.0
+    await passo(b, t, **{"in": amostra(40.0)})
+    estado = b._loop_state()
+    assert "rule_fire_count" not in estado.diag
+    assert set(estado.diag) == {"e_n", "de_n", "du_n"}
+    # e o quadro segue serializavel sem NaN (ADR-030)
+    assert "NaN" not in estado.model_dump_json()

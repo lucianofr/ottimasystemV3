@@ -533,6 +533,8 @@ def fuzzy_kernel_cfg_from(config: FuzzyLoopConfig) -> FuzzyKernelCfg:
         ku=config.ku,
         tf_de=config.tf_de,
         direct_acting=config.direct_acting,
+        lut_enabled=config.lut_enabled,
+        lut_resolution=config.lut_resolution,
     )
 
 
@@ -556,12 +558,7 @@ def _build_loop_kernel(node_type: str, config: Any) -> ControlKernel:
     o flow na construcao (SPEC_FUZZY secao 4.1-5).
     """
     if node_type == "fuzzy_loop":
-        return build_fuzzy_kernel(
-            config.fll,
-            fuzzy_kernel_cfg_from(config),
-            lut_enabled=config.lut_enabled,
-            lut_resolution=config.lut_resolution,
-        )
+        return build_fuzzy_kernel(config.fll, fuzzy_kernel_cfg_from(config))
     return PidKernel(pid_kernel_cfg_from(config))
 
 
