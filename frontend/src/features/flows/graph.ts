@@ -3,10 +3,12 @@ import {
   PORT_CONTRACTS,
   type ConstraintVar,
   type ContratoPortaDinamica,
+  type ContratoPortaFixaComDefault,
   type CvVar,
   type DirecaoPorta,
   type DvVar,
   type FuzzyConfig,
+  type FuzzyLoopConfig,
   type IopdtParams,
   type Limits,
   type ModeValues,
@@ -24,7 +26,7 @@ import {
 } from "../../lib/contracts.gen";
 import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
 import type { PortsPorBloco } from "./canalPrimitivos";
-import { PADRAO_FIRST_ORDER, PADRAO_KALMAN, PADRAO_PID, PADRAO_PID_LOOP, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
+import { PADRAO_FIRST_ORDER, PADRAO_KALMAN, PADRAO_PID, PADRAO_PID_LOOP, PADRAO_FUZZY_LOOP, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
 
 /**
  * Modelo do grafo do editor + as regras que o editor espelha do servidor.
@@ -50,6 +52,7 @@ export const TIPOS_BLOCO = [
   "fuzzy",
   "pid",
   "pid_loop",
+  "fuzzy_loop",
 ] as const;
 export type TipoBloco = (typeof TIPOS_BLOCO)[number];
 
@@ -84,6 +87,11 @@ export const MAX_PORTAS_FUZZY = tetoDoContrato(contratoFuzzy.rules[0]);
 /** Teto do texto FLL colado (FUZZY-SEC-02) — espelho de `MAX_FUZZY_FLL_LENGTH` no
  *  contrato, mesma fonte única: o backend reprova acima deste tamanho. */
 export const MAX_FLL_LENGTH = contratoFuzzy.max_fll_length;
+
+/** Contrato do `fuzzy_loop`: portas FIXAS (as do shell) mais o FLL default e o teto do
+ *  texto — a fonte única de onde a paleta tira o .fll pré-preenchido. */
+export const contratoFuzzyLoop = PORT_CONTRACTS.fuzzy_loop as ContratoPortaFixaComDefault;
+if (contratoFuzzyLoop.dynamic) throw new Error("contrato do fuzzy_loop deveria ser fixo");
 
 /** Rótulo por tipo (ARCH-18/TD-021): concentrado em `registro.ts` junto com
  *  descrição/defaults/componente — reexportado aqui porque a maioria dos consumidores já
@@ -179,6 +187,26 @@ export type DadosPidLoop = DadosBase &
     | "kc"
     | "ti_seconds"
     | "td_seconds"
+  >;
+
+/** Fuzzy Malha (SPEC_FUZZY §6.2): mesmo recorte do `pid_loop` no editor, trocando a sintonia
+ *  PID pelos ganhos do kernel fuzzy e pelo texto FLL. `fll` é ESTRUTURAL (D11): editar aqui
+ *  re-instancia o bloco no próximo deploy e a malha aterrissa em MAN. */
+export type DadosFuzzyLoop = DadosBase &
+  Pick<
+    FuzzyLoopConfig,
+    | "sp_hi_lim"
+    | "sp_lo_lim"
+    | "out_scale_lo"
+    | "out_scale_hi"
+    | "permitted"
+    | "normal"
+    | "direct_acting"
+    | "ke"
+    | "kde"
+    | "ku"
+    | "tf_de"
+    | "fll"
   >;
 
 /** `LimitesMpc`/`FaixaMpc`/`ValoresModoPid`/`PidMv` abaixo viram alias do tipo gerado
@@ -281,7 +309,8 @@ export type DadosBloco =
   | DadosKalman
   | DadosFuzzy
   | DadosPid
-  | DadosPidLoop;
+  | DadosPidLoop
+  | DadosFuzzyLoop;
 
 /** `type` é opcional em `Node`; aqui ele é o discriminante e nunca falta. */
 type Bloco<D extends Record<string, unknown>, T extends TipoBloco> = Node<D, T> & { type: T };
@@ -296,6 +325,7 @@ export type NoKalman = Bloco<DadosKalman, "kalman">;
 export type NoFuzzy = Bloco<DadosFuzzy, "fuzzy">;
 export type NoPid = Bloco<DadosPid, "pid">;
 export type NoPidLoop = Bloco<DadosPidLoop, "pid_loop">;
+export type NoFuzzyLoop = Bloco<DadosFuzzyLoop, "fuzzy_loop">;
 
 export type BlocoNode =
   | NoLeitura
@@ -307,7 +337,8 @@ export type BlocoNode =
   | NoKalman
   | NoFuzzy
   | NoPid
-  | NoPidLoop;
+  | NoPidLoop
+  | NoFuzzyLoop;
 
 /** Toda aresta do editor nasce de um par de handles resolvidos; `null` nunca chega ao save. */
 export type BlocoEdge = Omit<Edge, "sourceHandle" | "targetHandle"> & {
@@ -441,7 +472,7 @@ export function tipoPorta(no: BlocoNode, tags: MapaTags): TipoPorta {
   if (no.type === "mpc") return "num";
   if (no.type === "first_order" || no.type === "kalman") return "num";
   if (no.type === "fuzzy") return "num";
-  if (no.type === "pid" || no.type === "pid_loop") return "num";
+  if (no.type === "pid" || no.type === "pid_loop" || no.type === "fuzzy_loop") return "num";
   if (no.data.tag_id === null) return "desconhecido";
   const dado = tags.get(no.data.tag_id);
   if (dado === undefined) return "desconhecido";
@@ -995,6 +1026,32 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           kc: numero(dados.kc, PADRAO_PID_LOOP.kc),
           ti_seconds: numero(dados.ti_seconds, PADRAO_PID_LOOP.ti_seconds),
           td_seconds: numero(dados.td_seconds, PADRAO_PID_LOOP.td_seconds),
+        },
+      };
+    }
+    case "fuzzy_loop": {
+      const permittedCru = Array.isArray(dados.permitted) ? dados.permitted : PADRAO_FUZZY_LOOP.permitted;
+      const permitted = permittedCru.filter((p: unknown): p is string => typeof p === "string");
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          sp_hi_lim: numero(dados.sp_hi_lim, PADRAO_FUZZY_LOOP.sp_hi_lim),
+          sp_lo_lim: numero(dados.sp_lo_lim, PADRAO_FUZZY_LOOP.sp_lo_lim),
+          out_scale_lo: numero(dados.out_scale_lo, PADRAO_FUZZY_LOOP.out_scale_lo),
+          out_scale_hi: numero(dados.out_scale_hi, PADRAO_FUZZY_LOOP.out_scale_hi),
+          permitted,
+          normal: typeof dados.normal === "string" ? dados.normal : PADRAO_FUZZY_LOOP.normal,
+          direct_acting:
+            typeof dados.direct_acting === "boolean" ? dados.direct_acting : PADRAO_FUZZY_LOOP.direct_acting,
+          ke: numero(dados.ke, PADRAO_FUZZY_LOOP.ke),
+          kde: numero(dados.kde, PADRAO_FUZZY_LOOP.kde),
+          ku: numero(dados.ku, PADRAO_FUZZY_LOOP.ku),
+          tf_de: numero(dados.tf_de, PADRAO_FUZZY_LOOP.tf_de),
+          fll: typeof dados.fll === "string" ? dados.fll : contratoFuzzyLoop.default_fll,
         },
       };
     }

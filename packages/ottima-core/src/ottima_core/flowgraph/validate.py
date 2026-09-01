@@ -353,6 +353,8 @@ def _check_fuzzy_nodes(nodes: list[FlowNode], errors: list[str]) -> None:
     for node in nodes:
         if node.type == "fuzzy":
             _valida_fuzzy(node, errors)
+        elif node.type == "fuzzy_loop":
+            _valida_fuzzy_loop(node, errors)
 
 
 def _valida_fuzzy(node: FlowNode, errors: list[str]) -> None:
@@ -405,11 +407,52 @@ def _valida_fuzzy(node: FlowNode, errors: list[str]) -> None:
             )
 
 
+def _valida_fuzzy_loop(node: FlowNode, errors: list[str]) -> None:
+    """Conteúdo do FLL de um `fuzzy_loop` (SPEC_FUZZY §3.2): parse + contrato.
+
+    Diferente do bloco `fuzzy`, aqui o FLL não é livre: as variáveis têm nome e faixa
+    fixados pelo contrato, porque o kernel escala o erro para o universo normalizado e lê
+    `du` de volta por nome. A MESMA função roda no kernel em runtime (`validate()`), então
+    um FLL aceito aqui nunca surpreende no deploy — e um que degradou entre save e deploy
+    prende o bloco em `OOS` em vez de derrubar o flow (ADR-029, duas camadas).
+
+    Import lazy de `fuzzylite` pelo mesmo motivo de `_valida_fuzzy`.
+    """
+    import fuzzylite as fl
+
+    from ottima_core.flowgraph.fll_contract import validate_fll_contract
+
+    where = f"nó '{node.id}' (fuzzy_loop)"
+    try:
+        engine = fl.FllImporter().from_string(node.config.fll)
+    except Exception as erro:
+        errors.append(f"{where}: FLL inválido — {erro}")
+        return
+
+    for codigo in validate_fll_contract(engine):
+        errors.append(f"{where}: contrato FLL violado — {codigo}")
+
+    engine_errors: list[str] = []
+    if not engine.is_ready(engine_errors):
+        detalhe = "; ".join(str(item) for item in engine_errors)
+        errors.append(f"{where}: motor fuzzy não está pronto — {detalhe}")
+
+    # Mesmo teto FUZZY-SEC-01 do bloco `fuzzy`: defuzzificador integral sem limite de
+    # resolução trava o event loop do flow-runtime a cada varredura.
+    for variable in engine.output_variables:
+        defuzzifier = variable.defuzzifier
+        if isinstance(defuzzifier, fl.IntegralDefuzzifier) and defuzzifier.resolution > 10_000:
+            errors.append(
+                f"{where}: defuzzifier '{variable.name}' com resolution "
+                f"{defuzzifier.resolution} excede o teto de 10000"
+            )
+
+
 # --------------------------------------------------------------------------------------
 # Blocos malha (ADR-039): portas remotas exigidas por modo em permitted
 # --------------------------------------------------------------------------------------
 
-LOOP_TYPES: frozenset[str] = frozenset({"pid_loop"})
+LOOP_TYPES: frozenset[str] = frozenset({"pid_loop", "fuzzy_loop"})
 _LOOP_REMOTE_PORT = {"cas": "cas_in", "rcas": "rcas_in", "rout": "rout_in"}
 
 

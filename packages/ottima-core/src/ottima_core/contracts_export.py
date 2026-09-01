@@ -48,6 +48,7 @@ from ottima_core.flowgraph import (
     CvVar,
     DvVar,
     FuzzyConfig,
+    FuzzyLoopConfig,
     IopdtParams,
     MpcConfig,
     MvVar,
@@ -252,6 +253,25 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
             {"name": "bkcal_out", "direction": "output", "type": "num"},
         ],
     },
+    # Mesmo shell do `pid_loop` (ADR-039): as portas sao identicas por construcao — o
+    # teste `test_contrato_de_portas_espelha_o_pid_loop` trava a igualdade.
+    "fuzzy_loop": {
+        "dynamic": False,
+        "ports": [
+            {"name": "in", "direction": "input", "type": "num"},
+            {"name": "cas_in", "direction": "input", "type": "num"},
+            {"name": "rcas_in", "direction": "input", "type": "num"},
+            {"name": "rout_in", "direction": "input", "type": "num"},
+            {"name": "bkcal_in", "direction": "input", "type": "num"},
+            {"name": "bias_in", "direction": "input", "type": "num"},
+            {"name": "trk_in_d", "direction": "input", "type": "num"},
+            {"name": "lo_in_d", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+            {"name": "bkcal_out", "direction": "output", "type": "num"},
+        ],
+        "default_fll": FUZZY_LOOP_DEFAULT_FLL,
+        "max_fll_length": MAX_FUZZY_FLL_LENGTH,
+    },
 }
 
 # MpcVarState (tarefa 1.3) vem aninhado no schema de MpcState (`vars: dict[str, MpcVarState]`)
@@ -276,6 +296,7 @@ _NODE_CONFIG_MODELS = (
     FuzzyConfig,
     PidConfig,
     PidLoopConfig,
+    FuzzyLoopConfig,
     SopdtParams,
     IopdtParams,
 )

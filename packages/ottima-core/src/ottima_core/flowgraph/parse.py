@@ -11,6 +11,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from ottima_core.flowgraph.fll_defaults import FUZZY_LOOP_DEFAULT_FLL
+
 NodeType = Literal[
     "opc_read",
     "opc_write",
@@ -22,6 +24,7 @@ NodeType = Literal[
     "kalman",
     "pid",
     "pid_loop",
+    "fuzzy_loop",
 ]
 NODE_TYPES: tuple[str, ...] = (
     "opc_read",
@@ -34,6 +37,7 @@ NODE_TYPES: tuple[str, ...] = (
     "kalman",
     "pid",
     "pid_loop",
+    "fuzzy_loop",
 )
 
 MAX_SCRIPT_PORTS = 8  # spec §3.3
@@ -100,6 +104,42 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
         "gamma",
         "gap_band",
         "gap_gain",
+    ),
+    "fuzzy_loop": (
+        "permitted",
+        "normal",
+        "shed_opt",
+        "shed_no_return",
+        "direct_acting",
+        "sp_pv_track_in_man",
+        "use_pv_for_bkcal",
+        "track_enable",
+        "track_in_manual",
+        "sp_hi_lim",
+        "sp_lo_lim",
+        "sp_rate_up",
+        "sp_rate_dn",
+        "out_hi_lim",
+        "out_lo_lim",
+        "out_rate_up",
+        "out_rate_dn",
+        "out_scale_lo",
+        "out_scale_hi",
+        "out_startup",
+        "pv_ftime",
+        "trk_val",
+        "lo_val",
+        "ff_scale_lo",
+        "ff_scale_hi",
+        "ff_gain",
+        "ff_enable",
+        "ke",
+        "kde",
+        "ku",
+        "tf_de",
+        "fll",
+        "lut_enabled",
+        "lut_resolution",
     ),
 }
 # Blocos de filtro (ADR-026): config é só um punhado de escalares, e o valor do dicionário
@@ -337,6 +377,23 @@ class PidLoopConfig(LoopBaseConfig):
     gap_gain: float = Field(default=1.0, ge=0, le=1)
 
 
+class FuzzyLoopConfig(LoopBaseConfig):
+    """Fuzzy Malha (SPEC_FUZZY secao 6.2): ganhos do kernel + base de regras em texto.
+
+    `ke`/`kde`/`ku`/`tf_de` sao classe de SINTONIA (hot-swap in-place, F10); `fll` esta em
+    `LOOP_STRUCTURAL_KEYS` e portanto re-instancia o bloco (F11). `lut_resolution` tem teto
+    de servidor (FUZZY-SEC): 257 pontos por eixo sao 66k avaliacoes por save.
+    """
+
+    ke: float = Field(gt=0)  # 1/EU; 1/ke e a faixa de erro coberta sem saturar
+    kde: float = Field(default=0.0, ge=0)  # s/EU; 0 desliga a acao derivativa
+    ku: float = Field(gt=0)  # %span/s; sentido SO via direct_acting
+    tf_de: float = Field(default=1.0, gt=0)  # s
+    fll: str = Field(default=FUZZY_LOOP_DEFAULT_FLL, max_length=MAX_FUZZY_FLL_LENGTH)
+    lut_enabled: bool = False
+    lut_resolution: int = Field(default=65, ge=33, le=257)
+
+
 LOOP_STRUCTURAL_KEYS: frozenset[str] = frozenset({"type", "fll", "out_scale_lo", "out_scale_hi"})
 
 
@@ -370,6 +427,7 @@ NodeConfig = (
     | KalmanConfig
     | PidConfig
     | PidLoopConfig
+    | FuzzyLoopConfig
 )
 
 
@@ -555,6 +613,8 @@ def _parse_config(where: str, node_type: str, data: dict, errors: list[str]) -> 
         return _parse_pid_config(where, data, errors)
     if node_type == "pid_loop":
         return _parse_loop_config(where, node_type, PidLoopConfig, data, errors)
+    if node_type == "fuzzy_loop":
+        return _parse_loop_config(where, node_type, FuzzyLoopConfig, data, errors)
     if node_type in _FILTER_KEYS:
         return _parse_filter_config(where, node_type, data, errors)
     return _parse_tfs_config(where, data, errors)

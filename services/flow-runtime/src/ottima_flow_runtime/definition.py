@@ -45,6 +45,7 @@ from ottima_core.bus import (
 from ottima_core.flowgraph import (
     FlowGraph,
     FlowNode,
+    FuzzyLoopConfig,
     LoopBaseConfig,
     MpcConfig,
     PidLoopConfig,
@@ -59,6 +60,7 @@ from .blocks.base import Block
 from .blocks.first_order import FirstOrderBlock
 from .blocks.fuzzy import FuzzyBlock
 from .blocks.kalman import KalmanBlock
+from .blocks.kernels.fuzzy import FuzzyKernelCfg, build_fuzzy_kernel
 from .blocks.kernels.pid import PidKernel, PidKernelCfg
 from .blocks.mpc import MpcBlock
 from .blocks.opc_read import OpcReadBlock
@@ -67,13 +69,14 @@ from .blocks.pid import PidBlock
 from .blocks.script import ScriptBlock
 from .blocks.shell.block import BlockShell
 from .blocks.shell.config import ShellCfg
+from .blocks.shell.kernel import ControlKernel
 from .blocks.shell.mode import Mode, mode_from_name
 from .blocks.tfs import TfsBlock
 from .mpc.host import MpcHost
 from .mpc.worker import worker_main
 from .scheduler import FlowDefinition
 
-LOOP_TYPES: frozenset[str] = frozenset({"pid_loop"})
+LOOP_TYPES: frozenset[str] = frozenset({"pid_loop", "fuzzy_loop"})
 
 
 class LoopSeed(NamedTuple):
@@ -149,7 +152,7 @@ def build_definition(
         ):
             # Classe de sintonia (ADR-039 D11): in-place, estado preservado.
             block = kept[1]
-            kernel_cfg = pid_kernel_cfg_from(node.config) if node.type == "pid_loop" else None
+            kernel_cfg = _loop_kernel_cfg(node)
             block.apply_tuning(shell_cfg_from(node.config, ts_seconds), kernel_cfg)
         else:
             # TD-006 MPC abaixo. Estrutural de malha (D11): o predecessor carrega
@@ -523,6 +526,40 @@ def pid_kernel_cfg_from(config: PidLoopConfig) -> PidKernelCfg:
     )
 
 
+def fuzzy_kernel_cfg_from(config: FuzzyLoopConfig) -> FuzzyKernelCfg:
+    return FuzzyKernelCfg(
+        ke=config.ke,
+        kde=config.kde,
+        ku=config.ku,
+        tf_de=config.tf_de,
+        direct_acting=config.direct_acting,
+    )
+
+
+def _loop_kernel_cfg(node: FlowNode) -> PidKernelCfg | FuzzyKernelCfg | None:
+    """Config de sintonia do kernel para o hot-swap in-place (ADR-039 D11).
+
+    `None` para tipo que nao e malha: `apply_tuning` entao so troca o `ShellCfg`.
+    """
+    if node.type == "pid_loop":
+        return pid_kernel_cfg_from(node.config)
+    if node.type == "fuzzy_loop":
+        return fuzzy_kernel_cfg_from(node.config)
+    return None
+
+
+def _build_loop_kernel(node_type: str, config: Any) -> ControlKernel:
+    """Kernel de uma instancia nova de malha.
+
+    O `fuzzy_loop` pode devolver `BrokenKernel` (FLL degradado entre save e deploy): o
+    bloco nasce, o shell le `validate()` e o prende em OOS+CONFIG_ERROR em vez de derrubar
+    o flow na construcao (SPEC_FUZZY secao 4.1-5).
+    """
+    if node_type == "fuzzy_loop":
+        return build_fuzzy_kernel(config.fll, fuzzy_kernel_cfg_from(config))
+    return PidKernel(pid_kernel_cfg_from(config))
+
+
 async def carregar_loop_seeds(session: AsyncSession, flow_id: int) -> dict[str, LoopSeed]:
     """`{block_id: LoopSeed(sp, man_out)}` persistido em `loop_setpoints` para o flow —
     semente de SP e MAN_OUT no deploy (ADR-039 §4.10); TARGET persiste so para auditoria."""
@@ -571,7 +608,7 @@ def _instantiate_loop(
 
         await asyncio.wait_for(_grava(), timeout=PERSIST_SP_TIMEOUT_S)
 
-    kernel = PidKernel(pid_kernel_cfg_from(config))
+    kernel = _build_loop_kernel(node.type, config)
     return BlockShell(
         node.id,
         kernel=kernel,

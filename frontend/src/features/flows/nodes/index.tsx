@@ -15,6 +15,7 @@ import {
   type NoLeitura,
   type NoMpc as NoMpcData,
   type NoPid as NoPidData,
+  type NoFuzzyLoop as NoFuzzyLoopData,
   type NoPidLoop as NoPidLoopData,
   type NoScript,
   type NoTfs,
@@ -350,6 +351,35 @@ export function NoPidLoop({ id, data, selected }: NodeProps<NoPidLoopData>) {
   );
 }
 
+/** Fuzzy Malha (SPEC_FUZZY §6.2): mesmo chassis do PID Malha, resumo com os ganhos do kernel
+ *  e o tamanho da base de regras. `KDE` zerado é o default de comissionamento (a derivada
+ *  entra por último em campo, §6.4) e aparece como "desligada", mesmo tratamento de caso
+ *  degenerado que `NoPidLoop` dá a `Ti`/`Td`. */
+export function NoFuzzyLoop({ id, data, selected }: NodeProps<NoFuzzyLoopData>) {
+  const linhas = data.fll === "" ? 0 : data.fll.split("\n").length;
+  return (
+    <BlocoChapa
+      tipo="fuzzy_loop"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("fuzzy_loop", "input"))}
+      saidas={portas(portasFixas("fuzzy_loop", "output"))}
+      blockId={id}
+    >
+      <div className="space-y-0.5">
+        <LinhaResumo rotulo="Escala do erro KE" valor={FORMATO_PARAM.format(data.ke)} />
+        <LinhaResumo
+          rotulo="Escala da derivada KDE"
+          valor={data.kde === 0 ? "desligada" : FORMATO_PARAM.format(data.kde)}
+        />
+        <LinhaResumo rotulo="Ganho de saída KU" valor={`${FORMATO_PARAM.format(data.ku)} %/s`} />
+        <LinhaResumo rotulo="FLL" valor={`${String(linhas)} linha(s)`} />
+      </div>
+    </BlocoChapa>
+  );
+}
+
 /** Mapa de COMPONENTES por tipo (ARCH-18/TD-021). Mora AQUI, não em `registro.ts`: o
  *  registro é alcançado pelo chunk inicial via `CanalAoVivo.tsx` → `graph.ts` →
  *  `registro.ts`, e tocar os componentes de nó dali arrastaria o `@xyflow/react` de volta
@@ -372,4 +402,5 @@ export const TIPOS_DE_NO: Record<TipoBloco, ComponenteNo> = {
   fuzzy: NoFuzzy,
   pid: NoPid,
   pid_loop: NoPidLoop,
+  fuzzy_loop: NoFuzzyLoop,
 };

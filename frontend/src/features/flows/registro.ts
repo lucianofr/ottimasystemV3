@@ -1,5 +1,6 @@
 import {
   contratoFuzzy,
+  contratoFuzzyLoop,
   matrizPadrao,
   type DadosBase,
   type DadosFirstOrder,
@@ -7,6 +8,7 @@ import {
   type DadosKalman,
   type DadosMpc,
   type DadosPid,
+  type DadosFuzzyLoop,
   type DadosPidLoop,
   type DadosScript,
   type DadosTag,
@@ -48,7 +50,8 @@ type ConfigDoBloco =
   | Omit<DadosKalman, keyof DadosBase>
   | Omit<DadosFuzzy, keyof DadosBase>
   | Omit<DadosPid, keyof DadosBase>
-  | Omit<DadosPidLoop, keyof DadosBase>;
+  | Omit<DadosPidLoop, keyof DadosBase>
+  | Omit<DadosFuzzyLoop, keyof DadosBase>;
 
 export interface DefinicaoBloco {
   rotulo: string;
@@ -97,6 +100,25 @@ export const PADRAO_PID_LOOP = {
   kc: 1,
   ti_seconds: 60,
   td_seconds: 0,
+};
+
+/** Defaults do Fuzzy Malha (SPEC_FUZZY §6.4): sintonia de comissionamento — KE cobrindo 20
+ *  EU de erro, KU conservador (a spec recomenda 1–5 %span/s) e KDE em zero, que é a ordem
+ *  recomendada em campo (a derivada entra por último). O `fll` NÃO mora aqui: sai do
+ *  contrato dentro do thunk de `defaults`, senão o ciclo de import com `graph.ts` (que lê
+ *  esta const) avaliaria `contratoFuzzyLoop` antes da inicialização. */
+export const PADRAO_FUZZY_LOOP = {
+  sp_hi_lim: 100,
+  sp_lo_lim: 0,
+  out_scale_lo: 0,
+  out_scale_hi: 100,
+  permitted: ["oos", "man", "auto"],
+  normal: "auto",
+  direct_acting: false,
+  ke: 0.05,
+  kde: 0,
+  ku: 2,
+  tf_de: 1,
 };
 
 export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
@@ -159,6 +181,11 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
     rotulo: "PID Malha",
     descricao: "PID industrial com modos, cascata e tracking (ADR-039)",
     defaults: () => ({ ...PADRAO_PID_LOOP }),
+  },
+  fuzzy_loop: {
+    rotulo: "Fuzzy Malha",
+    descricao: "Controle fuzzy industrial com modos e cascata (ADR-039)",
+    defaults: () => ({ ...PADRAO_FUZZY_LOOP, fll: contratoFuzzyLoop.default_fll }),
   },
 };
 

@@ -5,6 +5,7 @@ import {
   type ContratoPortaDinamicaComDefault,
 } from "../../lib/contracts.gen";
 import {
+  contratoFuzzyLoop,
   avisosInversao,
   arestaComQualidade,
   compactarExecOrder,
@@ -1074,6 +1075,21 @@ test("ciclo comum por aresta de dados continua recusado", () => {
       TAGS,
     ),
   ).toContain("ciclo");
+});
+
+test("fuzzy_loop nasce com as mesmas portas do shell e defaults que o servidor aceita", () => {
+  const bloco = criarBloco("fuzzy_loop", "novo", POS, 1);
+  expect(bloco.type).toBe("fuzzy_loop");
+  expect(handlesEntrada(bloco)).toEqual(handlesEntrada(pidLoop("m", 1)));
+  expect(handlesSaida(bloco)).toEqual(["out", "bkcal_out"]);
+  // O servidor exige ke > 0 e ku > 0 (FuzzyLoopConfig): default inválido faria o bloco
+  // recém-arrastado reprovar no save.
+  const dados = bloco.data as { ke: number; ku: number; kde: number; fll: string };
+  expect(dados.ke).toBeGreaterThan(0);
+  expect(dados.ku).toBeGreaterThan(0);
+  expect(dados.kde).toBe(0);
+  expect(dados.fll).toBe(contratoFuzzyLoop.default_fll);
+  expect(dados.fll).toContain("InputVariable: e");
 });
 
 test("pid_loop nasce com as portas fixas do contrato e defaults válidos", () => {

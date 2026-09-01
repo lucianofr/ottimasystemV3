@@ -38,9 +38,21 @@ export interface ContratoPortaDinamicaComDefault extends ContratoPortaDinamica {
   max_fll_length: number;
 }
 
-export type ContratoPorta = ContratoPortaFixa | ContratoPortaDinamica | ContratoPortaDinamicaComDefault;
+/** Contrato de portas FIXAS que também carrega o default de criação (bloco "fuzzy_loop",
+ * SPEC_FUZZY §3.2): as portas são as do shell, mas a paleta precisa do .fll canônico e do
+ * teto do texto da mesma fonte única — sem duplicar o FLL no frontend. */
+export interface ContratoPortaFixaComDefault extends ContratoPortaFixa {
+  default_fll: string;
+  max_fll_length: number;
+}
 
-export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy" | "first_order" | "kalman" | "pid" | "tfs" | "mpc" | "pid_loop", ContratoPorta> = {
+export type ContratoPorta =
+  | ContratoPortaFixa
+  | ContratoPortaFixaComDefault
+  | ContratoPortaDinamica
+  | ContratoPortaDinamicaComDefault;
+
+export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy" | "first_order" | "kalman" | "pid" | "tfs" | "mpc" | "pid_loop" | "fuzzy_loop", ContratoPorta> = {
   "opc_read": {
     "dynamic": false,
     "ports": [
@@ -257,6 +269,63 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy
         "type": "num"
       }
     ]
+  },
+  "fuzzy_loop": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "cas_in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "rcas_in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "rout_in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "bkcal_in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "bias_in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "trk_in_d",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "lo_in_d",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      },
+      {
+        "name": "bkcal_out",
+        "direction": "output",
+        "type": "num"
+      }
+    ],
+    "default_fll": "Engine: fuzzy_loop_padrao\nInputVariable: e\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: NG Triangle -1.000 -1.000 -0.500\n  term: NP Triangle -1.000 -0.500 0.000\n  term: ZE Triangle -0.500 0.000 0.500\n  term: PP Triangle 0.000 0.500 1.000\n  term: PG Triangle 0.500 1.000 1.000\nInputVariable: de\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: N Triangle -1.000 -1.000 0.000\n  term: ZE Triangle -1.000 0.000 1.000\n  term: P Triangle 0.000 1.000 1.000\nOutputVariable: du\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  aggregation: none\n  defuzzifier: WeightedAverage\n  default: nan\n  lock-previous: false\n  term: NG Constant -1.000\n  term: NP Constant -0.500\n  term: ZE Constant 0.000\n  term: PP Constant 0.500\n  term: PG Constant 1.000\nRuleBlock: regras\n  enabled: true\n  conjunction: AlgebraicProduct\n  disjunction: Maximum\n  implication: AlgebraicProduct\n  activation: General\n  rule: if e is NG then du is NG\n  rule: if e is NP then du is NP\n  rule: if e is ZE and de is N then du is NP\n  rule: if e is ZE and de is ZE then du is ZE\n  rule: if e is ZE and de is P then du is PP\n  rule: if e is PP then du is PP\n  rule: if e is PG then du is PG\n",
+    "max_fll_length": 200000
   }
 };
 
@@ -562,6 +631,43 @@ export interface PidLoopConfig {
   gamma: number;
   gap_band: number;
   gap_gain: number;
+}
+
+export interface FuzzyLoopConfig {
+  permitted: string[];
+  normal: string;
+  shed_opt: "shed_to_auto" | "shed_to_man" | "shed_to_normal";
+  shed_no_return: boolean;
+  direct_acting: boolean;
+  sp_pv_track_in_man: boolean;
+  use_pv_for_bkcal: boolean;
+  track_enable: boolean;
+  track_in_manual: boolean;
+  sp_hi_lim: number;
+  sp_lo_lim: number;
+  sp_rate_up: number | null;
+  sp_rate_dn: number | null;
+  out_hi_lim: number;
+  out_lo_lim: number;
+  out_rate_up: number | null;
+  out_rate_dn: number | null;
+  out_scale_lo: number;
+  out_scale_hi: number;
+  out_startup: number;
+  pv_ftime: number;
+  trk_val: number;
+  lo_val: number;
+  ff_scale_lo: number;
+  ff_scale_hi: number;
+  ff_gain: number;
+  ff_enable: boolean;
+  ke: number;
+  kde: number;
+  ku: number;
+  tf_de: number;
+  fll: string;
+  lut_enabled: boolean;
+  lut_resolution: number;
 }
 
 export interface SopdtParams {

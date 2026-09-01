@@ -124,7 +124,19 @@ export interface ContratoPortaDinamicaComDefault extends ContratoPortaDinamica {
   max_fll_length: number;
 }
 
-export type ContratoPorta = ContratoPortaFixa | ContratoPortaDinamica | ContratoPortaDinamicaComDefault;
+/** Contrato de portas FIXAS que também carrega o default de criação (bloco "fuzzy_loop",
+ * SPEC_FUZZY §3.2): as portas são as do shell, mas a paleta precisa do .fll canônico e do
+ * teto do texto da mesma fonte única — sem duplicar o FLL no frontend. */
+export interface ContratoPortaFixaComDefault extends ContratoPortaFixa {
+  default_fll: string;
+  max_fll_length: number;
+}
+
+export type ContratoPorta =
+  | ContratoPortaFixa
+  | ContratoPortaFixaComDefault
+  | ContratoPortaDinamica
+  | ContratoPortaDinamicaComDefault;
 `.trim();
 
 function tabelaPortContracts(portContracts) {
