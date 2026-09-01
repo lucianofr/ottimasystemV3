@@ -56,7 +56,10 @@ from ottima_core.flowgraph import (
     ScriptConfig,
     SopdtParams,
 )
+from ottima_core.flowgraph.fll_defaults import FUZZY_LOOP_DEFAULT_FLL
 from ottima_core.flowgraph.parse import MAX_FUZZY_FLL_LENGTH
+
+__all__ = ["FUZZY_LOOP_DEFAULT_FLL"]  # reexport do modulo folha (SPEC_FUZZY secao 3.2)
 
 FUZZY_DEFAULT_FLL = """Engine: tsukamoto
 InputVariable: X
