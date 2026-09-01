@@ -85,12 +85,15 @@ class BlockShell(Block):
         self._bias = 0.0
         self._rebase_bias = False
         self._pendentes: list[dict[str, Any]] = []
-        # Edge-trigger dos alarmes de NIVEL (ADR-039: evento por transicao, nao por scan):
-        # cada flag dispara uma vez por episodio e rearma quando a condicao sana
-        # (mesmo padrao de _overrun_reported/_fail_fired de mpc.py).
-        self._shed_fired = False
-        self._scan_lost_fired = False
-        self._kernel_invalid_fired = False
+        # Alarmes de NIVEL (ADR-039: evento por transicao, nao por scan). O rearme e por
+        # scan: `_finish` — funil unico de todos os returns de `step` — promove as condicoes
+        # observadas nesta varredura a `_prev`, entao um scan que NAO observa a condicao
+        # encerra o episodio. Latch por flag exigia um clear em cada rota que pula a
+        # avaliacao, e as que faltavam (saida forcada e dt invalido, ambas sem `compute()`)
+        # silenciavam `kernel_invalid_output` para sempre. Dois conjuntos reusados: a troca
+        # e por referencia, sem alocar por varredura.
+        self._alarmes: set[str] = set()
+        self._alarmes_prev: set[str] = set()
 
         if carry is not None:
             self.u = clamp(carry.u, cfg.out_lo_lim, cfg.out_hi_lim)
@@ -213,14 +216,12 @@ class BlockShell(Block):
 
         if dt is None or not (0.0 < dt <= self.cfg.max_dt):
             if dt is not None:
-                if not self._scan_lost_fired:
-                    self._scan_lost_fired = True
-                    self._defer_event(
-                        kind=KIND_LOOP_ALARM,
-                        severity="warning",
-                        message=f"Scan perdido (dt={dt:.3f}s)",
-                        payload={"block_id": self.block_id, "code": "scan_lost", "dt": dt},
-                    )
+                self._alarme_nivelado(
+                    "scan_lost",
+                    kind=KIND_LOOP_ALARM,
+                    message=f"Scan perdido (dt={dt:.3f}s)",
+                    payload={"block_id": self.block_id, "code": "scan_lost", "dt": dt},
+                )
             if not kernel_errors and dt is None:
                 self.mode.actual = self._resolve_mode(inputs, kernel_errors)
                 m = self.mode.actual
@@ -237,7 +238,6 @@ class BlockShell(Block):
             self.kernel.align(self.u, self.sp, pv_k)
             return await self._finish(inputs)
 
-        self._scan_lost_fired = False  # scan com dt valido: rearma o alarme
         self.mode.actual = self._resolve_mode(inputs, kernel_errors)
         m = self.mode.actual
         self.sp = self._resolve_sp(m, inputs, dt)
@@ -257,17 +257,14 @@ class BlockShell(Block):
 
         du_dt = self.kernel.compute(self.sp, pv_k, dt)
         if not math.isfinite(du_dt):
-            if not self._kernel_invalid_fired:
-                self._kernel_invalid_fired = True
-                self._defer_event(
-                    kind=KIND_LOOP_ALARM,
-                    severity="warning",
-                    message="Kernel devolveu resultado invalido; OUT mantido",
-                    payload={"block_id": self.block_id, "code": "kernel_invalid_output"},
-                )
+            self._alarme_nivelado(
+                "kernel_invalid_output",
+                kind=KIND_LOOP_ALARM,
+                message="Kernel devolveu resultado invalido; OUT mantido",
+                payload={"block_id": self.block_id, "code": "kernel_invalid_output"},
+            )
             self.kernel.align(self.u, self.sp, pv_k)
             return await self._finish(inputs)
-        self._kernel_invalid_fired = False  # du/dt finito: rearma o alarme
         u = self._rate_limit(self.u_int + du_dt * dt + bias, dt)
         self.u = clamp(u, self.cfg.out_lo_lim, self.cfg.out_hi_lim)
         self.u_int = self.u - bias
@@ -302,38 +299,30 @@ class BlockShell(Block):
         cfg = self.cfg
         target = self.mode.target
         if kernel_errors or target is Mode.OOS:
-            return self._sem_shed(Mode.OOS)
+            return Mode.OOS
         efetivo = target if (target & cfg.permitted) else self.mode.normal
         bk = inputs.get("bkcal_in")
         if bk is not None and bk.v is not None and as_signal(bk).init_request:
-            return self._sem_shed(Mode.IMAN)
+            return Mode.IMAN
         lo = inputs.get("lo_in_d")
         if lo is not None and bool(lo.v) and lo.ok:
-            return self._sem_shed(Mode.LO)
+            return Mode.LO
         if not self.pv_ok and efetivo in CALCULATING_MODES:
-            return self._sem_shed(Mode.MAN)
+            return Mode.MAN
         for modo, porta in ((Mode.CAS, "cas_in"), (Mode.RCAS, "rcas_in"), (Mode.ROUT, "rout_in")):
             if efetivo is modo:
                 fonte = inputs.get(porta)
                 if fonte is None or fonte.v is None or not as_signal(fonte).is_good:
                     return self._shed(efetivo)
-        return self._sem_shed(efetivo)
-
-    def _sem_shed(self, modo: Mode) -> Mode:
-        """Resolucao sem shed: rearma o edge-trigger do alarme de shed."""
-        self._shed_fired = False
-        return modo
+        return efetivo
 
     def _shed(self, alvo: Mode) -> Mode:
         destino = _SHED_DESTINO.get(self.cfg.shed_opt, self.mode.normal)
         if self.cfg.shed_no_return and self.mode.target is alvo:
             self.mode.target = destino
-        if self._shed_fired:
-            return destino
-        self._shed_fired = True
-        self._defer_event(
+        self._alarme_nivelado(
+            "shed",
             kind=KIND_LOOP_SHED,
-            severity="warning",
             message=f"Fonte remota degradada: rebaixado para '{MODE_NAMES[destino]}'",
             payload={
                 "block_id": self.block_id,
@@ -431,6 +420,11 @@ class BlockShell(Block):
                 },
             )
             self._prev_actual = m
+        # Fecha a contabilidade de alarmes de nivel com a varredura: o que foi observado
+        # agora vira `_prev` (suprime a repeticao no proximo scan) e o conjunto reciclado
+        # entra vazio no scan seguinte, entao condicao nao observada = episodio encerrado.
+        self._alarmes_prev, self._alarmes = self._alarmes, self._alarmes_prev
+        self._alarmes.clear()
         await self._flush_events()
         if self._publish_state is not None:
             agora = time.monotonic()
@@ -438,6 +432,15 @@ class BlockShell(Block):
                 self._last_publish = agora
                 await self._publish_state(self._loop_state())
         return self._emit()
+
+    def _alarme_nivelado(
+        self, code: str, *, kind: str, message: str, payload: dict[str, Any]
+    ) -> None:
+        """Alarme de NIVEL: registra a condicao neste scan, emite so na borda de subida."""
+        self._alarmes.add(code)
+        if code in self._alarmes_prev:
+            return
+        self._defer_event(kind=kind, severity="warning", message=message, payload=payload)
 
     def _emit(self) -> dict[str, PortSample]:
         cfg, m = self.cfg, self.mode.actual

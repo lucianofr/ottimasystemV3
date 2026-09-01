@@ -66,3 +66,53 @@ async def test_kernel_invalid_uma_vez_por_episodio() -> None:
     kernel.rate = math.nan
     await passo(b, 5.0, **{"in": amostra(50.0)})
     assert len(_alarmes(eventos, "kernel_invalid_output")) == 2
+
+
+async def test_kernel_invalid_rearma_depois_de_saida_forcada() -> None:
+    """Latch preso: em MAN o `compute()` nem roda, entao o episodio de NaN terminou.
+
+    Sem rearme por scan, o proximo AUTO em NaN fica mudo para sempre — a rota de saida
+    forcada nao tem ponto natural onde limpar a flag do alarme.
+    """
+    eventos = EventosFake()
+    kernel = StubKernel(rate=math.nan)
+    b = bloco(kernel=kernel, eventos=eventos)
+    await passo(b, 0.0, **{"in": amostra(50.0)})
+    b.write_target(Mode.AUTO)
+    await passo(b, 1.0, **{"in": amostra(50.0)})
+    assert len(_alarmes(eventos, "kernel_invalid_output")) == 1
+
+    b.write_target(Mode.MAN)  # saida forcada: kernel fora do circuito
+    await passo(b, 2.0, **{"in": amostra(50.0)})
+    b.write_target(Mode.AUTO)
+    await passo(b, 3.0, **{"in": amostra(50.0)})
+    assert len(_alarmes(eventos, "kernel_invalid_output")) == 2
+
+
+async def test_kernel_invalid_rearma_depois_de_scan_invalido() -> None:
+    """Mesmo latch pela outra rota que pula `compute()`: um scan de dt invalido."""
+    eventos = EventosFake()
+    kernel = StubKernel(rate=math.nan)
+    b = bloco(kernel=kernel, eventos=eventos)
+    await passo(b, 0.0, **{"in": amostra(50.0)})
+    b.write_target(Mode.AUTO)
+    await passo(b, 1.0, **{"in": amostra(50.0)})
+    assert len(_alarmes(eventos, "kernel_invalid_output")) == 1
+
+    await passo(b, 1.0, **{"in": amostra(50.0)})  # dt=0: kernel nao consultado
+    await passo(b, 2.0, **{"in": amostra(50.0)})
+    assert len(_alarmes(eventos, "kernel_invalid_output")) == 2
+
+
+async def test_shed_rearma_por_rota_que_nao_avalia_a_fonte() -> None:
+    """Episodio de shed encerrado por uma rota que nem olha a fonte remota (PV ruim)."""
+    eventos = EventosFake()
+    b = bloco(eventos=eventos, permitted=Mode.OOS | Mode.MAN | Mode.AUTO | Mode.CAS)
+    await passo(b, 0.0, **{"in": amostra(50.0)})
+    b.write_target(Mode.CAS)
+    await passo(b, 1.0, **{"in": amostra(50.0), "cas_in": make_signal(50.0, Quality.BAD)})
+    assert eventos.kinds().count("loop_shed") == 1
+
+    await passo(b, 2.0, **{"in": amostra(50.0, ok=False)})  # cai por PV, sem avaliar cas_in
+    await passo(b, 3.0, **{"in": amostra(50.0), "cas_in": make_signal(50.0, Quality.BAD)})
+    assert eventos.kinds().count("loop_shed") == 2
