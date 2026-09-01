@@ -131,7 +131,13 @@ class FuzzyKernel:
         execucao (SPEC secao 3.3). `u` nao entra na conta — a forma incremental nao guarda
         posicao, e por isso que a troca de sintonia nao gera degrau (F10).
         """
-        self.e_prev = self._error(sp, pv)
+        erro = self._error(sp, pv)
+        if not math.isfinite(erro):
+            # Um align que nao pode ser calculado nao finge ter alinhado: gravar `e_prev =
+            # nan` deixaria `de = (finito - nan)` NaN em TODO scan seguinte, muito depois de
+            # a entrada ter voltado ao normal. O shell rechama align no proximo scan.
+            return
+        self.e_prev = erro
         self.de_f = 0.0
 
     def _error(self, sp: float, pv: float) -> float:
@@ -157,8 +163,13 @@ class FuzzyKernel:
         self.de_f += a * (de - self.de_f)
         self.e_prev = e
 
+        # `_sat` NAO sanitiza NaN (`v < lo` e `v > hi` sao ambos False), entao a saturacao
+        # nao e barreira: e_n/de_n saem NaN se o estado do filtro estiver contaminado, ainda
+        # que sp/pv deste scan sejam finitos. A guarda vai AQUI, depois dela.
         e_n = _sat(e * c.ke, -1.0, 1.0)
         de_n = _sat(self.de_f * c.kde, -1.0, 1.0)
+        if not (math.isfinite(e_n) and math.isfinite(de_n)):
+            return math.nan  # diag intocado: o shell segura OUT e alarma
         # INVARIANTE: todo valor de `diag` e finito. `LoopState.diag` e `dict[str, float]` e
         # o recorder REVALIDA o JSON (`_parse(LoopState, raw)`) — `model_dump_json` emite NaN
         # como `null`, mas `model_validate_json` rejeita null, e o quadro inteiro e contado
@@ -188,6 +199,12 @@ class FuzzyKernel:
         pode "consertar" regiao sem regra por interpolacao — o buraco tem de continuar
         visivel como `kernel_invalid_output` (F3).
         """
+        if not (math.isfinite(e_n) and math.isfinite(de_n)):
+            # Guarda no PROPRIO ponto do crash: `int(nan)` levanta ValueError, que sobe por
+            # `step()` ate `_handle_loop_failure` e derruba o flow inteiro, enquanto a
+            # inferencia devolveria NaN. Barrar aqui nao depende de provar que nenhum NaN
+            # chega — a mesma entrada tem de ter o mesmo destino nos dois caminhos.
+            return math.nan
         lut = self.lut
         assert lut is not None  # so chamado quando a LUT esta ativa
         n = lut.shape[0]

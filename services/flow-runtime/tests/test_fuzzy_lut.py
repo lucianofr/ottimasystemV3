@@ -217,3 +217,42 @@ def test_diag_nunca_carrega_valor_nao_finito() -> None:
         k.align(0.0, 0.0, 0.0)
         assert math.isnan(k.compute(sp=1.0, pv=0.0, dt=1.0)), f"lut={lut}"
         assert all(math.isfinite(v) for v in k.diag.values()), f"lut={lut}: {k.diag}"
+
+
+def test_sat_nao_sanitiza_nan_e_por_isso_a_guarda_e_depois_dele() -> None:
+    """`_sat` e `lo if v < lo else hi if v > hi else v`: as duas comparacoes sao False para
+    NaN, entao ele NAO e barreira — e_n/de_n saem NaN e chegariam ao `int()`."""
+    from ottima_flow_runtime.blocks.kernels.fuzzy import _sat
+
+    assert math.isnan(_sat(math.nan, -1.0, 1.0))
+
+
+def test_align_nao_envenena_o_estado_com_entrada_nao_finita() -> None:
+    """Sem isto, um `align` com sp/pv NaN grava `e_prev = nan` e TODO compute seguinte —
+    ainda que com sp/pv finitos — produz `de = (finito - nan) = nan`."""
+    k = _kernel_lut()
+    k.align(0.0, 10.0, 8.0)  # estado bom: e_prev = 2.0
+    k.align(0.0, math.nan, 8.0)
+    assert k.e_prev == 2.0  # preservado, nao envenenado
+
+
+def test_estado_envenenado_nao_derruba_o_flow_nem_publica_nan() -> None:
+    """Reproduz o caminho real: `align` com NaN e depois compute com sp/pv FINITOS.
+
+    Com a LUT ligada isso levantava ValueError em `int(nan)`, que sobe por `step()` ate
+    `_handle_loop_failure` e derruba o FLOW INTEIRO; sem a LUT, publicava `de_n: nan`, que o
+    recorder descarta. Os dois caminhos agora devolvem NaN e o shell segura o OUT.
+    """
+    for lut in (False, True):
+        k = _kernel_lut(kde=1.0, lut_enabled=lut)
+        k.e_prev = math.nan  # estado envenenado, venha de onde vier
+        r = k.compute(sp=20.0, pv=10.0, dt=1.0)
+        assert math.isnan(r), f"lut={lut}"
+        assert all(math.isfinite(v) for v in k.diag.values()), f"lut={lut}: {k.diag}"
+
+
+def test_interp_bilinear_devolve_nan_em_entrada_nao_finita() -> None:
+    """Guarda no PROPRIO ponto do crash: nao depender de provar que nenhum NaN sobe."""
+    k = _kernel_lut(lut_enabled=True)
+    assert math.isnan(k._interp_bilinear(math.nan, 0.0))
+    assert math.isnan(k._interp_bilinear(0.0, math.nan))

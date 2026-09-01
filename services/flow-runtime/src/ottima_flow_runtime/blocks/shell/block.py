@@ -256,6 +256,14 @@ class BlockShell(Block):
             return await self._finish(inputs)
 
         du_dt = self.kernel.compute(self.sp, pv_k, dt)
+        # Diagnostico do kernel (SPEC_FUZZY secao 8) copiado ANTES do portao de finitude: num
+        # scan sem regra o ponto de operacao corrente e exatamente o que o comissionador
+        # procura no heatmap — publicar o ultimo ponto COBERTO marcaria a celula errada
+        # justamente durante o alarme. O kernel garante `diag` finito (e omite `du_n` quando
+        # nao houve saida), entao o quadro segue valido para o recorder.
+        kernel_diag = getattr(self.kernel, "diag", None)
+        if kernel_diag:
+            self.diag = dict(kernel_diag)
         if not math.isfinite(du_dt):
             self._alarme_nivelado(
                 "kernel_invalid_output",
@@ -265,12 +273,6 @@ class BlockShell(Block):
             )
             self.kernel.align(self.u, self.sp, pv_k)
             return await self._finish(inputs)
-        # Diagnostico do kernel (SPEC_FUZZY secao 8): so depois de um compute VALIDO — num
-        # scan invalido o `return` acima preserva o ultimo quadro bom, que e o que o
-        # operador precisa ver no faceplate para achar a regiao sem regra.
-        kernel_diag = getattr(self.kernel, "diag", None)
-        if kernel_diag:
-            self.diag = dict(kernel_diag)
         u = self._rate_limit(self.u_int + du_dt * dt + bias, dt)
         self.u = clamp(u, self.cfg.out_lo_lim, self.cfg.out_hi_lim)
         self.u_int = self.u - bias

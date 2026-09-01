@@ -1,5 +1,7 @@
 """F5 + reexecucao dos cenarios S criticos com o FuzzyKernel real (SPEC_FUZZY secao 9)."""
 
+import math
+
 from shell_harness import EPS, EventosFake, amostra, passo
 
 from ottima_core.flowgraph.parse import FuzzyLoopConfig
@@ -179,3 +181,35 @@ async def test_quadro_publicado_faz_round_trip_de_validacao() -> None:
         bruto = b._loop_state().model_dump_json()
         assert "null" not in bruto.split('"diag"')[1], f"lut={lut}: {bruto}"
         LoopState.model_validate_json(bruto)  # levanta ValidationError se houver null
+
+
+async def test_diag_do_scan_invalido_mostra_o_ponto_descoberto() -> None:
+    """F3/S12: durante o alarme e exatamente o ponto SEM REGRA que o comissionador procura.
+
+    Publicar o ultimo ponto coberto marcaria a celula errada no heatmap justamente no
+    instante em que a informacao importa.
+    """
+    fll = FuzzyLoopConfig.model_validate(
+        {"sp_hi_lim": 100.0, "sp_lo_lim": 0.0, "ke": 0.1, "ku": 4.0}
+    ).fll
+    for regra in ("  rule: if e is PP then du is PP\n", "  rule: if e is PG then du is PG\n"):
+        fll = fll.replace(regra, "")
+    b = _malha(fll=fll, ke=0.1)
+    t = 0.0
+    await passo(b, t, **{"in": amostra(50.0)})
+    b.write_sp(50.0)
+    b.write_target(Mode.AUTO)
+    t += 1.0
+    await passo(b, t, **{"in": amostra(50.0)})
+    assert abs(b.diag["e_n"]) < 1e-9  # ponto coberto, na origem
+
+    b.write_sp(90.0)  # empurra para a regiao sem regra
+    t += 1.0
+    await passo(b, t, **{"in": amostra(50.0)})
+    estado = b._loop_state()
+    assert estado.diag["e_n"] == 1.0  # o ponto DESCOBERTO, nao o ultimo bom
+    assert "du_n" not in estado.diag  # nenhuma saida foi computada neste scan
+    assert all(math.isfinite(v) for v in estado.diag.values())
+    from ottima_core.bus import LoopState
+
+    LoopState.model_validate_json(estado.model_dump_json())  # segue ingerivel
