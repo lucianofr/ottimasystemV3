@@ -1,12 +1,20 @@
 """fuzzy_loop no runtime: instanciacao, F10 (sintonia in-place) e F11 (estrutural->MAN)."""
 
+from typing import Any, cast
+
 from shell_harness import EPS, amostra, passo
 
+from ottima_core.flowgraph import TagRef, parse_graph
 from ottima_core.flowgraph.parse import FuzzyLoopConfig, loop_structural
 from ottima_flow_runtime.blocks.kernels.fuzzy import BrokenKernel, FuzzyKernel, build_fuzzy_kernel
 from ottima_flow_runtime.blocks.shell.block import BlockShell
 from ottima_flow_runtime.blocks.shell.mode import Mode
-from ottima_flow_runtime.definition import LOOP_TYPES, fuzzy_kernel_cfg_from, shell_cfg_from
+from ottima_flow_runtime.definition import (
+    LOOP_TYPES,
+    build_definition,
+    fuzzy_kernel_cfg_from,
+    shell_cfg_from,
+)
 
 
 def _config(**over) -> FuzzyLoopConfig:
@@ -85,3 +93,103 @@ async def test_f11_troca_de_fll_e_estrutural() -> None:
     assert loop_structural(fa) == loop_structural(
         {"type": "fuzzy_loop", **_config(ku=9.0).model_dump()}
     )
+
+
+# --------------------------------------------------------------------------------------
+# build_definition — o caminho REAL do deploy (mesa pura, espelho de
+# test_pid_loop_definition.py)
+# --------------------------------------------------------------------------------------
+
+
+def _graph(**over: object) -> dict:
+    dados: dict[str, object] = {"sp_hi_lim": 100.0, "sp_lo_lim": 0.0, "ke": 0.05, "ku": 2.0}
+    dados.update(over)
+    return {
+        "nodes": [
+            {
+                "id": "r1",
+                "type": "opc_read",
+                "position": {"x": 0.0, "y": 0.0},
+                "data": {"exec_order": 1, "tag_id": 1},
+            },
+            {
+                "id": "m",
+                "type": "fuzzy_loop",
+                "position": {"x": 0.0, "y": 0.0},
+                "data": {"exec_order": 2, **dados},
+            },
+        ],
+        "edges": [
+            {
+                "id": "e1",
+                "source": "r1",
+                "target": "m",
+                "sourceHandle": "out",
+                "targetHandle": "in",
+            },
+        ],
+    }
+
+
+class _RedisFake:
+    async def publish(self, channel: str, payload: str) -> None:
+        return None
+
+
+def _build(graph: dict, reuse: dict | None = None):
+    none: Any = None
+    return build_definition(
+        parse_graph(graph),
+        {1: TagRef(id=1, conn_id=1, direction="r", data_type="float")},
+        flow_id=1,
+        ts_seconds=1.0,
+        reuse=reuse or {},
+        redis_client=cast(Any, _RedisFake()),
+        pool=none,
+        snapshot=none,
+    )
+
+
+def test_build_definition_instancia_blockshell_com_fuzzykernel() -> None:
+    """Regressao: `_instantiate` despachava por `node.type == "pid_loop"` literal, e o
+    fallback final da cadeia e `TfsBlock` — um `fuzzy_loop` caia no bloco de funcao de
+    transferencia e o deploy morria com `'FuzzyLoopConfig' object has no attribute 'matrix'`.
+    Achado no smoke fim-a-fim; o dispatch agora e por `LOOP_TYPES`."""
+    staged = _build(_graph())
+    _, bloco = staged.blocks["m"]
+    assert isinstance(bloco, BlockShell)
+    assert isinstance(bloco.kernel, FuzzyKernel)
+    assert bloco.cfg.max_dt == 10.0  # 10x o Ts do flow
+
+
+def test_build_definition_hotswap_de_sintonia_preserva_a_instancia() -> None:
+    antes = _build(_graph())
+    bloco = antes.blocks["m"][1]
+    depois = _build(_graph(ku=6.0), reuse=antes.blocks)
+    assert depois.blocks["m"][1] is bloco  # classe de sintonia: in-place (D11)
+    assert isinstance(bloco, BlockShell)
+    assert bloco.kernel.cfg.ku == 6.0
+
+
+async def test_build_definition_hotswap_de_fll_aterrissa_em_man_se_calculava() -> None:
+    """F11 no caminho real: trocar o `.fll` re-instancia e a malha aterrissa em MAN."""
+    antes = _build(_graph())
+    bloco = antes.blocks["m"][1]
+    assert isinstance(bloco, BlockShell)
+    t = 0.0
+    await passo(bloco, t, **{"in": amostra(50.0)})
+    bloco.write_sp(60.0)
+    bloco.write_target(Mode.AUTO)
+    for _ in range(3):
+        t += 1.0
+        await passo(bloco, t, **{"in": amostra(50.0)})
+    assert bloco.mode.actual is Mode.AUTO
+    u_antes = bloco.u
+
+    outro = _graph(fll=_config().fll.replace("Engine: fuzzy_loop_padrao", "Engine: outro"))
+    depois = _build(outro, reuse=antes.blocks)
+    novo = depois.blocks["m"][1]
+    assert novo is not bloco  # classe estrutural: re-instancia
+    assert isinstance(novo, BlockShell)
+    assert novo.mode.target is Mode.MAN  # aterrissou em MAN
+    assert abs(novo.u - u_antes) < 1e-9  # com u mantido, sem degrau

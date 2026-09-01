@@ -311,7 +311,7 @@ def _instantiate(
         )
     if node.type == "fuzzy":
         return _instantiate_fuzzy(node, flow_id=flow_id, redis_client=redis_client)
-    if node.type == "pid_loop":
+    if node.type in LOOP_TYPES:
         return _instantiate_loop(
             node,
             flow_id=flow_id,
