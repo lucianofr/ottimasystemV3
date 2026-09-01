@@ -265,6 +265,12 @@ class BlockShell(Block):
             )
             self.kernel.align(self.u, self.sp, pv_k)
             return await self._finish(inputs)
+        # Diagnostico do kernel (SPEC_FUZZY secao 8): so depois de um compute VALIDO — num
+        # scan invalido o `return` acima preserva o ultimo quadro bom, que e o que o
+        # operador precisa ver no faceplate para achar a regiao sem regra.
+        kernel_diag = getattr(self.kernel, "diag", None)
+        if kernel_diag:
+            self.diag = dict(kernel_diag)
         u = self._rate_limit(self.u_int + du_dt * dt + bias, dt)
         self.u = clamp(u, self.cfg.out_lo_lim, self.cfg.out_hi_lim)
         self.u_int = self.u - bias
