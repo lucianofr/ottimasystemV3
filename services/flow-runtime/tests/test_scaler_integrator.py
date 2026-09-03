@@ -1,12 +1,18 @@
 """Contratos dos blocos utilitários Scaler e Integrator.
 
 - **Scaler**: reescala linear sem estado — `out = out_min + (in - in_min) * ganho`, com
-  `ganho = (out_max - out_min) / (in_max - in_min)`. Fora da faixa de entrada extrapola
-  (nunca trava: quem limita é a config de escala, não o bloco).
-- **Integrator**: totalizador com estado — `out += in * Ts / fator` por varredura, fator
-  1/60/3600 para base s/min/h. O Ts vem do scheduler (única autoridade de tempo, ADR-031)
-  — nada de relógio de parede. `reset` ≠ 0 zera o total e a varredura sai 0, sem acumular.
+  clamp na faixa de saída fora da faixa de entrada (spike de sensor nunca vira escrita
+  além do OUT_SCALE) e saída nula/inválida para amostra não-finita.
+- **Integrator**: totalizador com estado — `out += in * dt / fator`, fator 1/60/3600 para
+  base s/min/h. O `dt` é medido entre os `ts` do scheduler (overrun pula fronteira sem
+  compensar: Ts nominal subcontaria); `dt <= 0` ou `dt > 10×Ts` congela e invalida, e a
+  primeira varredura com valor só inicia o relógio. Amostra `ok=False` ou não-finita
+  congela o total (erro de totalizador é permanente — não vale a A-6 do filtro).
+  `reset` ≠ 0 com qualidade boa zera o total e a varredura sai 0, sem acumular.
 """
+
+from datetime import UTC, datetime, timedelta
+from typing import Literal, cast
 
 import pytest
 
@@ -15,6 +21,7 @@ from ottima_flow_runtime.blocks.integrator import IntegratorBlock
 from ottima_flow_runtime.blocks.scaler import ScalerBlock
 
 TS = 1.0
+T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def scaler(**escala: float) -> ScalerBlock:
@@ -22,21 +29,29 @@ def scaler(**escala: float) -> ScalerBlock:
     return ScalerBlock("s1", **config)
 
 
-def integrator(time_base: str = "min", *, ts: float = TS) -> IntegratorBlock:
+def integrator(time_base: Literal["s", "min", "h"] = "min", *, ts: float = TS) -> IntegratorBlock:
     return IntegratorBlock("i1", time_base=time_base, ts_seconds=ts)
 
 
-async def alimenta(
-    block: ScalerBlock | IntegratorBlock,
-    valor: float,
-    *,
-    ok: bool = True,
-    reset: object = ...,
-) -> PortSample:
-    entradas: dict[str, PortSample] = {"in": PortSample(valor, ok)}
-    if reset is not ...:
-        entradas["reset"] = PortSample(reset, True)  # type: ignore[arg-type]
-    return (await block.step(entradas))["out"]
+async def alimenta_scaler(bloco: ScalerBlock, valor: float, *, ok: bool = True) -> PortSample:
+    return (await bloco.step({"in": PortSample(valor, ok)}))["out"]
+
+
+class Totaliza:
+    """Dirige um IntegratorBlock com relógio explícito: cada chamada avança `passo`."""
+
+    def __init__(self, bloco: IntegratorBlock, *, passo: float = TS) -> None:
+        self.bloco = bloco
+        self.passo = passo
+        self.agora = T0
+
+    async def alimenta(self, valor: float, *, ok: bool = True, reset: object = ...) -> PortSample:
+        entradas: dict[str, PortSample] = {"in": PortSample(valor, ok)}
+        if reset is not ...:
+            entradas["reset"] = PortSample(cast("float | bool | None", reset), True)
+        saida = (await self.bloco.step(entradas, ts=self.agora))["out"]
+        self.agora += timedelta(seconds=self.passo)
+        return saida
 
 
 # --------------------------------------------------------------------------------------
@@ -47,26 +62,46 @@ async def alimenta(
 async def test_scaler_mapeia_os_extremos_da_escala():
     bloco = scaler()
 
-    assert (await alimenta(bloco, 0.0)).v == 4.0
-    assert (await alimenta(bloco, 100.0)).v == 20.0
+    assert (await alimenta_scaler(bloco, 0.0)).v == 4.0
+    assert (await alimenta_scaler(bloco, 100.0)).v == 20.0
 
 
 async def test_scaler_mapeia_valor_intermediario_proporcionalmente():
-    assert (await alimenta(scaler(), 50.0)).v == pytest.approx(12.0)
+    assert (await alimenta_scaler(scaler(), 50.0)).v == pytest.approx(12.0)
 
 
 async def test_scaler_aceita_faixa_de_saida_invertida():
     bloco = scaler(out_min=100.0, out_max=0.0)
 
-    assert (await alimenta(bloco, 25.0)).v == pytest.approx(75.0)
+    assert (await alimenta_scaler(bloco, 25.0)).v == pytest.approx(75.0)
 
 
-async def test_scaler_extrapola_fora_da_faixa_sem_travar():
-    assert (await alimenta(scaler(), 150.0)).v == pytest.approx(28.0)
+async def test_scaler_trava_na_faixa_de_saida_fora_da_faixa_de_entrada():
+    """Spike de sensor não vira escrita além do OUT_SCALE: clamp, nunca extrapolação."""
+    bloco = scaler()
+
+    assert (await alimenta_scaler(bloco, 150.0)).v == 20.0
+    assert (await alimenta_scaler(bloco, -50.0)).v == 4.0
+
+
+async def test_scaler_trava_tambem_com_faixa_invertida():
+    bloco = scaler(out_min=100.0, out_max=0.0)
+
+    assert (await alimenta_scaler(bloco, 150.0)).v == 0.0
+    assert (await alimenta_scaler(bloco, -50.0)).v == 100.0
+
+
+async def test_scaler_amostra_nao_finita_sai_nula_e_invalida():
+    """Convenção da casa (fuzzy/pid): nunca nan/inf com ok=True na saída."""
+    for ruim in (float("nan"), float("inf"), float("-inf")):
+        saida = await alimenta_scaler(scaler(), ruim)
+
+        assert saida.v is None
+        assert saida.ok is False
 
 
 async def test_scaler_propaga_invalidez_da_entrada():
-    saida = await alimenta(scaler(), 50.0, ok=False)
+    saida = await alimenta_scaler(scaler(), 50.0, ok=False)
 
     assert saida.v == pytest.approx(12.0)
     assert saida.ok is False
@@ -87,106 +122,183 @@ def test_scaler_declara_uma_entrada_e_uma_saida():
 
 
 # --------------------------------------------------------------------------------------
-# Integrator — acumulação no tempo do flow
+# Integrator — acumulação no tempo medido pelo scheduler
 # --------------------------------------------------------------------------------------
 
 
-async def test_integrator_acumula_na_base_minuto():
-    """6 unidades/min com Ts=1 s ⇒ 0,1 por varredura; 60 varreduras totalizam 6."""
-    bloco = integrator("min")
-    for _ in range(59):
-        await alimenta(bloco, 6.0)
+async def test_integrator_primeira_varredura_so_inicia_o_relogio():
+    """Sem dt conhecido não há o que acumular: o total nasce zero, não in*Ts."""
+    totaliza = Totaliza(integrator("s"))
 
-    assert (await alimenta(bloco, 6.0)).v == pytest.approx(6.0)
+    assert (await totaliza.alimenta(6.0)).v == 0.0
+    assert (await totaliza.alimenta(6.0)).v == pytest.approx(6.0)
+
+
+async def test_integrator_acumula_na_base_minuto():
+    """6 unidades/min com dt=1 s ⇒ 0,1 por varredura após a inicialização."""
+    totaliza = Totaliza(integrator("min"))
+    await totaliza.alimenta(6.0)  # inicializa o relógio
+    for _ in range(59):
+        await totaliza.alimenta(6.0)
+
+    assert (await totaliza.alimenta(6.0)).v == pytest.approx(6.0)
 
 
 async def test_integrator_acumula_na_base_segundo():
-    bloco = integrator("s")
+    totaliza = Totaliza(integrator("s"))
+    await totaliza.alimenta(2.5)
 
-    assert (await alimenta(bloco, 2.5)).v == pytest.approx(2.5)
-    assert (await alimenta(bloco, 2.5)).v == pytest.approx(5.0)
+    assert (await totaliza.alimenta(2.5)).v == pytest.approx(2.5)
+    assert (await totaliza.alimenta(2.5)).v == pytest.approx(5.0)
 
 
 async def test_integrator_acumula_na_base_hora():
-    bloco = integrator("h", ts=0.5)
+    totaliza = Totaliza(integrator("h"), passo=0.5)
+    await totaliza.alimenta(3600.0)
 
-    assert (await alimenta(bloco, 3600.0)).v == pytest.approx(0.5)
+    assert (await totaliza.alimenta(3600.0)).v == pytest.approx(0.5)
 
 
-async def test_integrator_reset_ativo_zera_o_total_e_a_varredura():
+async def test_integrator_usa_o_dt_do_scheduler_e_nao_o_ts_nominal():
+    """Overrun pula fronteira sem compensar: dt=2 s com Ts=1 s soma 2×, não 1×."""
+    totaliza = Totaliza(integrator("s"), passo=2.0)
+    await totaliza.alimenta(3.0)
+
+    assert (await totaliza.alimenta(3.0)).v == pytest.approx(6.0)
+
+
+async def test_integrator_congela_em_salto_de_relogio():
+    """dt > 10×Ts é salto de NTP/parada longa: somar seria integrar um delta corrupto."""
+    totaliza = Totaliza(integrator("s"))
+    await totaliza.alimenta(5.0)
+    await totaliza.alimenta(5.0)  # total = 5
+
+    totaliza.agora += timedelta(hours=1)
+    suspeita = await totaliza.alimenta(5.0)
+    assert suspeita.v == pytest.approx(5.0)
+    assert suspeita.ok is False
+
+    # O relógio foi reancorado na varredura do salto: a seguinte volta a acumular.
+    assert (await totaliza.alimenta(5.0)).v == pytest.approx(10.0)
+
+
+async def test_integrator_congela_em_dt_nao_positivo():
     bloco = integrator("s")
-    await alimenta(bloco, 5.0)
-    await alimenta(bloco, 5.0)
+    await bloco.step({"in": PortSample(5.0, True)}, ts=T0)
+    await bloco.step({"in": PortSample(5.0, True)}, ts=T0 + timedelta(seconds=1))
 
-    assert (await alimenta(bloco, 5.0, reset=1.0)).v == 0.0
-    assert (await alimenta(bloco, 5.0, reset=0.0)).v == pytest.approx(5.0)
-
-
-async def test_integrator_integra_a_variavel_e_nao_o_valor_instantaneo():
-    """Entrada variável acumula amostra a amostra (soma de Riemann no Ts do flow)."""
-    bloco = integrator("s", ts=2.0)
-    saida = await alimenta(bloco, 1.0)
-    for valor in (2.0, 3.0):
-        saida = await alimenta(bloco, valor)
-
-    assert saida.v == pytest.approx(12.0)
-
-
-async def test_integrator_reset_cold_nao_zera():
-    """`reset` conectado sem valor ainda (None) não é comando de zerar."""
-    bloco = integrator("s")
-    await alimenta(bloco, 5.0)
-
-    assert (await alimenta(bloco, 5.0, reset=None)).v == pytest.approx(10.0)
-
-
-async def test_integrator_propaga_invalidez_da_entrada():
-    saida = await alimenta(integrator("s"), 5.0, ok=False)
+    saida = (await bloco.step({"in": PortSample(5.0, True)}, ts=T0))["out"]
 
     assert saida.v == pytest.approx(5.0)
     assert saida.ok is False
 
 
-async def test_integrator_amostra_nao_finita_nao_envenena_o_total():
-    """inf/nan não entram no acumulador: retém o total e marca a varredura inválida."""
+async def test_integrator_sem_ts_cai_no_ts_nominal():
+    """Chamador fora do scheduler (teste de pureza) usa o Ts configurado."""
     bloco = integrator("s")
-    await alimenta(bloco, 5.0)
 
-    suja = await alimenta(bloco, float("nan"))
-    assert suja.v == pytest.approx(5.0)
-    assert suja.ok is False
-    # O estado se cura na amostra seguinte — nunca precisa de redeploy para voltar.
-    assert (await alimenta(bloco, 5.0)).v == pytest.approx(10.0)
+    assert (await bloco.step({"in": PortSample(2.5, True)}))["out"].v == pytest.approx(2.5)
 
 
-async def test_integrator_ignora_reset_sem_qualidade():
-    """Comando de zerar vindo de amostra inválida não apaga o total."""
-    bloco = integrator("s")
-    await alimenta(bloco, 5.0)
-
-    saida = (await bloco.step({"in": PortSample(5.0, True), "reset": PortSample(1.0, False)}))[
-        "out"
-    ]
+async def test_integrator_integra_a_variavel_e_nao_o_valor_instantaneo():
+    totaliza = Totaliza(integrator("s"), passo=2.0)
+    await totaliza.alimenta(1.0)  # inicializa
+    saida = await totaliza.alimenta(2.0)  # +4
+    saida = await totaliza.alimenta(3.0)  # +6
 
     assert saida.v == pytest.approx(10.0)
 
 
-async def test_integrator_com_cold_start_nao_executa_nem_avanca_o_estado():
-    bloco = integrator("s")
+async def test_integrator_reset_ativo_zera_o_total_e_a_varredura():
+    totaliza = Totaliza(integrator("s"))
+    await totaliza.alimenta(5.0)
+    await totaliza.alimenta(5.0)
 
-    nula = (await bloco.step({"in": PortSample(None, False)}))["out"]
+    assert (await totaliza.alimenta(5.0, reset=1.0)).v == 0.0
+    # Zerou sem acumular a amostra da varredura do reset; a seguinte recomeça do zero —
+    # o relógio foi reancorado no instante do reset.
+    assert (await totaliza.alimenta(5.0)).v == pytest.approx(5.0)
+
+
+async def test_integrator_sem_aresta_no_reset_nunca_zera():
+    totaliza = Totaliza(integrator("s"))
+    await totaliza.alimenta(1.0)
+    for _ in range(2):
+        saida = await totaliza.alimenta(1.0)
+
+    assert saida.v == pytest.approx(2.0)
+
+
+async def test_integrator_reset_cold_nao_zera():
+    """`reset` conectado sem valor ainda (None) não é comando de zerar."""
+    totaliza = Totaliza(integrator("s"))
+    await totaliza.alimenta(5.0)
+
+    assert (await totaliza.alimenta(5.0, reset=None)).v == pytest.approx(5.0)
+
+
+async def test_integrator_ignora_reset_sem_qualidade():
+    """Tag de reset morta e congelada em 1 não apaga o total da planta."""
+    bloco = integrator("s")
+    await bloco.step({"in": PortSample(5.0, True)}, ts=T0)
+    await bloco.step({"in": PortSample(5.0, True)}, ts=T0 + timedelta(seconds=1))
+
+    saida = (
+        await bloco.step(
+            {"in": PortSample(5.0, True), "reset": PortSample(1.0, False)},
+            ts=T0 + timedelta(seconds=2),
+        )
+    )["out"]
+
+    assert saida.v == pytest.approx(10.0)
+
+
+async def test_integrator_amostra_sem_qualidade_nao_acumula():
+    """A-6 não vale para totalizador: valor de tag morta congelaria erro no acumulado."""
+    totaliza = Totaliza(integrator("s"))
+    await totaliza.alimenta(5.0)
+    await totaliza.alimenta(5.0)  # total = 5
+
+    ruim = await totaliza.alimenta(999.0, ok=False)
+    assert ruim.v == pytest.approx(5.0)
+    assert ruim.ok is False
+
+    assert (await totaliza.alimenta(5.0)).v == pytest.approx(10.0)
+
+
+async def test_integrator_amostra_nao_finita_nao_envenena_o_total():
+    """inf/nan não entram no acumulador: retém o total e marca a varredura inválida."""
+    totaliza = Totaliza(integrator("s"))
+    await totaliza.alimenta(5.0)
+    await totaliza.alimenta(5.0)  # total = 5
+
+    suja = await totaliza.alimenta(float("nan"))
+    assert suja.v == pytest.approx(5.0)
+    assert suja.ok is False
+    # O estado se cura na amostra seguinte — nunca precisa de redeploy para voltar.
+    assert (await totaliza.alimenta(5.0)).v == pytest.approx(10.0)
+
+
+async def test_integrator_com_cold_start_nao_executa_nem_avanca_o_estado():
+    totaliza = Totaliza(integrator("s"))
+
+    nula = (await totaliza.bloco.step({"in": PortSample(None, False)}))["out"]
     assert nula.v is None
     assert nula.ok is False
-    assert (await alimenta(bloco, 5.0)).v == pytest.approx(5.0)
+
+    await totaliza.alimenta(5.0)  # inicializa
+    assert (await totaliza.alimenta(5.0)).v == pytest.approx(5.0)
 
 
-async def test_integrator_reset_de_deploy_zera_o_total():
-    bloco = integrator("s")
-    await alimenta(bloco, 5.0)
+async def test_integrator_reset_de_deploy_zera_o_total_e_o_relogio():
+    totaliza = Totaliza(integrator("s"))
+    await totaliza.alimenta(5.0)
+    await totaliza.alimenta(5.0)
 
-    bloco.reset()
+    totaliza.bloco.reset()
 
-    assert (await alimenta(bloco, 5.0)).v == pytest.approx(5.0)
+    assert (await totaliza.alimenta(5.0)).v == 0.0  # primeiro scan pós-deploy só inicia
+    assert (await totaliza.alimenta(5.0)).v == pytest.approx(5.0)
 
 
 def test_integrator_declara_duas_entradas_e_uma_saida():

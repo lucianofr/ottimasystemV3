@@ -131,6 +131,14 @@ def test_scaler_aceita_faixa_de_saida_invertida():
     assert node.config.out_max == 0.0
 
 
+def test_scaler_aceita_inteiros_do_json():
+    """O canvas serializa 0/100 sem casa decimal e o JSONB devolve int: escala redonda
+    não pode virar 422."""
+    node = parse_graph(_ligado(_scaler(in_min=0, in_max=100, out_min=4, out_max=20))).node("s1")
+
+    assert node.config.in_max == 100.0
+
+
 def test_scaler_reprova_ganho_derivado_nao_finito():
     """Faixas patológicas transbordam a divisão do ganho — o bloco emitiria ±inf com ok=True."""
     assert has(

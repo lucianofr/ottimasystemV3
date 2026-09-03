@@ -1,11 +1,18 @@
 """Bloco Scaler: reescala linear de `in`∈[`in_min`,`in_max`] para [`out_min`,`out_max`].
 
 Sem estado: `out = out_min + (in - in_min) * ganho`, ganho pré-computado no construtor
-(`in_max > in_min` garantido pelo parse). Fora da faixa de entrada extrapola — quem delimita
-o sinal é a escala configurada, não o bloco. A faixa de saída pode ser invertida (ação
+(`in_max > in_min` garantido pelo parse). A faixa de saída pode ser invertida (ação
 reversa, ex.: 4-20 mA → 100-0 %).
+
+Duas regras de borda, mesma convenção dos filtros/PID:
+
+- **Fora da faixa de entrada ⇒ clamp** em [`out_min`,`out_max`] (na ordem que for): um
+  spike de sensor nunca vira escrita OPC além da escala de saída.
+- **Amostra não-finita (inf/nan) ⇒ saída nula e inválida**, nunca `nan`/`inf` com
+  `ok=True` contaminando o consumidor a jusante (convenção `fuzzy.py`/`pid.py::_retido`).
 """
 
+import math
 from collections.abc import Mapping
 from datetime import datetime
 
@@ -29,6 +36,7 @@ class ScalerBlock(Block):
         self._ganho = (float(out_max) - float(out_min)) / (float(in_max) - float(in_min))
         self._in_min = float(in_min)
         self._out_min = float(out_min)
+        self._out_max = float(out_max)
 
     @property
     def input_ports(self) -> tuple[str, ...]:
@@ -45,6 +53,12 @@ class ScalerBlock(Block):
             return null_outputs(OUTPUT_PORTS)
 
         sample = inputs["in"]
+        valor = float(sample.v)
+        if not math.isfinite(valor):
+            return null_outputs(OUTPUT_PORTS)
+
+        escalado = self._out_min + (valor - self._in_min) * self._ganho
+        lo, hi = min(self._out_min, self._out_max), max(self._out_min, self._out_max)
+        escalado = min(max(escalado, lo), hi)  # clamp na faixa de saída, em qualquer sentido
         # Amostra inválida executa e propaga a flag (decisão A-6), como nos filtros.
-        valor = self._out_min + (float(sample.v) - self._in_min) * self._ganho
-        return {"out": PortSample(valor, sample.ok)}
+        return {"out": PortSample(escalado, sample.ok)}

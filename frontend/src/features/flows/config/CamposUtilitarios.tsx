@@ -46,7 +46,7 @@ export function CamposScaler({ dados }: { dados: NoScaler["data"] }) {
           id="out_max"
           rotulo="Saída — máximo"
           valor={dados.out_max}
-          ajuda="Pode ser menor que o mínimo da saída (ação reversa, ex.: 4-20 mA → 100-0 %). Fora da faixa de entrada o bloco extrapola, não trava."
+          ajuda="Pode ser menor que o mínimo da saída (ação reversa, ex.: 4-20 mA → 100-0 %). Fora da faixa de entrada a saída trava no extremo correspondente (clamp — um spike de sensor nunca vira escrita além da escala)."
         />
       </div>
     </div>
