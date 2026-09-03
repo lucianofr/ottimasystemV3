@@ -180,6 +180,10 @@ def test_block_catalog_expoe_node_types_e_contratos() -> None:
         "first_order",
         "kalman",
         "pid",
+        "pid_loop",
+        "fuzzy_loop",
+        "scaler",
+        "integrator",
     ]
     assert "port_contracts" in catalogo
     assert "node_configs" in catalogo

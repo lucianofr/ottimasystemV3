@@ -49,11 +49,13 @@ from ottima_core.flowgraph import (
     DvVar,
     FuzzyConfig,
     FuzzyLoopConfig,
+    IntegratorConfig,
     IopdtParams,
     MpcConfig,
     MvVar,
     PidConfig,
     PidLoopConfig,
+    ScalerConfig,
     ScriptConfig,
     SopdtParams,
 )
@@ -198,6 +200,23 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
             {"name": "out", "direction": "output", "type": "num"},
         ],
     },
+    # Blocos utilitários: Scaler (reescala linear) e Integrator (totalizador com reset
+    # opcional). Portas fixas e numéricas; a config não muda porta nenhuma.
+    "scaler": {
+        "dynamic": False,
+        "ports": [
+            {"name": "in", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+        ],
+    },
+    "integrator": {
+        "dynamic": False,
+        "ports": [
+            {"name": "in", "direction": "input", "type": "num"},
+            {"name": "reset", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+        ],
+    },
     # Bloco PID (RF-551, ADR-031): portas fixas — `pv` e `sp` de entrada (`sp` é opcional;
     # ausente, `config.setpoint` supre, RF-552), `out` de saída, todas numéricas.
     "pid": {
@@ -299,6 +318,8 @@ _NODE_CONFIG_MODELS = (
     FuzzyLoopConfig,
     SopdtParams,
     IopdtParams,
+    ScalerConfig,
+    IntegratorConfig,
 )
 
 

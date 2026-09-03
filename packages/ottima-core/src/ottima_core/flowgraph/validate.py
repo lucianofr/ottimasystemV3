@@ -127,7 +127,7 @@ def _output_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[
         return ("out",)
     if node.type in LOOP_TYPES:
         return ("out", "bkcal_out")
-    if node.type in _FILTER_TYPES:
+    if node.type in _FILTER_TYPES or node.type in ("scaler", "integrator"):
         return ("out",)
     return ()
 
@@ -167,6 +167,11 @@ def _input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[s
             "trk_in_d",
             "lo_in_d",
         )
+    if node.type == "scaler":
+        return ("in",)
+    if node.type == "integrator":
+        # `reset` é opcional: sem aresta, o totalizador nunca zera pela porta.
+        return ("in", "reset")
     if node.type in _FILTER_TYPES:
         return ("in",)
     return ()
@@ -604,6 +609,9 @@ def _required_input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -
         return ("pv",)
     if node.type in LOOP_TYPES:
         # Malha (ADR-039): so a PV e obrigatoria; o resto e por modo/opcao.
+        return ("in",)
+    if node.type == "integrator":
+        # Só `in` é obrigatória; `reset` desconectado significa "nunca zera pela porta".
         return ("in",)
     # 'in' do Write, IN1..INn do Script e uma por CV/Restrição/DV do MPC (decisão A-10) são
     # sempre obrigatórias (RF-302).

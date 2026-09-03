@@ -503,6 +503,8 @@ async def flow_add_block(
             "first_order",
             "kalman",
             "pid",
+            "scaler",
+            "integrator",
         ],
         Field(description="Tipo do bloco — ver block_catalog para os campos de config"),
     ],

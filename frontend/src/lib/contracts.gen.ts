@@ -52,7 +52,7 @@ export type ContratoPorta =
   | ContratoPortaDinamica
   | ContratoPortaDinamicaComDefault;
 
-export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy" | "first_order" | "kalman" | "pid" | "tfs" | "mpc" | "pid_loop" | "fuzzy_loop", ContratoPorta> = {
+export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy" | "first_order" | "kalman" | "scaler" | "integrator" | "pid" | "tfs" | "mpc" | "pid_loop" | "fuzzy_loop", ContratoPorta> = {
   "opc_read": {
     "dynamic": false,
     "ports": [
@@ -139,6 +139,41 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy
     "ports": [
       {
         "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
+  },
+  "scaler": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
+  },
+  "integrator": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "reset",
         "direction": "input",
         "type": "num"
       },
@@ -680,4 +715,15 @@ export interface SopdtParams {
 export interface IopdtParams {
   Ki: number;
   theta: number;
+}
+
+export interface ScalerConfig {
+  in_min: number;
+  in_max: number;
+  out_min: number;
+  out_max: number;
+}
+
+export interface IntegratorConfig {
+  time_base: "s" | "min" | "h";
 }

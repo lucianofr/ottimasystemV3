@@ -9,6 +9,7 @@ import {
   type DvVar,
   type FuzzyConfig,
   type FuzzyLoopConfig,
+  type IntegratorConfig,
   type IopdtParams,
   type Limits,
   type ModeValues,
@@ -21,12 +22,13 @@ import {
   type PidLoopConfig,
   type Range,
   type RegraPortaDinamica,
+  type ScalerConfig,
   type ScriptConfig,
   type SopdtParams,
 } from "../../lib/contracts.gen";
 import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
 import type { PortsPorBloco } from "./canalPrimitivos";
-import { PADRAO_FIRST_ORDER, PADRAO_KALMAN, PADRAO_PID, PADRAO_PID_LOOP, PADRAO_FUZZY_LOOP, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
+import { BASES_TEMPO, PADRAO_FIRST_ORDER, PADRAO_INTEGRATOR, PADRAO_KALMAN, PADRAO_PID, PADRAO_PID_LOOP, PADRAO_FUZZY_LOOP, PADRAO_SCALER, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
 
 /**
  * Modelo do grafo do editor + as regras que o editor espelha do servidor.
@@ -53,6 +55,8 @@ export const TIPOS_BLOCO = [
   "pid",
   "pid_loop",
   "fuzzy_loop",
+  "scaler",
+  "integrator",
 ] as const;
 export type TipoBloco = (typeof TIPOS_BLOCO)[number];
 
@@ -159,6 +163,14 @@ export function passagemDireta(tau: number, tsFlowSegundos: number): boolean {
 /** Os dois campos são **desvio padrão na EU do sinal** (RF-533), nunca variância: o bloco
  *  eleva ao quadrado no runtime. `process_noise` é por varredura, não por segundo. */
 export type DadosKalman = DadosBase & { measurement_noise: number; process_noise: number };
+
+/** Scaler: reescala linear de [`in_min`,`in_max`] para [`out_min`,`out_max`] (a faixa de
+ *  saída pode inverter — ação reversa). */
+export type DadosScaler = DadosBase & Pick<ScalerConfig, keyof ScalerConfig>;
+
+/** Integrator (totalizador): acumula `in` no tempo do flow; `time_base` é a EU de tempo da
+ *  entrada ("s"/"min"/"h"). Porta `reset` opcional zera o total. */
+export type DadosIntegrator = DadosBase & Pick<IntegratorConfig, keyof IntegratorConfig>;
 
 /** ISA (Kc/Ti/Td), não paralelo (Kp/Ki/Kd) — `criarBloco`/runtime convertem uma vez na
  *  construção (ADR-031, RF-551..554). `ti_seconds === 0` desliga a ação integral (evita
@@ -310,8 +322,9 @@ export type DadosBloco =
   | DadosFuzzy
   | DadosPid
   | DadosPidLoop
-  | DadosFuzzyLoop;
-
+  | DadosFuzzyLoop
+  | DadosScaler
+  | DadosIntegrator;
 /** `type` é opcional em `Node`; aqui ele é o discriminante e nunca falta. */
 type Bloco<D extends Record<string, unknown>, T extends TipoBloco> = Node<D, T> & { type: T };
 
@@ -327,6 +340,8 @@ export type NoPid = Bloco<DadosPid, "pid">;
 export type NoPidLoop = Bloco<DadosPidLoop, "pid_loop">;
 export type NoFuzzyLoop = Bloco<DadosFuzzyLoop, "fuzzy_loop">;
 
+export type NoScaler = Bloco<DadosScaler, "scaler">;
+export type NoIntegrator = Bloco<DadosIntegrator, "integrator">;
 export type BlocoNode =
   | NoLeitura
   | NoEscrita
@@ -338,8 +353,9 @@ export type BlocoNode =
   | NoFuzzy
   | NoPid
   | NoPidLoop
-  | NoFuzzyLoop;
-
+  | NoFuzzyLoop
+  | NoScaler
+  | NoIntegrator;
 /** Toda aresta do editor nasce de um par de handles resolvidos; `null` nunca chega ao save. */
 export type BlocoEdge = Omit<Edge, "sourceHandle" | "targetHandle"> & {
   sourceHandle: string;
@@ -470,7 +486,7 @@ export function tipoPorta(no: BlocoNode, tags: MapaTags): TipoPorta {
   if (no.type === "script") return "bivalente";
   if (no.type === "tfs") return "num";
   if (no.type === "mpc") return "num";
-  if (no.type === "first_order" || no.type === "kalman") return "num";
+  if (no.type === "first_order" || no.type === "kalman" || no.type === "scaler" || no.type === "integrator") return "num";
   if (no.type === "fuzzy") return "num";
   if (no.type === "pid" || no.type === "pid_loop" || no.type === "fuzzy_loop") return "num";
   if (no.data.tag_id === null) return "desconhecido";
@@ -963,6 +979,31 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           label,
           measurement_noise: numero(dados.measurement_noise, PADRAO_KALMAN.measurement_noise),
           process_noise: numero(dados.process_noise, PADRAO_KALMAN.process_noise),
+        },
+      };
+    case "scaler":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          in_min: numero(dados.in_min, PADRAO_SCALER.in_min),
+          in_max: numero(dados.in_max, PADRAO_SCALER.in_max),
+          out_min: numero(dados.out_min, PADRAO_SCALER.out_min),
+          out_max: numero(dados.out_max, PADRAO_SCALER.out_max),
+        },
+      };
+    case "integrator":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          time_base: BASES_TEMPO.find((base) => base === dados.time_base) ?? PADRAO_INTEGRATOR.time_base,
         },
       };
     case "fuzzy":

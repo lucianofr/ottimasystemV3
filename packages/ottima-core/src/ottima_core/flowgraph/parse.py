@@ -25,6 +25,8 @@ NodeType = Literal[
     "pid",
     "pid_loop",
     "fuzzy_loop",
+    "scaler",
+    "integrator",
 ]
 NODE_TYPES: tuple[str, ...] = (
     "opc_read",
@@ -38,6 +40,8 @@ NODE_TYPES: tuple[str, ...] = (
     "pid",
     "pid_loop",
     "fuzzy_loop",
+    "scaler",
+    "integrator",
 )
 
 MAX_SCRIPT_PORTS = 8  # spec §3.3
@@ -141,6 +145,8 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
         "lut_enabled",
         "lut_resolution",
     ),
+    "scaler": ("in_min", "in_max", "out_min", "out_max"),
+    "integrator": ("time_base",),
 }
 # Blocos de filtro (ADR-026): config é só um punhado de escalares, e o valor do dicionário
 # diz se o campo exige positivo estrito (divisor) ou apenas não-negativo.
@@ -293,6 +299,45 @@ class KalmanConfig(BaseModel):
     process_noise: float = Field(ge=0)
 
 
+class ScalerConfig(BaseModel):
+    """Bloco Scaler: reescala linear de `in`∈[`in_min`,`in_max`] para [`out_min`,`out_max`].
+
+    `strict=True` reprova string/bool num campo de escala (mesma rejeição manual dos
+    filtros); `allow_inf_nan=False` protege o ganho `(out_max-out_min)/(in_max-in_min)`.
+    `in_max > in_min` porque a faixa de entrada é o divisor; a de saída pode inverter
+    (ação reversa, ex.: 4-20 mA → 100-0 %).
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    in_min: float = Field(allow_inf_nan=False)
+    in_max: float = Field(allow_inf_nan=False)
+    out_min: float = Field(allow_inf_nan=False)
+    out_max: float = Field(allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _faixa_de_entrada(self) -> "ScalerConfig":
+        if self.in_max <= self.in_min:
+            raise ValueError("in_max precisa ser maior que in_min")
+        # Ganho derivado também precisa ser finito: faixas patológicas (~1e308 de largura
+        # ou divisor denormal) transbordam a divisão e o bloco emitiria ±inf com ok=True.
+        ganho = (self.out_max - self.out_min) / (self.in_max - self.in_min)
+        if not math.isfinite(ganho):
+            raise ValueError("escala resulta em ganho não-finito")
+        return self
+
+
+class IntegratorConfig(BaseModel):
+    """Bloco Integrator (totalizador): acumula `in` no tempo do flow.
+
+    `time_base` é a EU de tempo da entrada: "s" (por segundo), "min" (por minuto) ou
+    "h" (por hora). O incremento por varredura é `in * Ts / fator`, com fator 1/60/3600 —
+    o Ts vem do scheduler, única autoridade de tempo do laço (ADR-031).
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    time_base: Literal["s", "min", "h"]
+
+
 class PidConfig(BaseModel):
     """Bloco PID (RF-551, ADR-031): controlador ISA, motor `simple-pid` por baixo.
 
@@ -428,6 +473,8 @@ NodeConfig = (
     | PidConfig
     | PidLoopConfig
     | FuzzyLoopConfig
+    | ScalerConfig
+    | IntegratorConfig
 )
 
 
@@ -615,6 +662,10 @@ def _parse_config(where: str, node_type: str, data: dict, errors: list[str]) -> 
         return _parse_loop_config(where, node_type, PidLoopConfig, data, errors)
     if node_type == "fuzzy_loop":
         return _parse_loop_config(where, node_type, FuzzyLoopConfig, data, errors)
+    if node_type == "scaler":
+        return _parse_loop_config(where, node_type, ScalerConfig, data, errors)
+    if node_type == "integrator":
+        return _parse_loop_config(where, node_type, IntegratorConfig, data, errors)
     if node_type in _FILTER_KEYS:
         return _parse_filter_config(where, node_type, data, errors)
     return _parse_tfs_config(where, data, errors)
@@ -748,14 +799,18 @@ def _parse_pid_config(where: str, data: dict, errors: list[str]) -> PidConfig | 
 def _parse_loop_config(
     where: str, node_type: str, modelo: type[BaseModel], data: dict, errors: list[str]
 ) -> NodeConfig | None:
-    """Config de bloco malha (ADR-039): modelo pydantic, um erro por problema."""
+    """Config via modelo pydantic (malhas ADR-039, scaler, integrator): um erro por problema."""
     payload = {key: data[key] for key in _CONFIG_KEYS[node_type] if key in data}
     try:
         return modelo.model_validate(payload)
     except ValidationError as exc:
         for erro in exc.errors():
             campo = ".".join(str(loc) for loc in erro["loc"])
-            errors.append(f"{where}: '{campo}': {erro['msg']}")
+            # Validador de modelo (loc vazio) não tem campo: a msg já nomeia o problema.
+            if campo == "":
+                errors.append(f"{where}: {erro['msg']}")
+            else:
+                errors.append(f"{where}: '{campo}': {erro['msg']}")
         return None
 
 

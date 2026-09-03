@@ -21,9 +21,11 @@ import {
   type NoMpc,
   type NoScript,
 } from "../graph";
+import { BASES_TEMPO } from "../registro";
 import { inteiroDoCampo, matrizDoFormulario, montarDadosPid, numeroDoCampo } from "./campos";
 import { CamposBlocoPid } from "./CamposBlocoPid";
 import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
+import { CamposIntegrator, CamposScaler } from "./CamposUtilitarios";
 import { CamposTfs } from "./CamposTfs";
 
 const OPCOES_PORTAS = Array.from({ length: MAX_PORTAS_SCRIPT + 1 }, (_, i) => i);
@@ -384,6 +386,37 @@ export function ModalConfigBloco({
           execOrder,
         );
         break;
+      case "scaler":
+        onAplicar(
+          {
+            ...no,
+            data: {
+              ...no.data,
+              label,
+              in_min: numeroDoCampo(campos.get("in_min"), no.data.in_min),
+              in_max: numeroDoCampo(campos.get("in_max"), no.data.in_max),
+              out_min: numeroDoCampo(campos.get("out_min"), no.data.out_min),
+              out_max: numeroDoCampo(campos.get("out_max"), no.data.out_max),
+            },
+          },
+          execOrder,
+        );
+        break;
+      case "integrator": {
+        const base = String(campos.get("time_base") ?? "");
+        onAplicar(
+          {
+            ...no,
+            data: {
+              ...no.data,
+              label,
+              time_base: BASES_TEMPO.find((candidata) => candidata === base) ?? no.data.time_base,
+            },
+          },
+          execOrder,
+        );
+        break;
+      }
       case "pid":
         onAplicar({ ...no, data: { ...montarDadosPid(no.data, campos), label } }, execOrder);
         break;
@@ -460,6 +493,8 @@ export function ModalConfigBloco({
           )}
           {no.type === "first_order" && <CamposFiltroPrimeiraOrdem dados={no.data} />}
           {no.type === "kalman" && <CamposFiltroKalman dados={no.data} />}
+          {no.type === "scaler" && <CamposScaler dados={no.data} />}
+          {no.type === "integrator" && <CamposIntegrator dados={no.data} />}
           {no.type === "fuzzy" && (
             <CamposFuzzy dados={no.data} nOutputs={nOutputsFuzzy} aoMudarNOutputs={setNOutputsFuzzy} />
           )}

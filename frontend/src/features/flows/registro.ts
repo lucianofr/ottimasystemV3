@@ -6,11 +6,13 @@ import {
   type DadosFirstOrder,
   type DadosFuzzy,
   type DadosKalman,
+  type DadosIntegrator,
   type DadosMpc,
   type DadosPid,
   type DadosFuzzyLoop,
   type DadosPidLoop,
   type DadosScript,
+  type DadosScaler,
   type DadosTag,
   type DadosTfs,
   type TipoBloco,
@@ -51,7 +53,9 @@ type ConfigDoBloco =
   | Omit<DadosFuzzy, keyof DadosBase>
   | Omit<DadosPid, keyof DadosBase>
   | Omit<DadosPidLoop, keyof DadosBase>
-  | Omit<DadosFuzzyLoop, keyof DadosBase>;
+  | Omit<DadosFuzzyLoop, keyof DadosBase>
+  | Omit<DadosScaler, keyof DadosBase>
+  | Omit<DadosIntegrator, keyof DadosBase>;
 
 export interface DefinicaoBloco {
   rotulo: string;
@@ -70,6 +74,15 @@ export interface DefinicaoBloco {
  *  vez de virar `NaN`. */
 export const PADRAO_FIRST_ORDER = { tau: 5 } as const;
 export const PADRAO_KALMAN = { measurement_noise: 1, process_noise: 0.1 } as const;
+
+/** Bases de tempo do Integrator — a mesma lista do `IntegratorConfig.time_base` no
+ *  servidor (`parse.py`), espelhada aqui para o `lerNo` e o modal. */
+export const BASES_TEMPO = ["s", "min", "h"] as const;
+
+/** Defaults dos blocos utilitários: Scaler nasce 0-100 → 4-20 (a conversão canônica %→mA)
+ *  e o Integrator na base por minuto (totalização de vazão é o caso típico). */
+export const PADRAO_SCALER = { in_min: 0, in_max: 100, out_min: 4, out_max: 20 } as const;
+export const PADRAO_INTEGRATOR = { time_base: "min" } as const;
 
 /** Defaults do PID (ADR-031, RF-551): estrutura ISA, tempos em segundos, derivativa
  *  desligada de fábrica (PI é o padrão industrial), faixa de saída 0..100 (MV em %). */
@@ -186,6 +199,16 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
     rotulo: "Fuzzy Malha",
     descricao: "Controle fuzzy industrial com modos e cascata (ADR-039)",
     defaults: () => ({ ...PADRAO_FUZZY_LOOP, fll: contratoFuzzyLoop.default_fll }),
+  },
+  scaler: {
+    rotulo: "Scaler",
+    descricao: "Reescala o sinal da faixa de entrada para a faixa de saída",
+    defaults: () => ({ ...PADRAO_SCALER }),
+  },
+  integrator: {
+    rotulo: "Integrador",
+    descricao: "Totaliza o sinal no tempo (base s/min/h), com reset",
+    defaults: () => ({ ...PADRAO_INTEGRATOR }),
   },
 };
 

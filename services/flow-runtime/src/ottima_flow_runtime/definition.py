@@ -59,6 +59,7 @@ from ottima_core.snapshot import ValueSnapshot
 from .blocks.base import Block
 from .blocks.first_order import FirstOrderBlock
 from .blocks.fuzzy import FuzzyBlock
+from .blocks.integrator import IntegratorBlock
 from .blocks.kalman import KalmanBlock
 from .blocks.kernels.fuzzy import FuzzyKernelCfg, build_fuzzy_kernel
 from .blocks.kernels.pid import PidKernel, PidKernelCfg
@@ -66,6 +67,7 @@ from .blocks.mpc import MpcBlock
 from .blocks.opc_read import OpcReadBlock
 from .blocks.opc_write import OpcWriteBlock
 from .blocks.pid import PidBlock
+from .blocks.scaler import ScalerBlock
 from .blocks.script import ScriptBlock
 from .blocks.shell.block import BlockShell
 from .blocks.shell.config import ShellCfg
@@ -303,6 +305,16 @@ def _instantiate(
         )
     if node.type == "first_order":
         return FirstOrderBlock(node.id, tau=config.tau, ts_seconds=ts_seconds)
+    if node.type == "scaler":
+        return ScalerBlock(
+            node.id,
+            in_min=config.in_min,
+            in_max=config.in_max,
+            out_min=config.out_min,
+            out_max=config.out_max,
+        )
+    if node.type == "integrator":
+        return IntegratorBlock(node.id, time_base=config.time_base, ts_seconds=ts_seconds)
     if node.type == "kalman":
         return KalmanBlock(
             node.id,

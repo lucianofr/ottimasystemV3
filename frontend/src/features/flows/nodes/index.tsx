@@ -10,9 +10,11 @@ import {
   portasScript,
   type NoEscrita,
   type NoFirstOrder,
+  type NoIntegrator as NoIntegratorData,
   type NoFuzzy as NoFuzzyData,
   type NoKalman,
   type NoLeitura,
+  type NoScaler as NoScalerData,
   type NoMpc as NoMpcData,
   type NoPid as NoPidData,
   type NoFuzzyLoop as NoFuzzyLoopData,
@@ -233,6 +235,57 @@ export function NoFiltroKalman({ id, data, selected }: NodeProps<NoKalman>) {
   );
 }
 
+/** Scaler: os dois extremos de cada faixa no resumo — o engenheiro confere a conversão sem
+ *  abrir o modal. */
+export function NoScaler({ id, data, selected }: NodeProps<NoScalerData>) {
+  return (
+    <BlocoChapa
+      tipo="scaler"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("scaler", "input"))}
+      saidas={portas(portasFixas("scaler", "output"))}
+      blockId={id}
+    >
+      <div className="space-y-0.5">
+        <LinhaResumo
+          rotulo="Entrada"
+          valor={`${FORMATO_PARAM.format(data.in_min)} – ${FORMATO_PARAM.format(data.in_max)}`}
+        />
+        <LinhaResumo
+          rotulo="Saída"
+          valor={`${FORMATO_PARAM.format(data.out_min)} – ${FORMATO_PARAM.format(data.out_max)}`}
+        />
+      </div>
+    </BlocoChapa>
+  );
+}
+
+const ROTULO_BASE_TEMPO: Record<NoIntegratorData["data"]["time_base"], string> = {
+  s: "segundo",
+  min: "minuto",
+  h: "hora",
+};
+
+/** Integrator (totalizador): a base de tempo da entrada no resumo — é ela que define a
+ *  escala do acumulado. */
+export function NoIntegrator({ id, data, selected }: NodeProps<NoIntegratorData>) {
+  return (
+    <BlocoChapa
+      tipo="integrator"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("integrator", "input"))}
+      saidas={portas(portasFixas("integrator", "output"))}
+      blockId={id}
+    >
+      <LinhaResumo rotulo="Base de tempo" valor={ROTULO_BASE_TEMPO[data.time_base]} />
+    </BlocoChapa>
+  );
+}
+
 /** Portas dinâmicas do config (spec F4 §7.2, decisão A-10): entradas = CVs+Restrições+DVs à
  *  esquerda, saída = MVs à direita, na ordem do config; sem variáveis ⇒ sem entradas, mas
  *  as 2 portas fixas de modo (`local`/`auto`, decisão A-10 revista) continuam saindo — não
@@ -403,4 +456,6 @@ export const TIPOS_DE_NO: Record<TipoBloco, ComponenteNo> = {
   pid: NoPid,
   pid_loop: NoPidLoop,
   fuzzy_loop: NoFuzzyLoop,
+  scaler: NoScaler,
+  integrator: NoIntegrator,
 };
