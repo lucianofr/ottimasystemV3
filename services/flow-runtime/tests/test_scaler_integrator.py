@@ -1,8 +1,8 @@
 """Contratos dos blocos utilitários Scaler e Integrator.
 
-- **Scaler**: reescala linear sem estado — `out = out_min + (in - in_min) * ganho`, com
-  clamp na faixa de saída fora da faixa de entrada (spike de sensor nunca vira escrita
-  além do OUT_SCALE) e saída nula/inválida para amostra não-finita.
+- **Scaler**: reescala linear sem estado — `out = out_min + (in - in_min) * ganho`,
+  extrapolando fora da faixa de entrada (conversão de unidade não satura) e com saída
+  nula/inválida para amostra não-finita.
 - **Integrator**: totalizador com estado — `out += in * dt / fator`, fator 1/60/3600 para
   base s/min/h. O `dt` é medido entre os `ts` do scheduler (overrun pula fronteira sem
   compensar: Ts nominal subcontaria); `dt <= 0` ou `dt > 10×Ts` congela e invalida, e a
@@ -109,6 +109,13 @@ async def test_scaler_com_cold_start_nao_executa():
 
     assert saida.v is None
     assert saida.ok is False
+
+
+def test_scaler_declara_uma_entrada_e_uma_saida():
+    bloco = scaler()
+
+    assert bloco.input_ports == ("in",)
+    assert bloco.output_ports == ("out",)
 
 
 # --------------------------------------------------------------------------------------
