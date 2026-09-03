@@ -6,8 +6,9 @@ reversa, ex.: 4-20 mA → 100-0 %).
 
 Duas regras de borda, mesma convenção dos filtros/PID:
 
-- **Fora da faixa de entrada ⇒ clamp** em [`out_min`,`out_max`] (na ordem que for): um
-  spike de sensor nunca vira escrita OPC além da escala de saída.
+- **Fora da faixa de entrada ⇒ extrapola**: bloco de escala é conversão de unidade (o
+  XD_SCALE de DCS não satura) — travar no extremo esconderia do operador/alarme/MPC a
+  evidência de over-range; limitar é função de outro bloco.
 - **Amostra não-finita (inf/nan) ⇒ saída nula e inválida**, nunca `nan`/`inf` com
   `ok=True` contaminando o consumidor a jusante (convenção `fuzzy.py`/`pid.py::_retido`).
 """
@@ -36,7 +37,6 @@ class ScalerBlock(Block):
         self._ganho = (float(out_max) - float(out_min)) / (float(in_max) - float(in_min))
         self._in_min = float(in_min)
         self._out_min = float(out_min)
-        self._out_max = float(out_max)
 
     @property
     def input_ports(self) -> tuple[str, ...]:
@@ -58,7 +58,5 @@ class ScalerBlock(Block):
             return null_outputs(OUTPUT_PORTS)
 
         escalado = self._out_min + (valor - self._in_min) * self._ganho
-        lo, hi = min(self._out_min, self._out_max), max(self._out_min, self._out_max)
-        escalado = min(max(escalado, lo), hi)  # clamp na faixa de saída, em qualquer sentido
         # Amostra inválida executa e propaga a flag (decisão A-6), como nos filtros.
         return {"out": PortSample(escalado, sample.ok)}

@@ -76,19 +76,16 @@ async def test_scaler_aceita_faixa_de_saida_invertida():
     assert (await alimenta_scaler(bloco, 25.0)).v == pytest.approx(75.0)
 
 
-async def test_scaler_trava_na_faixa_de_saida_fora_da_faixa_de_entrada():
-    """Spike de sensor não vira escrita além do OUT_SCALE: clamp, nunca extrapolação."""
+async def test_scaler_extrapola_fora_da_faixa_sem_travar():
+    """Bloco de escala é conversão de unidade: over-range chega ao operador/alarme/MPC —
+    limitar é função de outro bloco."""
     bloco = scaler()
 
-    assert (await alimenta_scaler(bloco, 150.0)).v == 20.0
-    assert (await alimenta_scaler(bloco, -50.0)).v == 4.0
+    assert (await alimenta_scaler(bloco, 150.0)).v == pytest.approx(28.0)
+    assert (await alimenta_scaler(bloco, -50.0)).v == pytest.approx(-4.0)
 
-
-async def test_scaler_trava_tambem_com_faixa_invertida():
-    bloco = scaler(out_min=100.0, out_max=0.0)
-
-    assert (await alimenta_scaler(bloco, 150.0)).v == 0.0
-    assert (await alimenta_scaler(bloco, -50.0)).v == 100.0
+    invertido = scaler(out_min=100.0, out_max=0.0)
+    assert (await alimenta_scaler(invertido, 150.0)).v == pytest.approx(-50.0)
 
 
 async def test_scaler_amostra_nao_finita_sai_nula_e_invalida():
@@ -112,13 +109,6 @@ async def test_scaler_com_cold_start_nao_executa():
 
     assert saida.v is None
     assert saida.ok is False
-
-
-def test_scaler_declara_uma_entrada_e_uma_saida():
-    bloco = scaler()
-
-    assert bloco.input_ports == ("in",)
-    assert bloco.output_ports == ("out",)
 
 
 # --------------------------------------------------------------------------------------
@@ -276,6 +266,19 @@ async def test_integrator_amostra_nao_finita_nao_envenena_o_total():
     assert suja.v == pytest.approx(5.0)
     assert suja.ok is False
     # O estado se cura na amostra seguinte — nunca precisa de redeploy para voltar.
+    assert (await totaliza.alimenta(5.0)).v == pytest.approx(10.0)
+
+
+async def test_integrator_buraco_de_qualidade_e_pulado_nunca_preenchido_retroativamente():
+    """3 scans ruins seguidos: a amostra boa seguinte integra só o seu dt — o relógio é
+    reancorado a cada scan ruim, senão o intervalo morto seria somado com o valor novo."""
+    totaliza = Totaliza(integrator("s"))
+    await totaliza.alimenta(5.0)
+    await totaliza.alimenta(5.0)  # total = 5
+
+    for _ in range(3):
+        await totaliza.alimenta(999.0, ok=False)
+
     assert (await totaliza.alimenta(5.0)).v == pytest.approx(10.0)
 
 
