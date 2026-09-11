@@ -16,7 +16,7 @@ const ROTULO_PARAM: Record<string, string> = {
   tau1: "τ1 (s)",
   tau2: "τ2 (s)",
   theta: "θ tempo morto (s)",
-  Ki: "Ki (%/s por %)",
+  Ki: "Ki (%/s)",
 };
 
 type LinhaModelo = { id: string; nome: string; kind: TipoLinhaMpc; span: number };

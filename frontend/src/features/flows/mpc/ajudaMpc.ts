@@ -315,7 +315,7 @@ export const AJUDA_MODELOS: Record<string, TooltipContent> = {
   },
   Ki: {
     description:
-      "Ganho do par IOPDT (linha integradora), NORMALIZADO e adimensional por segundo (RF-602): taxa de variação da linha, em % do Span DELA por SEGUNDO, pra cada 1% de variação sustentada da coluna, em % do Span DELA. A base de tempo é sempre o segundo — Ki em %/min produziria modelo 60× lento. O motor converte pra EU multiplicando por Span_linha/Span_coluna antes do worker (RF-602/609); os spans vigentes aparecem nos cabeçalhos da matriz.",
+      "Ganho do par IOPDT (linha integradora), NORMALIZADO em %/s: taxa de variação da linha, em % do Span DELA por SEGUNDO, com a coluna sustentada em 100% do Span DELA. A base de tempo é sempre o segundo — Ki em %/min produziria modelo 60× lento. O motor converte pra EU multiplicando por Span_linha/(100 × Span_coluna) antes do worker (RF-602/609); os spans vigentes aparecem nos cabeçalhos da matriz.",
     example: "Ki=0,05 numa CV de nível de tanque sem dreno, alimentado por uma MV de vazão de entrada.",
   },
   habilitado: {

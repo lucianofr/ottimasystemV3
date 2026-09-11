@@ -137,12 +137,13 @@ def discretize_iopdt(Ki: float, theta: float, ts: float) -> PairSS:
     sem limiar de passagem direta (a spec só aplica `Ts/DIRECT_PASS_RATIO` aos estágios do
     SOPDT — §3.1; um integrador nunca degrada a passagem direta).
 
-    UNIDADES (contrato do config, RF-602 normativo): `Ki` chega aqui já em EU/s por EU —
-    convertido em `eu_gain_params` do ganho NORMALIZADO %/% por segundo informado pelo
-    usuário (taxa da linha em % do span DELA por segundo, por 1% do span da coluna):
-    `Ki_EU = Ki × span_linha/span_coluna`. `b = Ki_EU*ts` com `ts` em segundos entrega o
-    incremento por amostra; `theta`/`ts` também em segundos. Ki em %/min produziria modelo
-    60× lento: a UI rotula o campo com a base de tempo em segundos (TabModels)."""
+    UNIDADES (contrato do config): `Ki` chega aqui já em EU/s por EU — convertido em
+    `eu_gain_params` do ganho NORMALIZADO **%/s** informado pelo usuário (taxa da linha em %
+    do span DELA por segundo, com a coluna sustentada em 100% do span dela):
+    `Ki_EU = Ki × span_linha/(100 × span_coluna)`. `b = Ki_EU*ts` com `ts` em segundos
+    entrega o incremento por amostra; `theta`/`ts` também em segundos. Ki em %/min
+    produziria modelo 60× lento: a UI rotula o campo com a base de tempo em segundos
+    (TabModels)."""
     a = np.array([[1.0]])
     b = np.array([[Ki * ts]])
     c = np.array([[1.0]])
@@ -153,24 +154,38 @@ def eu_gain_params(
     params: dict[str, float], *, kind: RowKind, row_span: float, col_span: float
 ) -> dict[str, float]:
     """Converte os ganhos NORMALIZADOS do config para a forma em EU que `discretize_*`
-    espera, ANTES de qualquer montagem/worker (RF-602/609, texto normativo): `K`/`Ki` são
-    adimensionais %/% — `K = ΔCV%/ΔMV%` e `Ki = (ΔCV%/s)/ΔMV%`, ambos sobre as faixas de
-    instrumento (zero/span, RF-609) — e a conversão é `× span_linha/span_coluna` para os
-    dois (o `Ki` resultante fica em EU/s por EU, porque a base de tempo do ganho integral
-    já é o segundo). Os defaults 0/100 dão razão 1, então config sem faixa explícita
-    reproduz a normalização pura. Cópia rasa: `params` do chamador nunca é mutado.
+    espera, ANTES de qualquer montagem/worker (RF-602/609).
 
-    Proposta de emenda pendente com o usuário (2026-09-11): declarar o `Ki` na base "coluna
-    em 100% do span" (÷100 aqui) — os dados identificados da coluna de naftaleno foram
-    informados nessa base. A emenda EXIGE revalidar `economics.integrating_tolerance` e cada
-    `sp_range_pct`: a largura da faixa de taxa do SSTO traduzida em movimento de MV é
-    `ε/Ki_EU` e escala 100× com a base (medido com operating_point coerente: ΔMV = 0,208 na
-    base normativa vs 20,833 na emenda, ambas `optimal` para o mesmo ε). Até a emenda do
-    RF-602 ser aprovada, o código segue o texto normativo vigente (base por 1%)."""
+    BASE DAS UNIDADES (decisão do dono do produto, 2026-09-11 — ordem explícita de corrigir
+    o CÓDIGO, sem tocar nos modelos já configurados):
+
+    - `K` (SOPDT): adimensional %/% — `ΔCV%/ΔMV%` sobre as faixas de instrumento (zero/span,
+      RF-609). Conversão: `K_EU = K × span_linha/span_coluna`.
+    - `Ki` (IOPDT): **%/s** — taxa da linha em % do span DELA por segundo com a coluna
+      sustentada em **100% do span dela**. Conversão: `Ki_EU = Ki × span_linha/(100 ×
+      span_coluna)`, em EU/s por EU (a base de tempo do ganho integral já é o segundo).
+
+    O ÷100 do integrador é o fator que faltava: os dados identificados (coluna de naftaleno)
+    foram informados nessa base, e sem ele o modelo da linha de nível fica 100× agressivo —
+    medido em campo no flow 987 (previsão +8,1 %/s contra ~0,016 %/s observados na excursão
+    de 2026-09-11 14:0x). Ponto ÚNICO de conversão: builder dinâmico e SSTO
+    (`target_calculation/model.py`) consomem esta função, então nunca divergem.
+
+    Defaults 0/100 de zero/span dão razão de span 1, então config sem faixa explícita
+    reproduz a normalização pura (com o ÷100 do integrador ainda aplicado). Cópia rasa:
+    `params` do chamador nunca é mutado.
+
+    DESALINHAMENTO DOCUMENTAL CONHECIDO: o texto vigente do RF-602/RF-609 descreve `Ki` na
+    base "por 1% da coluna" (sem ÷100). A emenda do PRD está proposta e AGUARDA aprovação
+    por escrito; o código segue a ordem do dono do produto. A emenda EXIGE revalidar
+    `economics.integrating_tolerance` e cada `sp_range_pct`: a largura da faixa de taxa do
+    SSTO traduzida em movimento de MV é `ε/Ki_EU` e escala 100× com a base (medido com
+    `operating_point` coerente: ΔMV = 0,208 na base antiga vs 20,833 nesta, ambas `optimal`
+    para o mesmo ε)."""
     escala = row_span / col_span
     convertido = dict(params)
     if kind == "selfreg":
         convertido["K"] = params["K"] * escala
     else:
-        convertido["Ki"] = params["Ki"] * escala
+        convertido["Ki"] = params["Ki"] * escala / 100.0
     return convertido

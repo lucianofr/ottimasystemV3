@@ -196,7 +196,8 @@ def test_linha_integradora_usa_taxa_de_rampa_na_matriz():
     model = build_steady_state_model(config, TS)
 
     assert model.row_kind["cv_lvl"] == "integrating"
-    assert model.g == pytest.approx(np.array([[0.4]]))
+    # Ki=0.4 %/s na base coluna-em-100% ⇒ 0.004 EU/s por EU na matriz (÷100 em eu_gain_params).
+    assert model.g == pytest.approx(np.array([[0.004]]))
 
 
 def test_sem_dv_a_matriz_gd_tem_zero_colunas():
@@ -239,4 +240,5 @@ def test_base_de_linha_integradora_e_a_taxa_atual_sem_bias():
 
     base = model.base(u={"mv_a": 25.0}, d={}, bias={"cv_lvl": 99.0})
 
-    assert base == pytest.approx(np.array([0.4 * 5.0]))
+    # Ki_EU = 0.4/100 (base coluna-em-100%) × Δu de 5 EU acima do ponto de operação.
+    assert base == pytest.approx(np.array([0.004 * 5.0]))

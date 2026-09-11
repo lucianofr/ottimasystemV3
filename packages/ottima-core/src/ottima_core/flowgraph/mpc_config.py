@@ -347,15 +347,20 @@ class MpcVariables(BaseModel):
 class PairModel(BaseModel):
     """Par `models[linha][coluna]` (spec §2.1-2); `params` genérico — completude é da 1.2.
 
-    UNIDADES do contrato de engenharia (RF-602 normativo, espelhadas nos rótulos/tooltips
-    da UI): ganhos NORMALIZADOS pelas faixas 0..span (RF-609), adimensionais %/% — selfreg
-    (SOPDT) `{K, tau1, tau2, theta}`: `K = ΔCV%/ΔMV%`; integrating (IOPDT) `{Ki, theta}`:
-    `Ki = (ΔCV%/s)/ΔMV%`, ou seja taxa da linha em % do span dela por SEGUNDO por 1% do
-    span da coluna; `tau1`/`tau2`/`theta` sempre em SEGUNDOS. O runtime converte pra EU em
-    `eu_gain_params` (×span_linha/span_coluna, ambos os ganhos) ANTES do worker e
-    discretiza contra `Ts_mpc` em segundos (`mpc/discretize.py`) — nenhuma conversão de
-    base de tempo em lugar nenhum. Emenda do RF-602 proposta em 2026-09-11 (base do Ki com
-    coluna em 100% do span, ÷100) aguardando aprovação do usuário."""
+    UNIDADES do contrato de engenharia (espelhadas nos rótulos/tooltips da UI); ganhos
+    NORMALIZADOS pelas faixas 0..span (RF-609):
+
+    - selfreg (SOPDT) `{K, tau1, tau2, theta}`: `K` adimensional %/% = `ΔCV%/ΔMV%`.
+    - integrating (IOPDT) `{Ki, theta}`: `Ki` em **%/s** = taxa da linha em % do span dela
+      por SEGUNDO com a coluna sustentada em **100% do span dela**.
+    - `tau1`/`tau2`/`theta` sempre em SEGUNDOS.
+
+    O runtime converte pra EU em `eu_gain_params` ANTES do worker — `K_EU = K ×
+    span_linha/span_coluna`, `Ki_EU = Ki × span_linha/(100 × span_coluna)` — e discretiza
+    contra `Ts_mpc` em segundos (`mpc/discretize.py`); nenhuma conversão de base de tempo em
+    lugar nenhum. Base do `Ki` decidida pelo dono do produto em 2026-09-11 (correção de
+    código, modelos configurados intocados); o texto vigente do RF-602/RF-609 ainda descreve
+    a base por 1% da coluna — emenda do PRD proposta, aguardando aprovação por escrito."""
 
     model_config = ConfigDict(extra="forbid")
 

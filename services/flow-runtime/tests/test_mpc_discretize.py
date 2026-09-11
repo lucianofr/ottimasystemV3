@@ -20,6 +20,7 @@ from ottima_flow_runtime.mpc.discretize import (
     PairSS,
     discretize_iopdt,
     discretize_sopdt,
+    eu_gain_params,
 )
 
 
@@ -209,20 +210,35 @@ def test_round_banker_3_5_arredonda_para_4():
     assert pair.delay == 4
 
 
-def test_ganho_integrador_e_invariante_de_base_de_tempo() -> None:
-    """Contrato de unidade do campo Ki (rótulo da UI: "Ki (%/s por %)", base % do span da
-    linha por segundo por % do span da coluna): o caminho config→modelo trata Ki como taxa
-    POR SEGUNDO, então a rampa de saída por unidade de TEMPO não pode depender do Ts de
-    amostragem. Discretizar o MESMO Ki com ts=1 s e ts=2 s tem de dar a mesma taxa %/s
-    (y(t)/t igual nos dois); só o incremento POR AMOSTRA muda (Ki·ts). Se alguém trocar a
-    base de tempo (Ki por minuto, ou esquecer o `·ts`), as duas taxas divergem e este teste
-    falha — o defeito que a coluna de naftaleno viveu em 2026-09-11."""
-    from ottima_flow_runtime.mpc.discretize import eu_gain_params
+def test_ki_do_campo_e_taxa_com_coluna_em_100_pct() -> None:
+    """Caso de campo (flow 987, linha de nível `cv_ij93`×`mv_chns`, Ki=0,2275): a base do
+    campo é %/s com a coluna sustentada em 100% do span, então 1% de coluna move a linha a
+    0,002275 %/s — e não 0,2275 %/s, que é o modelo 100× agressivo que saturou a taxa das
+    válvulas (±dumax por ciclo) em 2026-09-11. Fixa o ÷100 do `eu_gain_params` no caminho
+    completo config→discretização, junto do `·ts`."""
+    params = eu_gain_params(
+        {"Ki": 0.2275, "theta": 0.0}, kind="integrating", row_span=100.0, col_span=100.0
+    )
+    ts = 2.0
+    por_1pct = propagate(discretize_iopdt(params["Ki"], params["theta"], ts=ts), u=1.0, n=10)
+    assert por_1pct[-1] / (ts * len(por_1pct)) == pytest.approx(0.002275, rel=1e-12)
 
+    em_100pct = propagate(discretize_iopdt(params["Ki"], params["theta"], ts=ts), u=100.0, n=10)
+    assert em_100pct[-1] / (ts * len(em_100pct)) == pytest.approx(0.2275, rel=1e-12)
+
+
+def test_ganho_integrador_e_invariante_de_base_de_tempo() -> None:
+    """Contrato de unidade do campo Ki (rótulo da UI: "Ki (%/s)", base: % do span da linha
+    por segundo com a coluna sustentada em 100% do span dela): o caminho config→modelo trata
+    Ki como taxa POR SEGUNDO, então a rampa de saída por unidade de TEMPO não pode depender
+    do Ts de amostragem. Discretizar o MESMO Ki com ts=1 s e ts=2 s tem de dar a mesma taxa
+    %/s (y(t)/t igual nos dois); só o incremento POR AMOSTRA muda (Ki·ts). Se alguém trocar
+    a base de tempo (Ki por minuto, ou esquecer o `·ts`), as duas taxas divergem e este
+    teste falha — o defeito que a coluna de naftaleno viveu em 2026-09-11."""
     params = eu_gain_params(
         {"Ki": 0.5, "theta": 0.0}, kind="integrating", row_span=100.0, col_span=100.0
     )
-    u_degrau = 1.0  # 1% sustentado na coluna
+    u_degrau = 100.0  # coluna sustentada em 100% do span — a base declarada do campo
 
     taxa: dict[float, float] = {}
     for ts in (1.0, 2.0):

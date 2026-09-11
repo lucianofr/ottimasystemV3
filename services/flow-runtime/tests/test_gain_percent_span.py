@@ -85,7 +85,9 @@ def test_eu_gain_params_escala_k_e_ki_e_nao_muta_o_original() -> None:
     assert convertido["K"] == 6.0
     assert params["K"] == 1.5  # cópia rasa: o config do chamador nunca é mutado
 
+    # Integrador: base %/s com a coluna em 100% do span ⇒ razão de spans E ÷100.
     integrador = {"Ki": 0.5, "theta": 0.0}
     assert (
-        eu_gain_params(integrador, kind="integrating", row_span=100.0, col_span=25.0)["Ki"] == 2.0
+        eu_gain_params(integrador, kind="integrating", row_span=100.0, col_span=25.0)["Ki"] == 0.02
     )
+    assert integrador["Ki"] == 0.5
