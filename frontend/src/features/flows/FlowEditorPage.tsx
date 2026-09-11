@@ -42,6 +42,9 @@ import {
   criarBloco,
   deGraphJson,
   definirExecOrder,
+  euDaPortaDeEntrada,
+  euDeSaidaPorNo,
+  handlesEntrada,
   ID_MARCADOR_X,
   motivoRecusa,
   paraGraphJson,
@@ -58,7 +61,13 @@ import {
 import { impactoDoSave, type ImpactoMpc } from "./impactoSave";
 import { MpcModal } from "./mpc/MpcModal";
 import { TIPOS_DE_NO } from "./nodes";
-import { ContextoTags, ContextoTsFlow, ContextoValores, type ValoresAoVivo } from "./nodes/contexto";
+import {
+  ContextoEuHerdada,
+  ContextoTags,
+  ContextoTsFlow,
+  ContextoValores,
+  type ValoresAoVivo,
+} from "./nodes/contexto";
 import { formatarTs, useComandarFlow, useFlow, useSaveFlow } from "./useFlows";
 import {
   formatarNumero,
@@ -204,17 +213,21 @@ function ContextosDoEditor({
   tags,
   valores,
   tsFlowSegundos,
+  euHerdada,
   children,
 }: {
   tags: ReadonlyMap<number, TagOut>;
   valores: ValoresAoVivo;
   tsFlowSegundos: number;
+  euHerdada: Readonly<Record<string, string>>;
   children: ReactNode;
 }) {
   return (
     <ContextoTags.Provider value={tags}>
       <ContextoValores.Provider value={valores}>
-        <ContextoTsFlow.Provider value={tsFlowSegundos}>{children}</ContextoTsFlow.Provider>
+        <ContextoEuHerdada.Provider value={euHerdada}>
+          <ContextoTsFlow.Provider value={tsFlowSegundos}>{children}</ContextoTsFlow.Provider>
+        </ContextoEuHerdada.Provider>
       </ContextoValores.Provider>
     </ContextoTags.Provider>
   );
@@ -382,6 +395,21 @@ function Editor({ flowId }: { flowId: number }) {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<BlocoNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<BlocoEdge>([]);
+  // EU herdada por porta de ENTRADA (spec §4.1-5): `euDaPortaDeEntrada` resolve UM nível
+  // pela aresta que chega; aqui vira lookup `${noId}:${handle}` para o canvas mostrar
+  // unidade nas entradas de Script/TFS/Fuzzy/PID sem reimplementar a herança em cada nó.
+  const euHerdada = useMemo<Readonly<Record<string, string>>>(() => {
+    const eusPorTag = new Map([...porId].map(([id, tag]) => [id, tag.eu]));
+    const saidaPorNo = euDeSaidaPorNo(nodes, eusPorTag);
+    const mapa: Record<string, string> = {};
+    for (const no of nodes) {
+      for (const handle of handlesEntrada(no)) {
+        const eu = euDaPortaDeEntrada(edges, saidaPorNo, no.id, handle);
+        if (eu !== null) mapa[`${no.id}:${handle}`] = eu;
+      }
+    }
+    return mapa;
+  }, [nodes, edges, porId]);
   const [emConfig, setEmConfig] = useState<string | null>(null);
   const [recusa, setRecusa] = useState<string | null>(null);
   const [erroSave, setErroSave] = useState<string | null>(null);
@@ -618,7 +646,12 @@ function Editor({ flowId }: { flowId: number }) {
   }
 
   return (
-    <ContextosDoEditor tags={porId} valores={valores} tsFlowSegundos={flow.data.ts_seconds}>
+    <ContextosDoEditor
+      tags={porId}
+      valores={valores}
+      tsFlowSegundos={flow.data.ts_seconds}
+      euHerdada={euHerdada}
+    >
       <section className="flex h-[calc(100vh-9rem)] flex-col gap-3">
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-baseline gap-3">

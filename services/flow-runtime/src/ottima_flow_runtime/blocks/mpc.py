@@ -817,14 +817,28 @@ class MpcBlock(Block):
                 # plano (`_reclassify_mvs`) — sem plano para ela, vale o hold da posição
                 # real até o primeiro `SolveResult` novo.
                 plano = self._plan.get(mv.id) if self._plan is not None else None
-                v = self._mv_last[mv.id] if plano is None else plano
+                # Clamp defensivo (ADR-027: limite duro de MV em TODO caminho de código): o
+                # plano vem do solver, que respeita os bounds só dentro da tolerância dele —
+                # o caminho de escrita em AUTO não confia nisso. O hold `_mv_last` já nasce
+                # clampado pelas transições; clampar de novo é idempotente.
+                v = _clamp(
+                    self._mv_last[mv.id] if plano is None else plano, mv.limits.min, mv.limits.max
+                )
             outputs[mv.id] = PortSample(v, ok)
         # Portas fixas de modo (decisão A-10 revista, spec F4 §2.1-5): eixos LOCAL/REMOTO e
         # MAN/AUTO do próprio bloco, nunca uma variável do usuário — sempre numéricas
         # (decisão A-5), 1.0/0.0. Mesmo `ok` do resto da varredura (decisão A-6: uma
         # invalidez, uma flag, em toda porta do bloco).
+        # ESTADO REAL, não pedido do operador (decisão de campo 2026-09-11, emenda à nota da
+        # spec F4 §2.1-5): `local` só vale 1.0 com o bloco de fato em LOCAL; `auto` só vale
+        # 1.0 quando o bloco ESTÁ controlando — REMOTO + AUTO + host pronto (armed). Em
+        # `building`/worker indisponível o bloco não comanda nada, então `auto` = 0.0 mesmo
+        # com `man_auto` interno em "auto". As PORTAS contam o estado real; o campo `modes`
+        # do `mpc.state` segue sendo o alvo MATERIALIZADO (o seletor do faceplate e a
+        # pendência de comando confirmam por ele) — a honestidade do que está vigente mora
+        # aqui e no render do faceplate, não no `modes`.
         outputs[MPC_PORT_LOCAL] = PortSample(1.0 if self._local_remote == "local" else 0.0, ok)
-        outputs[MPC_PORT_AUTO] = PortSample(1.0 if self._man_auto == "auto" else 0.0, ok)
+        outputs[MPC_PORT_AUTO] = PortSample(1.0 if self._in_auto and self._host.ready else 0.0, ok)
         return outputs
 
     def _local_output(self, mv: MvVar) -> float | None:

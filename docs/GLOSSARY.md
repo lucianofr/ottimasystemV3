@@ -11,7 +11,7 @@
 | **Scan cycle** | Semântica de execução: a cada Ts, todos os blocos do flow são avaliados **em ordem crescente de `exec_order`** com os últimos valores conhecidos. |
 | **exec_order** | Parâmetro de todo bloco: inteiro único de 1 a N que define a ordem de execução na varredura (leituras < Script/MPC < escritas). Auto-numerado na inserção, editável, com badge no nó. Ordem invertida em relação a uma aresta ⇒ consumo do valor da varredura anterior (1 scan de atraso). |
 | **Ts (tempo de amostragem)** | Período do scan de um flow. Valores permitidos: 0.5, 1, 2, 5, 10, 30, 60 s. Definido individualmente por flow. |
-| **Bloco** | Nó do flow com entradas/saídas tipadas. Tipos da v1: OPC-Read, OPC-Write, MPC, Python-Script, TFS, Filtro 1ª ordem, Filtro Kalman, Fuzzy, PID. |
+| **Bloco** | Nó do flow com entradas/saídas tipadas. Tipos da v1: OPC-Read, OPC-Write, MPC, Python-Script, TFS, Filtro 1ª ordem, Filtro Kalman, Fuzzy, PID, Scaler, Integrator. Propostos no ADR-039: PID Malha (`pid_loop`) e Fuzzy Malha (`fuzzy_loop`). |
 | **opc-worker** | Processo asyncio que mantém as sessões OPC-UA (asyncua), publica leituras no barramento, executa escritas e opera o watchdog. Único processo que fala com PLC/DCS. |
 | **flow-runtime** | Processo asyncio que interpreta e executa os flows (MPC, scripts) como loops vivos. |
 | **recorder** | Consumidor do barramento que grava amostras na hypertable do TimescaleDB. |
@@ -20,14 +20,14 @@
 | **Loop vivo** | Processo contínuo que mantém estado e cicla indefinidamente (MPC, sessão OPC); task asyncio, nunca job de fila. |
 | **Watchdog** | Bit alternante com NOT cruzado entre sistema e PLC, configurado **por flow** (não por conexão): um flow escolhe a conexão OPC-UA e o par de nós (1 leitura + 1 escrita, distintos) por onde o handshake passa. O sistema copia o bit lido para a escrita sem inverter; o PLC aplica o NOT do lado dele. Bit parado por >10 s ⇒ falha de comunicação daquele flow ⇒ para as escritas e para o flow; flows-irmãos na mesma conexão não são afetados; PLC retoma controle convencional. |
 | **LOCAL / REMOTO** | Eixo de modo do MPC. LOCAL: PID do PLC controla. REMOTO: MPC assume. Transições bumpless nos dois sentidos, comandadas escrevendo o modo do PID no PLC (AUTO ↔ RCAS/CAS/ROUT). |
-| **PID** | Bloco do canvas (não o PID de campo do PLC — ver **LOCAL/REMOTO**) com uma entrada **`pv`** (obrigatória), uma entrada **`sp`** opcional (sobrepõe o `setpoint` da config quando conectada) e uma saída **`out`**. Estrutura **ISA**, configurado por **`kc`** (ganho), **`ti_seconds`** (tempo integral), **`td_seconds`** (tempo derivativo) e limites de saída (`output_min`/`output_max`). Cobre malhas sem PID de campo ou malhas auxiliares/computadas dentro do canvas — não substitui nem interage com os eixos de modo do MPC. |
+| **PID** | Bloco do canvas (não o PID de campo do PLC — ver **LOCAL/REMOTO**) com uma entrada **`pv`** (obrigatória), uma entrada **`sp`** opcional (sobrepõe o `setpoint` da config quando conectada) e uma saída **`out`**. Estrutura **ISA**, configurado por **`kc`** (ganho), **`ti_seconds`** (tempo integral), **`td_seconds`** (tempo derivativo) e limites de saída (`output_min`/`output_max`). Cobre malhas sem PID de campo ou malhas auxiliares/computadas dentro do canvas — não substitui nem interage com os eixos de modo do MPC. **Sem máquina de modos** — a versão com modos/cascata é o bloco malha `pid_loop` (ADR-039). |
 | **Tempo integral (Ti)** | Parâmetro do bloco PID, em **segundos por repetição**. Reset em repetições por segundo é `1/Ti`. **`Ti = 0` desliga a ação integral** (convenção documentada, permite P ou PD puro). |
 | **Tempo derivativo (Td)** | Parâmetro do bloco PID, em **segundos**. **`Td = 0` desliga a ação derivativa**. |
-| **Ganho (Kc)** | Ganho da forma ISA do bloco PID. Qualquer sinal — **negativo é ação reversa**. |
+| **Ganho (Kc)** | Ganho da forma ISA do bloco PID. Qualquer sinal — **negativo é ação reversa**. No bloco malha `pid_loop` (ADR-039) a convenção é outra: **`KC > 0` em %span/EU**, sentido exclusivamente via `DIRECT_ACTING`. |
 | **MAN / AUTO** | Sub-modo de REMOTO. MAN: operador escreve as MVs pela UI. AUTO: MPC calcula. Em LOCAL o sistema não escreve MV. |
-| **RCAS / CAS / ROUT** | Modos do PID no PLC usados pelo APC: SP remoto em cascata (RCAS/CAS) ou saída remota direta (ROUT). Determina o que o MPC escreve por MV. |
-| **Bumpless** | Transferência de controle sem salto na MV: MPC inicializa nas MVs atuais ao assumir; PID faz SP/OUT-tracking ao retomar. |
-| **Hot-swap** | Edição de flow em execução aplicada atomicamente na próxima varredura, sem interrupção e preservando estado dos blocos não alterados. |
+| **RCAS / CAS / ROUT** | Modos de cascata remota — do PID no PLC **e dos blocos malha do canvas** (ADR-039): SP remoto em cascata (RCAS/CAS) ou saída remota direta (ROUT). No MPC, determina o que é escrito por MV. |
+| **Bumpless** | Transferência de controle sem salto na saída: MPC inicializa nas MVs atuais ao assumir; PID de PLC faz SP/OUT-tracking ao retomar; nos blocos malha, propriedade da forma incremental do kernel (ADR-039 D2) — toda escrita direta em `u` deixa o controlador alinhado. |
+| **Hot-swap** | Edição de flow em execução aplicada atomicamente na próxima varredura, sem interrupção e preservando estado dos blocos não alterados. Nos blocos malha (ADR-039), a config divide-se em **classe de sintonia** (aplicada in-place, preserva modo e estado) e **classe estrutural** (re-instancia; se estava em modo calculante, aterrissa em MAN). |
 | **PV / MV / SP / CV / DV** | Variável de processo / manipulada / setpoint / controlada / distúrbio — nomenclatura padrão APC. |
 | **Admin** | Papel de engenharia: cria/edita flows, conexões OPC, tags, projetos, usuários — e tudo que o operador faz. |
 | **Operador** | Papel de operação (ex-"visualizador"): troca LOCAL/REMOTO e MAN/AUTO, escreve SP e MV (em MAN); enxerga tudo; não edita engenharia. |
@@ -47,6 +47,8 @@
 | **IOPDT** | Modelo integrador com tempo morto (Ki, θ) — usado em CVs/Restrições integradoras e no bloco TFS. |
 | **Filtro 1ª ordem** | Bloco de uma entrada e uma saída que suaviza o sinal por atraso de 1ª ordem, com parâmetro único `tau` (constante de tempo, em segundos), discretizado no Ts do flow. |
 | **Filtro Kalman** | Bloco de uma entrada e uma saída que estima o valor verdadeiro de um sinal ruidoso (passeio aleatório escalar). Configurado por dois desvios padrão na EU do sinal: `measurement_noise` (ruído da medição) e `process_noise` (variação esperada do valor verdadeiro por varredura). |
+| **Scaler** | Bloco de uma entrada (`in`) e uma saída (`out`) que reescala linearmente o sinal da faixa de entrada (`in_min`/`in_max`) para a faixa de saída (`out_min`/`out_max`). Faixa de saída invertida é ação reversa; fora da faixa de entrada **extrapola** (conversão de unidade não satura). |
+| **Integrator** | Bloco totalizador: acumula a entrada (`in`) no tempo, na **base de tempo** configurada (por segundo/minuto/hora — a EU de tempo da entrada). Porta **`reset`** opcional: valor ≠ 0 com qualidade boa zera o total. Amostra inválida ou não-finita congela o acumulado (nunca soma erro). |
 | **MV tracking** | Em LOCAL, a saída MV do MPC segue a MV real do PID (tag de readback), garantindo transição bumpless LOCAL→REMOTO. |
 | **Log de eventos** | Hypertable de eventos (info/warning/alarm) com retenção de 1 mês; alimenta o banner de alarmes ativos (sem ACK) e a auditoria de operação. |
 | **Hypertable** | Tabela particionada por tempo do TimescaleDB; amostras com retenção de 1 mês. |
@@ -56,6 +58,16 @@
 | **Conta `agente`** | Usuário dedicado (papel admin) usado pelo servidor MCP. Garante atribuição de auditoria — `FlowCommand.user = "user:{id}"` e eventos `mpc_*` distinguem ações de agente das de humanos sem mudança de backend. |
 | **Comandado ≠ confirmado (agente)** | RNF-05 aplicado a ferramentas: escrita de operação responde 202 (intenção publicada em `flow.commands`); a verdade é o estado publicado no barramento. Ferramenta MCP de escrita aguarda o estado confirmado ou falha por timeout explícito — nunca reporta sucesso pelo HTTP. |
 | **Cursor de eventos (since_id)** | Contrato de paginação incremental do log de eventos nas ferramentas MCP (`events_since`): leitura sob demanda na v1, supervisão contínua na v2 sem quebra de contrato. |
+| **Shell de bloco** | (ADR-039) Máquina genérica de modos, tracking, cascata e saída (`BlockShell`) que envolve um kernel de controle. Toda a semântica FF (modos, shed, BKCAL, anti-windup) vive nela — nunca no algoritmo. Termo interno; o usuário vê "malha". |
+| **Kernel de controle** | (ADR-039) Algoritmo puro em forma incremental: `compute(sp, pv, dt) → du/dt` em %span/s, mais `align`/`reset`/`validate`. Não conhece modo, saturação nem cascata. |
+| **Bloco malha** | (ADR-039) Bloco de produção `pid_loop`/`fuzzy_loop`: kernel + shell, com `MODE_BLK` completo, cascata e tracking. Os blocos kernel (`pid`, `fuzzy`) seguem existindo para prototipagem. |
+| **Signal** | (ADR-039) Extensão do `PortSample` com qualidade (GOOD/UNCERTAIN/BAD), substatus e bits de limitação. Promoção implícita nas arestas: `(v, ok)` ⇄ `Signal`. |
+| **MODE_BLK (TARGET/ACTUAL)** | (ADR-039) Modo alvo (escrito pelo operador) × modo real (calculado pelo shell por rebaixamento em prioridade FF: OOS > IMAN > LO > MAN > AUTO > CAS > RCAS > ROUT), com máscara `PERMITTED` e modo `NORMAL`. |
+| **IMAN** | (ADR-039) Initialization manual: modo imposto pelo bloco a jusante que não está aceitando cascata (`bkcal_in` com init request); a saída acompanha o SP de trabalho do jusante para retomada bumpless. |
+| **LO (override local)** | (ADR-039) Modo imposto por intertravamento via `lo_in_d`: a saída é forçada a `LO_VAL` enquanto ativo. |
+| **Shed** | (ADR-039) Rebaixamento de `ACTUAL` quando a fonte remota de SP/OUT degrada (`cas_in`/`rcas_in`/`rout_in` não-GOOD), conforme `SHED_OPT`; retorno automático quando a condição limpa. Com `SHED_NO_RETURN`, o `TARGET` é reescrito e re-engajar vira ato explícito. |
+| **BKCAL / aresta de retorno** | (ADR-039) Caminho de back-calculation da cascata: `bkcal_out` do secundário leva SP de trabalho e bits de limitação ao `bkcal_in` do primário, com atraso de 1 scan. No editor, aresta com destino `bkcal_in` é classe retorno: tracejada, fora da detecção de ciclo e do aviso de inversão (emenda ao ADR-024). |
+| **OUT_SCALE** | (ADR-039) Faixa em EU da saída de um bloco malha; `u` interno é sempre %, a porta `out` emite o valor escalado. Em cascata, `OUT_SCALE` do primário = faixa de SP do secundário. |
 
 ## Dimensionamento-alvo
 ~10 flows simultâneos · ~100 tags OPC (R+W) · até 5 servidores OPC-UA · retenção 1 mês.

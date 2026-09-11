@@ -296,7 +296,7 @@ export const AJUDA_PID = {
 export const AJUDA_MODELOS: Record<string, TooltipContent> = {
   K: {
     description:
-      "Ganho estático do par SOPDT, adimensional (%/%): quanto a linha varia, em % do seu Span, pra cada 1% de variação da coluna, em regime permanente. O motor converte pra EU multiplicando por Span_linha/Span_coluna na montagem (RF-602).",
+      "Ganho estático do par SOPDT em % por %: quanto a linha varia, em % do Span DELA, pra cada 1% de variação da coluna, em % do Span DELA, em regime permanente. O motor converte pra EU multiplicando por Span_linha/Span_coluna na montagem (RF-602/609) — os spans vigentes aparecem nos cabeçalhos da matriz.",
     example: "K=2 significa que 10% de variação na MV vira 20% de variação na CV, na faixa de cada uma.",
   },
   tau1: {
@@ -305,7 +305,7 @@ export const AJUDA_MODELOS: Record<string, TooltipContent> = {
   },
   tau2: {
     description:
-      "Segunda constante de tempo do par SOPDT (resposta de 2ª ordem, com um leve S na curva) — 0 reduz o modelo a 1ª ordem pura.",
+      "Segunda constante de tempo do par SOPDT (resposta de 2ª ordem, com um leve S na curva), em segundos — 0 reduz o modelo a 1ª ordem pura.",
     example: "τ2=0 pra maioria das malhas simples; um valor > 0 só quando a curva de reação mostra um S visível antes de subir.",
   },
   theta: {
@@ -315,7 +315,7 @@ export const AJUDA_MODELOS: Record<string, TooltipContent> = {
   },
   Ki: {
     description:
-      "Ganho do par IOPDT (linha integradora), adimensional: taxa de variação da linha, em %/s do seu Span, pra cada 1% de variação sustentada da coluna.",
+      "Ganho do par IOPDT (linha integradora), NORMALIZADO e adimensional por segundo (RF-602): taxa de variação da linha, em % do Span DELA por SEGUNDO, pra cada 1% de variação sustentada da coluna, em % do Span DELA. A base de tempo é sempre o segundo — Ki em %/min produziria modelo 60× lento. O motor converte pra EU multiplicando por Span_linha/Span_coluna antes do worker (RF-602/609); os spans vigentes aparecem nos cabeçalhos da matriz.",
     example: "Ki=0,05 numa CV de nível de tanque sem dreno, alimentado por uma MV de vazão de entrada.",
   },
   habilitado: {

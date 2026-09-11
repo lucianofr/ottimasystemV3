@@ -12,16 +12,19 @@ import {
 import { Campo } from "./CamposComuns";
 import { nomeParam } from "./campos";
 
-/** Rótulos dos params por modelo (spec F3 §3.4). */
+/** Rótulos dos params por modelo (spec F3 §3.4). Unidades explícitas: o TFS trabalha em EU
+ *  direto (sem conversão por span, ao contrário do MPC — RF-602/609): K é EU de saída por EU
+ *  de entrada; Ki é EU de saída por segundo por EU de entrada (`acc += Ki*Ts*u` em
+ *  `blocks/tfs.py`). Tempos sempre em segundos, mesma convenção do MPC. */
 const PARAMS: Record<TipoElemento, { chave: string; rotulo: string }[]> = {
   sopdt: [
-    { chave: "K", rotulo: "K (ganho)" },
+    { chave: "K", rotulo: "K (ganho, EU/EU)" },
     { chave: "tau1", rotulo: "tau1 (s)" },
     { chave: "tau2", rotulo: "tau2 (s)" },
     { chave: "theta", rotulo: "theta (s)" },
   ],
   iopdt: [
-    { chave: "Ki", rotulo: "Ki (ganho integral)" },
+    { chave: "Ki", rotulo: "Ki (EU/s por EU)" },
     { chave: "theta", rotulo: "theta (s)" },
   ],
 };

@@ -207,3 +207,28 @@ def test_round_banker_2_5_arredonda_para_2():
 def test_round_banker_3_5_arredonda_para_4():
     pair = discretize_iopdt(Ki=1.0, theta=3.5, ts=1.0)
     assert pair.delay == 4
+
+
+def test_ganho_integrador_e_invariante_de_base_de_tempo() -> None:
+    """Contrato de unidade do campo Ki (rótulo da UI: "Ki (%/s por %)", base % do span da
+    linha por segundo por % do span da coluna): o caminho config→modelo trata Ki como taxa
+    POR SEGUNDO, então a rampa de saída por unidade de TEMPO não pode depender do Ts de
+    amostragem. Discretizar o MESMO Ki com ts=1 s e ts=2 s tem de dar a mesma taxa %/s
+    (y(t)/t igual nos dois); só o incremento POR AMOSTRA muda (Ki·ts). Se alguém trocar a
+    base de tempo (Ki por minuto, ou esquecer o `·ts`), as duas taxas divergem e este teste
+    falha — o defeito que a coluna de naftaleno viveu em 2026-09-11."""
+    from ottima_flow_runtime.mpc.discretize import eu_gain_params
+
+    params = eu_gain_params(
+        {"Ki": 0.5, "theta": 0.0}, kind="integrating", row_span=100.0, col_span=100.0
+    )
+    u_degrau = 1.0  # 1% sustentado na coluna
+
+    taxa: dict[float, float] = {}
+    for ts in (1.0, 2.0):
+        got = propagate(discretize_iopdt(params["Ki"], params["theta"], ts=ts), u=u_degrau, n=6)
+        tempo_total = ts * len(got)
+        taxa[ts] = got[-1] / tempo_total  # % por segundo
+
+    assert taxa[1.0] == pytest.approx(0.5, rel=1e-12)
+    assert taxa[2.0] == pytest.approx(taxa[1.0], rel=1e-12)

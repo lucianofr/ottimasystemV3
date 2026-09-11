@@ -46,9 +46,12 @@ RowFailAction = Literal[
 # `_compute_outputs`) importam daqui — nunca literais duplicados.
 #
 # Valor sempre numérico (decisão A-5: toda porta do MPC é numérica, nunca bool): 1.0/0.0.
-# `MPC_PORT_LOCAL`: 1.0 em LOCAL, 0.0 em REMOTO. `MPC_PORT_AUTO`: 1.0 em AUTO (dentro de
-# REMOTO), 0.0 em MAN. Saem nulas junto com as demais saídas sob cold start das entradas
-# (padrão F3 §3.0) — mesma regra de invalidez de toda porta do bloco numa varredura ruim.
+# ESTADO REAL, não pedido do operador (emenda 2026-09-11 à nota da spec F4 §2.1-5):
+# `MPC_PORT_LOCAL`: 1.0 com o bloco de fato em LOCAL, 0.0 em REMOTO. `MPC_PORT_AUTO`: 1.0 só
+# quando o bloco ESTÁ controlando — REMOTO + AUTO + host pronto (armed); 0.0 em MAN, em LOCAL
+# e enquanto o solver está em `building`/worker indisponível. Saem nulas junto com as demais
+# saídas sob cold start das entradas (padrão F3 §3.0) — mesma regra de invalidez de toda porta
+# do bloco numa varredura ruim.
 MPC_PORT_LOCAL = "local"
 MPC_PORT_AUTO = "auto"
 MPC_FIXED_OUTPUT_PORTS: tuple[str, str] = (MPC_PORT_LOCAL, MPC_PORT_AUTO)
@@ -342,7 +345,17 @@ class MpcVariables(BaseModel):
 
 
 class PairModel(BaseModel):
-    """Par `models[linha][coluna]` (spec §2.1-2); `params` genérico — completude é da 1.2."""
+    """Par `models[linha][coluna]` (spec §2.1-2); `params` genérico — completude é da 1.2.
+
+    UNIDADES do contrato de engenharia (RF-602 normativo, espelhadas nos rótulos/tooltips
+    da UI): ganhos NORMALIZADOS pelas faixas 0..span (RF-609), adimensionais %/% — selfreg
+    (SOPDT) `{K, tau1, tau2, theta}`: `K = ΔCV%/ΔMV%`; integrating (IOPDT) `{Ki, theta}`:
+    `Ki = (ΔCV%/s)/ΔMV%`, ou seja taxa da linha em % do span dela por SEGUNDO por 1% do
+    span da coluna; `tau1`/`tau2`/`theta` sempre em SEGUNDOS. O runtime converte pra EU em
+    `eu_gain_params` (×span_linha/span_coluna, ambos os ganhos) ANTES do worker e
+    discretiza contra `Ts_mpc` em segundos (`mpc/discretize.py`) — nenhuma conversão de
+    base de tempo em lugar nenhum. Emenda do RF-602 proposta em 2026-09-11 (base do Ki com
+    coluna em 100% do span, ÷100) aguardando aprovação do usuário."""
 
     model_config = ConfigDict(extra="forbid")
 

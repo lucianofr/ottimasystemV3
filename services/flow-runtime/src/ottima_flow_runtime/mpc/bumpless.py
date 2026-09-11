@@ -95,6 +95,15 @@ def init_bumpless(
         x0[state_name] = u_now[mv_id]
 
     built.mpc.x0 = x0
+    # Chute inicial de `u` na MV VIGENTE (não na do ciclo anterior): `set_initial_guess`
+    # semeia o horizonte inteiro a partir de `mpc.u0`, e `make_step` reescreve `_u0` com o
+    # resultado de cada solve — sem isto, todo re-arme (MAN→AUTO, respawn, transplante,
+    # prime de boot) parte de um horizonte semeado na MV errada e o IPOPT para longe do
+    # ótimo do QP convexo (medido: Δu 2,7× o natural no primeiro ciclo pós-prime).
+    u0 = model.u(0.0)
+    for mv_id in built.u_prev_state_name:
+        u0[mv_id] = u_now[mv_id]
+    built.mpc.u0 = u0
 
     for row_id, bias_name in built.bias_tvp_name.items():
         bias_value = y_now[row_id] - row_contribution[row_id]

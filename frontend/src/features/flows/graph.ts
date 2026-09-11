@@ -452,7 +452,7 @@ export function handlesEntrada(no: BlocoNode): string[] {
  *  de modo do próprio bloco (RF-621), não uma variável do usuário — ao contrário das
  *  demais portas do MPC (uma por variável), estas 2 SEMPRE existem, mesmo no nó recém-
  *  criado sem nenhuma MV/CV. `PORTA_MPC_LOCAL`: 1 em LOCAL, 0 em REMOTO. `PORTA_MPC_AUTO`:
- *  1 em AUTO (dentro de REMOTO), 0 em MAN. Único ponto de definição da string no frontend —
+ *  1 só com o bloco DE FATO controlando (REMOTO+AUTO+host pronto), 0 em MAN/LOCAL/building.
  *  `NoMpc` (nodes/index.tsx) importa daqui. Espelha `MPC_PORT_LOCAL`/`MPC_PORT_AUTO`
  *  (`ottima_core.flowgraph.mpc_config`), hand-mirrado (mesmo padrão de `DIRECT_PASS_RATIO`
  *  acima): sem geração cruzada de linguagem para 2 literais. */
@@ -695,6 +695,43 @@ export function euDaPortaDeEntrada(
   if (aresta === undefined) return null;
   const eu = output_eu_por_no.get(aresta.source)?.[aresta.sourceHandle];
   return eu !== undefined && eu !== "" ? eu : null;
+}
+
+/** EU declarada nas portas de SAÍDA de cada nó, por tipo de bloco: Script/TFS/Fuzzy
+ *  declaram `output_eu` por porta; OPC-Read/Write herdam a EU da tag para todas as portas
+ *  de saída (o contrato dá os handles, nunca hardcoded); MPC declara por variável
+ *  (`variavel.id`, o handle da porta). Blocos sem EU declarada (PID, filtros, Scaler, ou
+ *  tag/variável com `eu` vazia) ficam FORA do mapa — chave ausente, não registro vazio.
+ *  É a tabela de origem que `euDaPortaDeEntrada` consulta: lógica pura, testada em
+ *  `graph.check.ts`, para entrar bloco novo sem quebrar calado. */
+export function euDeSaidaPorNo(
+  nodes: readonly BlocoNode[],
+  eusPorTag: ReadonlyMap<number, string>,
+): ReadonlyMap<string, Record<string, string>> {
+  const porNo = new Map<string, Record<string, string>>();
+  for (const no of nodes) {
+    if (no.type === "script" || no.type === "tfs" || no.type === "fuzzy") {
+      if (Object.keys(no.data.output_eu).length > 0) porNo.set(no.id, no.data.output_eu);
+    } else if (no.type === "mpc") {
+      const eus: Record<string, string> = {};
+      for (const variavel of [
+        ...no.data.variables.mvs,
+        ...no.data.variables.cvs,
+        ...no.data.variables.constraints,
+        ...no.data.variables.dvs,
+      ]) {
+        if (variavel.eu !== "") eus[variavel.id] = variavel.eu;
+      }
+      if (Object.keys(eus).length > 0) porNo.set(no.id, eus);
+    } else if (no.type === "opc_read" || no.type === "opc_write") {
+      const eu = no.data.tag_id === null ? "" : (eusPorTag.get(no.data.tag_id) ?? "");
+      const portas = handlesSaida(no); // opc_write não tem porta de saída: fica fora
+      if (eu !== "" && portas.length > 0) {
+        porNo.set(no.id, Object.fromEntries(portas.map((porta) => [porta, eu])));
+      }
+    }
+  }
+  return porNo;
 }
 
 /** Compactação automática ao excluir (ADR-024): o conjunto volta a ser contíguo 1..N. */

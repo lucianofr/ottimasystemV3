@@ -815,6 +815,24 @@ async def test_remoto_auto_publica_local_0_e_auto_1() -> None:
     assert saida["auto"] == PortSample(1.0, True)
 
 
+async def test_remoto_auto_com_host_indisponivel_publica_auto_0() -> None:
+    """Porta `auto` é ESTADO REAL, não pedido (emenda 2026-09-11): com o worker em build o
+    bloco não comanda nada — `auto` = 0.0 mesmo com `man_auto` interno em "auto". Sem isto,
+    o canvas e qualquer lógica a jusante acendem AUTO sobre um bloco que ainda não resolveu
+    um solve sequer (defeito de campo: faceplate em AUTO + "build em andamento" ao mesmo
+    tempo)."""
+    block, host, *_ = _block()
+    host.ready = False
+    await _entra_remoto_auto(block)
+    saida = await block.step(entradas(20.0))
+    assert saida["local"] == PortSample(0.0, True)
+    assert saida["auto"] == PortSample(0.0, True)
+
+    host.ready = True  # worker fica pronto: a porta vira 1.0 na varredura seguinte
+    saida = await block.step(entradas(20.0))
+    assert saida["auto"] == PortSample(1.0, True)
+
+
 async def test_entrada_invalida_propaga_ok_false_tambem_em_local_e_auto() -> None:
     """Decisão A-6: uma invalidez, uma flag, em TODA porta do bloco — as fixas não são
     exceção só porque o valor não depende da CV/Restrição/DV."""

@@ -273,6 +273,40 @@ def _assemble_model(config: MpcConfig, ts_flow: float) -> BuiltMpc:
     mpc.settings.t_step = horizons.ts_mpc
     mpc.settings.n_robust = 0
     mpc.settings.supress_ipopt_output()
+    # O modelo é LINEAR com custo quadrático: Hessiana e Jacobianos constantes por
+    # construção — declarar isso ao IPOPT evita reavaliações simbólicas. `store_full_solution`
+    # + `warm_start_init_point` fazem o solve seguinte partir da solução anterior (iterações
+    # caem ~pela metade): sem isso, o solve FRIO de um bloco típico (Np=60, Nc=15) estoura o
+    # orçamento de 0,7×Ts_mpc (ADR-014) e o respawn por overrun (spec §4.2) reinicia o worker
+    # antes do primeiro solve concluir — espiral de `building` permanente observada em campo
+    # (2026-09-11). SEM `warm_start_init_point`: o warm start DUAL do IPOPT (multiplicadores
+    # herdados do solve anterior) escala o teste de parada pela magnitude deles — duais
+    # grandes de um ciclo com restrição ativa fazem o solver declarar convergência em
+    # poucas iterações num ponto longe do ótimo do QP (medido: Δu 2,7× o natural, MV 1,14
+    # fora). O warm start PRIMAL continua de graça (`optimizer.solve()` sempre passa
+    # `opt_x_num` como chute), que é o que corta as iterações do solve quente.
+    # `tol=1e-10`: oráculo de custo num QP 1x1 convexo mostra o ótimo em u≈30.43007
+    # (cost 1.17058e-7); tol 1e-6/1e-8 param 0.025/0.031 longe dele com `Solve_Succeeded`,
+    # e esse desvio vira movimento de válvula (a banda morta TD-007 derivava junto). 1e-10
+    # converge ao ótimo custando ~150 ms a mais que 1e-6 no bloco de campo (frio 990 ms
+    # contra orçamento de 1400 ms — e o `_prime` paga o frio no boot). Perto do ótimo o
+    # custo é fracamente determinado (~0.03 de MV move o custo em ~2%): a banda morta
+    # (`du_min`, TD-007) é a proteção contra catraca nessa região, não a tolerância.
+    mpc.settings.store_full_solution = True
+    mpc.settings.nlpsol_opts.update(
+        {
+            "ipopt.hessian_constant": "yes",
+            "ipopt.jac_c_constant": "yes",
+            "ipopt.jac_d_constant": "yes",
+            "ipopt.tol": 1e-10,
+            # Limite de MV é DURO em todo caminho de código (ADR-027): o default do IPOPT
+            # relaxa bounds de variável/restrição (~1e-8 relativo) e deixava a MV sair 2,5e-6
+            # acima do curso — visível no clamp de MV congelada (test_mpc_frozen_mv). Zero
+            # faz o solver respeitar o bound exatamente; o clamp defensivo em
+            # `blocks/mpc.py::_compute_outputs` fecha o mesmo furo no caminho de escrita.
+            "ipopt.bound_relax_factor": 0.0,
+        }
+    )
 
     spans: dict[str, float] = {}
     for cv in cvs:

@@ -47,3 +47,15 @@ export function useValoresDoBloco(blockId: string): PortasDoBloco | null {
   const vivo = useContext(ContextoValores);
   return vivo.ativo ? (vivo.ports[blockId] ?? {}) : null;
 }
+
+/** EU herdada por porta de ENTRADA via aresta que chega (spec §4.1-5), resolvida UMA vez
+ *  por `FlowEditorPage` com `euDaPortaDeEntrada` (`graph.ts`) — chave `${noId}:${handle}`.
+ *  Mesmo motivo dos demais contextos: é derivado do grafo, nunca mora em `data`. */
+export const ContextoEuHerdada = createContext<Readonly<Record<string, string>>>({});
+
+/** EU da porta de entrada herdada da origem da aresta; `null` quando a porta não herda
+ *  nada (sem aresta, ou origem sem EU declarada). */
+export function useEuHerdada(noId: string, handle: string): string | null {
+  const mapa = useContext(ContextoEuHerdada);
+  return mapa[`${noId}:${handle}`] ?? null;
+}

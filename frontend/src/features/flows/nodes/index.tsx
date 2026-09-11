@@ -29,7 +29,7 @@ import {
 } from "../graph";
 import { rotuloVariavel } from "../mpc/mpcLogic";
 import { BlocoChapa, LinhaResumo, type Porta } from "./BlocoChapa";
-import { useTagsDoEditor, useTsFlowDoEditor } from "./contexto";
+import { useTagsDoEditor, useTsFlowDoEditor, useValoresDoBloco } from "./contexto";
 
 /** Portas rotuladas com o próprio nome do handle: é o que o engenheiro vê no 422 do save. */
 function portas(ids: readonly string[]): Porta[] {
@@ -44,14 +44,23 @@ function portasComEu(ids: readonly string[], output_eu: Record<string, string>):
   return ids.map((id) => ({ id, rotulo: id, eu: output_eu[id] }));
 }
 
-/** Portas do MPC rotulam `nome (EU)` — ao contrário do resto do canvas, que rotula pelo
- *  handle id (decisão A-10, spec F4 §7.2). Nome vazio cai no id (variável ainda sem nome). */
+/** Portas do MPC rotulam pelo nome da variável (decisão A-10, spec F4 §7.2); nome vazio cai
+ *  no id. No modo ONLINE a EU vai para o campo `eu` e herda o negrito do valor ao lado do
+ *  número; no EDIT não há valor ao vivo, então a EU volta embutida no rótulo
+ *  (`nome (EU)`) — era assim que o card a mostrava antes dos valores ao vivo existirem, e
+ *  tirá-la dali sem repor em lugar nenhum deixaria o engenheiro sem unidade no modo de
+ *  edição. */
 function portasMpc(
   variaveis: readonly (VariavelMv | VariavelCv | VariavelRestricao | VariavelDv)[],
+  euNoRotulo: boolean,
 ): Porta[] {
   return variaveis.map((variavel) => {
     const nome = rotuloVariavel(variavel);
-    return { id: variavel.id, rotulo: variavel.eu ? `${nome} (${variavel.eu})` : nome };
+    return {
+      id: variavel.id,
+      rotulo: euNoRotulo && variavel.eu ? `${nome} (${variavel.eu})` : nome,
+      eu: variavel.eu || undefined,
+    };
   });
 }
 
@@ -292,9 +301,12 @@ export function NoIntegrator({ id, data, selected }: NodeProps<NoIntegratorData>
  *  dependem de nenhuma variável (B-F4-01 passo 5). */
 export function NoMpc({ id, data, selected }: NodeProps<NoMpcData>) {
   const { mvs, cvs, constraints, dvs } = data.variables;
-  const entradas = portasMpc([...cvs, ...constraints, ...dvs]);
+  // EDIT (sem valores ao vivo) ⇒ EU embutida no rótulo; ONLINE ⇒ EU no campo `eu`, em
+  // negrito ao lado do número (ver `portasMpc`).
+  const euNoRotulo = useValoresDoBloco(id) === null;
+  const entradas = portasMpc([...cvs, ...constraints, ...dvs], euNoRotulo);
   const saidas = [
-    ...portasMpc(mvs),
+    ...portasMpc(mvs, euNoRotulo),
     { id: PORTA_MPC_LOCAL, rotulo: "LOCAL" },
     { id: PORTA_MPC_AUTO, rotulo: "AUTO" },
   ];

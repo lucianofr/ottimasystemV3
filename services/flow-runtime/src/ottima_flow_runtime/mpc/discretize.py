@@ -87,6 +87,10 @@ def _stage(tau: float, ts: float) -> tuple[float, float] | None:
 def discretize_sopdt(K: float, tau1: float, tau2: float, theta: float, ts: float) -> PairSS:
     """SOPDT (dois estágios de 1a ordem em série, ganho `K` aplicado na saída) no `Ts_mpc`.
 
+    UNIDADES (contrato do config, RF-602): `K` chega aqui já em EU (Δy_EU/Δu_EU, convertido
+    de %/% por `eu_gain_params`); `tau1`/`tau2`/`theta`/`ts` TODOS em segundos — o config do
+    usuário informa tempos em segundos e nada neste módulo converte base de tempo.
+
     **Dois estágios ativos:** 2 estados, forma companion triangular inferior — pólos
     `e^(-Ts/tau1)` e `e^(-Ts/tau2)` (autovalores de `a`, a própria diagonal por
     triangularidade). Derivação: o estágio 2 consome a saída JÁ ATUALIZADA do estágio 1 na
@@ -131,7 +135,14 @@ def discretize_sopdt(K: float, tau1: float, tau2: float, theta: float, ts: float
 def discretize_iopdt(Ki: float, theta: float, ts: float) -> PairSS:
     """IOPDT: integrador retangular `acc += Ki*Ts*u` — idêntico ao `_Iopdt` do TFS, 1 estado
     sem limiar de passagem direta (a spec só aplica `Ts/DIRECT_PASS_RATIO` aos estágios do
-    SOPDT — §3.1; um integrador nunca degrada a passagem direta)."""
+    SOPDT — §3.1; um integrador nunca degrada a passagem direta).
+
+    UNIDADES (contrato do config, RF-602 normativo): `Ki` chega aqui já em EU/s por EU —
+    convertido em `eu_gain_params` do ganho NORMALIZADO %/% por segundo informado pelo
+    usuário (taxa da linha em % do span DELA por segundo, por 1% do span da coluna):
+    `Ki_EU = Ki × span_linha/span_coluna`. `b = Ki_EU*ts` com `ts` em segundos entrega o
+    incremento por amostra; `theta`/`ts` também em segundos. Ki em %/min produziria modelo
+    60× lento: a UI rotula o campo com a base de tempo em segundos (TabModels)."""
     a = np.array([[1.0]])
     b = np.array([[Ki * ts]])
     c = np.array([[1.0]])
@@ -141,11 +152,21 @@ def discretize_iopdt(Ki: float, theta: float, ts: float) -> PairSS:
 def eu_gain_params(
     params: dict[str, float], *, kind: RowKind, row_span: float, col_span: float
 ) -> dict[str, float]:
-    """Converte o ganho do config — adimensional %/% (ΔCV%/ΔMV%, RF-602 revisado) — para a
-    forma em EU que `discretize_*` espera: multiplica `K` (selfreg) ou `Ki` (integrating)
-    por `span_linha / span_coluna`. Os defaults 0/100 dão razão 1, então config sem
-    zero/span explícito reproduz o ganho de antes bit a bit. Cópia rasa: `params` do
-    chamador nunca é mutado."""
+    """Converte os ganhos NORMALIZADOS do config para a forma em EU que `discretize_*`
+    espera, ANTES de qualquer montagem/worker (RF-602/609, texto normativo): `K`/`Ki` são
+    adimensionais %/% — `K = ΔCV%/ΔMV%` e `Ki = (ΔCV%/s)/ΔMV%`, ambos sobre as faixas de
+    instrumento (zero/span, RF-609) — e a conversão é `× span_linha/span_coluna` para os
+    dois (o `Ki` resultante fica em EU/s por EU, porque a base de tempo do ganho integral
+    já é o segundo). Os defaults 0/100 dão razão 1, então config sem faixa explícita
+    reproduz a normalização pura. Cópia rasa: `params` do chamador nunca é mutado.
+
+    Proposta de emenda pendente com o usuário (2026-09-11): declarar o `Ki` na base "coluna
+    em 100% do span" (÷100 aqui) — os dados identificados da coluna de naftaleno foram
+    informados nessa base. A emenda EXIGE revalidar `economics.integrating_tolerance` e cada
+    `sp_range_pct`: a largura da faixa de taxa do SSTO traduzida em movimento de MV é
+    `ε/Ki_EU` e escala 100× com a base (medido com operating_point coerente: ΔMV = 0,208 na
+    base normativa vs 20,833 na emenda, ambas `optimal` para o mesmo ε). Até a emenda do
+    RF-602 ser aprovada, o código segue o texto normativo vigente (base por 1%)."""
     escala = row_span / col_span
     convertido = dict(params)
     if kind == "selfreg":

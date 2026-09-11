@@ -17,6 +17,7 @@ import {
   ESPESSURA_ARESTA_VIVA,
   estadoDaAresta,
   euDaPortaDeEntrada,
+  euDeSaidaPorNo,
   handlesEntrada,
   handlesSaida,
   ID_MARCADOR_X,
@@ -886,6 +887,76 @@ test("resolve pela combinação exata nó+handle: outra entrada do mesmo nó, ou
   expect(euDaPortaDeEntrada(edges, output_eu_por_no, "b", "IN1")).toBe("t/h");
   expect(euDaPortaDeEntrada(edges, output_eu_por_no, "b", "IN2")).toBe("bar");
   expect(euDaPortaDeEntrada(edges, output_eu_por_no, "z", "IN1")).toBeNull();
+});
+
+// --------------------------------------------------------------------------------------
+// EU de saída por nó (spec §4.1-5): a tabela de origem da herança, por tipo de bloco
+// --------------------------------------------------------------------------------------
+
+test("euDeSaidaPorNo: Script entrega o output_eu por porta declarada", () => {
+  const no = script("s", 1, 2, 2);
+  if (no.type !== "script") throw new Error("tipo preservado");
+  no.data.output_eu = { OUT1: "t/h" };
+  expect(euDeSaidaPorNo([no], new Map()).get("s")).toEqual({ OUT1: "t/h" });
+});
+
+test("euDeSaidaPorNo: OPC-Read herda a EU da tag na porta de saída do contrato ('out')", () => {
+  const no = leitura("r", 1, 10);
+  expect(euDeSaidaPorNo([no], new Map([[10, "%"]])).get("r")).toEqual({ out: "%" });
+});
+
+test("euDeSaidaPorNo: tag com EU vazia ou ausente deixa o nó fora do mapa (chave ausente)", () => {
+  const comVazia = leitura("r", 1, 10);
+  const semTag = leitura("s", 2, null);
+  const mapa = euDeSaidaPorNo([comVazia, semTag], new Map([[10, ""]]));
+  expect(mapa.has("r")).toBe(false);
+  expect(mapa.has("s")).toBe(false);
+});
+
+test("euDeSaidaPorNo: OPC-Write não tem porta de saída e fica fora do mapa", () => {
+  const no = escrita("w", 1, 10);
+  expect(euDeSaidaPorNo([no], new Map([[10, "%"]])).has("w")).toBe(false);
+});
+
+test("euDeSaidaPorNo: MPC declara por variável, com o id estável como handle", () => {
+  const no = mpc("m", 1, {
+    variables: {
+      mvs: [variavelMv("mv_1", "Refluxo", "%")],
+      cvs: [variavelCv("cv_1", "Nível", "%")],
+      constraints: [],
+      dvs: [variavelDv("dv_1", "Carga", "m3/h")],
+    },
+  });
+  expect(euDeSaidaPorNo([no], new Map()).get("m")).toEqual({
+    mv_1: "%",
+    cv_1: "%",
+    dv_1: "m3/h",
+  });
+});
+
+test("euDeSaidaPorNo: MPC sem nenhuma EU declarada fica fora do mapa", () => {
+  const no = mpc("m", 1, {
+    variables: {
+      mvs: [variavelMv("mv_1", "Refluxo", "")],
+      cvs: [],
+      constraints: [],
+      dvs: [],
+    },
+  });
+  expect(euDeSaidaPorNo([no], new Map()).has("m")).toBe(false);
+});
+
+test("euDeSaidaPorNo: bloco sem EU própria (PID) fica fora do mapa", () => {
+  const no = criarBloco("pid", "p", POS, 1);
+  expect(euDeSaidaPorNo([no], new Map()).has("p")).toBe(false);
+});
+
+test("herança ponta a ponta: entrada de Script alimentada por OPC-Read ganha a EU da tag", () => {
+  const origem = leitura("r", 1, 10);
+  const alvo = script("s", 2, 1, 1);
+  const edges = [aresta("e1", "r", "out", "s", "IN1")];
+  const saida = euDeSaidaPorNo([origem, alvo], new Map([[10, "m3/h"]]));
+  expect(euDaPortaDeEntrada(edges, saida, "s", "IN1")).toBe("m3/h");
 });
 
 // --------------------------------------------------------------------------------------

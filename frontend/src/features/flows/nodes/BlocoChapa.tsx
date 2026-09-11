@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { cn } from "../../../lib/cn";
 import { ROTULO_BLOCO, type TipoBloco } from "../graph";
 import { formatarValorPorta, type PortValue } from "../useFlowStatus";
-import { useValoresDoBloco, type PortasDoBloco } from "./contexto";
+import { useEuHerdada, useValoresDoBloco, type PortasDoBloco } from "./contexto";
 
 /**
  * Equipamento de painel (DESIGN.md §Shapes): chapa, plaqueta de título com o badge de
@@ -51,10 +51,15 @@ function ValorPorta({ valor, eu }: { valor: PortValue | undefined; eu?: string |
   const numerico = typeof valor.v === "number";
   return (
     <span data-testid="porta-valor" className="flex items-baseline gap-1 leading-none">
-      <span className={cn("process-value text-[11px]", valor.ok ? "text-fg" : "text-fg-muted")}>
+      <span
+        className={cn(
+          "process-value text-[11px] font-bold",
+          valor.ok ? "text-fg" : "text-fg-muted",
+        )}
+      >
         {formatarValorPorta(valor)}
       </span>
-      {numerico && eu ? <span className="text-[9px] text-fg-muted">{eu}</span> : null}
+      {numerico && eu ? <span className="text-[9px] font-bold text-fg-muted">{eu}</span> : null}
       {!valor.ok && <span className="text-[9px] text-fg-muted">inválido</span>}
     </span>
   );
@@ -65,13 +70,16 @@ function LinhaPorta({
   lado,
   valores,
   eu,
+  noId,
 }: {
   porta: Porta;
   lado: "entrada" | "saida";
   valores: PortasDoBloco | null;
   eu?: string | null;
+  noId: string;
 }) {
   const entrada = lado === "entrada";
+  const euHerdada = useEuHerdada(noId, porta.id);
   return (
     <div
       className={cn(
@@ -85,7 +93,9 @@ function LinhaPorta({
         id={porta.id}
       />
       <span className="plaqueta text-[10px] leading-none text-fg-muted">{porta.rotulo}</span>
-      {valores !== null && <ValorPorta valor={valores[porta.id]} eu={porta.eu ?? eu} />}
+      {valores !== null && (
+        <ValorPorta valor={valores[porta.id]} eu={porta.eu ?? euHerdada ?? eu} />
+      )}
     </div>
   );
 }
@@ -127,12 +137,12 @@ export function BlocoChapa({
         <div className="flex border-t border-border py-1">
           <div className="flex-1">
             {entradas.map((porta) => (
-              <LinhaPorta key={porta.id} porta={porta} lado="entrada" valores={valores} eu={eu} />
+              <LinhaPorta key={porta.id} porta={porta} lado="entrada" valores={valores} eu={eu} noId={blockId} />
             ))}
           </div>
           <div className="flex-1">
             {saidas.map((porta) => (
-              <LinhaPorta key={porta.id} porta={porta} lado="saida" valores={valores} eu={eu} />
+              <LinhaPorta key={porta.id} porta={porta} lado="saida" valores={valores} eu={eu} noId={blockId} />
             ))}
           </div>
         </div>
