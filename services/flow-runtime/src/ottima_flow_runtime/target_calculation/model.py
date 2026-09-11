@@ -43,7 +43,9 @@ def pair_steady_state_gain(
         return float(direct_gain or 0.0)
     if kind == "integrating":
         # `a = 1` torna `(I − a)` singular: o integrador não converge. A taxa de rampa por
-        # amostra é `c·b`; por segundo, `(c·b)/Ts` — que devolve o `Ki` do config.
+        # amostra é `c·b`; por segundo, `(c·b)/Ts` — que devolve o `Ki_EU` já convertido por
+        # `eu_gain_params` (= Ki do config × span_linha/(100 × span_coluna)), não o número
+        # cru do config.
         return float((pair.c @ pair.b)[0, 0]) / ts
     identity = np.eye(pair.a.shape[0])
     return float((pair.c @ np.linalg.solve(identity - pair.a, pair.b))[0, 0])

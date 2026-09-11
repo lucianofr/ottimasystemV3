@@ -119,7 +119,8 @@ def test_ganho_do_par_degenerado_vem_do_direct_gain():
 @pytest.mark.parametrize("ts", [1.0, 4.0])
 def test_ganho_do_iopdt_e_a_taxa_de_rampa_Ki(ki: float, ts: float):
     """Linha integradora não tem ganho estático finito (ADR-027 §4): o que o LP usa é a
-    taxa de rampa `Ki` [EU/(EU·s)], recuperada do `PairSS` como `(c·b)/Ts`."""
+    taxa de rampa `Ki_EU` [EU/(EU·s)] — o valor JÁ convertido por `eu_gain_params`, que este
+    teste passa direto pro `discretize_iopdt` —, recuperada do `PairSS` como `(c·b)/Ts`."""
     pair = discretize_iopdt(ki, 0.0, ts)
 
     assert pair_steady_state_gain(
