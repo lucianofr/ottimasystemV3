@@ -351,16 +351,19 @@ class PairModel(BaseModel):
     NORMALIZADOS pelas faixas 0..span (RF-609):
 
     - selfreg (SOPDT) `{K, tau1, tau2, theta}`: `K` adimensional %/% = `ΔCV%/ΔMV%`.
-    - integrating (IOPDT) `{Ki, theta}`: `Ki` em **%/s** = taxa da linha em % do span dela
-      por SEGUNDO com a coluna sustentada em **100% do span dela**.
+    - integrating (IOPDT/IFOPDT) `{Ki, theta}` + `tau1` OPCIONAL: `Ki` em **%/(%·s)** = taxa
+      da linha em % do span dela por SEGUNDO, por **1% do span da coluna**. Com `tau1 > 0` o
+      par é `Ki·e^(-θs)/(s·(τ1·s+1))` — integrador alimentado por um lag de 1a ordem (2
+      estados); `tau1` ausente ou 0 é o integrador puro de sempre.
     - `tau1`/`tau2`/`theta` sempre em SEGUNDOS.
 
     O runtime converte pra EU em `eu_gain_params` ANTES do worker — `K_EU = K ×
-    span_linha/span_coluna`, `Ki_EU = Ki × span_linha/(100 × span_coluna)` — e discretiza
-    contra `Ts_mpc` em segundos (`mpc/discretize.py`); nenhuma conversão de base de tempo em
-    lugar nenhum. Base do `Ki` decidida pelo dono do produto em 2026-09-11 (correção de
-    código, modelos configurados intocados); o texto vigente do RF-602/RF-609 ainda descreve
-    a base por 1% da coluna — emenda do PRD proposta, aguardando aprovação por escrito."""
+    span_linha/span_coluna` e `Ki_EU = Ki × span_linha/span_coluna`, a MESMA razão de spans
+    nas duas formas — e discretiza contra `Ts_mpc` em segundos (`mpc/discretize.py`); nenhuma
+    conversão de base de tempo em lugar nenhum. Base do `Ki` reafirmada pelo dono do produto
+    em 2026-09-12, alinhada ao texto de RF-602/RF-609. O ÷100 extra que vigorou por um dia
+    (2026-09-11 → 09-12) foi removido: config novo não converte nada, e só o `Ki` escolhido
+    naquela janela precisa ser DIVIDIDO por 100 ao migrar (0,2191 ⇒ 0,002191)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -528,9 +531,10 @@ def mpc_state_dimension(config: MpcConfig, ts_mpc: float) -> int:
     """Dimensão do estado agregado do modelo do-mpc (spec §2.2-7).
 
     Soma, por par HABILITADO da matriz `models`: 2 estados se a linha é `selfreg` (SOPDT), 1
-    se `integrating` (IOPDT); mais `round(theta/Ts_mpc)` amostras de atraso — arredondamento
-    banker's do `round()` do Python, a mesma convenção do TFS (spec §3.1, fecha débito m2);
-    mais uma por MV (estado aumentado `u_prev`, §3.5 — o bias é `_tvp` e não conta).
+    se `integrating` (IOPDT) — 2 quando o integrador tem lag (`tau1 > 0`, IFOPDT); mais
+    `round(theta/Ts_mpc)` amostras de atraso — arredondamento banker's do `round()` do
+    Python, a mesma convenção do TFS (spec §3.1, fecha débito m2); mais uma por MV (estado
+    aumentado `u_prev`, §3.5 — o bias é `_tvp` e não conta).
     """
     row_kind: dict[str, RowKind] = {
         var.id: var.kind for var in (*config.variables.cvs, *config.variables.constraints)
@@ -541,6 +545,9 @@ def mpc_state_dimension(config: MpcConfig, ts_mpc: float) -> int:
         for pair in cols.values():
             if not pair.enabled:
                 continue
-            dimension += 2 if kind == "selfreg" else 1
+            if kind == "selfreg":
+                dimension += 2
+            else:
+                dimension += 2 if pair.params.get("tau1", 0.0) > 0 else 1
             dimension += round(pair.params["theta"] / ts_mpc)
     return dimension

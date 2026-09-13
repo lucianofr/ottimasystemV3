@@ -244,9 +244,13 @@ export function variavelRestricaoDoFormulario(
 }
 
 /** Params default por `kind` da linha (spec F4 §2.1-2): SOPDT `{K,tau1,tau2,theta}` /
- *  IOPDT `{Ki,theta}` — trocar o `kind` da linha troca a forma inteira, como no TFS. */
+ *  IOPDT `{Ki,tau1,theta}` — trocar o `kind` da linha troca a forma inteira, como no TFS.
+ *  `tau1` do integrador é o lag opcional do IFOPDT (`Ki/(s·(τ1·s+1))`): 0 = integrador puro,
+ *  a forma de todo config gravado antes do campo (o servidor aceita a chave ausente). */
 export function paramsPadraoLinha(kind: TipoLinhaMpc): Record<string, number> {
-  return kind === "integrating" ? { Ki: 1, theta: 0 } : { K: 1, tau1: 1, tau2: 0, theta: 0 };
+  return kind === "integrating"
+    ? { Ki: 1, tau1: 0, theta: 0 }
+    : { K: 1, tau1: 1, tau2: 0, theta: 0 };
 }
 
 export function parModeloDoFormulario(
@@ -256,7 +260,8 @@ export function parModeloDoFormulario(
   kindLinha: TipoLinhaMpc,
   dados: FormData,
 ): ParModeloMpc {
-  const nomes = kindLinha === "integrating" ? ["Ki", "theta"] : ["K", "tau1", "tau2", "theta"];
+  const nomes =
+    kindLinha === "integrating" ? ["Ki", "tau1", "theta"] : ["K", "tau1", "tau2", "theta"];
   const padrao = paramsPadraoLinha(kindLinha);
   const reconstruido: Record<string, number> = {};
   for (const nome of nomes) {
@@ -325,7 +330,8 @@ export function arredondarBankers(valor: number): number {
 }
 
 /** Dimensão do estado agregado (spec §2.2-7, espelho de `mpc_state_dimension`): 2 estados por
- *  par habilitado SOPDT, 1 por IOPDT, + `round(theta/Ts_mpc)` de atraso por par, + 1 por MV
+ *  par habilitado SOPDT, 1 por IOPDT (2 com o lag do IFOPDT, `tau1 > 0`),
+ *  + `round(theta/Ts_mpc)` de atraso por par, + 1 por MV
  *  (estado aumentado `u_prev`, §3.5 — o bias é `_tvp` e não conta). Assume matriz íntegra
  *  (params completos/válidos); o chamador (`validarConfigMpc`) só invoca depois de
  *  confirmar isso, como o servidor faz (`if ts_mpc is not None and matrix_intact`). */
@@ -344,7 +350,7 @@ export function dimensaoEstado(
     if (kind === undefined) continue; // linha órfã — matriz já podada em `modelosDoFormulario`
     for (const par of Object.values(colunas)) {
       if (!par.enabled) continue;
-      dimensao += kind === "selfreg" ? 2 : 1;
+      dimensao += kind === "selfreg" || (par.params.tau1 ?? 0) > 0 ? 2 : 1;
       dimensao += arredondarBankers((par.params.theta ?? 0) / tsMpc);
     }
   }
@@ -360,19 +366,25 @@ export function rotuloVariavel(variavel: { id: string; name: string }): string {
 
 const PARAMS_SELFREG = ["K", "tau1", "tau2", "theta"] as const;
 const PARAMS_INTEGRATING = ["Ki", "theta"] as const;
+// `tau1` do integrador (lag do IFOPDT) é OPCIONAL: config gravado antes do campo não tem a
+// chave e continua íntegro — mesmo critério de `_INTEGRATING_OPTIONAL_PARAMS` no servidor.
+const PARAMS_INTEGRATING_OPCIONAIS = ["tau1"] as const;
 
 /** Completude e validade dos `params` de um par por `kind` da linha (spec §2.2-3, espelho de
- *  `_valid_pair_params`): selfreg (SOPDT) exige K≠0, τ1>0, τ2≥0, θ≥0; integrating (IOPDT)
- *  exige Ki≠0, θ≥0 — mesma forma exata, nem mais nem menos chaves. */
+ *  `_valid_pair_params`): selfreg (SOPDT) exige K≠0, τ1>0, τ2≥0, θ≥0; integrating
+ *  (IOPDT/IFOPDT) exige Ki≠0, θ≥0 e aceita τ1≥0 opcional — nenhuma outra chave. */
 function paramsValidosParaKind(kind: TipoLinhaMpc, params: Record<string, number>): boolean {
-  const esperados: readonly string[] =
-    kind === "integrating" ? PARAMS_INTEGRATING : PARAMS_SELFREG;
   const chaves = Object.keys(params);
-  if (chaves.length !== esperados.length || !esperados.every((nome) => nome in params)) {
+  if (!Object.values(params).every((valor) => Number.isFinite(valor))) return false;
+  if (kind === "integrating") {
+    const aceitas: readonly string[] = [...PARAMS_INTEGRATING, ...PARAMS_INTEGRATING_OPCIONAIS];
+    if (!PARAMS_INTEGRATING.every((nome) => nome in params)) return false;
+    if (chaves.some((nome) => !aceitas.includes(nome))) return false;
+    return params.Ki !== 0 && params.theta >= 0 && (params.tau1 ?? 0) >= 0;
+  }
+  if (chaves.length !== PARAMS_SELFREG.length || !PARAMS_SELFREG.every((nome) => nome in params)) {
     return false;
   }
-  if (!Object.values(params).every((valor) => Number.isFinite(valor))) return false;
-  if (kind === "integrating") return params.Ki !== 0 && params.theta >= 0;
   return params.K !== 0 && params.tau1 > 0 && params.tau2 >= 0 && params.theta >= 0;
 }
 
@@ -451,7 +463,7 @@ export function validarConfigMpc(
         erros.push(
           `O par '${rotuloVariavel(linha)}' / '${rotuloVariavel(coluna)}' está habilitado ` +
             `com parâmetros inválidos ou incompletos para o modelo ` +
-            `${linha.kind === "integrating" ? "IOPDT" : "SOPDT"}.`,
+            `${linha.kind === "integrating" ? "IOPDT/IFOPDT" : "SOPDT"}.`,
         );
       }
     }

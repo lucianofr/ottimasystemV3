@@ -8,15 +8,16 @@ import { nomeCampoModelo, parModeloDoFormulario, paramsPadraoLinha } from "./mpc
 
 // Unidades explícitas no rótulo (não só no tooltip), com a BASE percentual: depois de
 // `eu_gain_params` (× span_linha/span_coluna, RF-609) o número digitado só é interpretável
-// junto dos spans vigentes — que a tabela mostra nos cabeçalhos de linha/coluna. K/Ki são
-// %/% e %/%/s (RF-602); todo tempo do par (τ1/τ2/θ) é SEGUNDO — mesma convenção do TFS
-// (CamposTfs.tsx, que usa EU direto) e do backend (`discretize_*` com ts em segundos).
+// junto dos spans vigentes — que a tabela mostra nos cabeçalhos de linha/coluna. K é %/% e
+// Ki é %/(%·s) (RF-602); todo tempo do par (τ1/τ2/θ) é SEGUNDO — mesma convenção do TFS
+// (CamposTfs.tsx, que usa EU direto) e do backend (`discretize_*` com ts em segundos). No
+// integrador o τ1 é o lag opcional do IFOPDT (0 = integrador puro).
 const ROTULO_PARAM: Record<string, string> = {
   K: "K (%/%)",
   tau1: "τ1 (s)",
   tau2: "τ2 (s)",
   theta: "θ tempo morto (s)",
-  Ki: "Ki (%/s)",
+  Ki: "Ki (%/(%·s))",
 };
 
 type LinhaModelo = { id: string; nome: string; kind: TipoLinhaMpc; span: number };
@@ -103,7 +104,7 @@ export function TabModels({ variaveis, modelos, aoMudar }: Props) {
               <th className="plaqueta px-2 py-2 text-left text-fg-muted">
                 {linha.nome}
                 <span className="ml-1 text-[10px] normal-case text-fg-muted">
-                  ({linha.kind === "integrating" ? "IOPDT" : "SOPDT"}) · span{" "}
+                  ({linha.kind === "integrating" ? "IOPDT/IFOPDT" : "SOPDT"}) · span{" "}
                   {formatarNumero(linha.span)}
                 </span>
               </th>

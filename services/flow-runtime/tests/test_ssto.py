@@ -548,9 +548,9 @@ def test_linha_integradora_entra_como_taxa_nula():
 def test_linha_integradora_com_faixa_do_sp_usa_epsilon_por_linha():
     """`sp_range_pct` numa CV integradora (emenda ADR-027 §4) vira ε de taxa por linha —
     `pct/100 × span/tss` — em vez do `integrating_tolerance` do bloco. `span=100`,
-    `tss=100`, `sp_range_pct=10` ⇒ ε = 0.1 EU/s; o `Ki=0.4` do config está na base %/s com
-    a coluna em 100% do span, então `Ki_EU = 0.004` e o LP para exatamente em
-    `ΔMV = ε/Ki_EU = 25.0`. `integrating_tolerance=1e6` no bloco prova que é o ε por-linha
+    `tss=100`, `sp_range_pct=10` ⇒ ε = 0.1 EU/s; o `Ki=0.4` do config está na base %/%/s
+    (razão de spans 1 aqui), então `Ki_EU = 0.4` e o LP para exatamente em
+    `ΔMV = ε/Ki_EU = 0.25`. `integrating_tolerance=1e6` no bloco prova que é o ε por-linha
     (não o global) que trava — senão a MV iria ao limite duro (±1000).
     """
     config = _config(
@@ -563,7 +563,7 @@ def test_linha_integradora_com_faixa_do_sp_usa_epsilon_por_linha():
     result = SteadyStateOptimizer(config, TS).solve(_entrada({"mv_a": 0.0}, bias={"cv_lvl": 0.0}))
 
     assert result.status == "optimal"
-    assert result.mv_target["mv_a"] == pytest.approx(25.0, abs=1e-6)
+    assert result.mv_target["mv_a"] == pytest.approx(0.25, abs=1e-6)
 
 
 def test_custo_de_linha_e_projetado_no_espaco_da_mv():

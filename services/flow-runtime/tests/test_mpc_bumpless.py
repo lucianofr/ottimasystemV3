@@ -7,6 +7,7 @@ no próprio teste).
 """
 
 import casadi as ca
+import numpy as np
 import pytest
 
 from ottima_core.flowgraph import MpcConfig
@@ -61,8 +62,11 @@ def _par_selfreg(K: float, tau1: float, tau2: float, theta: float) -> dict:
     return {"enabled": True, "params": {"K": K, "tau1": tau1, "tau2": tau2, "theta": theta}}
 
 
-def _par_integrating(Ki: float, theta: float) -> dict:
-    return {"enabled": True, "params": {"Ki": Ki, "theta": theta}}
+def _par_integrating(Ki: float, theta: float, tau1: float = 0.0) -> dict:
+    params = {"Ki": Ki, "theta": theta}
+    if tau1:
+        params["tau1"] = tau1
+    return {"enabled": True, "params": params}
 
 
 def _selfreg_config(
@@ -91,7 +95,12 @@ def _selfreg_config(
 
 
 def _integrating_config(
-    *, Ki: float = 0.5, theta: float = 0.0, max_rate: float = 1.0, operating_point: float = 0.0
+    *,
+    Ki: float = 0.5,
+    theta: float = 0.0,
+    tau1: float = 0.0,
+    max_rate: float = 1.0,
+    operating_point: float = 0.0,
 ) -> MpcConfig:
     return MpcConfig.model_validate(
         {
@@ -110,7 +119,7 @@ def _integrating_config(
                 "constraints": [],
                 "dvs": [],
             },
-            "models": {"cv_1": {"mv_1": _par_integrating(Ki, theta)}},
+            "models": {"cv_1": {"mv_1": _par_integrating(Ki, theta, tau1)}},
         }
     )
 
@@ -155,6 +164,40 @@ def test_predicao_t0_bate_na_medida_integrador():
     assert _y_pred_t0(built, "cv_1") == pytest.approx(77.0, abs=1e-6)
 
 
+def test_lag_do_integrador_nasce_no_u_vigente_e_o_acumulador_na_medida():
+    """O estágio de 1a ordem do IFOPDT é do lado da ENTRADA (EU da coluna); o acumulador é o
+    NÍVEL (EU da linha). `c = [0, 1]` só lê o acumulador, então plantar a medida nos DOIS
+    estados (o `np.full` que servia ao integrador de 1 estado) mantém `y_pred(t0)` na medida
+    e o bias em zero — nada denuncia o erro em t=0. O que quebra é a PRIMEIRA rampa, e é ela
+    que este teste mede: com o lag já assentado em `u_eff`, o incremento do acumulador por
+    ciclo é `Ki_EU·Ts_mpc·u_eff`. Com a medida (77) no lag, o incremento sai ~6× maior."""
+    Ki, u_now, y_now = 0.5, 12.0, 77.0
+    built = build_mpc(_integrating_config(Ki=Ki, tau1=40.0), ts_flow=1.0)
+    ts_mpc = built.horizons.ts_mpc
+
+    init_bumpless(built, u_now={"mv_1": u_now}, y_now={"cv_1": y_now}, d_now={})
+
+    par = built.pair_init[0]
+    lag, acumulador = par.state_names
+    assert float(built.mpc.x0[lag]) == pytest.approx(u_now)  # operating_point = 0
+    assert float(built.mpc.x0[acumulador]) == pytest.approx(y_now)
+
+    x = np.array([float(built.mpc.x0[lag]), float(built.mpc.x0[acumulador])])
+    x_next = par.pair.a @ x + par.pair.b.reshape(2) * u_now
+    assert x_next[1] - x[1] == pytest.approx(Ki * ts_mpc * u_now, rel=1e-9)
+
+
+def test_predicao_t0_bate_na_medida_integrador_com_lag():
+    built = build_mpc(_integrating_config(tau1=40.0), ts_flow=1.0)
+
+    init_bumpless(built, u_now={"mv_1": 12.0}, y_now={"cv_1": 77.0}, d_now={})
+
+    assert _y_pred_t0(built, "cv_1") == pytest.approx(77.0, abs=1e-6)
+    assert built.tvp_template["_tvp", 0, built.bias_tvp_name["cv_1"]] == pytest.approx(
+        0.0, abs=1e-9
+    )
+
+
 # --------------------------------------------------------------------------------------
 # Primeira MV do make_step <= du_max do valor vigente (o "sem salto" do aceite da fase)
 # --------------------------------------------------------------------------------------
@@ -177,6 +220,20 @@ def test_primeira_mv_sem_salto_selfreg():
 def test_primeira_mv_sem_salto_integrador():
     du_max = 5.0  # EU/ciclo (max_rate 1.0 x Ts_mpc=5)
     built = build_mpc(_integrating_config(Ki=0.5), ts_flow=1.0)
+    u_vigente = 12.0
+    y_medido = 77.0
+    init_bumpless(built, u_now={"mv_1": u_vigente}, y_now={"cv_1": y_medido}, d_now={})
+    built.tvp_template["_tvp", :, built.sp_tvp_name["cv_1"]] = y_medido
+
+    built.mpc.set_initial_guess()
+    built.mpc.make_step(built.mpc.x0)
+
+    assert abs(_first_mv(built, "mv_1") - u_vigente) <= du_max + 1e-4
+
+
+def test_primeira_mv_sem_salto_integrador_com_lag():
+    du_max = 5.0  # EU/ciclo (max_rate 1.0 x Ts_mpc=5)
+    built = build_mpc(_integrating_config(Ki=0.5, tau1=40.0), ts_flow=1.0)
     u_vigente = 12.0
     y_medido = 77.0
     init_bumpless(built, u_now={"mv_1": u_vigente}, y_now={"cv_1": y_medido}, d_now={})

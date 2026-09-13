@@ -186,7 +186,11 @@ def _assemble_model(config: MpcConfig, ts_flow: float) -> BuiltMpc:
                     params["K"], params["tau1"], params["tau2"], params["theta"], ts_mpc
                 )
             else:
-                pair = discretize_iopdt(params["Ki"], params["theta"], ts_mpc)
+                # `tau1` OPCIONAL no integrador (IFOPDT): ausente = integrador puro, a forma
+                # de todo config gravado antes do campo.
+                pair = discretize_iopdt(
+                    params["Ki"], params["theta"], ts_mpc, tau1=params.get("tau1", 0.0)
+                )
 
             is_mv_column = col_id in mv_symbol
             col_op = operating_point[col_id]
@@ -204,10 +208,11 @@ def _assemble_model(config: MpcConfig, ts_flow: float) -> BuiltMpc:
             n = pair.a.shape[0]
             if n == 0:
                 # Só ocorre para `selfreg` (SOPDT): os dois estágios abaixo do limiar
-                # `Ts/DIRECT_PASS_RATIO` simultaneamente (carryover da tarefa 2.1 — IOPDT
-                # nunca degenera, `discretize_iopdt` sempre devolve 1 estado). `PairSS` sem
-                # termo direto não representa esse ganho puro (`y=c@x=0` sempre); o ganho
-                # entra aqui como alimentação direta na saída agregada da linha.
+                # `Ts/DIRECT_PASS_RATIO` simultaneamente (carryover da tarefa 2.1 — o
+                # integrador nunca degenera: `discretize_iopdt` devolve 1 estado, ou 2 com
+                # lag). `PairSS` sem termo direto não representa esse ganho puro (`y=c@x=0`
+                # sempre); o ganho entra aqui como alimentação direta na saída agregada da
+                # linha.
                 gain_term = params["K"] * pair_input
                 row_expr += gain_term
                 # Alimentação direta de coluna MV sem atraso injeta um símbolo `_u` cru na

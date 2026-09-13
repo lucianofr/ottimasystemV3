@@ -200,17 +200,19 @@ def _horizontes() -> list[dict[str, object]]:
 
 
 def _dimensao_estado() -> list[dict[str, object]]:
-    especificacoes = [
-        ("simples_sopdt_sem_atraso", "selfreg", 0.0, True),
-        ("atraso_com_banker_meio_par", "selfreg", 2.5, True),
-        ("iopdt_soma_um_estado", "integrating", 0.0, True),
-        ("par_desabilitado_nao_soma_estado", "selfreg", 2.5, False),
+    especificacoes: list[tuple[str, str, float, bool, dict[str, float]]] = [
+        ("simples_sopdt_sem_atraso", "selfreg", 0.0, True, {}),
+        ("atraso_com_banker_meio_par", "selfreg", 2.5, True, {}),
+        ("iopdt_soma_um_estado", "integrating", 0.0, True, {}),
+        # IFOPDT: o lag do integrador soma o segundo estado (`tau1 > 0`).
+        ("ifopdt_com_lag_soma_dois_estados", "integrating", 0.0, True, {"tau1": 60.0}),
+        ("par_desabilitado_nao_soma_estado", "selfreg", 2.5, False, {}),
     ]
     casos: list[dict[str, object]] = []
-    for nome, kind, theta, enabled in especificacoes:
+    for nome, kind, theta, enabled, extras in especificacoes:
         mv_ = _mv("a")
         cv_ = _cv("a", kind=kind)
-        modelos = {cv_["id"]: {mv_["id"]: _par(kind=kind, enabled=enabled, theta=theta)}}
+        modelos = {cv_["id"]: {mv_["id"]: _par(kind=kind, enabled=enabled, theta=theta, **extras)}}
         config_data = _config([mv_], [cv_], models=modelos)
         config = MpcConfig.model_validate(config_data)
         casos.append(
@@ -370,6 +372,15 @@ def _cenario_horizons_np_acima() -> tuple[str, dict[str, object], float]:
     return "horizons_np_acima_do_teto", _config([mv_], [cv_], models=modelos, multiplier=1), 1.0
 
 
+def _cenario_integrating_com_lag_valido() -> tuple[str, dict[str, object], float]:
+    """`tau1` OPCIONAL do integrador (IFOPDT) é aprovado dos dois lados — sem este caso o
+    espelho TS poderia reprovar a chave extra e bloquear o Aplicar de um config que o
+    servidor aceita."""
+    mv_, cv_ = _mv("a"), _cv("a", kind="integrating")
+    modelos = {cv_["id"]: {mv_["id"]: _par(kind="integrating", tau1=45.0)}}
+    return "matrix_integrating_com_lag_valido", _config([mv_], [cv_], models=modelos), 1.0
+
+
 def _cenario_horizons_np_aviso() -> tuple[str, dict[str, object], float]:
     mv_ = _mv("a")
     cv_ = _cv("a", tss=100.0)
@@ -399,6 +410,7 @@ def _validacao() -> list[dict[str, object]]:
         _cenario_caps_cv_restricao,
         _cenario_caps_dv,
         _cenario_matrix_params_invalidos,
+        _cenario_integrating_com_lag_valido,
         _cenario_matrix_linha_sem_par_mv,
         _cenario_matrix_mv_sem_par,
         _cenario_matrix_dv_sem_par,

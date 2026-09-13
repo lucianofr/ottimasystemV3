@@ -33,7 +33,7 @@
 | **Operador** | Papel de operação (ex-"visualizador"): troca LOCAL/REMOTO e MAN/AUTO, escreve SP e MV (em MAN); enxerga tudo; não edita engenharia. |
 | **TSS** | Time to Steady State: tempo aproximado até o processo estabilizar após mudança na entrada. Informado por CV; deriva Np/Nc automaticamente. |
 | **SOPDT** | Modelo de 2ª ordem com tempo morto (K, τ1, τ2, θ) por par MV→CV / DV→CV, para CVs autorreguláveis. |
-| **Processo integrador** | CV que não estabiliza (rampa); modelado por ganho integrador Ki + θ por par. Tipo de resposta definido por CV. |
+| **Processo integrador** | CV que não estabiliza (rampa); modelado por ganho de rampa `Ki` + `τ1` opcional + `θ` por par (IOPDT/IFOPDT). Tipo de resposta definido por CV. |
 | **Multiplicador (MPC)** | N tal que o bloco MPC executa a cada N varreduras do flow (Ts_mpc = N × Ts_flow). |
 | **Taxa máxima (max_rate)** | Limite de variação de uma MV, em **EU/s** — o Δu permitido por ciclo do solve é `max_rate × Ts_mpc`. Chamava-se `du_max` e era EU/**ciclo** até o RF-604 revisado (migração `0009_mpc_max_rate`); a coordenada é ABSOLUTA, a mesma de `limits` e `initial_value`. **Obrigatório, sem default**: um `graph_json` sem a chave é config incompleto, não config antigo válido. O piso `max_rate > 0` não vive no Pydantic de propósito (um `gt` trocaria o 422 legível pela localização do campo) — mora em `validate._check_mpc_numbers`, espelhado no Resumo do editor e travado pelo golden cross-language. `max_rate × Ts_mpc = 0` é o mecanismo de **MV congelada** do ADR-028. |
 | **Deploy** | Ato explícito de colocar um flow em execução. Após boot, flows sobem parados aguardando deploy. |
@@ -45,6 +45,7 @@
 | **Restrição (variável)** | Categoria de variável do MPC controlada dentro de uma **faixa** (low/high), sem SP, com **precedência sobre as CVs** (soft constraint com slack e penalidade dominante). |
 | **TFS** | Bloco de simulação: matriz de funções de transferência até 2×2, cada elemento SOPDT ou IOPDT, em tempo discreto no Ts do flow. Fecha malha com o MPC sem PLC/OPC. |
 | **IOPDT** | Modelo integrador com tempo morto (Ki, θ) — usado em CVs/Restrições integradoras e no bloco TFS. |
+| **IFOPDT** | Integrador com **lag de 1ª ordem** e tempo morto (Ki, τ1, θ): `G(s) = Ki·e^(−θs)/(s·(τ1·s+1))`. É o par integrador do MPC com `τ1 > 0` (ADR-013 emendado) — atrasa a subida da rampa sem mudar a taxa de regime, que segue sendo `Ki`. `τ1 = 0` ou ausente reduz ao IOPDT. **Só no MPC**: o bloco TFS não tem esse elemento. No MPC o `Ki` é normalizado em **%/(%·s)**; no TFS, EU/s por EU. |
 | **Filtro 1ª ordem** | Bloco de uma entrada e uma saída que suaviza o sinal por atraso de 1ª ordem, com parâmetro único `tau` (constante de tempo, em segundos), discretizado no Ts do flow. |
 | **Filtro Kalman** | Bloco de uma entrada e uma saída que estima o valor verdadeiro de um sinal ruidoso (passeio aleatório escalar). Configurado por dois desvios padrão na EU do sinal: `measurement_noise` (ruído da medição) e `process_noise` (variação esperada do valor verdadeiro por varredura). |
 | **Scaler** | Bloco de uma entrada (`in`) e uma saída (`out`) que reescala linearmente o sinal da faixa de entrada (`in_min`/`in_max`) para a faixa de saída (`out_min`/`out_max`). Faixa de saída invertida é ação reversa; fora da faixa de entrada **extrapola** (conversão de unidade não satura). |

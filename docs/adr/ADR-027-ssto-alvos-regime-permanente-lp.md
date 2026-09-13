@@ -52,6 +52,13 @@ nula em regime**: `Σ_j Ki_ij·ΔMV_j + Σ_k Kdi_ik·ΔDV_k ∈ [−ε, +ε]`, c
 de rank das demais linhas. Sem essa linha, um integrador ficaria livre e o LP escolheria vértices que
 rampam a planta indefinidamente.
 
+`Ki_ij` continua saindo do MESMO `PairSS` do controlador (§3, sem segundo modelo de ganho). Com o
+par integrador do ADR-013 emendado (IFOPDT, `tau1 > 0`, 2 estados), a taxa é o **incremento do
+acumulador com o estágio de 1ª ordem já assentado** — a leitura `(c·b)/Ts`, válida para o
+integrador de 1 estado, devolveria `Ki·(1−a₁)` e subestimaria a rampa por um fator
+`(1−e^(−Ts/τ1))`. O valor correto é o mesmo `Ki` do config convertido por span: o lag atrasa a
+rampa, nunca muda a taxa de regime.
+
 ### 5. Mapeamento das categorias existentes (ADR-019 preservado)
 
 | Categoria | Papel no LP | Limite | Rank |

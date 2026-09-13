@@ -151,7 +151,7 @@ export const AJUDA_MV = {
 export const AJUDA_LINHA = {
   kind: {
     description:
-      "Forma do modelo dinâmico desta linha na matriz de Modelos (RF-602). Autorregulável (SOPDT): resposta que se estabiliza sozinha num novo valor — parâmetros K/τ1/τ2/θ. Integrador (IOPDT): resposta que não para de variar sozinha — parâmetros Ki/θ. Trocar o kind troca a forma dos parâmetros da linha inteira na matriz.",
+      "Forma do modelo dinâmico desta linha na matriz de Modelos (RF-602). Autorregulável (SOPDT): resposta que se estabiliza sozinha num novo valor — parâmetros K/τ1/τ2/θ. Integrador (IOPDT/IFOPDT): resposta que não para de variar sozinha — parâmetros Ki/τ1/θ, com τ1=0 no integrador puro e τ1>0 quando a rampa demora pra atingir a taxa plena. Trocar o kind troca a forma dos parâmetros da linha inteira na matriz.",
     example: "temperatura controlada por uma malha com dreno → Autorregulável; nível de um tanque de acúmulo sem escoamento livre → Integrador.",
   },
   prioridade: {
@@ -292,7 +292,7 @@ export const AJUDA_PID = {
   },
 } satisfies Record<string, TooltipContent>;
 
-// Aba Modelos (TabModels.tsx) — parâmetros SOPDT/IOPDT por par + checkbox de habilitação
+// Aba Modelos (TabModels.tsx) — parâmetros SOPDT/IOPDT-IFOPDT por par + checkbox de habilitação
 export const AJUDA_MODELOS: Record<string, TooltipContent> = {
   K: {
     description:
@@ -300,8 +300,9 @@ export const AJUDA_MODELOS: Record<string, TooltipContent> = {
     example: "K=2 significa que 10% de variação na MV vira 20% de variação na CV, na faixa de cada uma.",
   },
   tau1: {
-    description: "Constante de tempo dominante do par SOPDT, em segundos — quanto maior, mais lenta a resposta até se estabilizar.",
-    example: "τ1=120 s numa malha de temperatura de leito, tipicamente mais lenta que uma malha de vazão.",
+    description:
+      "Constante de tempo de 1ª ordem do par, em segundos — quanto maior, mais lenta a resposta. No par SOPDT é a constante dominante (até se estabilizar); no par integrador é o LAG opcional do IFOPDT `Ki/(s·(τ1·s+1))`: a rampa leva ~τ1 pra atingir a taxa plena, e τ1=0 é o integrador puro de sempre.",
+    example: "τ1=120 s numa malha de temperatura de leito; τ1=60 s num nível cuja vazão de saída responde devagar à válvula.",
   },
   tau2: {
     description:
@@ -315,8 +316,8 @@ export const AJUDA_MODELOS: Record<string, TooltipContent> = {
   },
   Ki: {
     description:
-      "Ganho do par IOPDT (linha integradora), NORMALIZADO em %/s: taxa de variação da linha, em % do Span DELA por SEGUNDO, com a coluna sustentada em 100% do Span DELA. A base de tempo é sempre o segundo — Ki em %/min produziria modelo 60× lento. O motor converte pra EU multiplicando por Span_linha/(100 × Span_coluna) antes do worker (RF-602/609); os spans vigentes aparecem nos cabeçalhos da matriz.",
-    example: "Ki=0,05 numa CV de nível de tanque sem dreno, alimentado por uma MV de vazão de entrada.",
+      "Ganho do par integrador (IOPDT/IFOPDT), NORMALIZADO em %/(%·s): taxa de variação da linha, em % do Span DELA por SEGUNDO, para cada 1% do Span da coluna. A base de tempo é sempre o segundo — Ki em %/min produziria modelo 60× lento. O motor converte pra EU multiplicando por Span_linha/Span_coluna antes do worker (a MESMA razão de spans do K do SOPDT, RF-602/609); os spans vigentes aparecem nos cabeçalhos da matriz. O τ1 abaixo atrasa a rampa, mas NÃO muda esta taxa de regime.",
+    example: "Ki=0,00379 %/(%·s) numa CV de nível: 1 ponto de abertura da válvula rampa o nível a 0,00379 % do span por segundo (0,23 %/min).",
   },
   habilitado: {
     description:

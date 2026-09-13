@@ -38,6 +38,9 @@ _MPC_DV_RANGE = (0, 4)
 # Params exigidos por `kind` de linha da matriz `models` (spec §2.1-2/§2.2-3, ADR-013).
 _SELFREG_PARAMS = frozenset({"K", "tau1", "tau2", "theta"})
 _INTEGRATING_PARAMS = frozenset({"Ki", "theta"})
+# `tau1` no integrador (IFOPDT, `Ki/(s·(τ1·s+1))`) é OPCIONAL: ausente = integrador puro, a
+# forma de todo config gravado antes do campo (ordem do dono do produto, 2026-09-13).
+_INTEGRATING_OPTIONAL_PARAMS = frozenset({"tau1"})
 
 # Campos de `pid` por direção exigida (spec §2.2-6): write/mode_cmd = W; readback/mode_read = R.
 _PID_WRITE_FIELDS = ("write_tag_id", "mode_cmd_tag_id")
@@ -751,20 +754,27 @@ def _check_mpc_caps(node: FlowNode, config: MpcConfig, errors: list[str]) -> Non
 
 def _valid_pair_params(kind: RowKind, params: dict[str, float]) -> bool:
     """Completude e validade dos `params` do par por `kind` da linha (spec §2.2-3):
-    selfreg (SOPDT) exige K≠0, τ1>0, τ2≥0, θ≥0; integrating (IOPDT) exige Ki≠0, θ≥0.
+    selfreg (SOPDT) exige K≠0, τ1>0, τ2≥0, θ≥0; integrating (IOPDT/IFOPDT) exige Ki≠0, θ≥0 e
+    aceita `tau1 ≥ 0` OPCIONAL (ausente = integrador puro; `Ki/(s·(τ1·s+1))` com τ1>0).
 
     Exige finitude em todo `params`: `theta` alimenta `round(theta/ts_mpc)` em
     `mpc_state_dimension`, onde inf/nan estouraria `OverflowError`/`ValueError` em vez de
     virar 422 (mesma nota de `parse.py` para o TFS — pré-condição da tarefa 1.1).
     """
-    expected = _SELFREG_PARAMS if kind == "selfreg" else _INTEGRATING_PARAMS
-    if set(params) != expected or not all(math.isfinite(value) for value in params.values()):
+    if not all(math.isfinite(value) for value in params.values()):
         return False
     if kind == "selfreg":
+        if set(params) != _SELFREG_PARAMS:
+            return False
         return (
             params["K"] != 0 and params["tau1"] > 0 and params["tau2"] >= 0 and params["theta"] >= 0
         )
-    return params["Ki"] != 0 and params["theta"] >= 0
+    chaves = set(params)
+    if not _INTEGRATING_PARAMS <= chaves or chaves - (
+        _INTEGRATING_PARAMS | _INTEGRATING_OPTIONAL_PARAMS
+    ):
+        return False
+    return params["Ki"] != 0 and params["theta"] >= 0 and params.get("tau1", 0.0) >= 0
 
 
 def _check_mpc_matrix(node: FlowNode, config: MpcConfig, errors: list[str]) -> bool:
