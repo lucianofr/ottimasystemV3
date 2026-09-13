@@ -72,7 +72,7 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 
 ## Testes
 
-- **TDD estrito (RED→GREEN→REFACTOR)** em lógica pura: motor de scan (execução por `exec_order`, hot-swap), discretização SOPDT/IOPDT, montagem do do-mpc, precedência Restrição>CV, bumpless, TFS.
+- **TDD estrito (RED→GREEN→REFACTOR)** em lógica pura: motor de scan (execução por `exec_order`, hot-swap), discretização SOPDT/IOPDT/IFOPDT, montagem do do-mpc, precedência Restrição>CV, bumpless, TFS.
 - **opc-worker:** testar contra **servidor OPC-UA de teste in-process do asyncua** (sem PLC real) — subscriptions, escrita, watchdog, reconexão.
 - **Malha fechada MPC↔TFS** é a suíte de aceitação do sistema (RNF-09): assume/devolve sem salto de MV, restrição vence CV, overrun mantém MV + alarme.
 - Infra (compose, schema): testes de integração; não faça teatro de TDD unitário aqui.
@@ -117,9 +117,11 @@ cd frontend && npm run generate:api                 # tipos do OpenAPI + contrat
 cd frontend && npm run generate:contracts           # só os contratos (portas por bloco + payloads do WS) de ottima_core.contracts_export
 uv run pytest -m slow services/flow-runtime/tests   # carga do MPC (RNF-02); o run default exclui `slow` além de `e2e`
 
-# Stack. A F2 acrescentou o opcsim e as portas de host do gate: use SEMPRE os dois arquivos.
-cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 9 serviços
-# Sem o override e2e sobem 8 (sem opcsim) e o opcsim/redis não ficam acessíveis do host.
+# Stack. O override e2e só expõe portas de host do gate: use SEMPRE os dois arquivos.
+cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 8 serviços
+# O opcsim NÃO é serviço do compose (docker-compose.e2e.yml §5-8): o opc-worker é só cliente e a
+# suíte e2e sobe o opcsim standalone no host (tests/e2e/conftest.py). Sem o override, o Redis
+# não fica acessível do host e a L2 não conecta.
 # deploy/.env é obrigatório e gitignored. Se a 6379 já estiver ocupada por outro projeto da
 # máquina, defina OTTIMA_E2E_REDIS_PORT (ex.: 6399) — senão a L2 fala com o Redis do vizinho.
 # Rebuild de um serviço só: use --no-deps, senão `--build frontend` arrasta o `api` junto.
@@ -177,7 +179,7 @@ cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -
 `npm run generate:contracts` + `git diff --exit-code` (contrato gerado em dia). Sem segredo, sem
 Docker, sem stack. **`uv run pytest` e o gate E2E de 3 camadas continuam MANUAIS** e são
 responsabilidade de quem abre o PR: o pytest precisaria de Docker no runner (~20 min, com o
-histórico de vermelho falso por contenção do TD-009) e o E2E precisaria da stack de 9 serviços
+histórico de vermelho falso por contenção do TD-009) e o E2E precisaria da stack de 8 serviços
 mais as credenciais de `deploy/.env`. Não confunda "CI verde" com "gate completo".
 
 ## Proibições rápidas para agentes
