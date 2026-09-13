@@ -108,6 +108,17 @@ function tracoComFade(corBase: string, agora: number | null): uPlot.Series.Strok
   };
 }
 
+/** Ponto do cursor de uma pena de predição. O `stroke` dessas séries é uma FUNÇÃO que devolve
+ *  `CanvasGradient` (`tracoComFade`): o uPlot cacheia esse retorno em `series.points._stroke` e
+ *  reusa o MESMO valor como cor do ponto do cursor, que é um nó do DOM (`elColor`) — e um
+ *  gradiente de canvas ali não é cor nenhuma, então o ponto saía incolor justamente na seção
+ *  futura, onde a pena medida já não tem valor. Cor explícita em string resolve sem segundo
+ *  caminho de paleta: é o mesmo matiz claro que o traço usa no início do gradiente. */
+function pontoCursorPrevisto(cor: string): uPlot.Series.Points {
+  const clara = corClara(cor);
+  return { show: false, stroke: clara, fill: clara };
+}
+
 /** Linha-cursor "agora" (§7.4-6): plugin de desenho, não série — não compete por espaço no
  *  teto de penas e não precisa de Y-range próprio. Lê de uma ref para atualizar a cada
  *  `setData` sem recriar a instância (mesma separação estrutura/dados do resto do arquivo).
@@ -306,7 +317,7 @@ function montarColunas(
           stroke: tracoComFade(cor, overlay.agora),
           width: 1.5,
           dash: [5, 5],
-          points: { show: false },
+          points: pontoCursorPrevisto(cor),
           scale,
         }),
       );
@@ -361,7 +372,7 @@ function montarColunas(
         stroke: tracoComFade(cor, overlay.agora),
         width: 1.5,
         dash: [5, 5],
-        points: { show: false },
+        points: pontoCursorPrevisto(cor),
         scale,
       }),
     );
@@ -419,7 +430,7 @@ function montarColunas(
           (uPlot.paths.stepped as (opts: typeof OPCOES_DEGRAU_MV) => uPlot.Series.PathBuilder)(
             OPCOES_DEGRAU_MV,
           )(u, seriesIdx, idx0, idx1),
-        points: { show: false },
+        points: pontoCursorPrevisto(cor),
         scale,
       }),
     );

@@ -578,11 +578,13 @@ test("silêncio simultâneo de todas as penas: eixo com marcas de silêncio abre
 
 /** Colunas do uPlot como `montarColunas` (TrendOperacao.tsx) as monta para uma CV com predição
  *  (medido + previsto) e uma MV só medida: x, cv medido, cv previsto, mv medido. O carimbo 2 é
- *  a fronteira do passado — dali em diante só a predição tem valor. */
+ *  a fronteira do passado — dali em diante só a predição tem valor. O previsto vale 12,5 na
+ *  emenda DE PROPÓSITO: com o mesmo 12 do medido, o teste de precedência abaixo passaria com a
+ *  ordem invertida e não pinaria nada. */
 const DADOS_CURSOR = [
   [T0, T0 + 1, T0 + 2, T0 + 3],
   [10, 11, 12, null],
-  [null, null, 12, 13],
+  [null, null, 12.5, 13],
   [70, 71, 72, null],
 ];
 const COLUNAS_POR_PENA: Readonly<Record<string, readonly number[]>> = {
@@ -607,9 +609,11 @@ test("valoresNoCursor: no histórico lê o medido de cada pena; na seção futur
   expect(valoresNoCursor(DADOS_CURSOR, COLUNAS_POR_PENA, 3)?.cv_1).toBe(13);
 });
 
-test("valoresNoCursor: pena sem coluna (desligada) e buraco de silêncio ficam FORA do resultado — legenda escreve travessão", () => {
+test("valoresNoCursor: pena ligada em silêncio fica FORA do resultado (legenda escreve travessão); pena sem coluna também — e aí a legenda mantém o valor vivo", () => {
   const futuro = valoresNoCursor(DADOS_CURSOR, COLUNAS_POR_PENA, 3);
-  // Pena desligada não tem coluna nenhuma; MV em silêncio tem coluna, com null no carimbo.
-  expect(futuro?.dv_1).toBeUndefined();
+  // MV ligada, em silêncio no carimbo: tem coluna, com `null` — travessão, nunca zero.
   expect(futuro?.mv_1).toBeUndefined();
+  // Pena desligada não tem coluna nenhuma. Quem decide o que mostrar é a legenda
+  // (`LegendaOperacao`): linha fora do gráfico continua no valor vivo.
+  expect(futuro?.dv_1).toBeUndefined();
 });

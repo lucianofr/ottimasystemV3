@@ -79,10 +79,15 @@ export function LegendaOperacao({
     const ligada = ligadas.has(pena.id);
     const ehSp = pena.categoria === "sp";
     const cor = cores.get(pena.varId) ?? "transparent";
-    // Hover no gráfico manda: a linha mostra o valor do carimbo apontado, não o vivo. É a
-    // MESMA coluna de valor — duas colunas obrigariam o operador a escolher qual ler.
+    // Hover no gráfico manda SÓ nas penas desenhadas. A linha sem pena no gráfico não tem o que
+    // ler no cursor, e apagá-la para travessão sumiria com o PV vivo da MAIORIA das linhas (as
+    // penas opt-in — SP, MV, DV — nascem desligadas): o operador perderia informação que ele
+    // não pediu para esconder. Sem ambiguidade: o que está sob o cursor é o que o gráfico
+    // desenha, e o carimbo no cabeçalho do poço diz que a leitura é do ponteiro.
     const valor =
-      valoresCursor === null ? valorDaPena(pena, vars) : (valoresCursor[pena.id] ?? null);
+      valoresCursor !== null && ligada
+        ? (valoresCursor[pena.id] ?? null)
+        : valorDaPena(pena, vars);
     // O eixo Y é da VARIÁVEL: a marca fica na linha da CV, e cai para a linha do SP quando
     // ele é a única pena daquela variável desenhada (senão o operador vê um eixo colorido
     // sem nenhuma linha da legenda dizendo de quem ele é).
