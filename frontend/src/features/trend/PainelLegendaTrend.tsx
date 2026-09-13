@@ -39,6 +39,14 @@ export interface ValorEuLegenda {
   readonly muted: boolean;
   readonly testIdValor?: string;
   readonly testIdEu?: string;
+  /** Coluna extra à ESQUERDA do valor corrente: a leitura no carimbo sob o ponteiro do mouse.
+   *  `undefined` = a tela não tem leitura no cursor (engenharia, fuzzy) e a coluna não existe;
+   *  `null` = a coluna existe e está vazia (ponteiro fora do gráfico, ou pena sem valor ali) —
+   *  reservada mesmo vazia para a linha não pular quando o operador entra no gráfico. O valor
+   *  corrente NUNCA é substituído por esta leitura: são duas grandezas diferentes na mesma
+   *  linha (o último valor publicado e o valor de um instante passado ou previsto). */
+  readonly valorCursor?: number | null;
+  readonly testIdValorCursor?: string;
 }
 
 export interface LinhaLegenda {
@@ -74,6 +82,18 @@ export function PainelLegendaTrend({ testId, linhas }: PainelLegendaTrendProps) 
               {badge.texto}
             </span>
           ))}
+          {linha.valorEu?.valorCursor !== undefined && (
+            <span
+              data-testid={linha.valorEu.testIdValorCursor}
+              className="w-28 text-right text-sm"
+            >
+              {linha.valorEu.valorCursor !== null && (
+                <span className="process-value rounded-pill bg-surface-2 px-2 py-0.5 text-fg">
+                  {formatarValorLegenda(linha.valorEu.valorCursor)}
+                </span>
+              )}
+            </span>
+          )}
           {linha.valorEu && (
             <>
               <span

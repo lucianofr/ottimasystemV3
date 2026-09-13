@@ -79,15 +79,13 @@ export function LegendaOperacao({
     const ligada = ligadas.has(pena.id);
     const ehSp = pena.categoria === "sp";
     const cor = cores.get(pena.varId) ?? "transparent";
-    // Hover no gráfico manda SÓ nas penas desenhadas. A linha sem pena no gráfico não tem o que
-    // ler no cursor, e apagá-la para travessão sumiria com o PV vivo da MAIORIA das linhas (as
-    // penas opt-in — SP, MV, DV — nascem desligadas): o operador perderia informação que ele
-    // não pediu para esconder. Sem ambiguidade: o que está sob o cursor é o que o gráfico
-    // desenha, e o carimbo no cabeçalho do poço diz que a leitura é do ponteiro.
-    const valor =
-      valoresCursor !== null && ligada
-        ? (valoresCursor[pena.id] ?? null)
-        : valorDaPena(pena, vars);
+    // Duas colunas, nunca substituição: `valor` é SEMPRE o último valor publicado (`mpc.state`)
+    // e `valorCursor` é a leitura no carimbo sob o ponteiro. Substituir um pelo outro tirava da
+    // tela justamente o número que o operador usa para decidir. A coluna do cursor fica vazia
+    // fora do hover e nas penas que o gráfico não desenha (pena desligada não tem o que ler).
+    const valor = valorDaPena(pena, vars);
+    const valorCursor =
+      valoresCursor !== null && ligada ? (valoresCursor[pena.id] ?? null) : null;
     // O eixo Y é da VARIÁVEL: a marca fica na linha da CV, e cai para a linha do SP quando
     // ele é a única pena daquela variável desenhada (senão o operador vê um eixo colorido
     // sem nenhuma linha da legenda dizendo de quem ele é).
@@ -162,6 +160,8 @@ export function LegendaOperacao({
         muted: valor === null,
         testIdValor: "operate-trend-legend-valor",
         testIdEu: "operate-trend-legend-eu",
+        valorCursor,
+        testIdValorCursor: "operate-trend-legend-valor-cursor",
       },
       // A pena de SP desenha na escala da própria CV (mesma grandeza): editor de faixa só
       // na linha da variável, senão a tela ofereceria dois controles para a mesma escala e
