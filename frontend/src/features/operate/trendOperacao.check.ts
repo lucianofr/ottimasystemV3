@@ -23,6 +23,7 @@ import {
   tracoPenaSp,
   ultimoCarimboHistorico,
   valorDaPena,
+  valoresNoCursor,
   type AmostraViva,
   type CategoriaVarOperacao,
   type PenaLegenda,
@@ -569,4 +570,46 @@ test("silêncio simultâneo de todas as penas: eixo com marcas de silêncio abre
   expect(eixo).toContain(T0 + 29);
   const cv = mescladas.find((serie) => serie.id === "cv_1")!;
   expect(alinharNoEixo(eixo, cv.t, cv.v, teto)[eixo.indexOf(T0 + 29)]).toBeNull();
+});
+
+// ----------------------------------------------------------------------------------------
+// Leitura no cursor (hover no gráfico): valor de cada pena no carimbo sob o ponteiro
+// ----------------------------------------------------------------------------------------
+
+/** Colunas do uPlot como `montarColunas` (TrendOperacao.tsx) as monta para uma CV com predição
+ *  (medido + previsto) e uma MV só medida: x, cv medido, cv previsto, mv medido. O carimbo 2 é
+ *  a fronteira do passado — dali em diante só a predição tem valor. */
+const DADOS_CURSOR = [
+  [T0, T0 + 1, T0 + 2, T0 + 3],
+  [10, 11, 12, null],
+  [null, null, 12, 13],
+  [70, 71, 72, null],
+];
+const COLUNAS_POR_PENA: Readonly<Record<string, readonly number[]>> = {
+  cv_1: [1, 2],
+  mv_1: [3],
+  dv_1: [],
+};
+
+test("valoresNoCursor: ponteiro fora da área do gráfico (idx nulo) devolve null — a legenda volta ao valor vivo", () => {
+  expect(valoresNoCursor(DADOS_CURSOR, COLUNAS_POR_PENA, null)).toBeNull();
+});
+
+test("valoresNoCursor: no histórico lê o medido de cada pena; na seção futura cai na predição", () => {
+  const noPassado = valoresNoCursor(DADOS_CURSOR, COLUNAS_POR_PENA, 1);
+  expect(noPassado?.cv_1).toBe(11);
+  expect(noPassado?.mv_1).toBe(71);
+
+  // Fronteira: medido e previsto coexistem no carimbo da emenda — o MEDIDO manda, senão o
+  // operador leria um número calculado na linha sólida que ele está apontando.
+  expect(valoresNoCursor(DADOS_CURSOR, COLUNAS_POR_PENA, 2)?.cv_1).toBe(12);
+  // Além da fronteira só a predição tem valor.
+  expect(valoresNoCursor(DADOS_CURSOR, COLUNAS_POR_PENA, 3)?.cv_1).toBe(13);
+});
+
+test("valoresNoCursor: pena sem coluna (desligada) e buraco de silêncio ficam FORA do resultado — legenda escreve travessão", () => {
+  const futuro = valoresNoCursor(DADOS_CURSOR, COLUNAS_POR_PENA, 3);
+  // Pena desligada não tem coluna nenhuma; MV em silêncio tem coluna, com null no carimbo.
+  expect(futuro?.dv_1).toBeUndefined();
+  expect(futuro?.mv_1).toBeUndefined();
 });

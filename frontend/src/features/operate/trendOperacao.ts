@@ -324,6 +324,41 @@ export function valorDaPena(
 }
 
 /**
+ * Valor de cada pena no carimbo sob o ponteiro do mouse (hover no gráfico). O uPlot já resolve
+ * o índice do ponto mais próximo (`cursor.idx`); aqui só se lê a coluna que cada pena desenha
+ * — nenhuma matemática de pixel (regra global 3: este módulo nunca vê DOM nem canvas).
+ *
+ * `colunasPorPena` vem de `montarColunas` (TrendOperacao.tsx) e lista as colunas de cada pena
+ * na ordem em que a pena as desenha: medido primeiro, predição depois. No carimbo da emenda as
+ * duas têm valor, e o MEDIDO manda — apontar a linha sólida e ler um número calculado seria
+ * mentir sobre o que está sob o cursor. Pena desligada (sem coluna) e carimbo em silêncio
+ * (coluna com `null`, gap) ficam FORA do resultado: a legenda escreve travessão, nunca zero.
+ *
+ * `idx === null` é o ponteiro fora da área de plotagem (o próprio uPlot zera ali): devolve
+ * `null` para a legenda voltar ao valor vivo do `mpc.state`.
+ */
+export function valoresNoCursor(
+  /** Colunas do uPlot (`AlignedData`), inclusive `undefined` no elemento: é o que o tipo do
+   *  uPlot admite, e o caminho de leitura já colapsa ausência em travessão. */
+  dados: readonly ArrayLike<number | null | undefined>[],
+  colunasPorPena: Readonly<Record<string, readonly number[]>>,
+  idx: number | null,
+): Readonly<Record<string, number>> | null {
+  if (idx === null) return null;
+  const valores: Record<string, number> = {};
+  for (const [penaId, colunas] of Object.entries(colunasPorPena)) {
+    for (const coluna of colunas) {
+      const valor = dados[coluna]?.[idx] ?? null;
+      if (valor !== null && Number.isFinite(valor)) {
+        valores[penaId] = valor;
+        break;
+      }
+    }
+  }
+  return valores;
+}
+
+/**
  * Seleção default de penas (decisão A-11, F5R-16; emenda 2026-08-16): CVs (PV) ligam na ordem
  * do config até o teto; Restrições ligam como banda (PV conta no teto) com o que sobrar; MVs,
  * DVs **e a pena de SP de cada CV** nascem desligadas — são opt-in pela legenda, mesmo com o

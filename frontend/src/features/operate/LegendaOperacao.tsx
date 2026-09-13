@@ -46,6 +46,10 @@ export interface LegendaOperacaoProps {
   /** Último quadro publicado do bloco (`mpc.state.vars`): a origem do valor corrente de cada
    *  linha. Vazio antes do primeiro quadro — a legenda mostra travessão, não zero. */
   readonly vars: Readonly<Record<string, MpcVarState>>;
+  /** Valor de cada pena no carimbo sob o ponteiro do mouse (`valoresNoCursor`). `null` = o
+   *  ponteiro está fora do gráfico e a linha mostra o valor VIVO; presente, a linha mostra o
+   *  valor apontado — e travessão para pena sem valor ali (desligada, ou silêncio). */
+  readonly valoresCursor: Readonly<Record<string, number>> | null;
   /** Variável focada (dona do único eixo Y visível); `null` quando nenhuma pena está ligada. */
   readonly foco: string | null;
   /** Escala Y de cada variável, chaveada pelo id; ausente = `ESCALA_AUTO`. */
@@ -62,6 +66,7 @@ export function LegendaOperacao({
   porIdDefinicao,
   cores,
   vars,
+  valoresCursor,
   foco,
   escalas,
   onAlternarPena,
@@ -74,7 +79,10 @@ export function LegendaOperacao({
     const ligada = ligadas.has(pena.id);
     const ehSp = pena.categoria === "sp";
     const cor = cores.get(pena.varId) ?? "transparent";
-    const valor = valorDaPena(pena, vars);
+    // Hover no gráfico manda: a linha mostra o valor do carimbo apontado, não o vivo. É a
+    // MESMA coluna de valor — duas colunas obrigariam o operador a escolher qual ler.
+    const valor =
+      valoresCursor === null ? valorDaPena(pena, vars) : (valoresCursor[pena.id] ?? null);
     // O eixo Y é da VARIÁVEL: a marca fica na linha da CV, e cai para a linha do SP quando
     // ele é a única pena daquela variável desenhada (senão o operador vê um eixo colorido
     // sem nenhuma linha da legenda dizendo de quem ele é).
