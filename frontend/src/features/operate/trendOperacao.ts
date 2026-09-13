@@ -358,6 +358,39 @@ export function valoresNoCursor(
   return valores;
 }
 
+/** As DUAS colunas de valor de uma linha da legenda de operação. Nomes distintos porque são
+ *  grandezas distintas: `atual` é o último valor publicado, `cursor` é a leitura de um instante
+ *  passado ou previsto. */
+export interface ValoresDaLinha {
+  readonly atual: number | null;
+  readonly cursor: number | null;
+}
+
+/**
+ * Par de valores que a linha da legenda mostra. Existe como função PURA porque a regra que ela
+ * guarda já foi violada uma vez: a leitura no cursor SUBSTITUÍA o valor corrente, e o operador
+ * perdia de vista o último valor publicado justamente enquanto inspecionava o histórico.
+ *
+ * Invariantes, agora executáveis (`trendOperacao.check.ts`):
+ *
+ * - `atual` é SEMPRE `valorDaPena` — nenhum estado de hover o altera;
+ * - `cursor` só tem valor com o ponteiro dentro do gráfico (`valoresCursor !== null`) E a pena
+ *   desenhada (`ligada`): linha fora do gráfico não tem o que ler no carimbo;
+ * - pena ligada em silêncio no carimbo (sem entrada em `valoresCursor`) devolve `cursor: null`
+ *   — coluna vazia, nunca zero fabricado.
+ */
+export function valoresDaLinha(
+  pena: PenaLegenda,
+  vars: Readonly<Record<string, MpcVarState>>,
+  valoresCursor: Readonly<Record<string, number>> | null,
+  ligada: boolean,
+): ValoresDaLinha {
+  return {
+    atual: valorDaPena(pena, vars),
+    cursor: valoresCursor !== null && ligada ? (valoresCursor[pena.id] ?? null) : null,
+  };
+}
+
 /**
  * Seleção default de penas (decisão A-11, F5R-16; emenda 2026-08-16): CVs (PV) ligam na ordem
  * do config até o teto; Restrições ligam como banda (PV conta no teto) com o que sobrar; MVs,

@@ -8,7 +8,7 @@ import {
 } from "../trend/PainelLegendaTrend";
 import {
   faixaPontilhadaSp,
-  valorDaPena,
+  valoresDaLinha,
   type CategoriaVarOperacao,
   type PenaLegenda,
 } from "./trendOperacao";
@@ -79,13 +79,11 @@ export function LegendaOperacao({
     const ligada = ligadas.has(pena.id);
     const ehSp = pena.categoria === "sp";
     const cor = cores.get(pena.varId) ?? "transparent";
-    // Duas colunas, nunca substituição: `valor` é SEMPRE o último valor publicado (`mpc.state`)
-    // e `valorCursor` é a leitura no carimbo sob o ponteiro. Substituir um pelo outro tirava da
-    // tela justamente o número que o operador usa para decidir. A coluna do cursor fica vazia
-    // fora do hover e nas penas que o gráfico não desenha (pena desligada não tem o que ler).
-    const valor = valorDaPena(pena, vars);
-    const valorCursor =
-      valoresCursor !== null && ligada ? (valoresCursor[pena.id] ?? null) : null;
+    // Duas colunas, nunca substituição — a regra mora em `valoresDaLinha` (pura, pinada em
+    // `trendOperacao.check.ts`): `atual` é sempre o último valor publicado e `cursor` é a
+    // leitura no carimbo sob o ponteiro, vazia fora do hover e nas penas que o gráfico não
+    // desenha.
+    const { atual, cursor: valorCursor } = valoresDaLinha(pena, vars, valoresCursor, ligada);
     // O eixo Y é da VARIÁVEL: a marca fica na linha da CV, e cai para a linha do SP quando
     // ele é a única pena daquela variável desenhada (senão o operador vê um eixo colorido
     // sem nenhuma linha da legenda dizendo de quem ele é).
@@ -155,9 +153,9 @@ export function LegendaOperacao({
       ),
       badges,
       valorEu: {
-        valor,
+        valor: atual,
         eu: definicao?.eu ?? "",
-        muted: valor === null,
+        muted: atual === null,
         testIdValor: "operate-trend-legend-valor",
         testIdEu: "operate-trend-legend-eu",
         valorCursor,
