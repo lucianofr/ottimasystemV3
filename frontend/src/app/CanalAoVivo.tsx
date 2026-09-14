@@ -14,7 +14,9 @@ import type { LoopState, MpcState } from "../lib/contracts.gen";
 import type { FuzzyState } from "../features/fuzzy/types";
 import {
   atrasoReconexao,
+  CODIGO_CANAL_MUDO,
   deveReconectar,
+  TIMEOUT_CANAL_MUDO_MS,
   ehEstado,
   lerPorts,
   mesclarPorts,
@@ -497,10 +499,50 @@ export function abrirCanalSessao(
   let ativo = true;
   let socket: WebSocket | null = null;
   let religar: number | null = null;
+  let vigia: number | null = null;
   let tentativa = 0;
+
+  function pararVigia(): void {
+    if (vigia === null) return;
+    ambiente.cancelar(vigia);
+    vigia = null;
+  }
+
+  /** Caminho único de religamento (queda limpa e canal mudo): estado + backoff. */
+  function religarDepois(): void {
+    aplicar((atual) => ({ ...atual, estado: "reconectando" }));
+    religar = ambiente.agendar(conectar, atrasoReconexao(tentativa));
+    tentativa += 1;
+  }
+
+  /**
+   * Vigia de canal mudo: socket meio-aberto (proxy/container recriado, host suspenso, NAT
+   * que esquece a conexão) não gera FIN nem RST, e o JS não vê o ping/pong do protocolo —
+   * o socket fica `OPEN` para sempre, o canvas mostra "Aguardando dado da varredura"
+   * indefinidamente e nada religa. O servidor manda um quadro `ping` a cada `HEARTBEAT_S`
+   * (`ws.py`), então silêncio além deste teto é socket morto.
+   *
+   * Não espera o `onclose` do `close()`: no socket meio-aberto o handshake de fechamento
+   * também não volta. Os handlers do zumbi são desligados para ele não religar de novo
+   * quando (e se) o `onclose` chegar atrasado.
+   */
+  function rearmarVigia(ws: WebSocket): void {
+    pararVigia();
+    vigia = ambiente.agendar(() => {
+      vigia = null;
+      if (!ativo || socket !== ws) return;
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onclose = null;
+      socket = null;
+      ws.close(CODIGO_CANAL_MUDO, "Canal mudo");
+      religarDepois();
+    }, TIMEOUT_CANAL_MUDO_MS);
+  }
 
   function desmontar(): void {
     ativo = false;
+    pararVigia();
     if (religar !== null) {
       ambiente.cancelar(religar);
       religar = null;
@@ -537,11 +579,15 @@ export function abrirCanalSessao(
         subscribe: { flow_status, mpc_state, fuzzy_state, loop_state, opc_values, events: true },
       });
       if (comando !== null) ws.send(comando);
+      rearmarVigia(ws);
       aplicar((atual) => ({ ...atual, estado: "aberto" }));
     };
 
     ws.onmessage = (evento: MessageEvent<unknown>) => {
       if (!ativo || typeof evento.data !== "string") return;
+      // Qualquer quadro — inclusive o `ping` do servidor e um envelope que o roteamento
+      // descarta — é prova de que o cano está vivo.
+      rearmarVigia(ws);
       const mensagem = analisarMensagemCanal(evento.data);
       if (mensagem === null) return;
       // `opc_values` NÃO vai ao `reduzir`: uma mensagem por tag a até 4 Hz renderizaria a
@@ -555,14 +601,13 @@ export function abrirCanalSessao(
 
     ws.onclose = (evento: CloseEvent) => {
       socket = null;
+      pararVigia();
       if (!ativo) return;
       if (!deveReconectar(evento.code)) {
         aplicar((atual) => ({ ...atual, estado: "sessao_invalida" }));
         return;
       }
-      aplicar((atual) => ({ ...atual, estado: "reconectando" }));
-      religar = ambiente.agendar(conectar, atrasoReconexao(tentativa));
-      tentativa += 1;
+      religarDepois();
     };
   }
 
