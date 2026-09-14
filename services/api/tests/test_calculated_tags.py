@@ -239,3 +239,52 @@ async def test_papeis_rotas_de_escrita_403(client, admin_headers, operator_heade
     assert r.status_code == 403
     r = await client.delete(f"/api/calculated-tags/{criado['id']}", headers=operator_headers)
     assert r.status_code == 403
+
+
+async def test_lista_ignora_variavel_historiada_do_mesmo_projeto(client, admin_headers):
+    """ADR-041 D1: variável historiada também é linha em `tags` com `connection_id IS
+    NULL`, sem `CalculatedTag` correspondente — sem o JOIN explícito, ela quebraria esta
+    listagem com 500 (`KeyError` em `calcs[t.id]`)."""
+    p = await _projeto(client, admin_headers, "MistoHistCalc")
+    tag_leitura = await _tag_opc(client, admin_headers, p["id"], "FT-Misto")
+
+    calc = await client.post(
+        "/api/calculated-tags",
+        json=_corpo_calc(p["id"], "CalcMisto", []),
+        headers=admin_headers,
+    )
+    assert calc.status_code == 201, calc.text
+
+    flow = await client.post(
+        "/api/flows",
+        json={"project_id": p["id"], "name": "FlowMisto", "ts_seconds": 1},
+        headers=admin_headers,
+    )
+    assert flow.status_code == 201, flow.text
+    flow_id = flow.json()["id"]
+    graph = {
+        "nodes": [
+            {
+                "id": "r1",
+                "type": "opc_read",
+                "position": {"x": 0.0, "y": 0.0},
+                "data": {"exec_order": 1, "tag_id": tag_leitura["id"]},
+            }
+        ],
+        "edges": [],
+    }
+    salvo = await client.put(
+        f"/api/flows/{flow_id}", json={"graph_json": graph}, headers=admin_headers
+    )
+    assert salvo.status_code == 200, salvo.text
+
+    hist = await client.post(
+        "/api/historized-vars",
+        json={"flow_id": flow_id, "block_id": "r1", "port": "out"},
+        headers=admin_headers,
+    )
+    assert hist.status_code == 201, hist.text
+
+    r = await client.get(f"/api/calculated-tags?project_id={p['id']}", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert [t["name"] for t in r.json()] == ["CalcMisto"]

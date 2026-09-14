@@ -134,7 +134,11 @@ async def _publicar(
 async def list_calculated_tags(
     project_id: int | None = None, db: AsyncSession = Depends(get_db)
 ) -> list[CalculatedTagOut]:
-    stmt = select(Tag).where(Tag.connection_id.is_(None)).order_by(Tag.name)
+    # JOIN explícito com `calculated_tags` (não só `connection_id IS NULL`): variável
+    # historiada (ADR-041 D1) também é linha em `tags` com `connection_id IS NULL`, sem
+    # `CalculatedTag` correspondente — sem o JOIN, `calcs[t.id]` abaixo estoura `KeyError`
+    # (500) na primeira variável historiada de um projeto com tags calculadas.
+    stmt = select(Tag).join(CalculatedTag, CalculatedTag.tag_id == Tag.id).order_by(Tag.name)
     if project_id is not None:
         stmt = stmt.where(Tag.project_id == project_id)
     tags = list(await db.scalars(stmt))
