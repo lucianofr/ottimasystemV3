@@ -40,7 +40,7 @@ test.afterAll(async () => {
 });
 
 test("PW-FL-05: paleta cabe na moldura e a lista rola até o último bloco", async ({ page }) => {
-  // Viewport curto: o transbordo dos 13 blocos fica garantido por construção,
+  // Viewport curto: o transbordo dos 14 blocos fica garantido por construção,
   // não herdado do viewport 1920x1080 do config.
   await page.setViewportSize({ width: 1280, height: 640 });
   await entrarNoShell(page);
