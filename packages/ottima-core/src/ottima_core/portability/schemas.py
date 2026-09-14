@@ -146,6 +146,23 @@ class BundleFlow(BaseModel):
         return self
 
 
+class BundleHistorizedVar(BaseModel):
+    """Variável historiada (RF-308, ADR-041 D1/D6): a linha de `tags` correspondente
+    (`connection=None`, `node_id=None`, `direction='r'`, `data_type='float'`) NUNCA entra
+    em `ProjectBundle.tags` — cairia fora do XOR de `BundleTag._coerencia` — e é
+    reconstruída no import a partir só deste modelo. `flow`/`block_id`/`port` são a chave
+    natural do registro (`uq_historized_vars_port`); `tag`/`eu` são os únicos campos da tag
+    que sobrevivem à fronteira (nome e engenharia), no mesmo molde de `BundleTagRef`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tag: str
+    eu: str = ""
+    flow: str
+    block_id: str
+    port: str
+
+
 class ProjectBundle(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -155,3 +172,7 @@ class ProjectBundle(BaseModel):
     connections: list[BundleConnection]
     tags: list[BundleTag]
     flows: list[BundleFlow]
+    # Aditivo e opcional (mesmo precedente de `exec_order`/`feedback_init`, ADR-024 D-final e
+    # ADR-040 D6): `schema_version` continua 1 — um bundle exportado antes do ADR-041 importa
+    # sem mudança, com a lista vazia (nenhuma variável historiada existia para exportar).
+    historized_vars: list[BundleHistorizedVar] = Field(default_factory=list)
