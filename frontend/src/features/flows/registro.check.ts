@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { PORT_CONTRACTS } from "../../lib/contracts.gen";
 import { criarBloco, TIPOS_BLOCO } from "./graph";
 import { TIPOS_DE_NO } from "./nodes";
 import { REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
@@ -41,6 +42,14 @@ test("ROTULO_BLOCO e TIPOS_DE_NO têm exatamente uma entrada por tipo de TIPOS_B
 
   expect(tiposRotulo).toEqual(esperado);
   expect(tiposNo).toEqual(esperado);
+});
+
+test("TIPOS_BLOCO é exatamente o conjunto de PORT_CONTRACTS — bloco novo no servidor sem entrada na paleta (e vice-versa) quebra aqui", () => {
+  // Último elo do ARCH-18: `portasFixas` indexa `PORT_CONTRACTS[tipo]` e `TipoBloco ⊂ keys`
+  // typecheca mesmo faltando um tipo na lista manual de `TIPOS_BLOCO` — o bloco sumiria da
+  // paleta em silêncio. Encadeia com `set(port_contracts) == set(NODE_TYPES)`
+  // (`test_contracts_export.py`), fechando paleta ⇄ contrato ⇄ `NODE_TYPES` do servidor.
+  expect([...TIPOS_BLOCO].sort()).toEqual(Object.keys(PORT_CONTRACTS).sort());
 });
 
 test("defaults() de tfs/script/fuzzy/mpc devolve objeto novo a cada chamada — dois blocos novos não compartilham matrix/output_eu/variables", () => {

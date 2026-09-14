@@ -39,7 +39,7 @@ from runtime_test_helpers import (  # noqa: E402
 )
 
 from ottima_core.config import get_settings  # noqa: E402
-from ottima_core.snapshot import ValueSnapshot  # noqa: E402
+from ottima_core.snapshot import ExchangeSnapshot, ValueSnapshot  # noqa: E402
 from ottima_flow_runtime.events import build_event_listener  # noqa: E402
 from ottima_flow_runtime.mpc.worker import worker_main  # noqa: E402
 from ottima_flow_runtime.partition import UNPARTITIONED, Partition  # noqa: E402
@@ -147,11 +147,13 @@ async def harness_factory(
         state = RuntimeState()
         pool = StubPool()
         snapshot = ValueSnapshot(redis_client)
+        exchange = ExchangeSnapshot(redis_client)
         supervisor = Supervisor(
             session_factory,
             redis_client,
             state,
             snapshot=snapshot,
+            exchange=exchange,
             pool=pool,
             poll_interval_s=poll_interval_s,
             mpc_worker_target=mpc_worker_target,
@@ -165,9 +167,10 @@ async def harness_factory(
             on_comm_restored=supervisor.on_comm_restored,
             on_project_activated=supervisor.on_project_activated,
         )
-        harness = Harness(supervisor, state, pool, snapshot, redis_client, events)
+        harness = Harness(supervisor, state, pool, snapshot, exchange, redis_client, events)
         built.append(harness)
         await snapshot.start()
+        await exchange.start()
         await supervisor.start()
         await events.start()
         return harness
@@ -178,3 +181,4 @@ async def harness_factory(
         await harness.events.stop()
         await harness.supervisor.stop()
         await harness.snapshot.stop()
+        await harness.exchange.stop()

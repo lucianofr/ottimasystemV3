@@ -17,7 +17,7 @@ import {
 } from "./graph";
 
 /**
- * Blocos utilitários Scaler e Integrator no modelo do editor.
+ * Blocos utilitários Scaler e Integrator, e o bloco-fonte Constante, no modelo do editor.
  *
  * Arquivo próprio, mesmo motivo de `filtros.check.ts`: `graph.check.ts` está no teto de
  * linhas do projeto.
@@ -69,6 +69,19 @@ test("integrator tem in + reset na entrada e out na saída", () => {
 
   expect(handlesEntrada(no)).toEqual(["in", "reset"]);
   expect(handlesSaida(no)).toEqual(["out"]);
+});
+
+test("constant está na paleta com rótulo Constante", () => {
+  expect(TIPOS_BLOCO).toContain("constant");
+  expect(ROTULO_BLOCO.constant).toBe("Constante");
+});
+
+test("constant não tem porta de entrada e tem só out numérico na saída", () => {
+  const no = criarBloco("constant", "c1", POS, 2);
+
+  expect(handlesEntrada(no)).toEqual([]);
+  expect(handlesSaida(no)).toEqual(["out"]);
+  expect(tipoPorta(no, TAGS)).toBe("num");
 });
 
 for (const tipo of ["scaler", "integrator"] as const) {
@@ -136,6 +149,13 @@ test("integrator nasce na base por minuto", () => {
   if (no.type !== "integrator") throw new Error("tipo preservado");
 
   expect(no.data.time_base).toBe("min");
+});
+
+test("constant nasce com value 0", () => {
+  const no = criarBloco("constant", "c1", POS, 2);
+  if (no.type !== "constant") throw new Error("tipo preservado");
+
+  expect(no.data.value).toBe(0);
 });
 
 test("round-trip preserva a config dos dois utilitários", () => {
@@ -207,4 +227,21 @@ test("data serializado carrega só as chaves que o servidor aceita", () => {
     "out_min",
   ]);
   expect(Object.keys(nodes[1].data).sort()).toEqual(["exec_order", "label", "time_base"]);
+});
+
+test("constant: value corrompido no graph_json cai no padrão 0 e o round-trip serializa só exec_order/label/value", () => {
+  const bruto = {
+    nodes: [
+      { id: "c1", type: "constant", position: POS, data: { exec_order: 1, label: "", value: null } },
+    ],
+    edges: [],
+  };
+
+  const { nodes } = deGraphJson(bruto);
+  const [constante] = nodes;
+  if (constante.type !== "constant") throw new Error("tipo preservado");
+  expect(constante.data.value).toBe(0);
+
+  const { nodes: serializados } = paraGraphJson(nodes, []);
+  expect(Object.keys(serializados[0].data).sort()).toEqual(["exec_order", "label", "value"]);
 });

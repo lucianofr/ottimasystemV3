@@ -44,6 +44,8 @@ from ottima_core.bus import FlowStatus, FuzzyState, LoopState, MpcState, PortVal
 from ottima_core.flowgraph import (
     MAX_SCRIPT_PORTS,
     MPC_FIXED_OUTPUT_PORTS,
+    BusKeyConfig,
+    ConstantConfig,
     ConstraintVar,
     CvVar,
     DvVar,
@@ -141,6 +143,11 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
         "dynamic": False,
         "ports": [{"name": "in", "direction": "input", "type": "tag"}],
     },
+    # Bloco Constante: fonte sem entradas — só a saída fixa `out`, numérica.
+    "constant": {
+        "dynamic": False,
+        "ports": [{"name": "out", "direction": "output", "type": "num"}],
+    },
     "script": {
         "dynamic": True,
         "source": "config.n_inputs / config.n_outputs (spec F3 §3.3)",
@@ -216,6 +223,17 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
             {"name": "reset", "direction": "input", "type": "num"},
             {"name": "out", "direction": "output", "type": "num"},
         ],
+    },
+    # Blocos de barramento (ADR-042): uma porta só cada, BIVALENTE (o barramento transporta
+    # `float | bool` sem reinterpretar, D7). `bus_publish` não tem saída e `bus_subscribe`
+    # não tem entrada — o outro lado é o canal `flow.exchange`.
+    "bus_publish": {
+        "dynamic": False,
+        "ports": [{"name": "in", "direction": "input", "type": "bivalent"}],
+    },
+    "bus_subscribe": {
+        "dynamic": False,
+        "ports": [{"name": "out", "direction": "output", "type": "bivalent"}],
     },
     # Bloco PID (RF-551, ADR-031): portas fixas — `pv` e `sp` de entrada (`sp` é opcional;
     # ausente, `config.setpoint` supre, RF-552), `out` de saída, todas numéricas.
@@ -320,6 +338,8 @@ _NODE_CONFIG_MODELS = (
     IopdtParams,
     ScalerConfig,
     IntegratorConfig,
+    ConstantConfig,
+    BusKeyConfig,
 )
 
 

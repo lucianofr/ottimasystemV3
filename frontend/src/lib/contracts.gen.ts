@@ -52,7 +52,7 @@ export type ContratoPorta =
   | ContratoPortaDinamica
   | ContratoPortaDinamicaComDefault;
 
-export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy" | "first_order" | "kalman" | "scaler" | "integrator" | "pid" | "tfs" | "mpc" | "pid_loop" | "fuzzy_loop", ContratoPorta> = {
+export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "constant" | "script" | "fuzzy" | "first_order" | "kalman" | "scaler" | "integrator" | "bus_publish" | "bus_subscribe" | "pid" | "tfs" | "mpc" | "pid_loop" | "fuzzy_loop", ContratoPorta> = {
   "opc_read": {
     "dynamic": false,
     "ports": [
@@ -70,6 +70,16 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy
         "name": "in",
         "direction": "input",
         "type": "tag"
+      }
+    ]
+  },
+  "constant": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
       }
     ]
   },
@@ -181,6 +191,26 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy
         "name": "out",
         "direction": "output",
         "type": "num"
+      }
+    ]
+  },
+  "bus_publish": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "bivalent"
+      }
+    ]
+  },
+  "bus_subscribe": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "bivalent"
       }
     ]
   },
@@ -726,4 +756,12 @@ export interface ScalerConfig {
 
 export interface IntegratorConfig {
   time_base: "s" | "min" | "h";
+}
+
+export interface ConstantConfig {
+  value: number;
+}
+
+export interface BusKeyConfig {
+  key: string;
 }

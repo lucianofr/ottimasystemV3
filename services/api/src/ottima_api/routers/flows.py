@@ -1,9 +1,7 @@
 """CRUD de flows (RF-302/306/307): leitura para operador, escrita para admin (ADR-015)."""
 
 import asyncio
-import logging
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
@@ -13,13 +11,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_api.deps import get_db, get_redis, require_admin, require_operator
+from ottima_api.historized import (
+    podar_variaveis_historiadas,
+    publicar_comando,
+    remover_variaveis_historiadas,
+)
 from ottima_api.messages import MSG_FLOW_NAO_ENCONTRADO, MSG_PROJETO_NAO_ENCONTRADO
 from ottima_core.bus import (
-    CHANNEL_FLOW_COMMANDS,
     KIND_FLOW_CREATED,
     KIND_FLOW_DELETED,
     KIND_FLOW_UPDATED,
-    FlowCommand,
+    KIND_HISTORIZED_VAR_PRUNED,
     publish_event,
 )
 from ottima_core.flowgraph import (
@@ -27,10 +29,11 @@ from ottima_core.flowgraph import (
     GraphParseError,
     TagRef,
     ValidationResult,
+    bus_publish_keys,
     parse_graph,
     validate_graph,
 )
-from ottima_core.models import Flow, OpcConnection, Project, User
+from ottima_core.models import Flow, HistorizedVar, OpcConnection, Project, User
 from ottima_core.schemas.flows import (
     MAX_BIGINT,
     FlowCreate,
@@ -41,8 +44,6 @@ from ottima_core.schemas.flows import (
     erro_watchdog_flow,
 )
 from ottima_core.tags import project_tags
-
-logger = logging.getLogger(__name__)
 
 # Sem dependência no router: os papéis variam por rota (ADR-015)
 router = APIRouter()
@@ -81,21 +82,24 @@ def _validar_grafo(
     ts_seconds: float,
     *,
     watchdog_enabled: bool,
-) -> ValidationResult:
+) -> tuple[FlowGraph, ValidationResult]:
     """Parse + validação semântica + aviso de watchdog (TD-004, ADR-009 revisado: watchdog
     por flow, não mais por conexão) num passo só, para rodar inteiro fora do event loop.
 
     As etapas são CPU-bound sobre dados já materializados (TD-002): num grafo grande
     seguram o loop e travam o WS de status de todo mundo enquanto um engenheiro salva.
+
+    Devolve o `FlowGraph` parseado junto (ADR-041): a poda de variável historiada do save
+    precisa dele, e reparsear o mesmo JSON de novo seria trabalho em dobro.
     """
     grafo = parse_graph(graph_json)
     resultado = validate_graph(grafo, tags, ts_seconds)
     if resultado.errors:
-        return resultado
+        return grafo, resultado
     aviso = _aviso_watchdog(grafo, watchdog_enabled=watchdog_enabled)
     if aviso is None:
-        return resultado
-    return ValidationResult(errors=resultado.errors, warnings=[*resultado.warnings, aviso])
+        return grafo, resultado
+    return grafo, ValidationResult(errors=resultado.errors, warnings=[*resultado.warnings, aviso])
 
 
 def _tem_alvo_de_escrita(grafo: FlowGraph) -> bool:
@@ -115,6 +119,46 @@ def _aviso_watchdog(grafo: FlowGraph, *, watchdog_enabled: bool) -> str | None:
         "Este flow escreve em planta mas o watchdog está desabilitado: as escritas "
         "serão recusadas (somente leitura de fato)."
     )
+
+
+async def _conflito_de_barramento(db: AsyncSession, flow: Flow, grafo: FlowGraph) -> str | None:
+    """ADR-042 D5: a `key` publicada é única no PROJETO, não só no flow.
+
+    `validate_graph` cobre o próprio grafo (validação pura); aqui se compara com os flows
+    IRMÃOS, que só a API tem em mão. Sem isto, dois flows publicando o mesmo nome fariam
+    last-writer-wins e o assinante leria valores alternados sem nenhum aviso.
+    """
+    chaves = set(bus_publish_keys(grafo))
+    if not chaves:
+        return None
+    irmaos = [
+        (nome, graph_json)
+        for nome, graph_json in (
+            await db.execute(
+                select(Flow.name, Flow.graph_json).where(
+                    Flow.project_id == flow.project_id, Flow.id != flow.id
+                )
+            )
+        ).all()
+    ]
+    # Parse dos grafos irmãos é CPU-bound (TD-002): fora do event loop, como o do próprio.
+    return await asyncio.to_thread(_primeiro_conflito, chaves, irmaos)
+
+
+def _primeiro_conflito(chaves: set[str], irmaos: list[tuple[str, dict]]) -> str | None:
+    for nome, graph_json in irmaos:
+        try:
+            irmao = parse_graph(graph_json)
+        except GraphParseError:
+            # Grafo irmão inválido no banco não pode travar o save deste flow; ele já é
+            # recusado no próprio save (mesma postura melhor-esforço de `operate.py`).
+            continue
+        colisoes = chaves & set(bus_publish_keys(irmao))
+        if colisoes:
+            return (
+                f"a chave de barramento '{sorted(colisoes)[0]}' já é publicada pelo flow '{nome}'"
+            )
+    return None
 
 
 async def _publicar_evento(
@@ -142,25 +186,6 @@ async def _publicar_evento(
         kind=kind,
         payload={"flow_id": flow_id, "project_id": project_id, "name": name},
     )
-
-
-async def _publicar_comando(redis_client: Redis, user: User, flow_id: int, cmd: str) -> None:
-    """Publica em `flow.commands` depois do commit; falha de publicação não derruba a rota.
-
-    Comando é intenção (spec §5.1) e não gera evento aqui: quem audita o efeito é o runtime,
-    ao materializá-lo (§2.2-7). Comando perdido = nada aconteceu: o `desired_state` já gravado
-    fica divergente do estado publicado até alguém recomandar, porque `desired_state` é
-    exibição e nunca é auto-aplicado (RF-306, ADR-017) — nem o watermark deploya sozinho.
-    O `reload` é a exceção coberta: o watermark de 10 s pega o `updated_at` novo do flow
-    rodando (§2.2-9).
-    """
-    comando = FlowCommand(
-        flow_id=flow_id, cmd=cmd, args={}, user=f"user:{user.id}", ts=datetime.now(UTC)
-    )
-    try:
-        await redis_client.publish(CHANNEL_FLOW_COMMANDS, comando.model_dump_json())
-    except Exception:
-        logger.exception("Falha ao publicar comando '%s' do flow %s", cmd, flow_id)
 
 
 @router.get("", response_model=list[FlowOut], dependencies=[Depends(require_operator)])
@@ -261,13 +286,22 @@ async def update_flow(
             raise _reprovado(["Conexão de watchdog não pertence a este projeto"])
     tags = await project_tags(db, flow.project_id)
     try:
-        resultado = await asyncio.to_thread(
+        grafo, resultado = await asyncio.to_thread(
             _validar_grafo, graph_json, tags, ts_efetivo, watchdog_enabled=wd_enabled
         )
     except GraphParseError as erro:
         raise _reprovado(erro.errors) from None
     if resultado.errors:
         raise _reprovado(resultado.errors)
+    conflito = await _conflito_de_barramento(db, flow, grafo)
+    if conflito is not None:
+        raise _reprovado([conflito])
+    # Poda ANTES do commit E antes de mexer no `flow` (ADR-041): bloco/porta que saiu do
+    # grafo não pode continuar historiando cego. A ordem importa — depois de `flow.name =
+    # body.name`, o SELECT da poda dispara autoflush e o nome duplicado estouraria
+    # `IntegrityError` AQUI, fora do `try` do commit que o traduz em 409. Rollback do commit
+    # desfaz a poda junto: os dois são a mesma transação.
+    nomes_podados = await podar_variaveis_historiadas(db, flow.id, grafo)
 
     if body.name is not None:
         flow.name = body.name
@@ -297,10 +331,22 @@ async def update_flow(
         project_id=flow.project_id,
         name=flow.name,
     )
+    if nomes_podados:
+        await publish_event(
+            redis_client,
+            severity="warning",
+            origin=f"user:{user.id}",
+            message=(
+                f"Flow '{flow.name}': {len(nomes_podados)} variável(is) historiada(s) "
+                "removida(s) ao salvar"
+            ),
+            kind=KIND_HISTORIZED_VAR_PRUNED,
+            payload={"flow_id": flow.id, "names": nomes_podados},
+        )
     # Dica de hot-swap (§4.1-1) só para flow rodando: parado, o save é apenas persistência e o
     # deploy futuro lê o grafo vigente (§4.1-2) — `reload` viraria comando de task inexistente.
     if flow.desired_state == "running":
-        await _publicar_comando(redis_client, user, flow_id, "reload")
+        await publicar_comando(redis_client, user, flow_id, "reload")
     return FlowSaved(flow=FlowDetail.model_validate(flow), warnings=resultado.warnings)
 
 
@@ -316,6 +362,13 @@ async def delete_flow(
         raise HTTPException(status_code=409, detail=MSG_RODANDO)
     # Identidade capturada antes do delete: depois o objeto não é mais legível
     project_id, name = flow.project_id, flow.name
+    # Variáveis historiadas do flow: remove pela linha de `tags` (ADR-041 D5) — a cascata
+    # de `flows` cuidaria de `historized_vars`, mas deixaria a tag órfã, eterna no seletor
+    # do TREND e fatal no export.
+    tag_ids = list(
+        await db.scalars(select(HistorizedVar.tag_id).where(HistorizedVar.flow_id == flow_id))
+    )
+    await remover_variaveis_historiadas(db, tag_ids)
     await db.delete(flow)
     await db.commit()
     await _publicar_evento(
@@ -345,7 +398,7 @@ async def _comandar(
     flow = await _carregar(db, flow_id)
     flow.desired_state = desired_state
     await db.commit()
-    await _publicar_comando(redis_client, user, flow_id, cmd)
+    await publicar_comando(redis_client, user, flow_id, cmd)
     # Sem corpo: um campo de estado aqui seria lido como confirmação, e o comando é só
     # intenção — quem confirma é o `flow.status` do runtime (DESIGN.md, Regra do Estado
     # Publicado).

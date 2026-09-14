@@ -8,7 +8,7 @@ Núcleo puro — nada de SQLAlchemy nem de `services/` aqui: o chamador traduz l
 import ast
 import math
 from collections.abc import Iterator, Mapping
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -19,14 +19,22 @@ from ottima_core.flowgraph.mpc_config import (
     derive_horizons,
     mpc_state_dimension,
 )
-from ottima_core.flowgraph.parse import _FILTER_KEYS, _TAG_DIRECTION, FlowEdge, FlowGraph, FlowNode
+from ottima_core.flowgraph.parse import (
+    _FILTER_KEYS,
+    _TAG_DIRECTION,
+    BUS_TYPES,
+    FlowEdge,
+    FlowGraph,
+    FlowNode,
+)
 
 MAX_DELAY_SAMPLES = 7200  # teto da fila de tempo morto do TFS (spec §3.4)
 
 # Blocos de filtro (ADR-026): portas fixas `in`/`out`, numéricas, entrada obrigatória.
 _FILTER_TYPES = frozenset(_FILTER_KEYS)
 
-# "bivalent" é a porta do bloco Script, que aceita numérico e booleano (decisão A-5).
+# "bivalent" é a porta do Script e as dos blocos de barramento, que aceitam numérico e
+# booleano (decisão A-5, ADR-042 D7).
 PortKind = Literal["num", "bool", "bivalent"]
 _PORT_LABEL: dict[str, str] = {"num": "numérica", "bool": "booleana", "bivalent": "bivalente"}
 
@@ -92,21 +100,55 @@ def validate_graph(
     _check_script_code(graph.nodes, errors)
     _check_fuzzy_nodes(graph.nodes, errors)
     _check_loop_nodes(graph.nodes, graph.edges, errors)
+    _check_bus_keys(graph.nodes, errors)
 
     linked = _check_edge_endpoints(graph.edges, by_id, errors)
     resolved = _check_handles(linked, by_id, mpc_configs, errors)
     _check_fan_in(resolved, errors)
     _check_port_types(resolved, by_id, tags, errors)
     _check_required_inputs(graph.nodes, resolved, mpc_configs, errors)
-    # Aresta de retorno `bkcal_in` fecha ciclo no grafo bruto de proposito (ADR-039 D6):
-    # isenta da deteccao de ciclo e do aviso de inversao.
-    dataflow = [e for e in linked if e.target_handle != "bkcal_in"]
+    # Duas quebras explícitas do RF-302 saem da detecção de ciclo E do aviso de inversão:
+    # aresta de retorno `bkcal_in` (ADR-039 D6) e aresta de realimentação, marcada por
+    # `feedback_init` (ADR-040 D2). Na segunda o ciclo e o atraso de 1 varredura são o
+    # propósito, então o aviso de inversão seria ruído.
+    dataflow = [e for e in linked if e.target_handle != "bkcal_in" and not e.is_feedback]
     _check_cycles(graph.nodes, dataflow, errors)
     _collect_inversion_warnings(dataflow, by_id, warnings)
+    _check_feedback_closes_cycle(linked, errors)
 
     _check_mpc_nodes(graph.nodes, mpc_configs, tags, ts_seconds, errors, warnings)
 
     return ValidationResult(errors=errors, warnings=warnings)
+
+
+class NodePorts(NamedTuple):
+    """Portas DECLARADAS de um bloco — as mesmas que o runtime cria em `_reset_ports`."""
+
+    inputs: tuple[str, ...]
+    outputs: tuple[str, ...]
+
+
+def graph_ports(graph: FlowGraph) -> dict[str, NodePorts]:
+    """Portas declaradas de cada bloco, por `block_id` (RF-308).
+
+    Única fonte de verdade de "esta porta existe" fora do runtime: quem cadastra uma
+    variável historiada valida contra isto, e a poda do save do flow decide por isto quem
+    deixou de existir. Reusa os mesmos `_input_handles`/`_output_handles` que validam as
+    arestas — uma réplica da regra (sobretudo das portas dinâmicas de `mpc`/`script`/`fuzzy`)
+    divergiria no primeiro bloco novo.
+
+    Nó `mpc` com config torta entra com as portas que dá para derivar (as 2 fixas de modo):
+    `_parse_mpc_configs` só devolve o que tipou, e aqui o canal de erro é irrelevante — o
+    save já reprova o grafo por esse mesmo motivo, pelo `ValidationResult`.
+    """
+    mpc_configs = _parse_mpc_configs(graph.nodes, [])
+    return {
+        node.id: NodePorts(
+            inputs=_input_handles(node, mpc_configs),
+            outputs=_output_handles(node, mpc_configs),
+        )
+        for node in graph.nodes
+    }
 
 
 def _output_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[str, ...]:
@@ -130,13 +172,20 @@ def _output_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[
         return ("out",)
     if node.type in LOOP_TYPES:
         return ("out", "bkcal_out")
-    if node.type in _FILTER_TYPES or node.type in ("scaler", "integrator"):
+    if node.type in _FILTER_TYPES or node.type in ("scaler", "integrator", "constant"):
+        return ("out",)
+    if node.type == "bus_subscribe":
+        # Bloco-fonte (ADR-042): o valor vem do barramento, não de uma aresta.
         return ("out",)
     return ()
 
 
 def _input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[str, ...]:
     if node.type == "opc_write":
+        return ("in",)
+    if node.type == "bus_publish":
+        # Sem saída: o valor sai pelo barramento (ADR-042). `in` é obrigatória pelo
+        # fallback de `_required_input_handles`, igual à do OPC-Write.
         return ("in",)
     if node.type == "script":
         return tuple(f"IN{i}" for i in range(1, node.config.n_inputs + 1))
@@ -227,6 +276,40 @@ def _check_tags(nodes: list[FlowNode], tags: Mapping[int, TagRef], errors: list[
             errors.append(
                 f"nó '{node.id}' ({node.type}): a tag {tag.id} tem direção '{tag.direction}'; "
                 f"este bloco exige direção '{expected}'"
+            )
+
+
+def bus_publish_keys(graph: FlowGraph) -> dict[str, str]:
+    """`{key: block_id}` das chaves que este grafo PUBLICA (ADR-042 D5).
+
+    Fonte única de "quem publica o quê": o check de unicidade dentro do flow (abaixo) e o
+    save/import da API (que compara com os flows irmãos do projeto) leem daqui. Com duas
+    publicações da mesma chave no mesmo grafo, sobra a de menor `block_id` no dicionário —
+    irrelevante, porque esse grafo já é reprovado por `_check_bus_keys`.
+    """
+    return {
+        node.config.key: node.id
+        for node in sorted(graph.nodes, key=lambda item: item.id, reverse=True)
+        if node.type == "bus_publish"
+    }
+
+
+def _check_bus_keys(nodes: list[FlowNode], errors: list[str]) -> None:
+    """ADR-042 D5: a `key` tem um publicador só — dois seriam last-writer-wins silencioso.
+
+    Aqui só o escopo do PRÓPRIO flow (validação pura, sem I/O); a unicidade entre flows do
+    projeto é do save da API, que tem os grafos irmãos em mão. Assinar a mesma `key` em
+    quantos blocos se queira é normal e não é checado.
+    """
+    publishers: dict[str, list[str]] = {}
+    for node in nodes:
+        if node.type == "bus_publish":
+            publishers.setdefault(node.config.key, []).append(node.id)
+    for key, ids in sorted(publishers.items()):
+        if len(ids) > 1:
+            errors.append(
+                f"a chave de barramento '{key}' é publicada por mais de um bloco "
+                f"(bus_publish): {', '.join(sorted(ids))}"
             )
 
 
@@ -566,7 +649,9 @@ def _port_kind(node: FlowNode, tags: Mapping[int, TagRef]) -> PortKind | None:
     duas pontas. Devolve `None` quando a tag é desconhecida: a integridade referencial já
     reportou o problema e um erro de tipo em cima só faria ruído.
     """
-    if node.type == "script":
+    if node.type == "script" or node.type in BUS_TYPES:
+        # Barramento é transporte (ADR-042 D7): entrega do outro lado o tipo publicado, sem
+        # reinterpretar — mesma bivalência das portas do Script.
         return "bivalent"
     if node.type in _TAG_DIRECTION:
         tag = tags.get(node.config.tag_id)
@@ -596,8 +681,8 @@ def _check_port_types(
         errors.append(
             f"aresta '{edge.id}': a saída '{source.id}.{edge.source_handle}' é "
             f"{_PORT_LABEL[out_kind]} e a entrada '{target.id}.{edge.target_handle}' é "
-            f"{_PORT_LABEL[in_kind]}; só as portas do bloco Script são bivalentes "
-            "(decisão A-5)"
+            f"{_PORT_LABEL[in_kind]}; só as portas do bloco Script e as dos blocos de "
+            "barramento são bivalentes (decisão A-5, ADR-042)"
         )
 
 
@@ -681,6 +766,45 @@ def _check_cycles(nodes: list[FlowNode], edges: list[FlowEdge], errors: list[str
                 stack.append((next_id, 0))
                 path.append(next_id)
                 on_path.add(next_id)
+
+
+def _check_feedback_closes_cycle(edges: list[FlowEdge], errors: list[str]) -> None:
+    """ADR-040 D2: `feedback_init` só vale em aresta que REALMENTE fecha ciclo.
+
+    Sem esta regra a chave seria um injetor de valor sintético: `_seeded` entrega
+    `PortSample(seed, True)` na primeira varredura, então um `feedback_init` posto numa
+    aresta comum que alimenta um `opc_write` passaria pelo portão de cold start do bloco
+    (`v is not None`) e mandaria ao PLC um número que nenhuma planta produziu — contra o
+    "falha sempre para o lado seguro". Numa entrada de MPC, faria a partida bumpless
+    calcular contra uma posição fabricada (o furo que o ADR-028 fechou). O gesto do editor
+    nunca produz isso; `POST /api/projects/import` e PUT de `graph_json` cru produzem.
+
+    "Fecha ciclo" é aferido como no espelho do editor (`graph.ts::alcanca`): o destino
+    alcança a origem pelas OUTRAS arestas. Incluir as demais marcadas é deliberado — num
+    laço em que duas arestas foram marcadas, cada uma é justificada pela outra, e as duas
+    são realimentação de fato.
+    """
+    marked = [edge for edge in edges if edge.is_feedback]
+    if not marked:
+        return
+    for edge in marked:
+        successors: dict[str, list[str]] = {}
+        for other in edges:
+            if other.id != edge.id:
+                successors.setdefault(other.source, []).append(other.target)
+        seen = {edge.target}
+        queue = [edge.target]
+        while queue and edge.source not in seen:
+            for following in successors.get(queue.pop(), ()):
+                if following not in seen:
+                    seen.add(following)
+                    queue.append(following)
+        if edge.source not in seen:
+            errors.append(
+                f"aresta '{edge.id}': 'feedback_init' só é válido em aresta de "
+                f"realimentação, e esta não fecha ciclo — '{edge.target}' não alimenta "
+                f"'{edge.source}' por nenhum caminho (ADR-040); remova a chave"
+            )
 
 
 def _collect_inversion_warnings(

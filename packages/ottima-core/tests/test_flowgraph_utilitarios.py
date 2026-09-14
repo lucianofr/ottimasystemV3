@@ -1,4 +1,4 @@
-"""Mesa de casos dos blocos utilitários SCALER e INTEGRATOR no `graph_json`.
+"""Mesa de casos dos blocos utilitários SCALER, INTEGRATOR e CONSTANT no `graph_json`.
 
 Mesma disciplina dos blocos de filtro (`test_flowgraph_filtros.py`): parse garante a FORMA
 (escalares finitos, chaves exatas) e `validate_graph` garante portas, obrigatoriedade e
@@ -9,11 +9,14 @@ tipo numérico (decisão A-5).
   pode ser invertida (`out_max < out_min` é ação reversa legítima).
 - **Integrator**: entradas `in` (obrigatória) e `reset` (opcional), saída `out`, config
   `time_base` ∈ {"s", "min", "h"}.
+- **Constant**: nenhuma entrada, saída `out`, config `value` (float finito) — bloco-fonte,
+  válido sozinho no grafo e sem obrigação de conexão.
 """
 
 import pytest
 
 from ottima_core.flowgraph import (
+    ConstantConfig,
     GraphParseError,
     IntegratorConfig,
     ScalerConfig,
@@ -41,6 +44,10 @@ def _scaler(node_id: str = "s1", *, exec_order: int = 2, **config: object) -> di
 
 def _integrator(node_id: str = "i1", *, exec_order: int = 2, **config: object) -> dict:
     return _node(node_id, "integrator", exec_order, **({"time_base": "min"} | config))
+
+
+def _constant(node_id: str = "c1", *, exec_order: int = 1, **config: object) -> dict:
+    return _node(node_id, "constant", exec_order, **({"value": 3.5} | config))
 
 
 def _leitura(node_id: str = "r1", *, exec_order: int = 1, tag_id: int = 1) -> dict:
@@ -173,6 +180,10 @@ def test_utilitarios_reprovam_chave_desconhecida(bloco, extra: str):
     assert has(parse_errors(_ligado(bloco(**{extra: 1.0}))), extra)
 
 
+def test_constant_reprova_chave_desconhecida():
+    assert has(parse_errors(_graph(_constant(tau=1.0))), "tau")
+
+
 # --------------------------------------------------------------------------------------
 # identidade funcional (hot-swap, ADR-011/024)
 # --------------------------------------------------------------------------------------
@@ -193,6 +204,35 @@ def test_identidade_funcional_ignora_rotulo_e_ordem(bloco):
 def test_identidade_funcional_do_scaler_muda_com_a_escala():
     antes = parse_graph(_ligado(_scaler())).node("s1").functional_config()
     depois = parse_graph(_ligado(_scaler(out_max=10.0))).node("s1").functional_config()
+
+    assert antes != depois
+
+
+def test_constant_parseia_com_config_tipada():
+    node = parse_graph(_graph(_constant())).node("c1")
+
+    assert isinstance(node.config, ConstantConfig)
+    assert node.config.value == 3.5
+
+
+def test_constant_aceita_inteiro_do_json():
+    """`{"value": 5}` é o que o JSON entrega para um valor redondo; vira float, não erro."""
+    assert parse_graph(_graph(_constant(value=5))).node("c1").config.value == 5.0
+
+
+@pytest.mark.parametrize("valor", ["3.5", None, True, float("inf"), float("nan")])
+def test_constant_reprova_value_invalido(valor: object):
+    """`True` reprova junto: `bool` é `int` em Python e viraria 1.0 em silêncio."""
+    assert has(parse_errors(_graph(_constant(value=valor))), "c1", "value")
+
+
+def test_constant_reprova_value_ausente():
+    assert has(parse_errors(_graph(_node("c1", "constant", 1))), "c1", "value")
+
+
+def test_identidade_funcional_do_constant_muda_com_o_valor():
+    antes = parse_graph(_graph(_constant())).node("c1").functional_config()
+    depois = parse_graph(_graph(_constant(value=7.0))).node("c1").functional_config()
 
     assert antes != depois
 
@@ -248,3 +288,25 @@ def test_portas_sao_numericas(bloco):
     tags = {1: TagRef(id=1, conn_id=1, direction="r", data_type="bool")}
 
     assert has(validate_graph(parse_graph(graph), tags, TS).errors, "booleana")
+
+
+def test_constant_sozinho_e_valido():
+    """Bloco-fonte sem entrada: não depende de aresta nenhuma para ser um grafo válido."""
+    assert errors_of(_graph(_constant())) == []
+
+
+def test_constant_alimenta_bloco_numerico():
+    graph = _graph(
+        _constant(exec_order=1),
+        _scaler("s1", exec_order=2),
+        edges=[_aresta("c1", "s1")],
+    )
+
+    assert errors_of(graph) == []
+
+
+def test_constant_recusa_aresta_de_entrada():
+    """Não tem porta de entrada: aresta apontando para ele é handle inexistente."""
+    graph = _graph(_leitura(), _constant(exec_order=2), edges=[_aresta("r1", "c1")])
+
+    assert has(errors_of(graph), "targetHandle", "in")

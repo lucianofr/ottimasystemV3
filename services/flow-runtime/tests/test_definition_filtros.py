@@ -67,6 +67,7 @@ def _build(graph: dict, reuse: dict | None = None) -> StagedDefinition:
         redis_client=none,
         pool=none,
         snapshot=none,
+        exchange=none,
     )
 
 

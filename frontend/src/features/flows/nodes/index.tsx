@@ -8,6 +8,9 @@ import {
   passagemDireta,
   portasFixas,
   portasScript,
+  type NoConstant,
+  type NoBusPublish as NoBusPublishData,
+  type NoBusSubscribe as NoBusSubscribeData,
   type NoEscrita,
   type NoFirstOrder,
   type NoIntegrator as NoIntegratorData,
@@ -117,6 +120,24 @@ export function NoEscritaOpc({ id, data, selected }: NodeProps<NoEscrita>) {
       eu={tag?.eu}
     >
       <CorpoTag tagId={data.tag_id} tag={tag} />
+    </BlocoChapa>
+  );
+}
+
+/** Barramento-Publicar (ADR-042): publica o valor da entrada no barramento Redis, para
+ *  outro flow consumir — bloco-sumidouro, mesmo chassis do Escrita OPC. */
+export function NoBusPublish({ id, data, selected }: NodeProps<NoBusPublishData>) {
+  return (
+    <BlocoChapa
+      tipo="bus_publish"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("bus_publish", "input"))}
+      saidas={[]}
+      blockId={id}
+    >
+      <LinhaResumo rotulo="Chave" valor={data.key || "—"} />
     </BlocoChapa>
   );
 }
@@ -295,6 +316,41 @@ export function NoIntegrator({ id, data, selected }: NodeProps<NoIntegratorData>
   );
 }
 
+/** Constante: bloco-fonte sem entrada — `value` fixo no resumo. */
+export function NoConstante({ id, data, selected }: NodeProps<NoConstant>) {
+  return (
+    <BlocoChapa
+      tipo="constant"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("constant", "input"))}
+      saidas={portas(portasFixas("constant", "output"))}
+      blockId={id}
+    >
+      <LinhaResumo rotulo="Valor" valor={FORMATO_PARAM.format(data.value)} />
+    </BlocoChapa>
+  );
+}
+
+/** Barramento-Assinar (ADR-042): consome do barramento um valor publicado por outro flow —
+ *  bloco-fonte, mesmo chassis da Constante. */
+export function NoBusSubscribe({ id, data, selected }: NodeProps<NoBusSubscribeData>) {
+  return (
+    <BlocoChapa
+      tipo="bus_subscribe"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={[]}
+      saidas={portas(portasFixas("bus_subscribe", "output"))}
+      blockId={id}
+    >
+      <LinhaResumo rotulo="Chave" valor={data.key || "—"} />
+    </BlocoChapa>
+  );
+}
+
 /** Portas dinâmicas do config (spec F4 §7.2, decisão A-10): entradas = CVs+Restrições+DVs à
  *  esquerda, saída = MVs à direita, na ordem do config; sem variáveis ⇒ sem entradas, mas
  *  as 2 portas fixas de modo (`local`/`auto`, decisão A-10 revista) continuam saindo — não
@@ -459,6 +515,7 @@ type ComponenteNo = NodeTypes[string];
 export const TIPOS_DE_NO: Record<TipoBloco, ComponenteNo> = {
   opc_read: NoLeituraOpc,
   opc_write: NoEscritaOpc,
+  constant: NoConstante,
   script: NoScriptPython,
   first_order: NoFiltroPrimeiraOrdem,
   kalman: NoFiltroKalman,
@@ -470,4 +527,6 @@ export const TIPOS_DE_NO: Record<TipoBloco, ComponenteNo> = {
   fuzzy_loop: NoFuzzyLoop,
   scaler: NoScaler,
   integrator: NoIntegrator,
+  bus_publish: NoBusPublish,
+  bus_subscribe: NoBusSubscribe,
 };

@@ -1,11 +1,12 @@
+import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
 import { Select } from "../../../components/ui/select";
-import { type NoIntegrator, type NoScaler } from "../graph";
+import { type NoBusPublish, type NoBusSubscribe, type NoConstant, type NoIntegrator, type NoScaler } from "../graph";
 import { BASES_TEMPO } from "../registro";
 import { Campo } from "./CamposComuns";
 
 /**
- * Formulários dos blocos utilitários Scaler e Integrator.
+ * Formulários dos blocos utilitários Scaler, Integrator e Constante.
  *
  * Mesma disciplina dos filtros (`CamposFiltros.tsx`): campos não-controlados lidos no
  * envio por `numeroDoCampo` (vírgula decimal pt-BR); o único controle discreto é a base
@@ -67,6 +68,41 @@ export function CamposIntegrator({ dados }: { dados: NoIntegrator["data"] }) {
       <p className="text-[10px] leading-tight text-fg-muted">
         Unidade de tempo em que a entrada está expressa (ex.: vazão em kg/min ⇒ por minuto).
         A porta `reset` (opcional) zera o total quando recebe valor diferente de zero.
+      </p>
+    </div>
+  );
+}
+
+export function CamposConstant({ dados }: { dados: NoConstant["data"] }) {
+  return (
+    <Campo
+      id="value"
+      rotulo="Valor"
+      valor={dados.value}
+      ajuda="Valor fixo emitido na porta `out` a cada varredura."
+    />
+  );
+}
+
+/** Config comum de `bus_publish`/`bus_subscribe` (ADR-042): um único componente — os dois
+ *  tipos só têm `key`. Sem campo de tempo: a validade do assinante é derivada no servidor
+ *  (3 × Ts do publicador, D4), não configurada aqui. */
+export function CamposBusKey({ dados }: { dados: NoBusPublish["data"] | NoBusSubscribe["data"] }) {
+  return (
+    <div className="space-y-1">
+      <Label htmlFor="key">Chave</Label>
+      <Input
+        id="key"
+        name="key"
+        data-testid="config-key"
+        maxLength={64}
+        defaultValue={dados.key}
+        placeholder="ex.: temperatura_reator_1"
+      />
+      <p className="text-[10px] leading-tight text-fg-muted">
+        Identifica a variável trocada entre flows pelo barramento. Só letras, números, `_` e
+        `-` (até 64 caracteres); o mesmo flow ou outro flow lê o valor com esta chave em um
+        bloco Barramento-Assinar.
       </p>
     </div>
   );
