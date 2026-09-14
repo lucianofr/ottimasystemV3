@@ -377,6 +377,41 @@ export interface paths {
         patch: operations["update_calculated_tag_api_calculated_tags__tag_id__patch"];
         trace?: never;
     };
+    "/api/historized-vars": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Historized Vars */
+        get: operations["list_historized_vars_api_historized_vars_get"];
+        put?: never;
+        /** Create Historized Var */
+        post: operations["create_historized_var_api_historized_vars_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/historized-vars/{tag_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Historized Var */
+        delete: operations["delete_historized_var_api_historized_vars__tag_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/flows": {
         parameters: {
             query?: never;
@@ -1601,6 +1636,39 @@ export interface components {
             redis_ok: boolean;
             /** Db Ok */
             db_ok: boolean;
+        };
+        /** HistorizedVarCreate */
+        HistorizedVarCreate: {
+            /** Flow Id */
+            flow_id: number;
+            /** Block Id */
+            block_id: string;
+            /** Port */
+            port: string;
+            /**
+             * Eu
+             * @default
+             */
+            eu: string;
+        };
+        /**
+         * HistorizedVarOut
+         * @description Montado pelo router a partir de `HistorizedVar` + `Tag` — não é `from_attributes`
+         *     porque `name`/`eu` vêm da linha de `tags`, não da própria `historized_vars` (D1).
+         */
+        HistorizedVarOut: {
+            /** Tag Id */
+            tag_id: number;
+            /** Flow Id */
+            flow_id: number;
+            /** Block Id */
+            block_id: string;
+            /** Port */
+            port: string;
+            /** Name */
+            name: string;
+            /** Eu */
+            eu: string;
         };
         /** HistoryResponse */
         HistoryResponse: {
@@ -3332,6 +3400,99 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CalculatedTagOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_historized_vars_api_historized_vars_get: {
+        parameters: {
+            query: {
+                flow_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistorizedVarOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_historized_var_api_historized_vars_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HistorizedVarCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistorizedVarOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_historized_var_api_historized_vars__tag_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
