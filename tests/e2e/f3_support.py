@@ -99,11 +99,15 @@ def matriz_integrador(ki: float = KI) -> list[list[dict]]:
 
 
 def grafo_script_tfs(constante: float) -> dict:
-    """Script (constante) → TFS integrador: o par do aceite da fase (PRD §8-F3)."""
+    """Script (constante) → TFS integrador: o par do aceite da fase (PRD §8-F3).
+
+    `y0` explícito em zero (e não o default 50 da config): o cenário lê o acumulador do
+    integrador desde o repouso.
+    """
     return montar_grafo(
         [
             bloco("calculo", "script", 1, n_inputs=0, n_outputs=1, code=f"OUT1 = {constante!r}"),
-            bloco("planta", "tfs", 2, matrix=matriz_integrador()),
+            bloco("planta", "tfs", 2, matrix=matriz_integrador(), y0=[0.0, 0.0]),
         ],
         [aresta("calculo", "OUT1", "planta", "u1")],
     )

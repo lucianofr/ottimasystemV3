@@ -898,7 +898,9 @@ def grafo_mpc_tfs(
             "id": "planta",
             "type": "tfs",
             "position": {"x": 0.0, "y": 0.0},
-            "data": {"exec_order": 3, "matrix": _matriz_planta()},
+            # `y0` explícito em zero (e não o default 50): a malha de aceite mede a planta
+            # em variável-desvio, partindo do repouso.
+            "data": {"exec_order": 3, "matrix": _matriz_planta(), "y0": [0.0, 0.0]},
         },
         {
             "id": mpc_id,
