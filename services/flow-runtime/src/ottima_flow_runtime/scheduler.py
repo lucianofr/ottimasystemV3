@@ -13,28 +13,34 @@ Duas escolhas carregam o aceite da fase ("0,5 s sem jitter > 10%"):
 2. **Tabela de portas persistente.** Ela sobrevive à varredura, então a semântica do RF-401
    cai sozinha: aresta em ordem normal lê o valor escrito nesta varredura, aresta invertida lê
    o da anterior, e na primeira varredura a invertida lê `null` — que é o cold start (§3.0).
-   Nenhum caso especial para nenhuma das três situações.
+   Nenhum caso especial para nenhuma das três situações. A única exceção é a entrada de uma
+   aresta de realimentação (ADR-040 D4): enquanto a origem dela nunca produziu valor, a
+   leitura entrega a condição inicial declarada — senão o ciclo se auto-alimentaria de
+   invalidez para sempre.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 import traceback
 from collections.abc import Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal, Protocol
+from typing import Literal, NamedTuple, Protocol
 
 from redis.asyncio import Redis
 
 from ottima_core.bus import (
+    CHANNEL_FLOW_VALUES,
     KIND_BLOCK_OVERRUN,
     KIND_FLOW_FAILED,
     KIND_FLOW_OVERRUN,
     FlowStatus,
+    OpcValue,
     PortValue,
     channel_flow_status,
     publish_event,
@@ -57,6 +63,19 @@ sozinho já gasta o Ts inteiro garante, por conta própria, que esta varredura e
 decidir quantos blocos "cabem" no orçamento, decisão sem base hoje (spec F3 não reparte Ts
 entre blocos). `block_overrun` é observabilidade — nomeia o bloco culpado; não reabre o
 modelo de concorrência (ADR-004: mesma partição, mesmo event loop)."""
+
+
+HISTORIZED_THROTTLE_S = 1.0
+"""Teto de cadência por porta historiada (ADR-041 D3): `max(Ts_flow, 1 s)`.
+
+A comparação leva tolerância de MEIA varredura (`- ts_seconds / 2`), não um épsilon de
+microssegundo: o `ts` publicado é hora de PAREDE (`SystemClock.now()`, a grade é monotônica),
+então o intervalo real entre varreduras oscila em torno de Ts por microssegundos. Com
+tolerância de 1 µs e Ts = 1 s, cerca de um terço das varreduras caía um fio abaixo do limiar
+e PERDIA a publicação — a série saía a ~1,5 s em vez de 1 s (medido no stack: 16 amostras em
+25 s, alternando 1,000/2,003 s). Meia varredura decide sem ambiguidade em qualquer Ts da
+lista {0,5; 1; 2; 5; 10; 30; 60}: Ts >= 1 s publica em toda varredura, Ts = 0,5 s publica em
+uma de cada duas."""
 
 
 class Clock(Protocol):
@@ -87,6 +106,38 @@ class SystemClock:
         await asyncio.sleep(max(0.0, deadline_monotonic - time.monotonic()))
 
 
+class HistorizedPort(NamedTuple):
+    """Porta historiada resolvida contra o grafo (ADR-041 D1/D7): `definition.py` já
+    filtrou pelo que o bloco realmente tem — aqui só o necessário para publicar em
+    `flow.values` (`tag_id` é a linha em `tags` compartilhada com a variável)."""
+
+    block_id: str
+    port: str
+    tag_id: int
+
+
+def _historized_value(sample: PortSample) -> tuple[float, int]:
+    """`PortSample` -> `(value, quality)` de `OpcValue` (ADR-041 D4).
+
+    Porta inválida (`ok=False`) ou sem valor (`v=None`) vira `0.0`/`quality=2` — o recorder
+    troca por NULL sozinho (ADR-037); alargar `OpcValue.value` para aceitar `None` mudaria
+    o contrato compartilhado com `opc.values`/`calc.values`. Porta booleana vira `1.0`/`0.0`.
+
+    Não-finito é FALHA, não valor (mesma regra de `calc_worker/runner.py`): `OpcReadBlock`
+    propaga o float do PLC verbatim com `ok=True`, então um NaN/Inf de campo (overflow de
+    escala, divisão por zero na lógica do PLC) chegaria aqui com qualidade boa. NULL é
+    ignorado por `avg`/`max` do SQL; NaN CONTAMINA o bucket do CAgg de 1 min para sempre.
+    """
+    if not sample.ok or sample.v is None:
+        return 0.0, 2
+    if isinstance(sample.v, bool):
+        return (1.0 if sample.v else 0.0), 0
+    value = float(sample.v)
+    if not math.isfinite(value):
+        return 0.0, 2
+    return value, 0
+
+
 @dataclass(frozen=True, slots=True)
 class FlowDefinition:
     """O que o laço precisa para varrer: blocos prontos, em ordem, e a fiação entre eles."""
@@ -97,6 +148,22 @@ class FlowDefinition:
     """Já em ordem crescente de `exec_order` (ADR-024): a tupla É a ordem de execução."""
     wiring: Mapping[str, Mapping[str, tuple[str, str]]]
     """`wiring[block_id][input_handle] = (source_block_id, source_handle)`."""
+    seeds: Mapping[tuple[str, str], float] = field(default_factory=dict)
+    """Condição inicial das arestas de realimentação (ADR-040 D4), por porta de DESTINO:
+    `seeds[(target_block_id, target_handle)] = feedback_init`.
+
+    Porta de destino, e não de origem: ela é única por construção (uma aresta por porta de
+    entrada), e a semente é consumida na LEITURA — semear a tabela na origem não sobrevive
+    ao próprio bloco de origem (ver `_seeded`). Sem isto o laço não é só frio:
+    `has_cold_input` faz todo bloco devolver saída nula enquanto uma entrada conectada for
+    `v=None`, e num ciclo essa invalidez se auto-alimenta — a malha ficaria inválida para
+    sempre."""
+    historized: tuple[HistorizedPort, ...] = field(default_factory=tuple)
+    """Portas de bloco gravadas em `flow.values` (ADR-041): já filtradas contra as portas
+    reais dos blocos instanciados por `definition.py` — porta que saiu do grafo (bloco
+    removido, `n_inputs` reduzido, MV do mpc renomeada) nunca chega aqui. O throttle por
+    porta (D3) mora no `FlowTask`, não nesta definição imutável e compartilhada entre
+    varreduras."""
 
 
 class FlowTask:
@@ -114,6 +181,8 @@ class FlowTask:
         self._clock: Clock = clock if clock is not None else SystemClock()
         self._state: Literal["running", "stopped", "failed"] = "stopped"
         self._ports: dict[str, dict[str, PortSample]] = {}
+        self._seeds_armed: dict[tuple[str, str], float] = {}
+        self._historized_last: dict[tuple[str, str], datetime] = {}
         self._staged: FlowDefinition | None = None
         self._task: asyncio.Task[None] | None = None
         self._t0 = 0.0
@@ -163,6 +232,7 @@ class FlowTask:
         self._overruns = 0
         self._overrun_armed = True
         self._block_overrun_armed = {}
+        self._historized_last = {}
         self._last_scan_ts = None
         self._t0 = self._clock.monotonic()
         self._state = "running"
@@ -236,6 +306,7 @@ class FlowTask:
                 # próprio `overruns`, e não o da anterior — é o campo que o aceite mede.
                 index = await self._settle_grid(index)
                 await self._publish_status(ts=fired_ts, ports=self._port_values())
+                await self._publish_historized(fired_ts)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -262,6 +333,7 @@ class FlowTask:
             inputs: dict[str, PortSample] = {}
             for handle, (source_id, source_handle) in wiring.get(block.block_id, {}).items():
                 sample = self._ports[source_id][source_handle]
+                sample = self._seeded(block.block_id, handle, sample)
                 inputs[handle] = sample
                 # A entrada também vai para a tabela: o canvas desenha os dois lados da
                 # aresta (§4.2). Só o dict `inputs` é restrito às portas conectadas.
@@ -272,6 +344,29 @@ class FlowTask:
             for handle, sample in outputs.items():
                 ports[handle] = sample
             await self._check_block_budget(block.block_id, block_ms, budget_ms)
+
+    def _seeded(self, block_id: str, handle: str, sample: PortSample) -> PortSample:
+        """Condição inicial da aresta de realimentação (ADR-040 D4), no ponto de LEITURA.
+
+        A semente é **de partida, não fallback de invalidez**: vale enquanto a porta de
+        origem nunca produziu valor, e é desarmada na primeira amostra com valor. Depois
+        disso a invalidez propaga normalmente — senão um laço cujo sinal ficou ruim no meio
+        da operação passaria a mostrar a condição inicial como se fosse dado bom.
+
+        Aplicada na leitura, e chaveada pela porta de DESTINO, por dois motivos: semear a
+        porta de origem na tabela não sobrevive (`_scan` grava toda saída do `step()`, e
+        bloco com entrada fria devolve `null_outputs` — a origem apagaria a própria
+        semente), e a porta de destino é única por construção (uma aresta por porta de
+        entrada, `_check_fan_in`), então não há empate a resolver.
+        """
+        key = (block_id, handle)
+        seed = self._seeds_armed.get(key)
+        if seed is None:
+            return sample
+        if sample.v is None:
+            return PortSample(seed, True)
+        del self._seeds_armed[key]
+        return sample
 
     async def _check_block_budget(self, block_id: str, block_ms: float, budget_ms: float) -> None:
         """Compara o custo de UM `block.step()` contra o orçamento e nomeia o bloco culpado.
@@ -373,6 +468,7 @@ class FlowTask:
         previous_ts = self._definition.ts_seconds
         self._definition = staged
         self._carry_ports()
+        self._forget_dead_historized()
         logger.info("Flow %s adotou a definição staged", staged.flow_id)
         if staged.ts_seconds != previous_ts:
             # Ts novo re-ancora a grade no instante da troca (spec §4.1-4): manter o `t0`
@@ -386,7 +482,9 @@ class FlowTask:
 
         Editar o grafo não pode zerar o histórico de quem não mudou: a aresta invertida
         perderia a varredura anterior por causa de uma edição em outro canto do flow. Porta
-        nova nasce fria (§3.0); porta que saiu do grafo desaparece da publicação.
+        nova nasce fria (§3.0); porta que saiu do grafo desaparece da publicação. As sementes
+        de realimentação rearmam no `_reset_ports` — a de aresta nova parte da condição
+        inicial dela, e a de aresta antiga se desarma sem efeito na primeira leitura.
         """
         previous = self._ports
         self._reset_ports()
@@ -396,12 +494,29 @@ class FlowTask:
                 if port in carried:
                     ports[port] = carried[port]
 
+    def _forget_dead_historized(self) -> None:
+        """Descarta o throttle das portas que saíram do cadastro (ADR-041 D3): variável
+        removida ou porta que desapareceu do grafo não pode deixar chave morta acumulando
+        para sempre num flow de Ts longo. Porta que sobrevive ao hot-swap mantém a própria
+        cadência — a troca não reseta o relógio dela."""
+        alive = {(port.block_id, port.port) for port in self._definition.historized}
+        for key in list(self._historized_last):
+            if key not in alive:
+                del self._historized_last[key]
+
     def _reset_ports(self) -> None:
-        """Toda porta declarada — entrada e saída — nasce nula e inválida, nunca 0.0."""
+        """Toda porta declarada — entrada e saída — nasce nula e inválida, nunca 0.0.
+
+        Rearma junto as sementes de realimentação (ADR-040 D4): vale para o deploy e para o
+        hot-swap, porque aresta de realimentação NOVA precisa da condição inicial dela. Uma
+        semente rearmada sobre porta que já tem valor não tem efeito — `_seeded` a desarma
+        na primeira leitura, sem nunca usá-la.
+        """
         self._ports = {
             block.block_id: dict.fromkeys((*block.input_ports, *block.output_ports), COLD)
             for block in self._definition.blocks
         }
+        self._seeds_armed = dict(self._definition.seeds)
 
     def _reset_blocks(self) -> None:
         for block in self._definition.blocks:
@@ -440,6 +555,41 @@ class FlowTask:
             # Telemetria não derruba laço de controle (ADR-004/009) — mesma regra que o
             # `publish_event` do bus já aplica aos eventos.
             logger.exception("Falha ao publicar flow.status do flow %s", self._definition.flow_id)
+
+    async def _publish_historized(self, ts: datetime) -> None:
+        """Publica em `flow.values` as portas historiadas cuja cadência (ADR-041 D3) já
+        venceu, no MESMO `ts` da grade publicado em `flow.status` — nunca `time.time()`,
+        para o throttle não herdar o jitter que a fronteira absoluta já elimina.
+
+        Fire-and-forget, uma mensagem por porta: exceção de publicação é logada e nunca
+        derruba a varredura (mesmo tratamento de `_publish_status`). Sai antes de montar
+        qualquer coisa quando o flow não tem porta historiada — custo zero no caso comum.
+        """
+        historized = self._definition.historized
+        if not historized:
+            return
+        # Tolerância de meia varredura (ver `HISTORIZED_THROTTLE_S`): o `ts` é hora de parede
+        # e oscila em torno de Ts, então épsilon de microssegundo descartaria varredura boa.
+        minimo = HISTORIZED_THROTTLE_S - self._definition.ts_seconds / 2
+        for port in historized:
+            key = (port.block_id, port.port)
+            last = self._historized_last.get(key)
+            if last is not None and (ts - last).total_seconds() < minimo:
+                continue
+            self._historized_last[key] = ts
+            sample = self._ports.get(port.block_id, {}).get(port.port, COLD)
+            value, quality = _historized_value(sample)
+            payload = OpcValue(tag_id=port.tag_id, ts=ts, value=value, quality=quality)
+            try:
+                await self._redis.publish(CHANNEL_FLOW_VALUES, payload.model_dump_json())
+            except Exception:
+                logger.exception(
+                    "Falha ao publicar variável historiada %s.%s (tag %s) do flow %s",
+                    port.block_id,
+                    port.port,
+                    port.tag_id,
+                    self._definition.flow_id,
+                )
 
     async def _publish_transition(self) -> None:
         """Transição de estado não tem varredura atrás dela: `ports` vazio é o contrato."""
