@@ -87,6 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         events,
         flows,
         health,
+        historized_vars,
         history,
         history_retention,
         operate,
@@ -104,6 +105,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tags.router, prefix="/api/tags", tags=["tags"])
     app.include_router(
         calculated_tags.router, prefix="/api/calculated-tags", tags=["calculated-tags"]
+    )
+    app.include_router(
+        historized_vars.router, prefix="/api/historized-vars", tags=["historized-vars"]
     )
     app.include_router(flows.router, prefix="/api/flows", tags=["flows"])
     app.include_router(operate.router, prefix="/api/operate", tags=["operate"])
