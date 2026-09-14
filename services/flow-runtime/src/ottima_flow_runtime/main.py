@@ -32,7 +32,7 @@ from ottima_core.config import get_settings
 from ottima_core.db import create_engine, create_session_factory
 from ottima_core.logging import setup_logging, watch_log_level
 from ottima_core.script_pool import SCRIPT_POOL_SIZE, ScriptPool
-from ottima_core.snapshot import ValueSnapshot
+from ottima_core.snapshot import ExchangeSnapshot, ValueSnapshot
 from ottima_flow_runtime.events import build_event_listener
 from ottima_flow_runtime.partition import UNPARTITIONED, Partition, PartitionParent
 from ottima_flow_runtime.state import RuntimeState
@@ -102,11 +102,16 @@ def build_app(partition: Partition = UNPARTITIONED) -> FastAPI:
         runtime_state = RuntimeState()
         app.state.runtime_state = runtime_state
         snapshot = ValueSnapshot(client)
+        # Espelho de `flow.exchange` (ADR-042): um por processo, como o de `opc.values.*` —
+        # a partição por processo é justamente por que a troca entre flows passa pelo
+        # barramento e não por memória compartilhada.
+        exchange = ExchangeSnapshot(client)
         supervisor = Supervisor(
             session_factory,
             client,
             runtime_state,
             snapshot=snapshot,
+            exchange=exchange,
             pool=ScriptPool(size=_pool_size(partition)),
             partition=partition,
         )
@@ -123,6 +128,7 @@ def build_app(partition: Partition = UNPARTITIONED) -> FastAPI:
             # O espelho antes do supervisor: bloco OPC-Read instanciado por um deploy já encontra
             # a assinatura de `opc.values.*` em pé.
             await snapshot.start()
+            await exchange.start()
             await supervisor.start()
             await events.start()
             # Só vira `up` com os três em pé: supervisor ou listener morto deixa o runtime surdo
@@ -139,6 +145,7 @@ def build_app(partition: Partition = UNPARTITIONED) -> FastAPI:
         await events.stop()
         await supervisor.stop()
         await snapshot.stop()
+        await exchange.stop()
         task.cancel()
         log_task.cancel()
         try:

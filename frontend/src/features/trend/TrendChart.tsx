@@ -6,7 +6,7 @@ import { ESCALA_AUTO, construirEscalasUplot, type EscalaVar } from "./escalas";
 import { useMotorTrend } from "./motorTrend";
 import { construirOpcoes, lerTemaTrend } from "./trendTheme";
 import "./trend.css";
-import { estaZoomadoEmX } from "./zoomX";
+import { estaZoomadoEmX, type FaixaX } from "./zoomX";
 
 const ALTURA = 420;
 
@@ -21,10 +21,13 @@ export interface TrendChartProps {
   readonly escalas: Readonly<Record<string, EscalaVar>>;
 }
 
-/** Imperativo mínimo para o botão "Reset layout" do header: o motor detém a instância do
- *  uPlot, `TrendPage` só precisa limpar o zoom no mesmo clique que volta ao vivo. */
+/** Imperativo mínimo que `TrendPage` precisa da instância do uPlot (o motor é o dono dela):
+ *  limpar o zoom no clique de "Reset layout" e LER a faixa visível de x, porque o export de CSV
+ *  tem de recortar o arquivo no que está na tela, não na janela buscada. */
 export interface TrendChartHandle {
   readonly resetZoom: () => void;
+  /** Faixa de x visível quando há zoom aplicado; `null` sem zoom (a extensão é o próprio dado). */
+  readonly faixaX: () => FaixaX | null;
 }
 
 export const TrendChart = forwardRef<TrendChartHandle, TrendChartProps>(function TrendChart(
@@ -71,7 +74,20 @@ export const TrendChart = forwardRef<TrendChartHandle, TrendChartProps>(function
       !estaZoomadoEmX(instancia.scales.x.min, instancia.scales.x.max, instancia.data[0]),
   });
 
-  useImperativeHandle(handleRef, () => ({ resetZoom: motor.aplicarDadosComRerange }), [motor]);
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      resetZoom: motor.aplicarDadosComRerange,
+      faixaX: () => {
+        const instancia = motor.instancia.current;
+        if (instancia === null) return null;
+        const { min, max } = instancia.scales.x;
+        if (min === undefined || max === undefined) return null;
+        return estaZoomadoEmX(min, max, instancia.data[0]) ? { min, max } : null;
+      },
+    }),
+    [motor],
+  );
 
   return (
     <div

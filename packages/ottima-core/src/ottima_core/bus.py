@@ -20,6 +20,24 @@ CHANNEL_CALC_VALUES = "calc.values"
 (`calc-worker`) e nenhum consumidor filtra por origem — todos casam por `tag_id` no payload.
 Reusa `OpcValue` verbatim, então recorder e `/ws` gravam e distribuem sem tradução."""
 
+CHANNEL_FLOW_VALUES = "flow.values"
+"""Valores de portas de bloco historiadas (ADR-041). Canal fixo, sem sufixo: o produtor é um
+só (`flow-runtime`) e o consumidor (`recorder`) casa por `tag_id` no payload, não pela origem.
+Reusa `OpcValue` verbatim — o recorder grava por `ingest_sample`, igual a `calc.values`.
+
+Cadência: `max(Ts_flow, 1 s)` por porta (ADR-041 D3) — o throttle é na ORIGEM, não no
+recorder. `PortValue` inválida (`ok=False` ou `v=None`) viaja como `value=0.0, quality=2`:
+`OpcValue.value` é `float` estrito e alargá-lo mudaria o contrato compartilhado de
+`opc.values`/`calc.values`; o recorder troca por NULL sozinho ao ver `quality=2` (ADR-037)."""
+
+CHANNEL_FLOW_EXCHANGE = "flow.exchange"
+"""Troca de variável ENTRE flows (ADR-042). Canal fixo, sem sufixo: a identidade da variável
+é a `key` DENTRO do payload (`ExchangeValue`), como `tag_id` em `calc.values`/`flow.values` —
+o canvas nunca cria nome de canal (ADR-042 D1). Produtor e consumidor são o mesmo serviço
+(`flow-runtime`): o bloco `bus_publish` publica, o espelho `ExchangeSnapshot` de cada
+processo assina, e o bloco `bus_subscribe` lê do espelho. Nada é persistido — sem recorder,
+sem `/ws`."""
+
 
 def channel_opc_values(conn_id: int) -> str:
     return f"opc.values.{conn_id}"
@@ -46,6 +64,26 @@ class OpcValue(BaseModel):
     ts: datetime
     value: float
     quality: int  # 0=good, 1=uncertain, 2=bad (spec F1 §3.2)
+
+
+class ExchangeValue(BaseModel):
+    """Payload de `flow.exchange` (ADR-042 D1).
+
+    `v` é `float | bool` porque as portas dos dois blocos são bivalentes (decisão A-5): um
+    booleano publicado chega booleano do outro lado, sem virar `1.0` no caminho. `ok=False`
+    viaja (decisão A-6 atravessa o barramento, D3); cold start nunca é publicado, então não
+    existe `v: None` aqui.
+
+    `period_s` é o Ts do flow publicador e é o que dá validade automática ao assinante:
+    `idade > 3 × period_s` ⇒ saída inválida (D4). Vem no payload em vez de config porque só
+    o publicador conhece a própria cadência.
+    """
+
+    key: str
+    ts: datetime
+    v: float | bool
+    ok: bool
+    period_s: float
 
 
 class OpcWrite(BaseModel):
@@ -299,6 +337,13 @@ KIND_LOOP_LIMITED = "loop_limited"
 KIND_LOOP_TARGET_WRITTEN = "loop_target_written"
 KIND_LOOP_SP_WRITTEN = "loop_sp_written"
 KIND_LOOP_OUT_WRITTEN = "loop_out_written"
+
+# Vocabulário `kind` novo da variável historiada (ADR-041). `pruned` é o único não disparado
+# por ação direta do usuário: o save do flow apaga o cadastro de uma porta que deixou de
+# existir, e a auditoria é a única pista que sobra para quem perdeu a série.
+KIND_HISTORIZED_VAR_CREATED = "historized_var_created"
+KIND_HISTORIZED_VAR_DELETED = "historized_var_deleted"
+KIND_HISTORIZED_VAR_PRUNED = "historized_var_pruned"
 
 # Vocabulário `kind` novo da F5 (spec F5 §7.2-2, F5R-02b).
 KIND_SCRIPT_RECOVERED = "script_recovered"  # severity "info"

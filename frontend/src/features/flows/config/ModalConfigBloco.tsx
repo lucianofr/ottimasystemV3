@@ -13,6 +13,7 @@ import {
   podarOutputEu,
   portasScript,
   ROTULO_BLOCO,
+  type BlocoEdge,
   type BlocoNode,
   type DadosTfs,
   type NoEscrita,
@@ -25,7 +26,8 @@ import { BASES_TEMPO } from "../registro";
 import { inteiroDoCampo, matrizDoFormulario, montarDadosPid, numeroDoCampo } from "./campos";
 import { CamposBlocoPid } from "./CamposBlocoPid";
 import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
-import { CamposIntegrator, CamposScaler } from "./CamposUtilitarios";
+import { CamposHistoriar } from "./CamposHistoriar";
+import { CamposBusKey, CamposConstant, CamposIntegrator, CamposScaler } from "./CamposUtilitarios";
 import { CamposTfs } from "./CamposTfs";
 
 const OPCOES_PORTAS = Array.from({ length: MAX_PORTAS_SCRIPT + 1 }, (_, i) => i);
@@ -259,6 +261,14 @@ interface Props {
   totalBlocos: number;
   tags: readonly TagOut[];
   podeMutar: boolean;
+  /** Historizar portas (ADR-041) precisa do flow, das arestas (checa porta fria, D7) e de
+   *  quais blocos já existem no grafo salvo no servidor (bloco novo sem Salvar é 422). */
+  flowId: number;
+  edges: readonly BlocoEdge[];
+  blocosSalvos: ReadonlySet<string>;
+  /** EU da porta, resolvida pelo editor (saída declarada ou herança pela aresta) — vai no
+   *  cadastro da variável historiada, que congela nome e unidade (ADR-041 D6). */
+  euDaPorta: (noId: string, porta: string) => string;
   onAplicar: (no: NoGenerico, execOrder: number) => void;
   onFechar: () => void;
 }
@@ -276,6 +286,10 @@ export function ModalConfigBloco({
   totalBlocos,
   tags,
   podeMutar,
+  flowId,
+  edges,
+  blocosSalvos,
+  euDaPorta,
   onAplicar,
   onFechar,
 }: Props) {
@@ -358,6 +372,10 @@ export function ModalConfigBloco({
               label,
               matrix: matrizDoFormulario((matrizTfs ?? no.data).matrix, campos),
               output_eu: outputEuDoFormulario(campos, ["y1", "y2"]),
+              y0: [
+                numeroDoCampo(campos.get("y0_y1"), (matrizTfs ?? no.data).y0[0]),
+                numeroDoCampo(campos.get("y0_y2"), (matrizTfs ?? no.data).y0[1]),
+              ],
             },
           },
           execOrder,
@@ -417,6 +435,12 @@ export function ModalConfigBloco({
         );
         break;
       }
+      case "constant":
+        onAplicar(
+          { ...no, data: { ...no.data, label, value: numeroDoCampo(campos.get("value"), no.data.value) } },
+          execOrder,
+        );
+        break;
       case "pid":
         onAplicar({ ...no, data: { ...montarDadosPid(no.data, campos), label } }, execOrder);
         break;
@@ -425,6 +449,18 @@ export function ModalConfigBloco({
         // (permitted/modos/limites/FF) vem com o plano fuzzy-loop; os demais campos
         // sobrevivem nos defaults do servidor.
         onAplicar({ ...no, data: { ...no.data, label } }, execOrder);
+        break;
+      case "bus_publish":
+        onAplicar(
+          { ...no, data: { ...no.data, label, key: String(campos.get("key") ?? "").trim() } },
+          execOrder,
+        );
+        break;
+      case "bus_subscribe":
+        onAplicar(
+          { ...no, data: { ...no.data, label, key: String(campos.get("key") ?? "").trim() } },
+          execOrder,
+        );
         break;
     }
     // `onClose` (linha do <dialog>) chama `onFechar`; fechar via `close()` explícito em vez
@@ -495,10 +531,21 @@ export function ModalConfigBloco({
           {no.type === "kalman" && <CamposFiltroKalman dados={no.data} />}
           {no.type === "scaler" && <CamposScaler dados={no.data} />}
           {no.type === "integrator" && <CamposIntegrator dados={no.data} />}
+          {no.type === "constant" && <CamposConstant dados={no.data} />}
+          {no.type === "bus_publish" && <CamposBusKey dados={no.data} />}
+          {no.type === "bus_subscribe" && <CamposBusKey dados={no.data} />}
           {no.type === "fuzzy" && (
             <CamposFuzzy dados={no.data} nOutputs={nOutputsFuzzy} aoMudarNOutputs={setNOutputsFuzzy} />
           )}
           {no.type === "pid" && <CamposBlocoPid dados={no.data} />}
+          <CamposHistoriar
+            no={no}
+            flowId={flowId}
+            podeMutar={podeMutar}
+            blocoSalvo={blocosSalvos.has(no.id)}
+            arestas={edges}
+            euDaPorta={euDaPorta}
+          />
         </fieldset>
 
         <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">

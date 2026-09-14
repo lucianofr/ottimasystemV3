@@ -49,15 +49,11 @@ function nomeBaseSeguro(bruto: string): string | null {
 }
 
 /**
- * Download autenticado (spec §6.0-3): `apiResposta` já carrega o header `Authorization`, então
- * `res.blob()` chega autenticado. O nome vem do `Content-Disposition` da resposta, com
- * `nomePadrao` como fallback. O object URL é sempre revogado e o nó de ancora sempre removido,
- * mesmo se `click()` lançar — vazamento de object URL é defeito.
+ * Dispara o download de um blob já em memória (export de CSV do trend). O object URL é sempre
+ * revogado e o nó de ancora sempre removido, mesmo se `click()` lançar — vazamento de object
+ * URL é defeito.
  */
-export async function baixarArquivo(path: string, nomePadrao: string): Promise<void> {
-  const res = await apiResposta(path);
-  const blob = await res.blob();
-  const nome = nomeDoContentDisposition(res.headers.get("Content-Disposition")) ?? nomePadrao;
+export function baixarBlob(blob: Blob, nome: string): void {
   const url = URL.createObjectURL(blob);
   const ancora = document.createElement("a");
   ancora.href = url;
@@ -69,6 +65,17 @@ export async function baixarArquivo(path: string, nomePadrao: string): Promise<v
     document.body.removeChild(ancora);
     URL.revokeObjectURL(url);
   }
+}
+
+/**
+ * Download autenticado (spec §6.0-3): `apiResposta` já carrega o header `Authorization`, então
+ * `res.blob()` chega autenticado. O nome vem do `Content-Disposition` da resposta, com
+ * `nomePadrao` como fallback.
+ */
+export async function baixarArquivo(path: string, nomePadrao: string): Promise<void> {
+  const res = await apiResposta(path);
+  const blob = await res.blob();
+  baixarBlob(blob, nomeDoContentDisposition(res.headers.get("Content-Disposition")) ?? nomePadrao);
 }
 
 /**

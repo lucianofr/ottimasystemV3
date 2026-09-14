@@ -41,10 +41,15 @@ def tfs(
     y1: tuple[TfsElement, TfsElement] | None = None,
     y2: tuple[TfsElement, TfsElement] | None = None,
     ts: float = TS,
+    y0: tuple[float, float] = (0.0, 0.0),
 ) -> TfsBlock:
-    """`matrix[J][K]` = contribuição de `uK` para `yJ` (spec §3.4)."""
+    """`matrix[J][K]` = contribuição de `uK` para `yJ` (spec §3.4).
+
+    `y0` default zero (e não o 50 da config) para os casos de resposta ao degrau lerem a
+    solução analítica direto, sem subtrair a condição inicial.
+    """
     rows = [list(y1 or (off(), off())), list(y2 or (off(), off()))]
-    return TfsBlock("t1", matrix=rows, ts_seconds=ts)
+    return TfsBlock("t1", matrix=rows, ts_seconds=ts, y0=y0)
 
 
 async def series(
@@ -306,6 +311,90 @@ async def test_estado_nao_e_compartilhado_entre_instancias():
     out = await second.step({"u1": PortSample(1.0, True)})
 
     assert out["y1"].v == pytest.approx(TS)
+
+
+# --------------------------------------------------------------------------------------
+# Condição inicial (`y0`)
+# --------------------------------------------------------------------------------------
+
+
+async def test_y0_no_ponto_de_operacao_mantem_a_saida_parada():
+    """Caso de uso do campo: a planta simulada parte no ponto em que a MV já a segura
+    (`K*u == y0`), então a primeira varredura não dá salto nenhum."""
+    block = tfs(y1=(sopdt(K=1.0, tau1=20.0, theta=3 * TS), off()), y0=(50.0, 0.0))
+
+    got = await series(block, 50, u1=50.0)
+
+    assert all(value == pytest.approx(50.0) for value in got)
+
+
+async def test_y0_e_condicao_inicial_e_nao_deslocamento_do_ganho():
+    """O estado parte de `y0` e a dinâmica leva a saída até `K*u` — o ganho estático
+    continua mandando no valor final, exatamente como antes do campo existir.
+
+    Com `tau2` em passagem direta sobra um 1a ordem, cuja trajetória a partir de uma
+    condição inicial é exata no ZOH: `y[n] = y0*a^n + K*u*(1 - a^n)`.
+    """
+    block = tfs(y1=(sopdt(K=2.0, tau1=5.0, tau2=0.0), off()), y0=(30.0, 0.0))
+
+    got = await series(block, 400, u1=1.0)
+
+    a = math.exp(-TS / 5.0)
+    for n, value in enumerate(got, start=1):
+        esperado = 30.0 * a**n + 2.0 * (1.0 - a**n)
+        assert value == pytest.approx(esperado, rel=1e-12)
+    assert got[-1] == pytest.approx(2.0, abs=1e-6)
+
+
+async def test_y0_divide_a_condicao_inicial_entre_os_elementos_da_linha():
+    """Dois elementos habilitados: a SOMA da linha é que precisa começar em `y0`."""
+    block = tfs(y1=(iopdt(Ki=1.0), iopdt(Ki=1.0)), y0=(40.0, 0.0))
+
+    out = await block.step({"u1": PortSample(0.0, True), "u2": PortSample(0.0, True)})
+
+    assert out["y1"].v == pytest.approx(40.0)
+
+
+async def test_y0_sobrevive_ao_tempo_morto_do_elemento():
+    """A fila de atraso nasce cheia da entrada equivalente: sem isso o atraso injetaria
+    zeros e a saída despencaria nas primeiras `theta/Ts` varreduras."""
+    block = tfs(y1=(sopdt(K=2.0, tau1=5.0, theta=4 * TS), off()), y0=(30.0, 0.0))
+
+    got = await series(block, 6, u1=0.0)
+
+    assert got[:4] == pytest.approx([30.0] * 4)  # fila cheia de u_eq: nada se move
+    assert got[4] < 30.0  # e só depois do atraso a entrada real (0) começa a agir
+
+
+async def test_y0_em_linha_integradora_e_o_nivel_de_partida_e_permanece_somado():
+    """IOPDT não tem ganho estático: `y = y0 + Ki*∫u`, e é isso que o campo significa numa
+    linha integradora — o nível de onde o acumulador passa a integrar."""
+    block = tfs(y1=(iopdt(Ki=1.0), off()), y0=(20.0, 0.0))
+
+    got = await series(block, 4, u1=2.0)
+
+    assert got == pytest.approx([20.0 + 2.0 * TS * n for n in (1, 2, 3, 4)])
+
+
+async def test_elemento_sem_memoria_nao_guarda_y0():
+    """Teto conhecido: `tau < Ts/10` com `theta = 0` é passagem direta e `K = 0` é mudo —
+    ganho puro não tem estado onde segurar a condição inicial, então a parcela parte de
+    `K*u`. Travado para que ninguém "conserte" o caso virando `y0` em offset permanente,
+    que deslocaria o regime de toda planta já configurada."""
+    direto = tfs(y1=(sopdt(K=2.0, tau1=0.0, tau2=0.0), off()), y0=(30.0, 0.0))
+    mudo = tfs(y1=(sopdt(K=0.0, tau1=5.0), off()), y0=(30.0, 0.0))
+
+    assert (await direto.step({"u1": PortSample(1.0, True)}))["y1"].v == pytest.approx(2.0)
+    assert (await mudo.step({"u1": PortSample(1.0, True)}))["y1"].v == pytest.approx(0.0)
+
+
+async def test_reset_volta_para_y0_e_nao_para_zero():
+    block = tfs(y1=(iopdt(Ki=1.0), off()), y0=(25.0, 0.0))
+
+    await series(block, 10, u1=1.0)
+    block.reset()
+
+    assert (await block.step({"u1": PortSample(0.0, True)}))["y1"].v == pytest.approx(25.0)
 
 
 async def test_portas_declaradas_sao_fixas():

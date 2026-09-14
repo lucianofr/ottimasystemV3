@@ -68,6 +68,18 @@ de folga por flow inscrito — cobre soluço de rede sem deixar um cliente trava
 memória. Cheia, descarta-se a **mais antiga**: o canvas mostra estado publicado, não
 histórico (RNF-05, fire-and-forget)."""
 
+HEARTBEAT_S = 10.0
+"""Cadência do quadro `ping` por socket. O browser não expõe ping/pong de WebSocket ao JS:
+sem um sinal de vida na camada de aplicação, um socket meio-aberto (proxy recriado, host
+suspenso, NAT que esquece a conexão — nenhum FIN, nenhum RST) fica `OPEN` para sempre e o
+canvas mostra "Aguardando dado da varredura" indefinidamente, sem religar. O cliente derruba
+o socket quando o silêncio passa de 3× isto (`TIMEOUT_CANAL_MUDO_MS`, `CanalAoVivo.tsx`)."""
+
+PING_TEXT = json.dumps({"channel": "ping", "data": {}})
+"""Quadro de sinal de vida. Canal fora do roteamento do cliente de propósito: ele descarta o
+envelope desconhecido e o que conta é só a chegada (rearma o vigia). Não é canal de
+barramento (nada é publicado no Redis) — é o protocolo do `/ws`."""
+
 
 class Subscriber:
     """Um socket inscrito: os flows/blocos que ele quer, se está no canal `events`, a fila
@@ -96,6 +108,15 @@ class Subscriber:
         if self._queue.full():
             self._queue.get_nowait()
         self._queue.put_nowait(text)
+
+    def offer_idle(self, text: str) -> None:
+        """Enfileira só com a fila vazia — é o heartbeat (`HEARTBEAT_S`).
+
+        Fila com algo em espera já prova o canal vivo, e um `offer` normal aqui poderia
+        descartar (drop-oldest) um valor de varredura para dar lugar a um `ping`.
+        """
+        if self._queue.empty():
+            self._queue.put_nowait(text)
 
     async def stop(self) -> None:
         """Cancela a task de envio. Idempotente e nunca levanta: é desmonte."""
@@ -169,6 +190,7 @@ class FlowStatusHub:
         self._events_listener = ChannelListener(
             redis_client, CHANNEL_EVENTS, self._dispatch_events, name="api-events-hub"
         )
+        self._heartbeat_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         """Assina os dois padrões e o canal `events`, e sobe as tasks de leitura; retorna já.
@@ -184,9 +206,16 @@ class FlowStatusHub:
         await self._fuzzy_listener.start()
         await self._loop_listener.start()
         await self._events_listener.start()
+        if self._heartbeat_task is None:
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(), name="ws-heartbeat")
 
     async def stop(self) -> None:
         """Para os laços, encerra as inscrições e fecha os sockets restantes. Nunca levanta."""
+        task, self._heartbeat_task = self._heartbeat_task, None
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
         await self._listener.stop()
         await self._mpc_listener.stop()
         await self._opc_listener.stop()
@@ -197,6 +226,29 @@ class FlowStatusHub:
         subs, self._subs = self._subs, set()
         for sub in subs:
             await sub.close()
+
+    def _heartbeat_tick(self) -> None:
+        """Um batimento: sinal de vida a cada socket OCIOSO (`offer_idle` — nunca `offer`, que
+        descartaria varredura por drop-oldest).
+
+        Síncrono e separado do laço de propósito: é o que o teste de fiação chama direto, sem
+        relógio nenhum. Captura ampla no mesmo espírito de `heartbeat_loop` do health e do
+        `_publish_status` do scheduler — exceção que subisse daqui mataria a task e tiraria a
+        vivacidade de TODOS os sockets em silêncio, reeditando o defeito que ela cobre, e sem
+        sintoma nenhum.
+        """
+        try:
+            for sub in self._subs:
+                sub.offer_idle(PING_TEXT)
+        except Exception:
+            logger.exception("Falha ao publicar heartbeat do /ws; o laço segue")
+
+    async def _heartbeat_loop(self) -> None:
+        """Cadência do sinal de vida (`HEARTBEAT_S`): é o que deixa o cliente distinguir canal
+        parado de canal morto — sem isso, socket meio-aberto fica mudo para sempre."""
+        while True:
+            await asyncio.sleep(HEARTBEAT_S)
+            self._heartbeat_tick()
 
     async def register(self, socket: WebSocket) -> Subscriber:
         sub = Subscriber(socket)

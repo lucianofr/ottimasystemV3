@@ -22,6 +22,7 @@ import {
   handlesSaida,
   ID_MARCADOR_X,
   matrizPadrao,
+  y0Padrao,
   motivoRecusa,
   paraGraphJson,
   podarArestasDoBloco,
@@ -352,6 +353,63 @@ test("ciclo é recusado, direto ou por caminho longo", () => {
   ).toBeNull();
 });
 
+test("realimentação confirmada libera o ciclo e o auto-laço; sem confirmar, continua recusado", () => {
+  const nodes = [script("a", 1), script("b", 2), script("c", 3, 2, 1)];
+  const edges = [aresta("e1", "a", "OUT1", "b", "IN1"), aresta("e2", "b", "OUT1", "c", "IN1")];
+  const fecha = { source: "c", sourceHandle: "OUT1", target: "a", targetHandle: "IN1" };
+
+  expect(motivoRecusa({ ...fecha, feedback: true }, nodes, edges, TAGS)).toBeNull();
+  expect(
+    motivoRecusa(
+      { source: "a", sourceHandle: "OUT1", target: "a", targetHandle: "IN1", feedback: true },
+      nodes,
+      edges,
+      TAGS,
+    ),
+  ).toBeNull();
+  // A quebra vale só para o ciclo: entrada ocupada e tipo incompatível seguem barrando, e é
+  // disso que o editor depende para saber que o diálogo pode abrir.
+  expect(
+    motivoRecusa(
+      { source: "a", sourceHandle: "OUT1", target: "b", targetHandle: "IN1", feedback: true },
+      nodes,
+      edges,
+      TAGS,
+    ),
+  ).toContain("no máximo uma");
+});
+
+test("feedback_init só vai ao servidor quando existe, e volta na releitura", () => {
+  const comum = aresta("e1", "a", "OUT1", "b", "IN1");
+  const realimenta = { ...aresta("e2", "b", "OUT1", "a", "IN1"), feedback_init: 12.5 };
+
+  const json = paraGraphJson([], [comum, realimenta]);
+
+  expect(json.edges[0]).toEqual({
+    id: "e1",
+    source: "a",
+    target: "b",
+    sourceHandle: "OUT1",
+    targetHandle: "IN1",
+  });
+  expect(json.edges[1].feedback_init).toBe(12.5);
+
+  const relido = deGraphJson({
+    nodes: [script("a", 1), script("b", 2)],
+    edges: json.edges,
+  });
+  expect(relido.edges.map((item) => item.feedback_init)).toEqual([undefined, 12.5]);
+});
+
+test("aresta de realimentação é tracejada já no modo edição", () => {
+  const realimenta = { ...aresta("e1", "t", "y1", "p", "pv"), feedback_init: 0 };
+
+  expect(arestaComQualidade(realimenta, {}).className).toBe("aresta-retorno");
+  expect(arestaComQualidade(realimenta, { t: { y1: { v: 3, ok: true } } }).className).toBe(
+    "aresta-boa aresta-retorno",
+  );
+});
+
 test("porta de entrada aceita no máximo uma aresta; saída pode alimentar várias", () => {
   const nodes = [script("a", 1, 1, 2), script("b", 2, 2, 1), script("c", 3, 1, 1)];
   const edges = [aresta("e1", "a", "OUT1", "b", "IN1")];
@@ -492,7 +550,7 @@ test("data sai com exatamente as chaves do contrato, uma lista por tipo", () => 
     ["exec_order", "label", "tag_id"],
     ["exec_order", "label", "tag_id"],
     ["code", "exec_order", "label", "n_inputs", "n_outputs", "output_eu"],
-    ["exec_order", "label", "matrix", "output_eu"],
+    ["exec_order", "label", "matrix", "output_eu", "y0"],
     ["exec_order", "label", "models", "multiplier", "name", "variables"],
     ["exec_order", "fll", "label", "n_inputs", "n_outputs", "output_eu"],
   ]);
@@ -554,7 +612,13 @@ test("ida e volta pelo graph_json preserva output_eu do Script, TFS e Fuzzy (spe
       id: "t",
       type: "tfs",
       position: { x: 300, y: 20 },
-      data: { exec_order: 2, label: "", matrix: matrizPadrao(), output_eu: { y1: "C" } },
+      data: {
+        exec_order: 2,
+        label: "",
+        matrix: matrizPadrao(),
+        output_eu: { y1: "C" },
+        y0: y0Padrao(),
+      },
     },
     {
       id: "f",
@@ -588,7 +652,7 @@ test("nó Fuzzy salvo sem fll/output_eu carrega com o default do contrato e {} (
   expect(f.data.output_eu).toEqual({});
 });
 
-test("nó Script/TFS salvo antes da F6, sem output_eu, carrega com {} (compatibilidade retroativa)", () => {
+test("nó Script/TFS salvo antes da F6, sem output_eu (nem y0), carrega com {} e y0 padrão (compatibilidade retroativa)", () => {
   const grafo = deGraphJson({
     nodes: [
       {
@@ -606,6 +670,7 @@ test("nó Script/TFS salvo antes da F6, sem output_eu, carrega com {} (compatibi
   if (s?.type !== "script" || t?.type !== "tfs") throw new Error("tipos preservados");
   expect(s.data.output_eu).toEqual({});
   expect(t.data.output_eu).toEqual({});
+  expect(t.data.y0).toEqual(y0Padrao());
 });
 
 test("ida e volta pelo graph_json preserva o nó mpc com config completo (mvs com pid, cvs, constraints, dvs, models)", () => {

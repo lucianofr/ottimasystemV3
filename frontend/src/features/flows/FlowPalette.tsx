@@ -37,7 +37,7 @@ function ItemPaleta({ tipo, onAdicionar }: { tipo: TipoBloco; onAdicionar: Props
   );
 }
 
-/** Paleta de 13 blocos (RF-301, RF-551): o MPC entra em operação na F4 (decisão A-1) igual aos
+/** Paleta de 14 blocos (RF-301, RF-551): o MPC entra em operação na F4 (decisão A-1) igual aos
  *  demais — arrastável, sem badge de fase pendente (spec F4 §7.1). */
 export function FlowPalette({ onAdicionar }: Props) {
   return (

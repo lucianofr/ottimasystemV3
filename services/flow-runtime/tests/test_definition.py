@@ -261,6 +261,7 @@ def test_build_definition_com_watchdog_desabilitado_bloqueia_arme_do_mpc():
         redis_client=_FakeRedis(),
         pool=ScriptPool(),
         snapshot=_FakeSnapshot(),
+        exchange=_FakeSnapshot(),  # nenhum bloco de barramento nestes grafos
         watchdog_enabled=False,
     )
 
@@ -285,6 +286,7 @@ def test_build_definition_com_watchdog_habilitado_nao_bloqueia_por_td_004():
         redis_client=_FakeRedis(),
         pool=ScriptPool(),
         snapshot=_FakeSnapshot(),
+        exchange=_FakeSnapshot(),  # nenhum bloco de barramento nestes grafos
         watchdog_enabled=True,
     )
 

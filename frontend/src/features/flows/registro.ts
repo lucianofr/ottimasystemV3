@@ -2,7 +2,11 @@ import {
   contratoFuzzy,
   contratoFuzzyLoop,
   matrizPadrao,
+  y0Padrao,
   type DadosBase,
+  type DadosBusPublish,
+  type DadosBusSubscribe,
+  type DadosConstant,
   type DadosFirstOrder,
   type DadosFuzzy,
   type DadosKalman,
@@ -55,7 +59,10 @@ type ConfigDoBloco =
   | Omit<DadosPidLoop, keyof DadosBase>
   | Omit<DadosFuzzyLoop, keyof DadosBase>
   | Omit<DadosScaler, keyof DadosBase>
-  | Omit<DadosIntegrator, keyof DadosBase>;
+  | Omit<DadosIntegrator, keyof DadosBase>
+  | Omit<DadosConstant, keyof DadosBase>
+  | Omit<DadosBusPublish, keyof DadosBase>
+  | Omit<DadosBusSubscribe, keyof DadosBase>;
 
 export interface DefinicaoBloco {
   rotulo: string;
@@ -83,6 +90,15 @@ export const BASES_TEMPO = ["s", "min", "h"] as const;
  *  e o Integrator na base por minuto (totalização de vazão é o caso típico). */
 export const PADRAO_SCALER = { in_min: 0, in_max: 100, out_min: 4, out_max: 20 } as const;
 export const PADRAO_INTEGRATOR = { time_base: "min" } as const;
+
+/** Constante nasce em 0 — valor neutro que passa no save sem exigir ajuste imediato. */
+export const PADRAO_CONSTANT = { value: 0 } as const;
+
+/** Barramento (ADR-042): os dois nascem com `key` vazia — o bloco recém-arrastado ainda não
+ *  identifica variável nenhuma, e o engenheiro preenche antes do primeiro save (o servidor
+ *  rejeita chave vazia). */
+export const PADRAO_BUS_PUBLISH = { key: "" } as const;
+export const PADRAO_BUS_SUBSCRIBE = { key: "" } as const;
 
 /** Defaults do PID (ADR-031, RF-551): estrutura ISA, tempos em segundos, derivativa
  *  desligada de fábrica (PI é o padrão industrial), faixa de saída 0..100 (MV em %). */
@@ -145,6 +161,11 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
     descricao: "Escreve o valor da entrada em uma tag do projeto",
     defaults: () => ({ tag_id: null }),
   },
+  constant: {
+    rotulo: "Constante",
+    descricao: "Valor numérico fixo (float) na saída",
+    defaults: () => ({ ...PADRAO_CONSTANT }),
+  },
   script: {
     rotulo: "Script",
     descricao: "Código Python com IN1..INn e OUT1..OUTn",
@@ -163,7 +184,7 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
   tfs: {
     rotulo: "TFS",
     descricao: "Matriz 2x2 de funções de transferência (SOPDT/IOPDT)",
-    defaults: () => ({ matrix: matrizPadrao(), output_eu: {} }),
+    defaults: () => ({ matrix: matrizPadrao(), output_eu: {}, y0: y0Padrao() }),
   },
   mpc: {
     rotulo: "MPC",
@@ -209,6 +230,16 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
     rotulo: "Integrador",
     descricao: "Totaliza o sinal no tempo (base s/min/h), com reset",
     defaults: () => ({ ...PADRAO_INTEGRATOR }),
+  },
+  bus_publish: {
+    rotulo: "Barramento-Publicar",
+    descricao: "Publica o valor da entrada no barramento, para outro flow consumir",
+    defaults: () => ({ ...PADRAO_BUS_PUBLISH }),
+  },
+  bus_subscribe: {
+    rotulo: "Barramento-Assinar",
+    descricao: "Consome do barramento um valor publicado por outro flow",
+    defaults: () => ({ ...PADRAO_BUS_SUBSCRIBE }),
   },
 };
 

@@ -457,6 +457,90 @@ async def test_put_grafo_malformado_422_sem_500(client, admin_headers):
         assert "nodes" in _mensagens(r)
 
 
+def _grafo_publicador(tag_r: int, key: str) -> dict:
+    """Read -> Barramento-Publicar: o menor grafo que publica uma chave (ADR-042)."""
+    return {
+        "nodes": [
+            _no("r1", "opc_read", 1, tag_id=tag_r),
+            _no("p1", "bus_publish", 2, key=key),
+        ],
+        "edges": [_aresta("r1", "out", "p1", "in")],
+    }
+
+
+async def test_put_aceita_par_de_barramento_entre_flows(client, admin_headers):
+    """Um flow publica, outro assina a mesma chave — o caso de uso do ADR-042."""
+    flow, leitura, escrita = await _cenario(client, admin_headers, "BarramentoOk")
+    consumidor = await _flow(client, admin_headers, flow["project_id"], "Consumidor")
+
+    publica = await _salvar(client, admin_headers, flow["id"], _grafo_publicador(leitura, "nivel"))
+    assina = await _salvar(
+        client,
+        admin_headers,
+        consumidor["id"],
+        {
+            "nodes": [
+                _no("s1", "bus_subscribe", 1, key="nivel"),
+                _no("w1", "opc_write", 2, tag_id=escrita),
+            ],
+            "edges": [_aresta("s1", "out", "w1", "in")],
+        },
+    )
+
+    assert publica.status_code == 200, publica.text
+    assert assina.status_code == 200, assina.text
+
+
+async def test_put_key_publicada_por_outro_flow_do_projeto_422(client, admin_headers):
+    """ADR-042 D5: dois publicadores da mesma chave seriam last-writer-wins silencioso."""
+    flow, leitura, _ = await _cenario(client, admin_headers, "BarramentoDup")
+    vizinho = await _flow(client, admin_headers, flow["project_id"], "Vizinho")
+    primeiro = await _salvar(client, admin_headers, flow["id"], _grafo_publicador(leitura, "vazao"))
+    assert primeiro.status_code == 200, primeiro.text
+
+    r = await _salvar(client, admin_headers, vizinho["id"], _grafo_publicador(leitura, "vazao"))
+
+    assert r.status_code == 422, r.text
+    texto = _mensagens(r)
+    assert "vazao" in texto
+    assert flow["name"] in texto
+
+
+async def test_put_mesma_key_em_outro_projeto_passa(client, admin_headers):
+    """Só um projeto fica ativo por vez (ADR-017): a chave não colide entre projetos."""
+    flow, leitura, _ = await _cenario(client, admin_headers, "BarramentoProjA")
+    outro, leitura_b, _ = await _cenario(client, admin_headers, "BarramentoProjB")
+    primeiro = await _salvar(
+        client, admin_headers, flow["id"], _grafo_publicador(leitura, "pressao")
+    )
+    assert primeiro.status_code == 200, primeiro.text
+
+    r = await _salvar(client, admin_headers, outro["id"], _grafo_publicador(leitura_b, "pressao"))
+
+    assert r.status_code == 200, r.text
+
+
+async def test_put_reprova_duas_publicacoes_da_mesma_key_no_mesmo_flow(client, admin_headers):
+    flow, leitura, _ = await _cenario(client, admin_headers, "BarramentoInterno")
+    graph = _grafo_publicador(leitura, "temp")
+    graph["nodes"].append(_no("p2", "bus_publish", 3, key="temp"))
+    graph["edges"].append(_aresta("r1", "out", "p2", "in", id_="e2"))
+
+    r = await _salvar(client, admin_headers, flow["id"], graph)
+
+    assert r.status_code == 422, r.text
+    assert "temp" in _mensagens(r)
+
+
+async def test_put_key_fora_do_charset_422(client, admin_headers):
+    flow, leitura, _ = await _cenario(client, admin_headers, "BarramentoCharset")
+
+    r = await _salvar(client, admin_headers, flow["id"], _grafo_publicador(leitura, "com ponto."))
+
+    assert r.status_code == 422, r.text
+    assert "key" in _mensagens(r)
+
+
 async def test_put_junta_todas_as_reprovacoes_num_detail_so(client, admin_headers):
     """O `detail` string não pode custar defeitos: quem corrige precisa ver todos de uma vez.
 

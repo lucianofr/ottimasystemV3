@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-import { CODIGO_SESSAO_INVALIDA, type AmbienteAoVivo } from "../features/flows/canalPrimitivos";
+import {
+  CODIGO_CANAL_MUDO,
+  CODIGO_SESSAO_INVALIDA,
+  TIMEOUT_CANAL_MUDO_MS,
+  type AmbienteAoVivo,
+} from "../features/flows/canalPrimitivos";
 import {
   abrirCanalSessao,
   analisarMensagemCanal,
@@ -447,10 +452,31 @@ function bancada(token: string | null = "jwt"): Bancada {
   };
 }
 
+/** Timers de religamento ainda pendentes. O vigia de canal mudo (`TIMEOUT_CANAL_MUDO_MS`) é
+ *  rearmado a cada quadro recebido, então `agendados[0]` não é mais o religamento — o que
+ *  estes testes querem é o timer de backoff, identificado pelo atraso (o teto do backoff é
+ *  15 s, nunca 30 s). */
+function religamentos(b: Bancada): { id: number; acao: () => void; atrasoMs: number }[] {
+  const pendentes = new Set(b.pendentes());
+  return b.agendados.filter(
+    (timer) => pendentes.has(timer.id) && timer.atrasoMs !== TIMEOUT_CANAL_MUDO_MS,
+  );
+}
+
+/** O vigia armado agora. Rearmado a cada quadro, então o id muda — é por isso que os testes
+ *  o buscam pelo atraso e não por posição. */
+function vigiaDeCanalMudo(b: Bancada): { id: number; acao: () => void; atrasoMs: number } {
+  const pendentes = new Set(b.pendentes());
+  const timer = b.agendados.find(
+    (candidato) => pendentes.has(candidato.id) && candidato.atrasoMs === TIMEOUT_CANAL_MUDO_MS,
+  );
+  if (timer === undefined) throw new Error("vigia de canal mudo não foi armado");
+  return timer;
+}
+
 test("conectar manda um único quadro com events e o agregado das páginas já assinadas", () => {
   const b = bancada();
   b.registro.adicionar({ flow_status: [1, 2], mpc_state: ["1/b1"], opc_values: [7] });
-
   b.abrir();
   b.sockets[0].abrir();
 
@@ -493,7 +519,7 @@ test("desmonte cancela o timer de reconexão e não deixa nem socket nem timer p
   b.sockets[0].abrir();
   b.sockets[0].cair(1006);
 
-  expect(b.pendentes()).toHaveLength(1);
+  expect(religamentos(b)).toHaveLength(1);
 
   ciclo.desmontar();
 
@@ -507,8 +533,9 @@ test("timer que dispara depois do desmonte não ressuscita o socket", () => {
   const ciclo = b.abrir();
   b.sockets[0].abrir();
   b.sockets[0].cair(1006);
+  const religar = religamentos(b)[0];
   ciclo.desmontar();
-  b.agendados[0].acao();
+  religar.acao();
 
   expect(b.sockets).toHaveLength(1);
 });
@@ -520,7 +547,7 @@ test("1008 encerra a sessão sem agendar reconexão: nada de bomba de requisiç�
   b.sockets[0].cair(CODIGO_SESSAO_INVALIDA);
 
   expect(b.estado().estado).toBe("sessao_invalida");
-  expect(b.agendados).toEqual([]);
+  expect(b.pendentes()).toEqual([]);
   expect(b.sockets).toHaveLength(1);
 });
 
@@ -532,16 +559,57 @@ test("queda de rede religa com backoff crescente e reassina o agregado inteiro, 
   b.sockets[0].cair(1006);
 
   expect(b.estado().estado).toBe("reconectando");
-  expect(b.agendados[0].atrasoMs).toBe(1000);
+  expect(religamentos(b)[0].atrasoMs).toBe(1000);
 
   // Entre a queda e o religamento uma segunda página passa a querer outro flow: o
   // religamento tem que enxergar o agregado atual, não o que existia antes da queda.
   b.registro.adicionar({ flow_status: [7] });
 
-  b.agendados[0].acao();
+  religamentos(b)[0].acao();
   b.sockets[1].abrir();
 
   expect(b.sockets[1].enviados).toEqual(['{"subscribe":{"flow_status":[12,7],"events":true}}']);
+  expect(b.estado().estado).toBe("aberto");
+});
+
+/** Socket meio-aberto (proxy/container recriado, host suspenso, NAT que esquece a conexão):
+ *  nenhum FIN, nenhum RST, nenhum quadro. Sem vigia, o socket fica `OPEN` para sempre e o
+ *  canvas mostra "Aguardando dado da varredura" indefinidamente — foi o que travou o editor
+ *  do flow 987 em 2026-09-13. */
+test("socket mudo além do teto é derrubado e religado, e o onclose atrasado não religa de novo", () => {
+  const b = bancada();
+  b.registro.adicionar({ flow_status: [12] });
+  b.abrir();
+  b.sockets[0].abrir();
+
+  vigiaDeCanalMudo(b).acao(); // 30 s sem nada, nem o `ping` do servidor
+
+  expect(b.sockets[0].fechamentos).toEqual([CODIGO_CANAL_MUDO]);
+  expect(b.estado().estado).toBe("reconectando");
+  expect(religamentos(b)).toHaveLength(1);
+
+  b.sockets[0].cair(1006); // handshake de fechamento que chega tarde, se chegar
+
+  expect(religamentos(b)).toHaveLength(1);
+
+  religamentos(b)[0].acao();
+  b.sockets[1].abrir();
+
+  expect(b.sockets[1].enviados).toEqual(['{"subscribe":{"flow_status":[12],"events":true}}']);
+  expect(b.estado().estado).toBe("aberto");
+});
+
+test("qualquer quadro rearma o vigia: o ping do servidor mantém o canal de pé", () => {
+  const b = bancada();
+  b.abrir();
+  b.sockets[0].abrir();
+  const primeiro = vigiaDeCanalMudo(b);
+
+  b.sockets[0].receber('{"channel":"ping","data":{}}');
+
+  expect(b.cancelados).toContain(primeiro.id);
+  expect(vigiaDeCanalMudo(b).id).not.toBe(primeiro.id);
+  expect(b.sockets[0].fechamentos).toEqual([]);
   expect(b.estado().estado).toBe("aberto");
 });
 

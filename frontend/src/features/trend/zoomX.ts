@@ -5,6 +5,14 @@
  * aqui — mesmo padrão de `trendOperacao.ts` ao lado de `TrendOperacao.tsx`.
  */
 
+/** Faixa do eixo x: extremos em segundos de época. O gráfico produz (faixa visível, quando há
+ *  zoom) e o export consome (recorte do CSV) — mora aqui, junto da regra de zoom, para o
+ *  `TrendChart` não precisar importar tipo do módulo de CSV. */
+export interface FaixaX {
+  readonly min: number;
+  readonly max: number;
+}
+
 /**
  * Há zoom em X aplicado? Compara as escalas da instância com a extensão do próprio dado.
  *

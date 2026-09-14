@@ -136,6 +136,7 @@ async def flow_connect(
     source_handle: str,
     target: str,
     target_handle: str,
+    feedback_init: float | None = None,
 ) -> dict[str, Any]:
     grafo = await _ler_grafo(cliente, flow_id)
     ids_existentes = {e["id"] for e in grafo["edges"]}
@@ -147,6 +148,9 @@ async def flow_connect(
             "target": target,
             "sourceHandle": source_handle,
             "targetHandle": target_handle,
+            # ADR-040: a chave só existe em aresta de realimentação; aresta comum não a
+            # carrega (o servidor tem `extra="forbid"` mas aceita a chave ausente).
+            **({} if feedback_init is None else {"feedback_init": float(feedback_init)}),
         }
     )
     resultado = await _salvar_grafo(cliente, flow_id, grafo)

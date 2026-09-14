@@ -173,6 +173,7 @@ def test_block_catalog_expoe_node_types_e_contratos() -> None:
     assert catalogo["node_types"] == [
         "opc_read",
         "opc_write",
+        "constant",
         "script",
         "fuzzy",
         "tfs",

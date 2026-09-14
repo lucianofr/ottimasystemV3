@@ -30,6 +30,7 @@ let flowOnline: number;
 let flowProps: number;
 let flowImpacto: number;
 let flowParado: number;
+let flowRealimenta: number;
 const nomeFlowParado = `Editor Deploy ${RUN_ID}`;
 
 function grafoMpc(tagId: number): unknown {
@@ -84,14 +85,71 @@ function grafoMpc(tagId: number): unknown {
   };
 }
 
-async function criarFlow(nome: string, tagId: number): Promise<number> {
+/** Malha PID↔TFS (ADR-040): a planta realimenta a PV por aresta de realimentação, que é o
+ *  que torna o ciclo aceitável. `y2`/`sp` ficam livres — é o par que o PW-FL-05 liga no
+ *  arraste para provocar o diálogo sem precisar desfazer nada antes. */
+function grafoPidTfs(): unknown {
+  const desligado = {
+    enabled: false,
+    kind: "sopdt",
+    params: { K: 1, tau1: 1, tau2: 0, theta: 0 },
+  };
+  return {
+    nodes: [
+      {
+        id: "pid",
+        type: "pid",
+        position: { x: 0, y: 0 },
+        data: {
+          exec_order: 1,
+          kc: 2,
+          ti_seconds: 10,
+          td_seconds: 0,
+          setpoint: 50,
+          output_min: 0,
+          output_max: 100,
+          auto_mode: true,
+          proportional_on_measurement: false,
+          differential_on_measurement: false,
+          starting_output: 0,
+        },
+      },
+      {
+        id: "tfs",
+        type: "tfs",
+        position: { x: 420, y: 0 },
+        data: {
+          exec_order: 2,
+          matrix: [
+            [{ enabled: true, kind: "sopdt", params: { K: 1, tau1: 5, tau2: 0, theta: 0 } }, desligado],
+            [desligado, desligado],
+          ],
+          y0: [0, 0],
+        },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "pid", sourceHandle: "out", target: "tfs", targetHandle: "u1" },
+      {
+        id: "e2",
+        source: "tfs",
+        sourceHandle: "y1",
+        target: "pid",
+        targetHandle: "pv",
+        feedback_init: 0,
+      },
+    ],
+  };
+}
+
+async function criarFlow(nome: string, tagId: number, grafo?: unknown): Promise<number> {
   const criado = await ambiente.api.post("/api/flows", {
     data: { project_id: ambiente.projectId, name: nome, ts_seconds: 1 },
   });
   if (!criado.ok()) throw new Error(`criação do flow ${nome}: HTTP ${criado.status()}`);
   const corpo: FlowIdOut = await criado.json();
   const salvo = await ambiente.api.put(`/api/flows/${String(corpo.id)}`, {
-    data: { graph_json: grafoMpc(tagId) },
+    data: { graph_json: grafo ?? grafoMpc(tagId) },
   });
   if (!salvo.ok()) throw new Error(`PUT do grafo do flow ${nome}: HTTP ${salvo.status()}`);
   return corpo.id;
@@ -150,6 +208,7 @@ test.beforeAll(async ({ baseURL }) => {
   flowProps = await criarFlow(`Editor Props ${RUN_ID}`, tagId);
   flowImpacto = await criarFlow(`Editor Impacto ${RUN_ID}`, tagId);
   flowParado = await criarFlow(nomeFlowParado, tagId);
+  flowRealimenta = await criarFlow(`Editor Realimentacao ${RUN_ID}`, tagId, grafoPidTfs());
   await deployEAguardar(flowOnline);
   await deployEAguardar(flowProps);
   await deployEAguardar(flowImpacto);
@@ -157,7 +216,7 @@ test.beforeAll(async ({ baseURL }) => {
 });
 
 test.afterAll(async () => {
-  for (const id of [flowOnline, flowProps, flowImpacto, flowParado]) {
+  for (const id of [flowOnline, flowProps, flowImpacto, flowParado, flowRealimenta]) {
     await pararEApagar(id);
   }
   await ambiente.encerrar();
@@ -282,5 +341,75 @@ test.describe("Editor de Flows", () => {
     await page.goto("/engenharia/flows");
     const linha = page.getByTestId("flow-row").filter({ hasText: nomeFlowParado });
     await expect(linha.getByTestId("flow-last-state")).toHaveText(/Rodando/, { timeout: 30_000 });
+  });
+
+  test("PW-FL-05: ligação que fecha ciclo pede realimentação e salva com feedback_init", async ({
+    page,
+  }) => {
+    await page.goto(`/engenharia/flows/${String(flowRealimenta)}`);
+    // Flow nunca deployado: o modo cai em "edit", com paleta e Salvar já disponíveis.
+    await expect(page.getByTestId("flow-salvar")).toBeVisible();
+
+    // A aresta de realimentação salva (`TFS.y1 -> PID.pv`) nasce tracejada já em edição:
+    // o tracejado é estrutural (ADR-040 D5), não vem do dado ao vivo.
+    await expect(page.locator('.react-flow__edge[data-id="e2"]')).toHaveClass(/aresta-retorno/);
+
+    // `TFS.y2 -> PID.sp` fecha o MESMO ciclo por um par de portas livres: o ciclo é o único
+    // impedimento, então em vez de recusar o editor pede a condição inicial.
+    //
+    // A caixa dos handles é lida DEPOIS de a grade assentar (medir durante o `fitView`
+    // devolve coordenada velha, o `mouse.down` cai no corpo do nó e o gesto vira arraste de
+    // bloco — sem conexão, sem diálogo, acusando a feature errada). A mira vai para a
+    // metade INTERNA do handle: o card do bloco tem `overflow-hidden`, então a metade que
+    // sobra para fora da borda é recortada e o centro geométrico da caixa cai no card.
+    // `elementFromPoint` confirma o alvo antes de apertar o botão.
+    const pontoDoHandle = async (
+      seletor: string,
+      dx: number,
+    ): Promise<{ x: number; y: number }> => {
+      const caixa = await page.locator(seletor).boundingBox();
+      if (caixa === null) throw new Error(`handle '${seletor}' sem caixa delimitadora`);
+      const ponto = { x: caixa.x + caixa.width / 2 + dx, y: caixa.y + caixa.height / 2 };
+      const alvo = await page.evaluate(
+        ({ x, y }) => document.elementFromPoint(x, y)?.className ?? "",
+        ponto,
+      );
+      if (!String(alvo).includes("react-flow__handle")) {
+        throw new Error(`ponto (${String(ponto.x)}, ${String(ponto.y)}) não é o handle: '${String(alvo)}'`);
+      }
+      return ponto;
+    };
+    await expect(page.locator('.react-flow__node[data-id="tfs"]')).toBeVisible();
+    await page.waitForTimeout(1_000); // fitView do React Flow é animado
+    // saída fica na borda direita (interior à esquerda); entrada, na esquerda (interior à direita)
+    const de = await pontoDoHandle('.react-flow__node[data-id="tfs"] .react-flow__handle[data-handleid="y2"]', -3);
+    const para = await pontoDoHandle('.react-flow__node[data-id="pid"] .react-flow__handle[data-handleid="sp"]', 3);
+    await page.mouse.move(de.x, de.y);
+    await page.mouse.down();
+    await page.mouse.move(de.x, de.y + 120, { steps: 8 });
+    await page.mouse.move(para.x, para.y, { steps: 12 });
+    await page.mouse.up();
+
+    await expect(page.getByTestId("flow-realimentacao-dialog")).toBeVisible();
+    await page.getByTestId("flow-realimentacao-valor").fill("25");
+    await page.getByTestId("flow-realimentacao-confirmar").click();
+    await expect(page.getByTestId("flow-realimentacao-dialog")).toHaveCount(0);
+
+    const nova = page.locator('.react-flow__edge[data-id="tfs.y2->pid.sp"]');
+    await expect(nova).toHaveClass(/aresta-retorno/);
+
+    await page.getByTestId("flow-salvar").click();
+    await expect
+      .poll(
+        async () => {
+          const res = await ambiente.api.get(`/api/flows/${String(flowRealimenta)}`);
+          const corpo = (await res.json()) as {
+            readonly graph_json: { readonly edges: readonly { readonly id: string; readonly feedback_init?: number }[] };
+          };
+          return corpo.graph_json.edges.find((e) => e.id === "tfs.y2->pid.sp")?.feedback_init;
+        },
+        { message: "feedback_init da aresta nova no grafo salvo", timeout: 15_000 },
+      )
+      .toBe(25);
   });
 });

@@ -1,10 +1,11 @@
+import { useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
 
 import { Button } from "../components/ui/button";
 import { ThemeToggle } from "../components/ui/theme-toggle";
 import { useAuth } from "../features/auth/useAuth";
 import { AnnunciatorBar } from "./AnnunciatorBar";
-import { CanalAoVivoProvider } from "./CanalAoVivo";
+import { CanalAoVivoProvider, useCanalAoVivo } from "./CanalAoVivo";
 
 /* Navegação em dois grupos (decisão A-10, spec F5 §7.3-1): Operação·Eventos são de
    operador (admin herda); Projetos·Conexões·Tags·Flows·Trend seguem visíveis para leitura —
@@ -47,11 +48,31 @@ function ItemNav({ rotulo, para, testid }: { rotulo: string; para: string; testi
   );
 }
 
+/**
+ * `sessao_invalida` é desfecho no canal ao vivo: o provider NÃO religa (`CanalAoVivo.tsx:606`,
+ * e religar em laço contra 1008 seria bomba de requisição). Sem este vigia a tela de operação
+ * congela calada — trend e faceplate param de atualizar sem nenhum aviso —, o pior modo de
+ * falha numa sala de controle. Desfecho idêntico ao interceptor de 401 do REST
+ * (`lib/api.ts:57`): encerra a sessão e manda para o /login, onde o operador entra de novo.
+ */
+function VigiaSessao() {
+  const { estado } = useCanalAoVivo();
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (estado !== "sessao_invalida") return;
+    logout();
+    navigate("/login", { replace: true });
+  }, [estado, logout, navigate]);
+  return null;
+}
+
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   return (
     <CanalAoVivoProvider>
+      <VigiaSessao />
       <div className="flex min-h-screen flex-col bg-bg bg-[image:var(--gradient-mesh)] bg-fixed">
         <AnnunciatorBar />
         <header className="glass sticky top-0 z-20 flex h-14 items-center justify-between border-x-0 border-t-0 px-5">

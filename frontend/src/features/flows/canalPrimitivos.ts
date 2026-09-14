@@ -43,6 +43,15 @@ export interface AmbienteAoVivo {
 /** Fechamento por sessão inválida (§5.3); qualquer outro código é queda de rede. */
 export const CODIGO_SESSAO_INVALIDA = 1008;
 
+/** Fechamento provocado pelo vigia de canal mudo (`rearmarVigia`, `CanalAoVivo.tsx`): faixa
+ *  privada do protocolo (4000-4999), então nunca colide com código do servidor. */
+export const CODIGO_CANAL_MUDO = 4001;
+
+/** Teto de silêncio tolerado no `/ws`. O servidor manda um `ping` a cada `HEARTBEAT_S` = 10 s
+ *  (`ws.py`), logo 30 s são três heartbeats perdidos — folga para soluço de rede e para o
+ *  throttling de timer de aba em segundo plano, sem deixar o canvas mudo por minutos. */
+export const TIMEOUT_CANAL_MUDO_MS = 30000;
+
 const ATRASO_BASE_MS = 1000;
 const ATRASO_TETO_MS = 15000;
 

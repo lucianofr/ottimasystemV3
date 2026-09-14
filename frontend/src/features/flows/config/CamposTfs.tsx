@@ -59,7 +59,8 @@ interface Props {
 
 /**
  * Matriz 2x2 (spec F3 §3.4): `matrix[J][K]` é a contribuição de `uK` para `yJ`. Acima da
- * matriz, dois campos de EU (spec F6 §4.1), um por porta de saída fixa (`y1`/`y2`).
+ * matriz, dois campos de EU (spec F6 §4.1) e o valor inicial de cada saída (`y0`), um par
+ * por porta de saída fixa (`y1`/`y2`).
  *
  * `enabled` e `kind` são estado do modal; os params (e o EU) são campos não-controlados
  * lidos no envio (`matrizDoFormulario`/`outputEuDoFormulario`). Trocar o modelo remonta os
@@ -81,6 +82,18 @@ export function CamposTfs({ dados, aoMudar }: Props) {
               placeholder="ex.: C"
             />
           </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {(["y1", "y2"] as const).map((porta, indice) => (
+          <Campo
+            key={porta}
+            id={`y0_${porta}`}
+            rotulo={`${porta} · valor inicial`}
+            valor={dados.y0[indice]}
+            ajuda="Saída na primeira varredura; a resposta parte deste ponto de operação."
+          />
         ))}
       </div>
 

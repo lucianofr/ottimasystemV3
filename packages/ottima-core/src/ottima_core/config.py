@@ -20,7 +20,14 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     secret_key: str = INSECURE_SECRET_KEY_DEFAULT
     fernet_key: str = ""  # OTTIMA_FERNET_KEY obrigatória para cifrar/decifrar segredos OPC
-    token_ttl_hours: int = 12
+    # HMI de planta não tem timeout de inatividade: a tela de operação fica aberta por semanas
+    # sem interação, e mandar o operador para o /login no meio de um distúrbio é inaceitável
+    # (mesma razão do rate-limit por IP em `frontend/nginx.conf`). O `exp` continua existindo
+    # (RNF-04) e a revogação real não depende dele: `get_current_user` recarrega o usuário do
+    # banco a cada requisição e recusa `is_active=False`. 1 ano ⇒ na prática a estação reinicia
+    # antes. Se um re-login anual atrapalhar, o caminho é token deslizante (endpoint de refresh
+    # + renovação periódica no frontend), não um TTL ainda maior.
+    token_ttl_hours: int = 8760
     admin_username: str | None = None
     admin_password: str | None = None
     admin_name: str = "Administrador"
