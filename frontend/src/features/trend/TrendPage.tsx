@@ -14,7 +14,14 @@ import {
   type LeituraViva,
 } from "./bordaViva";
 import { EditorEscala } from "./EditorEscala";
-import { ESCALA_AUTO, gravarEscalas, lerEscalas, limparEscalas, type EscalaVar } from "./escalas";
+import {
+  ESCALA_AUTO,
+  foraDaFaixa,
+  gravarEscalas,
+  lerEscalas,
+  limparEscalas,
+  type EscalaVar,
+} from "./escalas";
 import { montarCsvTrend, nomeCsvTrend, recortarEmX } from "./exportarCsv";
 import { JanelaTempo } from "./JanelaTempo";
 import {
@@ -328,6 +335,18 @@ export function TrendPage() {
                     className: "plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg",
                   });
                 }
+                // Pena cortada pela moldura: a faixa fixada não alcança o valor de agora.
+                // Sem isto a linha some sem explicação e o engenheiro conclui que a
+                // variável parou de historiar (achado de campo) — mesma família de
+                // `SEM DADO`: aviso na legenda quando o gráfico não pode mostrar a pena.
+                const escalaDaTag = escalas[String(resumo.tagId)] ?? ESCALA_AUTO;
+                if (foraDaFaixa(escalaDaTag, resumo.valor)) {
+                  badges.push({
+                    testId: "trend-legend-fora-escala",
+                    texto: "FORA DA ESCALA",
+                    className: "plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg",
+                  });
+                }
                 const linha: LinhaLegenda = {
                   chave: String(resumo.tagId),
                   testId: "trend-legend-item",
@@ -347,7 +366,7 @@ export function TrendPage() {
                   valorEu: { valor: resumo.valor, eu: tag?.eu ?? "", muted: resumo.bad || resumo.semDado },
                   filhoEscala: (
                     <EditorEscala
-                      escala={escalas[String(resumo.tagId)] ?? ESCALA_AUTO}
+                      escala={escalaDaTag}
                       prefixoTestid="trend"
                       aoMudar={(escala) => {
                         definirEscala(resumo.tagId, escala);

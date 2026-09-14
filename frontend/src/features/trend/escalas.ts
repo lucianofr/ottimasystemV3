@@ -43,23 +43,47 @@ export interface EscalasUplot {
 }
 
 /**
- * Bloco `scales` do uPlot, uma entrada por variável.
+ * Faixa manual que o gráfico REALMENTE aplica, ou `null` quando a escala cai em autoscale.
  *
  * Faixa manual só é honrada com os dois extremos preenchidos e `min < max`. Meio preenchida
  * (o operador ainda está digitando) ou invertida cai para autoscale — um gráfico que some
  * enquanto se digita ensina o operador a não usar o controle.
+ *
+ * Decisão única de propósito: `foraDaFaixa` avisa sobre a pena cortada pela moldura e só
+ * pode concordar com o desenho se as duas lerem a mesma regra.
  */
+export function faixaFixa(escala: EscalaVar): readonly [number, number] | null {
+  const { min, max } = escala;
+  return !escala.auto && min !== null && max !== null && min < max ? [min, max] : null;
+}
+
+/**
+ * Pena viva cujo valor CORRENTE caiu fora da faixa fixada.
+ *
+ * O uPlot corta a linha na moldura sem dizer nada: a pena simplesmente some e o operador lê
+ * "a variável parou de historiar" (achado de campo — trend com faixa 40..60 e processo em
+ * 30). A legenda continua mostrando o número, mas número ao lado de gráfico vazio se lê como
+ * resíduo, não como valor vivo. Quem chama transforma isto num aviso na linha.
+ *
+ * Só o valor corrente: é o que a legenda mostra ao lado e o que responde "cadê minha linha
+ * agora". Janela inteira fora da faixa com o valor corrente dentro dela é o caso em que a
+ * pena está visível — não há o que avisar.
+ */
+export function foraDaFaixa(escala: EscalaVar, valor: number | null): boolean {
+  const faixa = faixaFixa(escala);
+  if (faixa === null || valor === null) return false;
+  return valor < faixa[0] || valor > faixa[1];
+}
+
+/** Bloco `scales` do uPlot, uma entrada por variável. */
 export function construirEscalasUplot(vars: readonly VariavelComEscala[]): EscalasUplot {
   const scales: uPlot.Scales = {};
   const scaleKeyPorVar = new Map<string, string>();
   for (const { id, escala } of vars) {
     const chave = chaveEscala(id);
     scaleKeyPorVar.set(id, chave);
-    const { min, max } = escala;
-    scales[chave] =
-      !escala.auto && min !== null && max !== null && min < max
-        ? { auto: false, range: [min, max] }
-        : { auto: true };
+    const faixa = faixaFixa(escala);
+    scales[chave] = faixa === null ? { auto: true } : { auto: false, range: [faixa[0], faixa[1]] };
   }
   return { scales, scaleKeyPorVar };
 }

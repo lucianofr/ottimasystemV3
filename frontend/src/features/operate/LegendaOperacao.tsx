@@ -1,6 +1,6 @@
 import type { MpcVarState } from "../../lib/contracts.gen";
 import { EditorEscala } from "../trend/EditorEscala";
-import { ESCALA_AUTO, type EscalaVar } from "../trend/escalas";
+import { ESCALA_AUTO, foraDaFaixa, type EscalaVar } from "../trend/escalas";
 import {
   type BadgeLegenda,
   type LinhaLegenda,
@@ -97,6 +97,16 @@ export function LegendaOperacao({
       badges.push({
         testId: "operate-trend-legend-teto",
         texto: "Acima do teto",
+        className: "plaqueta rounded-pill bg-warn-soft px-2 py-0.5 text-xs text-warn-fg",
+      });
+    }
+    // A pena está ligada mas a moldura não a alcança: sem aviso o operador lê o gráfico
+    // vazio como variável morta. Vale também para a pena de SP, que desenha na escala da
+    // CV (`pena.varId`) sem ter editor próprio.
+    if (ligada && foraDaFaixa(escalas[pena.varId] ?? ESCALA_AUTO, atual)) {
+      badges.push({
+        testId: "operate-trend-legend-fora-escala",
+        texto: "Fora da escala",
         className: "plaqueta rounded-pill bg-warn-soft px-2 py-0.5 text-xs text-warn-fg",
       });
     }
