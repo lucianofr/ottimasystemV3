@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ottima_core.bus import (
     CHANNEL_CALC_VALUES,
     CHANNEL_EVENTS,
+    CHANNEL_FLOW_VALUES,
     KIND_RECORDER_BACKPRESSURE,
     EventMessage,
     FuzzyState,
@@ -112,11 +113,11 @@ class RecorderPipeline:
     """Barramento → hypertables. Único escritor de `samples`/`events`/`mpc_samples`/
     `fuzzy_samples` (spec F2 §6, F5 §2.3, ADR-030).
 
-    Seis assinaturas independentes (`opc.values.*`, `calc.values`, `events`, `mpc.state.*`,
-    `fuzzy.state.*` e `loop.state.*`), cada uma no seu próprio `PatternListener`/`ChannelListener`
-    do laço resiliente compartilhado — os seis tipos de dado têm buffers, tetos e contadores de
-    descarte próprios (spec §6.4), então nada aqui depende de ordem entre canal e padrão:
-    uma conexão a menos era só economia, não contrato.
+    Sete assinaturas independentes (`opc.values.*`, `calc.values`, `flow.values`, `events`,
+    `mpc.state.*`, `fuzzy.state.*` e `loop.state.*`), cada uma no seu próprio
+    `PatternListener`/`ChannelListener` do laço resiliente compartilhado — os sete tipos de
+    dado têm buffers, tetos e contadores de descarte próprios (spec §6.4), então nada aqui
+    depende de ordem entre canal e padrão: uma conexão a menos era só economia, não contrato.
     """
 
     def __init__(
@@ -164,6 +165,14 @@ class RecorderPipeline:
         # `_on_sample` e `_samples` — mesma hypertable, sem buffer/tabela novos.
         self._calc_listener = ChannelListener(
             redis_client, CHANNEL_CALC_VALUES, self._on_calc_sample, name="recorder-calc-values"
+        )
+        # Porta de bloco historiada publica no mesmo formato `OpcValue`, canal próprio
+        # `flow.values` (ADR-041 D2): canal separado de `calc.values` porque o produtor é o
+        # flow-runtime, não o calc-worker, mas o recorder continua escritor cego — reusa
+        # `ingest_sample` verbatim, sem resolver `historized_vars` nem decimar nada aqui; o
+        # throttle por Ts_flow já vem aplicado na origem (ADR-041 D3).
+        self._flow_listener = ChannelListener(
+            redis_client, CHANNEL_FLOW_VALUES, self._on_flow_value, name="recorder-flow-values"
         )
         self._mpc_listener = PatternListener(
             redis_client, MPC_STATE_PATTERN, self._on_mpc_state, name="recorder-mpc"
@@ -237,6 +246,7 @@ class RecorderPipeline:
             await self._events_listener.start()
             await self._samples_listener.start()
             await self._calc_listener.start()
+            await self._flow_listener.start()
             await self._mpc_listener.start()
             await self._fuzzy_listener.start()
             await self._loop_listener.start()
@@ -247,6 +257,7 @@ class RecorderPipeline:
             await self._events_listener.stop()
             await self._samples_listener.stop()
             await self._calc_listener.stop()
+            await self._flow_listener.stop()
             await self._mpc_listener.stop()
             await self._fuzzy_listener.stop()
             await self._loop_listener.stop()
@@ -272,6 +283,7 @@ class RecorderPipeline:
         await self._events_listener.stop()
         await self._samples_listener.stop()
         await self._calc_listener.stop()
+        await self._flow_listener.stop()
         await self._mpc_listener.stop()
         await self._fuzzy_listener.stop()
         await self._loop_listener.stop()
@@ -488,6 +500,13 @@ class RecorderPipeline:
     async def _on_calc_sample(self, raw: str) -> None:
         """`ChannelListener` entrega só `data` (canal fixo, sem sufixo) — `ingest_sample` já
         ignora o canal, então é o mesmo parse de `_on_sample`."""
+        self.ingest_sample(raw)
+
+    async def _on_flow_value(self, raw: str) -> None:
+        """Porta de bloco historiada (ADR-041 D2): mesmo payload `OpcValue`, canal próprio
+        porque o produtor é o flow-runtime e não o calc-worker — o resto é idêntico a
+        `_on_calc_sample`, `ingest_sample` já resolve tudo (inclusive `quality == QUALITY_BAD`
+        virando NULL, ADR-037)."""
         self.ingest_sample(raw)
 
     async def _on_event(self, raw: str) -> None:
