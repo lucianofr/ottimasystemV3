@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { useAssinaturaOpcValues, useCanalAoVivo } from "../../app/CanalAoVivo";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
+import { baixarBlob } from "../../lib/arquivos";
 import { cn } from "../../lib/cn";
 import { useConnections } from "../connections/useConnections";
 import { useActiveProject } from "../projects/useProjects";
@@ -14,6 +15,7 @@ import {
 } from "./bordaViva";
 import { EditorEscala } from "./EditorEscala";
 import { ESCALA_AUTO, gravarEscalas, lerEscalas, limparEscalas, type EscalaVar } from "./escalas";
+import { montarCsvTrend, nomeCsvTrend, recortarEmX } from "./exportarCsv";
 import { JanelaTempo } from "./JanelaTempo";
 import {
   type BadgeLegenda,
@@ -143,6 +145,25 @@ export function TrendPage() {
     setEscalas({});
   }
 
+  function exportarCsv(): void {
+    // `dados` é a MESMA matriz que o <TrendChart> desenha (inclui a ponta viva do WS e os gaps),
+    // recortada na faixa VISÍVEL: com zoom em X aplicado, a janela buscada é maior do que a que
+    // o engenheiro está vendo, e o arquivo tem de ser o que está na tela.
+    if (!dados || !resposta) return;
+    const matriz = recortarEmX(dados, chartRef.current?.faixaX() ?? null);
+    const csv = montarCsvTrend(
+      matriz,
+      selecionadas.map((id) => ({
+        rotulo: porId.get(id)?.name ?? String(id),
+        eu: porId.get(id)?.eu ?? "",
+      })),
+    );
+    baixarBlob(
+      new Blob([csv], { type: "text/csv;charset=utf-8" }),
+      nomeCsvTrend(matriz, resposta.mode),
+    );
+  }
+
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
@@ -186,6 +207,16 @@ export function TrendPage() {
               }}
             >
               {">"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="trend-export-csv"
+              disabled={!dados}
+              onClick={exportarCsv}
+            >
+              Exportar CSV
             </Button>
             <Button
               type="button"
