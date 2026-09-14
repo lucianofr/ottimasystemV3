@@ -34,3 +34,8 @@ graphify-out/
 # planta_virtual: scratch da planta simulada (scripts de campanha, historico, identificacao).
 # O `plant_history.sqlite` sozinho passa de 40 MB e e regerado a cada rodada.
 planta_virtual/
+
+# scripts/identificacao: os scripts sao versionados; a saida NAO. `out/` tem dado bruto de
+# planta (CSV de step-test com tags do cliente) e PNG regeneravel por `valida.py` — 3 MiB de
+# blob permanente por rodada se entrar no historico.
+scripts/identificacao/out/
