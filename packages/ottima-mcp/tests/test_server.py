@@ -185,6 +185,8 @@ def test_block_catalog_expoe_node_types_e_contratos() -> None:
         "fuzzy_loop",
         "scaler",
         "integrator",
+        "bus_publish",
+        "bus_subscribe",
     ]
     assert "port_contracts" in catalogo
     assert "node_configs" in catalogo
