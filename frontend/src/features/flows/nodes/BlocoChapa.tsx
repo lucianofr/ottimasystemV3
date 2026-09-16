@@ -2,7 +2,7 @@ import { Handle, Position } from "@xyflow/react";
 import type { ReactNode } from "react";
 
 import { cn } from "../../../lib/cn";
-import { QUALITY_UNCERTAIN, portaValida } from "../canalPrimitivos";
+import { portaValida } from "../canalPrimitivos";
 import { ROTULO_BLOCO, type TipoBloco } from "../graph";
 import { formatarValorPorta, type PortValue } from "../useFlowStatus";
 import { useEuHerdada, useValoresDoBloco, type PortasDoBloco } from "./contexto";
@@ -36,8 +36,17 @@ interface Props {
   children: ReactNode;
 }
 
-/** Rótulos pt-BR dos 7 substatus do ADR-039 §Substatus; `0` (NON_SPECIFIC) nunca vira
- *  `title` — só os demais explicam a invalidez/incerteza no hover. */
+/** Rótulos pt-BR de `quality` (polaridade Fieldbus BAD=0/UNCERTAIN=1/GOOD=2, ADR-043) —
+ *  só no tooltip (spec §7: sem terceiro estado visual nesta entrega; o rótulo VISÍVEL é
+ *  sempre "inválido" quando `!portaValida`). */
+const QUALITY_ROTULO: Record<number, string> = {
+  0: "inválido",
+  1: "incerto",
+  2: "válido",
+};
+
+/** Rótulos pt-BR dos 7 substatus do ADR-039 §Substatus; `0` (NON_SPECIFIC) nunca entra no
+ *  tooltip — só os demais complementam a qualidade no hover. */
 const SUBSTATUS_ROTULO: Record<number, string> = {
   0: "não especificado",
   1: "pedido de inicialização",
@@ -49,9 +58,11 @@ const SUBSTATUS_ROTULO: Record<number, string> = {
 };
 
 /**
- * Valor ao vivo da porta. Inválido/incerto é dessaturado **e** rotulado, nunca só
- * descolorido (Regra do Canal Redundante); o número sai em mono tabular para não dançar de
- * largura a cada varredura (Regra do Número Tabular).
+ * Valor ao vivo da porta. Inválido é dessaturado **e** rotulado, nunca só descolorido
+ * (Regra do Canal Redundante); o número sai em mono tabular para não dançar de largura a
+ * cada varredura (Regra do Número Tabular). Quality/substatus detalhados só no `title`
+ * (spec §7: tooltip mostra GOOD/UNCERTAIN/BAD e substatus quando ≠ NON_SPECIFIC; sem
+ * terceiro estado visual no rótulo desta entrega).
  */
 function ValorPorta({ valor, eu }: { valor: PortValue | undefined; eu?: string | null }) {
   if (valor === undefined) {
@@ -63,12 +74,11 @@ function ValorPorta({ valor, eu }: { valor: PortValue | undefined; eu?: string |
   }
   const numerico = typeof valor.v === "number";
   const valida = portaValida(valor);
+  const titulo = `${QUALITY_ROTULO[valor.quality] ?? "inválido"}${
+    valor.substatus !== 0 ? ` · ${SUBSTATUS_ROTULO[valor.substatus]}` : ""
+  }`;
   return (
-    <span
-      data-testid="porta-valor"
-      className="flex items-baseline gap-1 leading-none"
-      title={valor.substatus !== 0 ? SUBSTATUS_ROTULO[valor.substatus] : undefined}
-    >
+    <span data-testid="porta-valor" className="flex items-baseline gap-1 leading-none" title={titulo}>
       <span
         className={cn(
           "process-value text-[11px] font-bold",
@@ -78,11 +88,7 @@ function ValorPorta({ valor, eu }: { valor: PortValue | undefined; eu?: string |
         {formatarValorPorta(valor)}
       </span>
       {numerico && eu ? <span className="text-[9px] font-bold text-fg-muted">{eu}</span> : null}
-      {!valida && (
-        <span className="text-[9px] text-fg-muted">
-          {valor.quality === QUALITY_UNCERTAIN ? "incerto" : "inválido"}
-        </span>
-      )}
+      {!valida && <span className="text-[9px] text-fg-muted">inválido</span>}
     </span>
   );
 }

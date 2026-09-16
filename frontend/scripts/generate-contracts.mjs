@@ -60,13 +60,24 @@ function tipoDe(schema) {
  *  schema de `IntEnum`/`StrEnum` do Pydantic vira `$def` SEM `properties` — esses saem como
  *  `type` (união de literais), nunca `interface` vazia. Todo campo de interface sai
  *  obrigatório: o Pydantic sempre serializa campos com default no `model_dump*`, então
- *  "opcional na construção" (JSON Schema `required`) não é "ausente no payload". */
+ *  "opcional na construção" (JSON Schema `required`) não é "ausente no payload".
+ *
+ *  FALHA ALTO em qualquer forma de `$def` que não seja enum nem objeto-com-`properties`
+ *  (união/discriminated union, `Literal` promovido a `$def`, etc.): o fallback silencioso
+ *  que existia aqui antes emitia `interface {}` vazia sem aviso — exatamente o modo de
+ *  falha que expôs `Quality`/`Substatus` tipados errado até o `typecheck` denunciar a
+ *  jusante. Melhor quebrar o gate `generate:contracts` na hora do que gerar tipo vazio. */
 function interfaceDe(nome, schema) {
   if (schema.enum) return `export type ${nome} = ${tipoDe(schema)};`;
-  const campos = Object.entries(schema.properties ?? {})
-    .map(([campo, propSchema]) => `  ${campo}: ${tipoDe(propSchema)};`)
-    .join("\n");
-  return `export interface ${nome} {\n${campos}\n}`;
+  if (schema.properties !== undefined) {
+    const campos = Object.entries(schema.properties)
+      .map(([campo, propSchema]) => `  ${campo}: ${tipoDe(propSchema)};`)
+      .join("\n");
+    return `export interface ${nome} {\n${campos}\n}`;
+  }
+  throw new Error(
+    `$def '${nome}' não é enum nem objeto com 'properties' — forma não tratada pelo gerador: ${JSON.stringify(schema)}`,
+  );
 }
 
 /** Achata um dict `{nome: schema}` (schemas de raiz + `$defs` aninhados) numa lista de
