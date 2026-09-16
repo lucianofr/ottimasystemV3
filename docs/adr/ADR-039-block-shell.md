@@ -131,6 +131,8 @@ class Signal:            # extensao do PortSample existente
 ```
 
 - v1: `UNCERTAIN` é tratado como `GOOD` em toda decisão do shell (`STATUS_OPTS`: §9).
+
+> **Emendado pelo ADR-043:** UNCERTAIN invalida atuação (`is_good` ≡ `quality is GOOD`). Texto original mantido por histórico.
 - Promoção implícita nas arestas, feita pelo runtime: `(v, ok)` → `Signal(v, GOOD|BAD)`; `Signal` → `(value, is_good)`.
 
 ### 4.2 Modos

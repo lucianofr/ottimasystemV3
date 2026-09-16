@@ -79,6 +79,10 @@ barramento em vez de parar nele. O assinante entrega `PortSample(v, ok=False)` e
 jusante aplica a sua própria regra (o MPC marca `input_invalid`, o `opc_write` suprime a
 escrita, o filtro passa adiante).
 
+> **Emendado pelo ADR-043:** o payload de `flow.exchange` deixa de carregar o booleano `ok` e
+> passa a carregar o `Signal` completo (`quality`, `substatus`, `hi_limited`, `lo_limited`) —
+> ver ADR-043 §6/§7.2. Cold continua sem publicar.
+
 ### D4 — Validade por idade AUTOMÁTICA: `3 × period_s`, sem campo de config
 
 O assinante invalida o valor quando `idade > 3 × period_s`, onde `period_s` é o Ts do flow
@@ -100,6 +104,10 @@ por engano num assinante de um flow de `Ts = 60 s` invalidaria a variável perma
 um `max_age_s = 600` num flow de `Ts = 0,5 s` é um dado morto de 10 minutos passando por
 válido. Derivar do publicador é sempre coerente e elimina um campo de config de todo o
 caminho (parse, validate, contrato TS, modal, checks).
+
+> **Emendado pelo ADR-043:** a expiração deixa de produzir "último valor com `ok=false`" e passa
+> a rebaixar por teto — `min(quality publicado, UNCERTAIN)` — mantendo o último valor. Inválida
+> para atuação do mesmo jeito, pois `ok ≡ quality is GOOD` (ADR-043 D3/D5) — ver ADR-043 §7.2.
 
 ### D5 — `key` única por projeto: duplicata reprova o save (422)
 
