@@ -239,6 +239,25 @@ async def test_g_saida_nao_finita_mantem_ultimo_bom_por_porta():
     assert depois_do_bom.ok is False
 
 
+async def test_retencao_com_entrada_boa_sai_uncertain():
+    """ADR-043 D7: saída retida (sem cobertura, não-finita) com entrada GOOD é retenção
+    genuína -> teto UNCERTAIN (UncertainLastUsable), nunca BAD hardcoded."""
+    block = bloco(SEM_COBERTURA_FLL)
+    await passo(block, 5.0)  # pico do termo: primeira saída boa
+    retida = await passo(block, 1.0)  # fora de [4,6]: sem cobertura, retém
+    assert retida.quality is Quality.UNCERTAIN
+    assert retida.ok is False
+
+
+async def test_retencao_nao_lava_entrada_bad():
+    """Monotonicidade (D7): entrada BAD retida (sem cobertura) permanece BAD, nunca sobe
+    a UNCERTAIN."""
+    block = bloco(SEM_COBERTURA_FLL)
+    await passo(block, 5.0)  # pico do termo: primeira saída boa
+    retida = await passo(block, 1.0, ok=False)  # fora de cobertura E flag ruim
+    assert retida.quality is Quality.BAD
+
+
 # --------------------------------------------------------------------------------------
 # (h) lock-previous retém entre varreduras; reset() limpa o estado da fuzzylite
 # --------------------------------------------------------------------------------------

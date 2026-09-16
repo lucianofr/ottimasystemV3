@@ -123,11 +123,11 @@ class PidBlock(Block):
         if has_cold_input(inputs):
             return null_outputs(OUTPUT_PORTS)
 
-        # Amostra inválida executa e propaga a flag (decisão A-6) -- mas só depois do
-        # guard de finitude abaixo, que decide se o passo sequer chama o controlador.
+        # Amostra inválida executa e propaga a flag (decisão A-6). `q_entradas` é a
+        # qualidade CRUA das entradas (mínimo das flags) -- NUNCA rebaixada aqui por
+        # valor não-finito: essa distinção é o que permite `_retido` diferenciar
+        # retenção genuína (entrada GOOD, valor nan/inf) de entrada já BAD (ADR-043 D7).
         q_entradas = min((s.quality for s in inputs.values()), default=Quality.GOOD)
-        if any(not math.isfinite(float(s.v)) for s in inputs.values()):
-            q_entradas = Quality.BAD
 
         pv = float(inputs["pv"].v)
         setpoint = float(inputs["sp"].v) if "sp" in inputs else self._setpoint
@@ -136,7 +136,7 @@ class PidBlock(Block):
         # envenenaria a integral para sempre, e a saída ficaria `nan` mesmo depois do
         # sinal se recuperar (ver docstring do módulo).
         if not (math.isfinite(pv) and math.isfinite(setpoint)):
-            return self._retido()
+            return self._retido(q_entradas)
 
         self._pid.setpoint = setpoint
         try:
@@ -148,21 +148,25 @@ class PidBlock(Block):
                 "Bloco PID '%s': falha no controlador -- retendo a última saída (ok=False)",
                 self.block_id,
             )
-            return self._retido()
+            return self._retido(q_entradas)
 
         # `auto_mode=False` sem cômputo anterior devolve `None` (`_last_output` do
         # simple-pid ainda não setado) -- trata como qualquer outra saída ruim.
         if resultado is None or not math.isfinite(resultado):
-            return self._retido()
+            return self._retido(q_entradas)
 
         self._last = resultado
         return {"out": Signal(resultado, quality=q_entradas)}
 
-    def _retido(self) -> dict[str, Signal]:
-        """Saída retida (RF-553): última boa conhecida, sempre BAD (comportamento
-        congelado — nunca herda `q_entradas`: a saída retida não reflete a entrada
-        corrente, então marcá-la GOOD por causa dela seria enganoso)."""
-        return {"out": Signal(self._last, quality=Quality.BAD)}
+    def _retido(self, q: Quality) -> dict[str, Signal]:
+        """Saída retida (RF-553): último bom conhecido, rebaixado a UNCERTAIN sem
+        elevar entrada BAD (ADR-043 D7) -- teto `min(UNCERTAIN, q_entradas)`: entrada
+        boa retida vira UNCERTAIN (UncertainLastUsable), entrada BAD permanece BAD.
+        Sem saída boa anterior (`self._last is None`) não há o que reter -- ausência de
+        dado, não retenção: fica BAD como `null_outputs`, independente de `q`."""
+        if self._last is None:
+            return {"out": Signal(None, quality=Quality.BAD)}
+        return {"out": Signal(self._last, quality=min(Quality.UNCERTAIN, q))}
 
     def reset(self) -> None:
         # Reconstrói em vez de `self._pid.reset()`: `PID.reset()` zera `_integral` mas

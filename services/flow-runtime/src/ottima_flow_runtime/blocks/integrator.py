@@ -81,11 +81,11 @@ class IntegratorBlock(Block):
         if not sample.ok or not math.isfinite(valor):
             # A brecha fica de fora do total E fora do relógio: reancora o ts para a
             # amostra boa seguinte não "cobrir" o intervalo ruim com o valor novo.
-            # Comportamento congelado: sempre BAD (não `sample.quality`) — mesmo uma
-            # amostra GOOD cujo valor seja não-finito produz total inválido aqui.
+            # Teto `min(UNCERTAIN, sample.quality)` (ADR-043 D7): amostra GOOD com valor
+            # não-finito retida vira UNCERTAIN; amostra BAD retida permanece BAD.
             if ts is not None:
                 self._ultimo_ts = ts
-            return {"out": Signal(self._total, quality=Quality.BAD)}
+            return {"out": Signal(self._total, quality=min(Quality.UNCERTAIN, sample.quality))}
 
         if ts is None:
             # Fora do scheduler (teste unitário de pureza): cai no Ts nominal.
@@ -97,9 +97,9 @@ class IntegratorBlock(Block):
             dt = (ts - self._ultimo_ts).total_seconds()
             self._ultimo_ts = ts
             if dt <= 0 or dt > _MAX_DT_FATOR * self._ts:
-                # Comportamento congelado: sempre BAD — salto de relógio invalida o
-                # total independente da qualidade da amostra corrente.
-                return {"out": Signal(self._total, quality=Quality.BAD)}
+                # Teto `min(UNCERTAIN, sample.quality)` (ADR-043 D7): salto de relógio
+                # congela o total; amostra GOOD retida vira UNCERTAIN, BAD permanece BAD.
+                return {"out": Signal(self._total, quality=min(Quality.UNCERTAIN, sample.quality))}
 
         self._total += valor * dt / self._fator
         return {"out": Signal(self._total, quality=Quality.GOOD)}

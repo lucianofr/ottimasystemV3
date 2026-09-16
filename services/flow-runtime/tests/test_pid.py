@@ -181,6 +181,26 @@ async def test_sp_nao_finito_retem_a_ultima_saida_boa():
     assert ruim.ok is False
 
 
+async def test_retido_com_entrada_boa_sai_uncertain():
+    """RF-553 + ADR-043 D7: valor não-finito com entrada boa = retenção genuína -> teto
+    UNCERTAIN (UncertainLastUsable), nunca BAD hardcoded."""
+    controlador = bloco(kc=1.0, ti_seconds=0.0, td_seconds=0.0, setpoint=10.0)
+    boa = await alimenta(controlador, 4.0)
+    retida = await alimenta(controlador, math.nan)
+    assert retida.v == pytest.approx(boa.v)
+    assert retida.quality is Quality.UNCERTAIN
+    assert retida.ok is False
+
+
+async def test_retido_nao_lava_entrada_bad():
+    """Monotonicidade (D7): retenção NUNCA eleva — PV não-finita E com flag ruim retida
+    sai BAD, não UNCERTAIN."""
+    controlador = bloco(kc=1.0, ti_seconds=0.0, td_seconds=0.0, setpoint=10.0)
+    await alimenta(controlador, 4.0)
+    retida = await alimenta(controlador, math.nan, ok=False)
+    assert retida.quality is Quality.BAD
+
+
 async def test_entrada_invalida_e_finita_e_processada_e_propagada():
     """Decisão A-6: `ok=False` com valor finito ainda executa o controlador e propaga."""
     controlador = bloco(kc=1.0, ti_seconds=0.0, td_seconds=0.0, setpoint=10.0)

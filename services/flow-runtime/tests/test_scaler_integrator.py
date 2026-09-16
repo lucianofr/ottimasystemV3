@@ -283,6 +283,29 @@ async def test_integrator_amostra_nao_finita_nao_envenena_o_total():
     assert (await totaliza.alimenta(5.0)).v == pytest.approx(10.0)
 
 
+async def test_integrator_lacuna_por_entrada_bad_mantem_bad():
+    """Monotonicidade (ADR-043 D7): amostra BAD retida não lava o sensor ruim — total
+    permanece BAD, nunca sobe a UNCERTAIN."""
+    totaliza = Totaliza(integrator("s"))
+    await totaliza.alimenta(5.0)
+    await totaliza.alimenta(5.0)  # total = 5
+
+    ruim = await totaliza.alimenta(999.0, ok=False)
+    assert ruim.quality is Quality.BAD
+    assert ruim.v is not None
+
+
+async def test_integrator_lacuna_por_valor_nao_finito_sai_uncertain():
+    """ADR-043 D7: amostra GOOD com valor não-finito retida vira UNCERTAIN
+    (UncertainLastUsable) — retenção genuína, teto sobre o congelamento."""
+    totaliza = Totaliza(integrator("s"))
+    await totaliza.alimenta(5.0)
+    await totaliza.alimenta(5.0)  # total = 5
+
+    suja = await totaliza.alimenta(float("nan"))
+    assert suja.quality is Quality.UNCERTAIN
+
+
 async def test_integrator_buraco_de_qualidade_e_pulado_nunca_preenchido_retroativamente():
     """3 scans ruins seguidos: a amostra boa seguinte integra só o seu dt — o relógio é
     reancorado a cada scan ruim, senão o intervalo morto seria somado com o valor novo."""

@@ -144,8 +144,13 @@ class FuzzyBlock(Block):
 
         # RF-542: a entrada só é "ok" para o motor se TODA amostra tiver a flag boa E for
         # finita — diferente de decisão A-6 (flag isolada), porque aqui um nan de entrada
-        # contaminaria o resultado da inferência em silêncio, não só a flag.
-        q_entradas = min((s.quality for s in inputs.values()), default=Quality.GOOD)
+        # contaminaria o resultado da inferência em silêncio, não só a flag. `q_entradas`
+        # rebaixa a BAD por valor não-finito (usado no caminho de sucesso e em
+        # `FuzzyState.ok`, fora do escopo desta migração — Task 4). `q_entradas_crua` NÃO
+        # rebaixa: é o que permite aos ramos de retenção abaixo diferenciar entrada GOOD
+        # retida (-> UNCERTAIN) de entrada já BAD (permanece BAD) -- ADR-043 D7.
+        q_entradas_crua = min((s.quality for s in inputs.values()), default=Quality.GOOD)
+        q_entradas = q_entradas_crua
         if any(not math.isfinite(float(s.v)) for s in inputs.values()):
             q_entradas = Quality.BAD
         # A ausência de porta em `inputs` não ocorre enquanto `validate_graph` exigir
@@ -170,11 +175,17 @@ class FuzzyBlock(Block):
                 "Bloco fuzzy '%s': falha na inferência — retendo as últimas saídas (ok=False)",
                 self.block_id,
             )
-            # Retenção de falha (exceção): comportamento congelado do decisão A-6/RF-542
-            # original — sempre BAD, nunca herda `q_entradas` (isso contaminaria a saída
-            # retida com GOOD mesmo o motor tendo falhado).
+            # Retenção de falha (exceção): teto `min(UNCERTAIN, q_entradas_crua)`
+            # (ADR-043 D7) -- entrada boa retida vira UNCERTAIN (UncertainLastUsable);
+            # entrada BAD permanece BAD, nunca eleva. Porta sem saída boa anterior
+            # (`v is None`) não tem o que reter -- ausência de dado, não retenção: BAD.
             self._last_outputs = {
-                port: Signal(sample.v, quality=Quality.BAD)
+                port: Signal(
+                    sample.v,
+                    quality=Quality.BAD
+                    if sample.v is None
+                    else min(Quality.UNCERTAIN, q_entradas_crua),
+                )
                 for port, sample in self._last_outputs.items()
             }
             return dict(self._last_outputs)
@@ -192,9 +203,14 @@ class FuzzyBlock(Block):
                 outputs[port] = Signal(value, quality=q_entradas)
             else:
                 # RF-542: nunca nan/inf com ok=True — retém o último valor finito DAQUELA
-                # porta (None antes do primeiro bom). Comportamento congelado: sempre BAD,
-                # nunca herda `q_entradas` (a saída em si não é confiável).
-                outputs[port] = Signal(self._last_outputs[port].v, quality=Quality.BAD)
+                # porta (None antes do primeiro bom). Teto `min(UNCERTAIN, q_entradas_crua)`
+                # (ADR-043 D7): entrada boa retida vira UNCERTAIN, entrada BAD permanece
+                # BAD. Sem saída boa anterior (`v is None`) não há o que reter: fica BAD.
+                ultimo = self._last_outputs[port]
+                quality = (
+                    Quality.BAD if ultimo.v is None else min(Quality.UNCERTAIN, q_entradas_crua)
+                )
+                outputs[port] = Signal(ultimo.v, quality=quality)
             if publicar:
                 output_states.append(
                     FuzzyVarState(
