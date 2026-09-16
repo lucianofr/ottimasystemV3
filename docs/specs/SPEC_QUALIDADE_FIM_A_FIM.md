@@ -1,7 +1,7 @@
 # SPEC — Qualidade fim-a-fim (Signal como contrato de porta)
 
 Data: 2026-09-16 · Status: aprovado em brainstorm, aguarda revisão final
-Materializa em: ADR-043 (novo) + emendas (ADR-039 §4.1, ADR-042 D3/D4, PRD §5.17/§7.1, GLOSSARY)
+Materializa em: ADR-043 (novo) + emendas (ADR-039 §4.1, ADR-042 D3/D4, PRD §7.1, GLOSSARY)
 
 ## 1. Problema
 
@@ -20,19 +20,20 @@ para que qualquer implementação futura obedeça.
 
 | # | decisão |
 |---|---|
-| D1 | **`Signal` do ADR-039 é O contrato de porta do sistema inteiro.** `PortSample` e `Signal` fundem numa classe única (`Signal`, em `blocks/base.py`). Polaridade Fieldbus mantida: `Quality` BAD=0 / UNCERTAIN=1 / GOOD=2. |
+| D1 | **`Signal` do ADR-039 é O contrato de porta do sistema inteiro.** `PortSample` e `Signal` fundem numa classe única (`Signal`). Polaridade Fieldbus mantida: `Quality` BAD=0 / UNCERTAIN=1 / GOOD=2. `Quality`/`Substatus` nascem em `ottima-core` (PortValue/ExchangeValue/contracts_export dependem deles); o dataclass `Signal` fica em `blocks/base.py` importando de lá. |
 | D2 | **`OpcValue` fica intocado** (0=good/1=uncertain/2=bad) na camada OPC/persistência: `opc.values.*`, `calc.values`, `flow.values`, recorder, `samples`, `/ws opc_values`, histórico. `opc_read` é o ÚNICO ponto de tradução entre os dois vocabulários. |
 | D3 | **UNCERTAIN invalida atuação** — emenda formal ao ADR-039 §4.1: `is_good` passa de `quality is not BAD` para `quality is GOOD`. Preserva o comportamento vivo atual (hoje uncertain chega ao shell colapsado em BAD; a regra §4.1 v1 nunca executou). `STATUS_OPTS` (§9) permanece futuro. |
 | D4 | **`Substatus` É o campo "status para uso futuro"** — nenhum campo novo. Códigos novos entram por ADR quando houver necessidade real. O wire carrega o Signal completo: `{v, quality, substatus, hi_limited, lo_limited}`. |
 | D5 | **`ok` vira propriedade derivada** (`quality is Quality.GOOD`) — sai do wire e do construtor; legado que lê `.ok` compila e mantém comportamento. `as_signal`/`make_signal` morrem (promoção desnecessária). |
 | D6 | **Propagação default:** `quality_out` = pior (`min` na polaridade Fieldbus) das entradas **que alimentaram o cálculo daquela saída** — não "todas as conectadas". |
-| D7 | **Retenção emite UNCERTAIN** (UncertainLastUsable): PID `_retido` (RF-553), retenção do fuzzy, lacuna/dt patológico do integrator, expiração do `bus_subscribe`. Comportamento de atuação idêntico (uncertain invalida como BAD); diagnóstico/histórico distinguem "valor retido" de "sem valor". |
+| D7 | **Retenção emite UNCERTAIN** (UncertainLastUsable): PID `_retido` (RF-553), retenção do fuzzy, lacuna/dt patológico do integrator, expiração do `bus_subscribe`. Comportamento de atuação idêntico (uncertain invalida como BAD); diagnóstico/UI (`flow.status`/WS/exchange) distinguem "valor retido" de "sem valor" — o histórico NÃO (§4). |
 | D8 | **Script e tag calculada não veem qualidade** — runtime carimba pior-das-entradas automaticamente. API do sandbox (ADR-018/033) inalterada. |
+| D9 | **Bloco não-shell emite `substatus=NON_SPECIFIC` e `hi_limited=lo_limited=False`** — idêntico ao zeramento que `as_signal` faz hoje em toda aresta legada. Só o shell PRODUZ substatus/limites (bits direcionais, ADR-039 §4.9); blocos de barramento TRANSPORTAM verbatim. Propagação real por blocos de transformação exigiria regra de inversão por sinal de ganho (scaler reverso) — ADR futuro. |
 
 ## 3. Contrato
 
 ```python
-# blocks/base.py — substitui PortSample; shell/signal.py SOME (imports migram para cá)
+# ottima_core: Quality/Substatus · blocks/base.py: Signal (substitui PortSample; shell/signal.py SOME)
 class Quality(IntEnum):
     BAD = 0; UNCERTAIN = 1; GOOD = 2          # inalterado (ADR-039)
 
@@ -65,11 +66,13 @@ Invariantes:
 | ponto | direção | mapa |
 |---|---|---|
 | `opc_read` | `OpcValue.quality` → `Quality` | 0→GOOD · 1→UNCERTAIN · 2→BAD · tag fora do espelho→`Signal(None)` |
-| `scheduler._historized_value` (`flow.values`, RF-804) | `Quality` → `OpcValue.quality` | GOOD→0 · UNCERTAIN→1 · BAD→2 · `v=None`→`(0.0, 2)` |
+| `scheduler._historized_value` (`flow.values`, RF-804) | `Quality` → `OpcValue.quality` | GOOD→0 · **não-GOOD→2** · `v=None`→`(0.0, 2)` |
 
-**Mudança observável única de persistência:** porta historiada UNCERTAIN passa a gravar
-valor+`quality=1` em `samples` onde hoje grava NULL+2 (o NULL do ADR-037 continua exclusivo de
-BAD). Trend mostra o valor retido, marcado incerto. Emenda no texto do RF-804.
+**Persistência byte-idêntica à atual:** todo não-GOOD historiado vira `quality=2` → recorder grava
+NULL (ADR-037 intacto, RF-804 intacto). UNCERTAIN persistido com valor injetaria o valor CONGELADO
+da retenção em `avg`/`sum`/`samples_1m` — exatamente o dano que o ADR-037 escolheu NULL para evitar.
+O tri-state vive em `flow.status`/WS/`flow.exchange` (diagnóstico), não no histórico. Tag OPC
+uncertain (medição real) segue persistindo valor como hoje — a regra do recorder não muda.
 
 ## 5. Propagação por bloco
 
@@ -77,7 +80,7 @@ BAD). Trend mostra o valor retido, marcado incerto. Emenda no texto do RF-804.
 |---|---|
 | opc_read | tradução da borda (§4); substatus NON_SPECIFIC |
 | constant | GOOD sempre (gerador) |
-| scaler, lag, first_order, kalman, filtros | default D6 (pior das entradas consumidas) |
+| scaler, lag, first_order, kalman, filtros | default D6 (pior das entradas consumidas); emissão D9 (substatus/limites zerados) |
 | integrator | qualidade sai SÓ de `in`; `reset` fica fora (decisão documentada no módulo). Lacuna/dt patológico → saída UNCERTAIN (D7) |
 | TFS | POR LINHA de saída: `min()` dos elementos habilitados da linha (forma quality do AND atual, ADR-022); linha toda desabilitada → GOOD |
 | PID (shell) | ADR-039 vigente + emenda §4.1; `_retido` (RF-553) → UNCERTAIN (D7); saídas OUT/BKCAL_OUT mantêm semântica própria (OOS→BAD etc.) |
@@ -85,7 +88,7 @@ BAD). Trend mostra o valor retido, marcado incerto. Emenda no texto do RF-804.
 | MPC | portas de saída mantêm semântica atual; disponibilidade de MV (RF-626/ADR-028) INTOCADA — `mpc/availability.py` lê `tag.quality` do `ValueSnapshot`, não de porta |
 | script | default D6 automático; sandbox cego a qualidade (D8) |
 | opc_write | consumidor: suprime escrita se `not ok` (= `quality is not GOOD`) — comportamento atual |
-| bus_publish | cold (`v is None`) não publica (como hoje); senão publica Signal completo no payload |
+| bus_publish | cold (`v is None`) não publica (como hoje); senão TRANSPORTA o Signal completo da entrada no payload (D9) |
 | bus_subscribe | nunca-publicada → `Signal(None)`; fresca → quality/substatus/limites publicados; expirada (idade > 3×period_s) → `min(quality publicado, UNCERTAIN)` (D7) |
 | calc-worker (tag calculada) | INTOCADO — já publica `max(quality)` das entradas na polaridade OpcValue (`runner.py`) |
 
@@ -110,13 +113,13 @@ compatibilidade dupla. Nenhuma DDL.
 
 ## 8. Documentação normativa (processo CLAUDE.md item 4 — aprovada pelo usuário neste brainstorm)
 
-1. **ADR-043-qualidade-fim-a-fim.md** (novo): decisões D1–D8; tabela de tradução (§4); registra
+1. **ADR-043-qualidade-fim-a-fim.md** (novo): decisões D1–D9; tabela de tradução (§4); registra
    as emendas: ADR-039 §4.1 (`is_good`), ADR-042 D3/D4 (payload + regra de expiração do
-   exchange), decisão A-6 da F3 (flag booleana → tri-state), RF-804/ADR-037 (UNCERTAIN persiste
-   valor).
+   exchange), decisão A-6 da F3 (flag booleana → tri-state); registra que a persistência fica
+   byte-idêntica (ADR-037/RF-804 intactos — não-GOOD historiado → `quality=2`).
 2. **ADR-039**: nota de emenda no §4.1 apontando ADR-043 (texto original preservado, marcado emendado).
 3. **ADR-042**: nota de emenda em D3/D4 apontando ADR-043.
-4. **PRD**: §7.1 tabela (duas linhas do §6 acima) + nota `flow.values` + texto do RF-804.
+4. **PRD**: §7.1 tabela (duas linhas do §6 acima).
 5. **GLOSSARY**: `qualidade` (tri-state Fieldbus em porta; tri-state OpcValue na borda OPC),
    `substatus` (campo de uso futuro, códigos por ADR), `status` (termo guarda-chuva FF =
    quality+substatus+limites; DISTINTO do status de MV do RF-626 `rcas_ok|...`).
@@ -140,4 +143,7 @@ compatibilidade dupla. Nenhuma DDL.
   borda OpcValue; perda documentada no ADR-043).
 - Terceiro estado visual (uncertain) no frontend.
 - RF-626/ADR-028 (disponibilidade de MV) — já lê qualidade da fonte certa.
+- Propagação de `substatus`/`hi_limited`/`lo_limited` por blocos de transformação (D9) — ADR
+  futuro com regra de inversão por sinal de ganho.
+- Emenda a RF-804/ADR-037 — persistência não muda.
 - Persistência de substatus/limites; DDL de qualquer espécie.
