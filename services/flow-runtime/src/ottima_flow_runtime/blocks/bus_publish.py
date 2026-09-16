@@ -4,13 +4,15 @@ Mesma forma do OPC-Write (entrada `in`, nenhuma saída, publica dentro do `step(
 tag, sem conexão e sem escrita em planta: o destino é o barramento interno, e do outro lado
 está o bloco `bus_subscribe` de outro flow.
 
-Duas diferenças de semântica em relação ao Write, ambas do ADR-042 D3:
+Duas diferenças de semântica em relação ao Write, ambas do ADR-042 D3 (emendado por
+ADR-043 §6):
 
 - **Cold start não publica** — não há valor a anunciar, e o assinante fica COLD (D4/D6).
   Também não gera evento: enquanto o Write suprimido é uma escrita de controle que deixou de
   sair (fato de operação), aqui a ausência é a partida normal de um flow.
-- **Valor inválido publica com `ok=false`** — a decisão A-6 atravessa o barramento em vez de
-  parar nele: o assinante entrega valor + flag, e quem decide o que fazer é o bloco a jusante
+- **Valor inválido publica mesmo assim** — o bloco TRANSPORTA o `Signal` completo da entrada
+  verbatim (D9): `quality`, `substatus` e os dois bits de limitação viajam tal como chegaram,
+  nunca reinterpretados. Quem decide o que fazer com uma qualidade ruim é o bloco a jusante
   (MPC marca `input_valid=False`, o Write suprime, o filtro propaga).
 
 `period_s` viaja em todo quadro: é o Ts do flow que contém este bloco e é o que permite ao
@@ -62,7 +64,10 @@ class BusPublishBlock(Block):
             key=self._key,
             ts=ts if ts is not None else datetime.now(UTC),
             v=sample.v,
-            ok=sample.ok,
+            quality=sample.quality,
+            substatus=sample.substatus,
+            hi_limited=sample.hi_limited,
+            lo_limited=sample.lo_limited,
             period_s=self._period_s,
         )
         await self._redis.publish(CHANNEL_FLOW_EXCHANGE, value.model_dump_json())

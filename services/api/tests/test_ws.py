@@ -24,6 +24,7 @@ from ottima_core.bus import (
     channel_flow_status,
 )
 from ottima_core.security import create_access_token
+from ottima_core.signal import Quality
 
 RECEIVE_TIMEOUT_S = 5.0
 """Teto de espera por mensagem: cobre o trânsito pelo Redis real."""
@@ -179,7 +180,12 @@ def status_json(scan_ms: float = 3.2, v: float | bool | None = 42.5) -> str:
         scan_ms=scan_ms,
         overruns=0,
         ts=datetime.now(UTC),
-        ports={"b1": {"out": PortValue(v=v, ok=True), "in": PortValue(v=None, ok=False)}},
+        ports={
+            "b1": {
+                "out": PortValue(v=v, quality=Quality.GOOD),
+                "in": PortValue(v=None, quality=Quality.BAD),
+            }
+        },
     ).model_dump_json()
 
 
@@ -254,8 +260,20 @@ async def test_operador_recebe_status_do_flow_inscrito(connect, operator_token, 
         assert message["channel"] == "flow.status.1"
         assert message["data"]["state"] == "running"
         # O contrato do canvas é o conteúdo de `ports`, não a presença da chave
-        assert message["data"]["ports"]["b1"]["out"] == {"v": 42.5, "ok": True}
-        assert message["data"]["ports"]["b1"]["in"] == {"v": None, "ok": False}
+        assert message["data"]["ports"]["b1"]["out"] == {
+            "v": 42.5,
+            "quality": 2,
+            "substatus": 0,
+            "hi_limited": False,
+            "lo_limited": False,
+        }
+        assert message["data"]["ports"]["b1"]["in"] == {
+            "v": None,
+            "quality": 0,
+            "substatus": 0,
+            "hi_limited": False,
+            "lo_limited": False,
+        }
 
 
 async def test_admin_tambem_e_aceito(connect, make_user, make_token, redis_client):

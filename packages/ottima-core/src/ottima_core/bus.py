@@ -10,6 +10,8 @@ from typing import Any, Literal
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
+from ottima_core.signal import Quality, Substatus
+
 logger = logging.getLogger(__name__)
 
 CHANNEL_OPC_WRITES = "opc.writes"
@@ -67,22 +69,26 @@ class OpcValue(BaseModel):
 
 
 class ExchangeValue(BaseModel):
-    """Payload de `flow.exchange` (ADR-042 D1).
+    """Payload de `flow.exchange` (ADR-042 D1, campos de qualidade emendados por ADR-043 §6).
 
     `v` é `float | bool` porque as portas dos dois blocos são bivalentes (decisão A-5): um
-    booleano publicado chega booleano do outro lado, sem virar `1.0` no caminho. `ok=False`
-    viaja (decisão A-6 atravessa o barramento, D3); cold start nunca é publicado, então não
-    existe `v: None` aqui.
+    booleano publicado chega booleano do outro lado, sem virar `1.0` no caminho. O bloco
+    `bus_publish` transporta o `Signal` completo da entrada verbatim (D9) — `quality`,
+    `substatus` e os dois bits de limitação viajam tal como chegaram, nunca reinterpretados;
+    cold start nunca é publicado, então não existe `v: None` aqui.
 
     `period_s` é o Ts do flow publicador e é o que dá validade automática ao assinante:
-    `idade > 3 × period_s` ⇒ saída inválida (D4). Vem no payload em vez de config porque só
-    o publicador conhece a própria cadência.
+    `idade > 3 × period_s` ⇒ saída rebaixada para `min(quality, UNCERTAIN)`, nunca elevada
+    (D4). Vem no payload em vez de config porque só o publicador conhece a própria cadência.
     """
 
     key: str
     ts: datetime
     v: float | bool
-    ok: bool
+    quality: Quality
+    substatus: Substatus = Substatus.NON_SPECIFIC
+    hi_limited: bool = False
+    lo_limited: bool = False
     period_s: float
 
 
@@ -96,12 +102,19 @@ class OpcWrite(BaseModel):
 
 
 class PortValue(BaseModel):
-    """Valor de uma porta de bloco numa varredura (spec F3 §4.2, decisão A-3)."""
+    """Valor de uma porta de bloco numa varredura (spec F3 §4.2; ADR-043 §6).
+
+    Polaridade Fieldbus (BAD=0/UNCERTAIN=1/GOOD=2) — NUNCA a de OpcValue.
+    Validade para render: `quality == GOOD`; o canvas dessatura o resto.
+    """
 
     # União em modo smart do Pydantic v2: `True` continua bool e `42.5` continua float no
     # round-trip. O canvas desenha lâmpada para bool e número para float; coerção seria defeito.
     v: float | bool | None
-    ok: bool  # False = valor inválido; o canvas dessatura e rotula (decisão #6)
+    quality: Quality
+    substatus: Substatus = Substatus.NON_SPECIFIC
+    hi_limited: bool = False
+    lo_limited: bool = False
 
 
 class FlowStatus(BaseModel):

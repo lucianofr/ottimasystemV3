@@ -14,6 +14,7 @@ from ottima_core.bus import (
     OpcValue,
     channel_opc_values,
 )
+from ottima_core.signal import Quality
 from ottima_core.snapshot import ExchangeSnapshot, ValueSnapshot
 
 TS = datetime(2026, 8, 4, 12, 0, 0, tzinfo=UTC)
@@ -159,9 +160,14 @@ async def test_queda_do_assinante_e_reassinada(redis_client):
 
 
 async def publish_exchange(
-    redis_client: Redis, key: str, v: float | bool, *, ok: bool = True, period_s: float = 1.0
+    redis_client: Redis,
+    key: str,
+    v: float | bool,
+    *,
+    quality: Quality = Quality.GOOD,
+    period_s: float = 1.0,
 ) -> int:
-    payload = ExchangeValue(key=key, ts=TS, v=v, ok=ok, period_s=period_s)
+    payload = ExchangeValue(key=key, ts=TS, v=v, quality=quality, period_s=period_s)
     return await redis_client.publish(CHANNEL_FLOW_EXCHANGE, payload.model_dump_json())
 
 
@@ -178,7 +184,7 @@ async def test_chave_publicada_aparece_no_espelho(redis_client, exchange):
 
     await await_until(lambda: exchange.get("nivel_tanque") is not None)
     value = exchange.get("nivel_tanque")
-    assert (value.v, value.ok, value.period_s, value.ts) == (42.5, True, 2.0, TS)
+    assert (value.v, value.quality, value.period_s, value.ts) == (42.5, Quality.GOOD, 2.0, TS)
 
 
 async def test_chave_sem_publicador_devolve_none(exchange):
@@ -200,10 +206,10 @@ async def test_ultima_publicacao_da_chave_vence(redis_client, exchange):
     await publish_exchange(redis_client, "a", 1.0)
     await await_until(lambda: exchange.get("a") is not None)
 
-    await publish_exchange(redis_client, "a", 2.0, ok=False)
+    await publish_exchange(redis_client, "a", 2.0, quality=Quality.BAD)
 
     await await_until(lambda: exchange.get("a").v == 2.0)
-    assert exchange.get("a").ok is False
+    assert exchange.get("a").quality is Quality.BAD
 
 
 async def test_payload_invalido_de_barramento_nao_derruba_o_assinante(redis_client, exchange):

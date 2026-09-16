@@ -534,7 +534,16 @@ class FlowTask:
     def _port_values(self) -> dict[str, dict[str, PortValue]]:
         """Tabela inteira: todas as portas de todos os blocos são o que o canvas desenha."""
         return {
-            block_id: {port: PortValue(v=sample.v, ok=sample.ok) for port, sample in ports.items()}
+            block_id: {
+                port: PortValue(
+                    v=sample.v,
+                    quality=sample.quality,
+                    substatus=sample.substatus,
+                    hi_limited=sample.hi_limited,
+                    lo_limited=sample.lo_limited,
+                )
+                for port, sample in ports.items()
+            }
             for block_id, ports in self._ports.items()
         }
 

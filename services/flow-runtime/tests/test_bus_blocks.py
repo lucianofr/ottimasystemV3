@@ -1,11 +1,11 @@
-"""Contratos dos blocos de barramento `bus_publish`/`bus_subscribe` (ADR-042).
+"""Contratos dos blocos de barramento `bus_publish`/`bus_subscribe` (ADR-042; ADR-043 §6).
 
 - **bus_publish**: publica `ExchangeValue` em `flow.exchange` a cada varredura, carimbando o
-  Ts do próprio flow em `period_s`. Cold start NÃO publica; inválido publica com `ok=false`
-  (decisão A-6 atravessa o barramento, D3).
+  Ts do próprio flow em `period_s`. Cold start NÃO publica; qualquer qualidade publica —
+  o `Signal` completo da entrada viaja verbatim (D9).
 - **bus_subscribe**: lê do espelho e decide validade por IDADE (D4) — `key` nunca publicada é
-  cold (`None`, inválido); valor mais velho que `3 × period_s` sai com o último valor e
-  `ok=False`, nunca com `ok=True`.
+  cold (`None`, `quality=BAD`); valor mais velho que `3 × period_s` sai com o último valor e
+  qualidade rebaixada por teto (`min(quality, UNCERTAIN)`), nunca elevada (D7).
 
 O par ponta a ponta é exercido com um espelho alimentado pelo payload REAL do publicador:
 é o que prova que os dois lados falam o mesmo contrato de canal.
@@ -76,7 +76,12 @@ async def test_publica_valor_no_canal_com_o_ts_do_flow():
     canal, payload = redis.publicados[0]
     assert canal == CHANNEL_FLOW_EXCHANGE
     quadro = ExchangeValue.model_validate_json(payload)
-    assert (quadro.key, quadro.v, quadro.ok, quadro.period_s) == (KEY, 42.5, True, 2.0)
+    assert (quadro.key, quadro.v, quadro.quality, quadro.period_s) == (
+        KEY,
+        42.5,
+        Quality.GOOD,
+        2.0,
+    )
     assert quadro.ts == T0
 
 
@@ -110,7 +115,7 @@ async def test_invalido_publica_com_flag_de_invalidez():
     await bloco.step({"in": Signal(7.0)}, ts=T0)
 
     quadro = ExchangeValue.model_validate_json(redis.publicados[0][1])
-    assert (quadro.v, quadro.ok) == (7.0, False)
+    assert (quadro.v, quadro.quality) == (7.0, Quality.BAD)
 
 
 async def test_publica_uma_vez_por_varredura():
@@ -141,7 +146,7 @@ async def test_key_sem_publicador_sai_nula_e_invalida():
 
 async def test_valor_fresco_sai_valido():
     espelho = EspelhoFake()
-    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=12.0, ok=True, period_s=TS)
+    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=12.0, quality=Quality.GOOD, period_s=TS)
 
     saida = (await assinante(espelho).step({}, ts=T0 + timedelta(seconds=2)))["out"]
 
@@ -151,7 +156,7 @@ async def test_valor_fresco_sai_valido():
 async def test_valor_expirado_sai_com_ultimo_valor_e_invalido():
     """`3 × period_s` (D4): mantém o valor conhecido e baixa a flag, nunca `None`."""
     espelho = EspelhoFake()
-    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=12.0, ok=True, period_s=TS)
+    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=12.0, quality=Quality.GOOD, period_s=TS)
 
     saida = (await assinante(espelho).step({}, ts=T0 + timedelta(seconds=3.5)))["out"]
 
@@ -161,7 +166,7 @@ async def test_valor_expirado_sai_com_ultimo_valor_e_invalido():
 async def test_tolerancia_acompanha_o_ts_do_publicador():
     """Publicador de Ts=60 s tolera 180 s — o que um limite fixo de segundos quebraria."""
     espelho = EspelhoFake()
-    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=1.0, ok=True, period_s=60.0)
+    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=1.0, quality=Quality.GOOD, period_s=60.0)
 
     bloco = assinante(espelho)
 
@@ -171,7 +176,7 @@ async def test_tolerancia_acompanha_o_ts_do_publicador():
 
 async def test_invalidez_do_publicador_propaga_mesmo_fresco():
     espelho = EspelhoFake()
-    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=3.0, ok=False, period_s=TS)
+    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=3.0, quality=Quality.BAD, period_s=TS)
 
     saida = (await assinante(espelho).step({}, ts=T0))["out"]
 
@@ -181,7 +186,7 @@ async def test_invalidez_do_publicador_propaga_mesmo_fresco():
 async def test_period_s_patologico_expira_em_vez_de_tolerar_para_sempre():
     """`period_s <= 0`/não-finito não pode virar tolerância infinita: cai para inválido."""
     espelho = EspelhoFake()
-    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=5.0, ok=True, period_s=0.0)
+    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=5.0, quality=Quality.GOOD, period_s=0.0)
 
     saida = (await assinante(espelho).step({}, ts=T0))["out"]
 
@@ -190,7 +195,7 @@ async def test_period_s_patologico_expira_em_vez_de_tolerar_para_sempre():
 
 async def test_assinante_de_outra_key_nao_ve_o_valor():
     espelho = EspelhoFake()
-    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=9.0, ok=True, period_s=TS)
+    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=9.0, quality=Quality.GOOD, period_s=TS)
 
     saida = (await assinante(espelho, key="outra").step({}, ts=T0))["out"]
 
@@ -269,7 +274,7 @@ def _build(graph: dict, reuse: dict | None = None, *, exchange: object = None) -
 
 async def test_build_definition_instancia_os_dois_blocos():
     espelho = EspelhoFake()
-    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=1.0, ok=True, period_s=2.0)
+    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=1.0, quality=Quality.GOOD, period_s=2.0)
 
     staged = _build(_grafo_bus(), exchange=espelho)
 

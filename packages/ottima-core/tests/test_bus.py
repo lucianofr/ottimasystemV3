@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 
 from ottima_core.bus import (
@@ -5,6 +6,7 @@ from ottima_core.bus import (
     CHANNEL_FLOW_COMMANDS,
     CHANNEL_OPC_WRITES,
     EventMessage,
+    ExchangeValue,
     FlowStatus,
     OpcValue,
     OpcWrite,
@@ -13,6 +15,7 @@ from ottima_core.bus import (
     channel_mpc_state,
     channel_opc_values,
 )
+from ottima_core.signal import Quality, Substatus
 
 
 def test_nomes_de_canais_prd_71():
@@ -63,8 +66,8 @@ def test_flow_status_com_ports_serializa_verbatim_spec_f3_42():
         ts=datetime(2026, 8, 4, 12, 0, 0, tzinfo=UTC),
         ports={
             "blk-1": {
-                "out": PortValue(v=42.5, ok=True),
-                "in": PortValue(v=None, ok=False),
+                "out": PortValue(v=42.5, quality=Quality.GOOD),
+                "in": PortValue(v=None, quality=Quality.BAD),
             }
         },
     )
@@ -75,8 +78,20 @@ def test_flow_status_com_ports_serializa_verbatim_spec_f3_42():
         "ts": "2026-08-04T12:00:00Z",
         "ports": {
             "blk-1": {
-                "out": {"v": 42.5, "ok": True},
-                "in": {"v": None, "ok": False},
+                "out": {
+                    "v": 42.5,
+                    "quality": 2,
+                    "substatus": 0,
+                    "hi_limited": False,
+                    "lo_limited": False,
+                },
+                "in": {
+                    "v": None,
+                    "quality": 0,
+                    "substatus": 0,
+                    "hi_limited": False,
+                    "lo_limited": False,
+                },
             }
         },
     }
@@ -85,16 +100,48 @@ def test_flow_status_com_ports_serializa_verbatim_spec_f3_42():
 def test_port_value_preserva_bool_e_float_no_round_trip():
     # O canvas desenha lâmpada para bool e número para float: True virando 1.0 é defeito
     # observável. A união em modo smart do Pydantic v2 preserva o tipo exato — travado aqui.
-    booleano = PortValue.model_validate_json(PortValue(v=True, ok=True).model_dump_json())
+    booleano = PortValue.model_validate_json(
+        PortValue(v=True, quality=Quality.GOOD).model_dump_json()
+    )
     assert booleano.v is True
 
-    numero = PortValue.model_validate_json(PortValue(v=42.5, ok=True).model_dump_json())
+    numero = PortValue.model_validate_json(
+        PortValue(v=42.5, quality=Quality.GOOD).model_dump_json()
+    )
     assert not isinstance(numero.v, bool)
     assert numero.v == 42.5
 
-    invalido = PortValue.model_validate_json(PortValue(v=None, ok=False).model_dump_json())
+    invalido = PortValue.model_validate_json(
+        PortValue(v=None, quality=Quality.BAD).model_dump_json()
+    )
     assert invalido.v is None
-    assert invalido.ok is False
+    assert invalido.quality is Quality.BAD
+
+
+def test_port_value_carrega_signal_completo_sem_ok():
+    pv = PortValue(v=1.5, quality=Quality.UNCERTAIN)
+    data = json.loads(pv.model_dump_json())
+    assert data == {
+        "v": 1.5,
+        "quality": 1,
+        "substatus": 0,
+        "hi_limited": False,
+        "lo_limited": False,
+    }
+    assert "ok" not in data
+
+
+def test_exchange_value_round_trip_com_quality():
+    ev = ExchangeValue(
+        key="k",
+        ts=datetime.now(UTC),
+        v=True,
+        quality=Quality.GOOD,
+        substatus=Substatus.NON_SPECIFIC,
+        period_s=1.0,
+    )
+    volta = ExchangeValue.model_validate_json(ev.model_dump_json())
+    assert volta.v is True and volta.quality is Quality.GOOD  # bool não vira 1.0 (A-5)
 
 
 def test_flow_status_aceita_ports_vazio_em_transicao_de_estado():

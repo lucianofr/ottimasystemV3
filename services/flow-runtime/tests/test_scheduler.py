@@ -341,8 +341,11 @@ async def test_payload_de_varredura_bate_com_a_spec(flow, subscribe):
     assert status.scan_ms == pytest.approx(2.0)
     assert status.ts == EPOCH + timedelta(seconds=TS_SECONDS)
     assert status.ports == {
-        "a": {"out": PortValue(v=1.0, ok=True)},
-        "b": {"in": PortValue(v=1.0, ok=True), "solto": PortValue(v=None, ok=False)},
+        "a": {"out": PortValue(v=1.0, quality=Quality.GOOD)},
+        "b": {
+            "in": PortValue(v=1.0, quality=Quality.GOOD),
+            "solto": PortValue(v=None, quality=Quality.BAD),
+        },
     }
 
 
@@ -535,7 +538,9 @@ async def test_hot_swap_preserva_porta_que_sobrevive_e_esquece_a_que_saiu(flow, 
     assert sink.seen[0]["in"].v == 1.0  # herdado da varredura anterior à troca
     status = FlowStatus.model_validate_json(raw[-1])
     assert "g" not in status.ports  # bloco que saiu do grafo não publica mais
-    assert status.ports["f"]["solta"] == PortValue(v=None, ok=False)  # porta nova nasce fria
+    assert status.ports["f"]["solta"] == PortValue(
+        v=None, quality=Quality.BAD
+    )  # porta nova nasce fria
 
 
 async def test_inputs_leva_somente_as_portas_com_aresta(flow):

@@ -39,6 +39,7 @@ from runtime_test_helpers import (
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ottima_core.bus import CHANNEL_EVENTS, KIND_RELOAD_REJECTED, channel_flow_status
+from ottima_core.signal import Quality
 
 Factory = Callable[..., Awaitable[Harness]]
 Collect = Callable[[str], Awaitable[Collector]]
@@ -216,7 +217,7 @@ async def test_bloco_removido_desaparece_e_bloco_novo_nasce_null(
     assert "t1" not in adocao.ports  # removido ⇒ descartado
     assert adocao.ports["t2"]["u1"].v is None  # novo ⇒ nasce null
     assert adocao.ports["t2"]["y1"].v is None
-    assert adocao.ports["t2"]["y1"].ok is False
+    assert adocao.ports["t2"]["y1"].quality is Quality.BAD
 
 
 # --------------------------------------------------------------------------------------
