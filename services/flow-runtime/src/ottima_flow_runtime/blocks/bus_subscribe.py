@@ -14,7 +14,7 @@ valor mais velho que `3 × period_s` sai com qualidade rebaixada por teto — nu
   UNCERTAIN))`: valor conhecido + qualidade rebaixada, exatamente o que o OPC-Read faz com
   `quality != GOOD`.
 
-Fora da expiração, o bloco RECONSTRÓI o `Signal` do payload verbatim (D9): `quality`,
+Fora da expiração, o bloco RECONSTRÓI o `Signal` do payload verbatim (ADR-043 D9): `quality`,
 `substatus` e os dois bits de limitação são os do publicador, nunca reinterpretados.
 
 Sem a expiração, parar o flow publicador deixaria este bloco entregando o último valor com

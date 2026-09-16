@@ -73,7 +73,7 @@ class ExchangeValue(BaseModel):
 
     `v` é `float | bool` porque as portas dos dois blocos são bivalentes (decisão A-5): um
     booleano publicado chega booleano do outro lado, sem virar `1.0` no caminho. O bloco
-    `bus_publish` transporta o `Signal` completo da entrada verbatim (D9) — `quality`,
+    `bus_publish` transporta o `Signal` completo da entrada verbatim (ADR-043 D9) — `quality`,
     `substatus` e os dois bits de limitação viajam tal como chegaram, nunca reinterpretados;
     cold start nunca é publicado, então não existe `v: None` aqui.
 

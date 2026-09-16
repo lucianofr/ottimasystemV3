@@ -11,9 +11,9 @@ ADR-043 §6):
   Também não gera evento: enquanto o Write suprimido é uma escrita de controle que deixou de
   sair (fato de operação), aqui a ausência é a partida normal de um flow.
 - **Valor inválido publica mesmo assim** — o bloco TRANSPORTA o `Signal` completo da entrada
-  verbatim (D9): `quality`, `substatus` e os dois bits de limitação viajam tal como chegaram,
-  nunca reinterpretados. Quem decide o que fazer com uma qualidade ruim é o bloco a jusante
-  (MPC marca `input_valid=False`, o Write suprime, o filtro propaga).
+  verbatim (ADR-043 D9): `quality`, `substatus` e os dois bits de limitação viajam tal como
+  chegaram, nunca reinterpretados. Quem decide o que fazer com uma qualidade ruim é o bloco
+  a jusante (MPC marca `input_valid=False`, o Write suprime, o filtro propaga).
 
 `period_s` viaja em todo quadro: é o Ts do flow que contém este bloco e é o que permite ao
 assinante derivar a validade sem nenhum campo de config (D4).

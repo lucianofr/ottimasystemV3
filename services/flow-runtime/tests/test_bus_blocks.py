@@ -2,7 +2,7 @@
 
 - **bus_publish**: publica `ExchangeValue` em `flow.exchange` a cada varredura, carimbando o
   Ts do próprio flow em `period_s`. Cold start NÃO publica; qualquer qualidade publica —
-  o `Signal` completo da entrada viaja verbatim (D9).
+  o `Signal` completo da entrada viaja verbatim (ADR-043 D9).
 - **bus_subscribe**: lê do espelho e decide validade por IDADE (D4) — `key` nunca publicada é
   cold (`None`, `quality=BAD`); valor mais velho que `3 × period_s` sai com o último valor e
   qualidade rebaixada por teto (`min(quality, UNCERTAIN)`), nunca elevada (D7).
@@ -161,6 +161,19 @@ async def test_valor_expirado_sai_com_ultimo_valor_e_invalido():
     saida = (await assinante(espelho).step({}, ts=T0 + timedelta(seconds=3.5)))["out"]
 
     assert (saida.v, saida.ok) == (12.0, False)
+
+
+async def test_bad_expirado_permanece_bad_nunca_sobe_para_uncertain():
+    """D7 (ADR-043 §6): o teto é `min(quality, UNCERTAIN)` — NUNCA eleva. Um publicador que já
+    manda `BAD` teria a invalidez lavada para `UNCERTAIN` se a expiração usasse `UNCERTAIN`
+    puro em vez do `min()`; `.ok`/`.ok is False` não pega essa regressão porque BAD e
+    UNCERTAIN são igualmente `ok=False`."""
+    espelho = EspelhoFake()
+    espelho.valores[KEY] = ExchangeValue(key=KEY, ts=T0, v=3.0, quality=Quality.BAD, period_s=TS)
+
+    saida = (await assinante(espelho).step({}, ts=T0 + timedelta(seconds=3.5)))["out"]
+
+    assert saida.quality is Quality.BAD
 
 
 async def test_tolerancia_acompanha_o_ts_do_publicador():
