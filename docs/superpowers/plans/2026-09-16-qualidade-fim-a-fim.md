@@ -169,6 +169,8 @@ Expected: FAIL — `ImportError: cannot import name 'Signal' from 'ottima_flow_r
 Substituir o bloco `@dataclass PortSample` (base.py:29-38) por:
 
 ```python
+from dataclasses import KW_ONLY, dataclass
+
 from ottima_core.signal import Quality, Substatus
 
 
@@ -182,6 +184,12 @@ class Signal:
     """
 
     v: float | bool | None
+    # `quality` KEYWORD-ONLY por segurança (ADR-043 §3): o construtor antigo era
+    # posicional `PortSample(v, ok: bool)` em 60+ call sites. Sem kw-only, um
+    # `Signal(x, True)` sobrevivente guardaria `True` CRU (dataclass não coage):
+    # `ok` viraria False e o bool contaminaria `min()` e o payload JSON — e o CI não
+    # tem mypy (ADR-035). Kw-only vira TypeError na coleta do pytest.
+    _: KW_ONLY
     quality: Quality = Quality.BAD
     substatus: Substatus = Substatus.NON_SPECIFIC
     hi_limited: bool = False
@@ -202,38 +210,42 @@ Docstring de `null_outputs` continua verdadeira ("nulas e inválidas").
 
 - [ ] **Step 4: Migrar TODOS os construtores pelo mapa**
 
-Regra geral: `PortSample(x, True)` → `Signal(x, Quality.GOOD)`; `PortSample(x, False)` →
-`Signal(x)` (BAD default); `PortSample(x, sample.ok)` → `Signal(x, sample.quality)`
-(propagação D6). Sites e formas exatas:
+`quality` é KEYWORD-ONLY: escreva SEMPRE `quality=`. A forma posicional é um erro de
+corrupção silenciosa (bool→IntEnum), e é por isso que o campo é kw-only — se algum
+resíduo posicional escapar, o pytest falha na coleta com `TypeError`.
+
+Regra geral: `PortSample(x, True)` → `Signal(x, quality=Quality.GOOD)`;
+`PortSample(x, False)` → `Signal(x)` (BAD default); `PortSample(x, sample.ok)` →
+`Signal(x, quality=sample.quality)` (propagação D6). Sites e formas exatas:
 
 | arquivo:linha | de | para |
 |---|---|---|
 | scheduler.py:53 | `COLD = PortSample(None, False)` | `COLD = Signal(None)` |
-| scheduler.py:367 | `PortSample(seed, True)` | `Signal(seed, Quality.GOOD)` (semente ADR-040 nasce GOOD) |
+| scheduler.py:367 | `PortSample(seed, True)` | `Signal(seed, quality=Quality.GOOD)` (semente ADR-040 nasce GOOD) |
 | opc_read.py:46 | `PortSample(None, False)` | `Signal(None)` |
-| opc_read.py:50 | `PortSample(value, tag_value.quality == 0)` | `Signal(value, _QUALITY_FROM_OPC.get(tag_value.quality, Quality.BAD))` + no topo do módulo: `_QUALITY_FROM_OPC = {0: Quality.GOOD, 1: Quality.UNCERTAIN, 2: Quality.BAD}` — ÚNICA tradução OpcValue→Quality (ADR-043 §4) |
-| constant.py:29 | `PortSample(self._value, True)` | `Signal(self._value, Quality.GOOD)` |
-| scaler.py:62 | `PortSample(escalado, sample.ok)` | `Signal(escalado, sample.quality)` |
-| first_order.py:57 | `PortSample(self._lag.step(value), sample.ok)` | `Signal(self._lag.step(value), sample.quality)` |
-| kalman.py:70 | `PortSample(self._x, sample.ok)` | `Signal(self._x, sample.quality)` |
-| integrator.py:76 | `PortSample(0.0, sample.ok)` | `Signal(0.0, sample.quality)` |
-| integrator.py:84,96 | `PortSample(self._total, False)` | `Signal(self._total)` (vira UNCERTAIN na Task 3) |
-| integrator.py:91 | `PortSample(self._total, sample.ok)` | `Signal(self._total, sample.quality)` |
-| integrator.py:99 | `PortSample(self._total, True)` | `Signal(self._total, Quality.GOOD)` |
-| tfs.py:197-210 | `ok = True` … `ok = ok and sample.ok` … `PortSample(total, ok)` | `q = Quality.GOOD` … `q = min(q, sample.quality)` … `Signal(total, q)` — POR LINHA, só elementos habilitados (forma quality do AND, ADR-022; linha toda desabilitada segue GOOD) |
-| script.py:98-101 | `ok = all(sample.ok …)` … `PortSample(result.outputs[port], ok)` | `q = min((s.quality for s in inputs.values()), default=Quality.GOOD)` … `Signal(result.outputs[port], q)` (D6/D8) |
+| opc_read.py:50 | `PortSample(value, tag_value.quality == 0)` | `Signal(value, quality=_QUALITY_FROM_OPC.get(tag_value.quality, Quality.BAD))` + no topo do módulo: `_QUALITY_FROM_OPC = {0: Quality.GOOD, 1: Quality.UNCERTAIN, 2: Quality.BAD}` — ÚNICA tradução OpcValue→Quality (ADR-043 §4) |
+| constant.py:29 | `PortSample(self._value, True)` | `Signal(self._value, quality=Quality.GOOD)` |
+| scaler.py:62 | `PortSample(escalado, sample.ok)` | `Signal(escalado, quality=sample.quality)` |
+| first_order.py:57 | `PortSample(self._lag.step(value), sample.ok)` | `Signal(self._lag.step(value), quality=sample.quality)` |
+| kalman.py:70 | `PortSample(self._x, sample.ok)` | `Signal(self._x, quality=sample.quality)` |
+| integrator.py:76 | `PortSample(0.0, sample.ok)` | `Signal(0.0, quality=sample.quality)` |
+| integrator.py:84,96 | `PortSample(self._total, False)` | `Signal(self._total, quality=sample.quality)` — preserva a qualidade da entrada; a Task 3 aplica o teto UNCERTAIN |
+| integrator.py:91 | `PortSample(self._total, sample.ok)` | `Signal(self._total, quality=sample.quality)` |
+| integrator.py:99 | `PortSample(self._total, True)` | `Signal(self._total, quality=Quality.GOOD)` |
+| tfs.py:197-210 | `ok = True` … `ok = ok and sample.ok` … `PortSample(total, ok)` | `q = Quality.GOOD` … `q = min(q, sample.quality)` … `Signal(total, quality=q)` — POR LINHA, só elementos habilitados (forma quality do AND, ADR-022; linha toda desabilitada segue GOOD) |
+| script.py:98-101 | `ok = all(sample.ok …)` … `PortSample(result.outputs[port], ok)` | `q = min((s.quality for s in inputs.values()), default=Quality.GOOD)` … `Signal(result.outputs[port], quality=q)` (D6/D8) |
 | pid.py:126-128 | `ok_entradas = all(sample.ok and math.isfinite(float(sample.v)) …)` | `q_entradas = min((s.quality for s in inputs.values()), default=Quality.GOOD)`; em seguida `if any(not math.isfinite(float(s.v)) for s in inputs.values()): q_entradas = Quality.BAD` (não-finito era inválido; continua) |
-| pid.py:157 | `PortSample(resultado, ok_entradas)` | `Signal(resultado, q_entradas)` |
-| pid.py:161 | `PortSample(self._last, False)` | `Signal(self._last)` (vira UNCERTAIN na Task 3) |
+| pid.py:157 | `PortSample(resultado, ok_entradas)` | `Signal(resultado, quality=q_entradas)` |
+| pid.py:159-161 | `def _retido(self)` … `PortSample(self._last, False)` | `def _retido(self, q: Quality)` … `Signal(self._last, quality=q)`; os chamadores passam `q_entradas` (a Task 3 aplica o teto). Localize-os com `grep -n "_retido" services/flow-runtime/src/ottima_flow_runtime/blocks/pid.py` |
 | fuzzy.py:147-148 | `ok_entradas = all(sample.ok and math.isfinite(…))` | mesmo par `min(…)` + rebaixa a BAD por não-finito do pid acima |
-| fuzzy.py:187 | `PortSample(value, ok_entradas)` | `Signal(value, q_entradas)` |
-| fuzzy.py:173,191 | `PortSample(…, False)` | `Signal(…)` (vira UNCERTAIN na Task 3) |
+| fuzzy.py:187 | `PortSample(value, ok_entradas)` | `Signal(value, quality=q_entradas)` |
+| fuzzy.py:173,191 | `PortSample(…, False)` | `Signal(…, quality=q_entradas)` — a Task 3 aplica o teto. Em `:173` (exceção), `q_entradas` pode ainda não ter sido calculado: compute-o antes do `try` ou derive de `inputs` no `except` |
 | mpc.py:462 | `PortSample(None, False)` | `Signal(None)` |
 | mpc.py:792 | `PortSample(None, False)` | `Signal(None)` |
-| mpc.py:827 | `PortSample(v, ok)` | `Signal(v, Quality.GOOD if ok else Quality.BAD)` (semântica própria do MPC preservada) |
-| mpc.py:840-841 | `PortSample(1.0 if … else 0.0, ok)` | `Signal(1.0 if … else 0.0, Quality.GOOD if ok else Quality.BAD)` |
+| mpc.py:827 | `PortSample(v, ok)` | `Signal(v, quality=Quality.GOOD if ok else Quality.BAD)` (semântica própria do MPC preservada) |
+| mpc.py:840-841 | `PortSample(1.0 if … else 0.0, ok)` | `Signal(1.0 if … else 0.0, quality=Quality.GOOD if ok else Quality.BAD)` |
 | bus_subscribe.py:52 | `PortSample(None, False)` | `Signal(None)` |
-| bus_subscribe.py:60 | `PortSample(value.v, value.ok and fresco)` | `Signal(value.v, value.quality if fresco else Quality.BAD)` (payload ainda tem `ok` até a Task 4 — use `Quality.GOOD if value.ok else Quality.BAD` como quality do payload NESTA task; a Task 4 troca pelo campo real) |
+| bus_subscribe.py:60 | `PortSample(value.v, value.ok and fresco)` | `q_pub = Quality.GOOD if value.ok else Quality.BAD` (payload só ganha `quality` na Task 4); `Signal(value.v, quality=q_pub if fresco else min(q_pub, Quality.UNCERTAIN))` — expiração REBAIXA, nunca eleva (D7) |
 
 Em cada arquivo: trocar o import `from .base import Block, PortSample` por
 `from .base import Block, Signal` (+ `from ottima_core.signal import Quality` onde usado)
@@ -288,46 +300,72 @@ Os quatro pontos internos onde "último valor conhecido, inválido" vira UNCERTA
 - [ ] **Step 1: Write the failing tests** (um por bloco, no arquivo de teste existente de cada um)
 
 ```python
-# services/flow-runtime/tests/test_pid_block.py (acrescentar)
-async def test_retido_sai_uncertain_com_ultimo_valor(pid_convergido):
-    """RF-553 + ADR-043 D7: retenção = último bom com UNCERTAIN, não BAD."""
-    saida = await pid_convergido.step({"pv": Signal(float("nan"), Quality.GOOD), "sp": Signal(50.0, Quality.GOOD)})
-    assert saida["out"].ok is False
+# services/flow-runtime/tests/test_pid_block.py (acrescentar OS DOIS)
+async def test_retido_com_entrada_boa_sai_uncertain(pid_convergido):
+    """RF-553 + ADR-043 D7: valor não-finito com entrada boa = retenção genuína."""
+    saida = await pid_convergido.step(
+        {"pv": Signal(float("nan"), quality=Quality.GOOD), "sp": Signal(50.0, quality=Quality.GOOD)}
+    )
     assert saida["out"].quality is Quality.UNCERTAIN
+    assert saida["out"].ok is False
     assert saida["out"].v is not None
+
+
+async def test_retido_nao_lava_entrada_bad(pid_convergido):
+    """Monotonicidade (D7): retenção NUNCA eleva — PV BAD retido sai BAD."""
+    saida = await pid_convergido.step(
+        {"pv": Signal(10.0, quality=Quality.BAD), "sp": Signal(50.0, quality=Quality.GOOD)}
+    )
+    assert saida["out"].quality is Quality.BAD
 ```
 
 ```python
-# services/flow-runtime/tests/test_integrator_block.py (acrescentar)
-async def test_lacuna_retem_total_com_uncertain(integrator_com_total):
-    saida = await integrator_com_total.step({"in": Signal(1.0, Quality.BAD)})
+# services/flow-runtime/tests/test_integrator_block.py (acrescentar OS DOIS)
+async def test_lacuna_por_entrada_bad_mantem_bad(integrator_com_total):
+    saida = await integrator_com_total.step({"in": Signal(1.0, quality=Quality.BAD)})
+    assert saida["out"].quality is Quality.BAD  # não lava o sensor ruim
+    assert saida["out"].v is not None           # total retido
+
+
+async def test_lacuna_por_valor_nao_finito_sai_uncertain(integrator_com_total):
+    saida = await integrator_com_total.step({"in": Signal(float("nan"), quality=Quality.GOOD)})
     assert saida["out"].quality is Quality.UNCERTAIN
-    assert saida["out"].ok is False
 ```
 
 ```python
-# services/flow-runtime/tests/test_fuzzy_block.py (acrescentar)
-async def test_retencao_sai_uncertain(fuzzy_apos_bom):
-    saida = await fuzzy_apos_bom.step({"in1": Signal(float("inf"), Quality.GOOD)})
+# services/flow-runtime/tests/test_fuzzy_block.py (acrescentar OS DOIS)
+async def test_retencao_com_entrada_boa_sai_uncertain(fuzzy_apos_bom):
+    saida = await fuzzy_apos_bom.step({"in1": Signal(float("inf"), quality=Quality.GOOD)})
     assert all(s.quality is Quality.UNCERTAIN for s in saida.values())
+
+
+async def test_retencao_nao_lava_entrada_bad(fuzzy_apos_bom):
+    saida = await fuzzy_apos_bom.step({"in1": Signal(1.0, quality=Quality.BAD)})
+    assert all(s.quality is Quality.BAD for s in saida.values())
 ```
 
 (Adapte os fixtures aos nomes REAIS já existentes em cada arquivo de teste — os três
 arquivos já têm fixtures que levam o bloco ao estado "tem último valor bom"; reuse-os.
-NÃO crie fixture nova se uma equivalente existir.)
+NÃO crie fixture nova se uma equivalente existir. Nos testes de fuzzy, complete `inputs`
+com TODAS as portas IN que o fixture exigir.)
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest services/flow-runtime/tests/test_pid_block.py services/flow-runtime/tests/test_integrator_block.py services/flow-runtime/tests/test_fuzzy_block.py -q`
-Expected: os 3 novos FALHAM com `quality is BAD`; o resto PASSA. (Se os caminhos de teste
-tiverem outro nome, localize com `grep -rln "def test_.*retid\|_retido\|retención\|retencao" services/flow-runtime/tests`.)
+Expected: os 3 testes de UNCERTAIN genuíno FALHAM (recebem BAD, porque a Task 2 deixou
+`quality=q_entradas` sem teto); os 3 de monotonicidade JÁ PASSAM (é o que a Task 2 entregou)
+— eles são a rede que impede a Task 3 de virar um upgrade. (Se os arquivos tiverem outro
+nome, localize com `grep -rln "_retido\|retencao\|retido" services/flow-runtime/tests`.)
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implement — teto UNCERTAIN, sem elevar**
 
-- `pid.py:161`: `return {"out": Signal(self._last, Quality.UNCERTAIN)}` — e docstring de `_retido` ganha "(UNCERTAIN, ADR-043 D7)".
-- `fuzzy.py:173`: `port: Signal(sample.v, Quality.UNCERTAIN) for …`
-- `fuzzy.py:191`: `outputs[port] = Signal(self._last_outputs[port].v, Quality.UNCERTAIN)`
-- `integrator.py:84,96`: `return {"out": Signal(self._total, Quality.UNCERTAIN)}`
+A regra é `min(Quality.UNCERTAIN, q_entradas)` em toda retenção: o teto rebaixa uma
+entrada boa a UNCERTAIN e deixa BAD passar intacto.
+
+- `pid.py`: `_retido(self, q: Quality)` → `return {"out": Signal(self._last, quality=min(Quality.UNCERTAIN, q))}`; docstring: "último bom, rebaixado a UNCERTAIN sem elevar entrada BAD (ADR-043 D7)". Chamadores seguem passando `q_entradas`.
+- `fuzzy.py:173` (exceção): `port: Signal(sample.v, quality=min(Quality.UNCERTAIN, q_entradas)) for …`
+- `fuzzy.py:191` (saída não-finita): `outputs[port] = Signal(self._last_outputs[port].v, quality=min(Quality.UNCERTAIN, q_entradas))`
+- `integrator.py:84,96`: `return {"out": Signal(self._total, quality=min(Quality.UNCERTAIN, sample.quality))}`
 
 - [ ] **Step 4: Run tests to verify pass**
 
@@ -337,7 +375,7 @@ Run: mesmo comando do Step 2. Expected: PASS integral.
 
 ```bash
 git add -A
-git commit -m "feat(flow-runtime): retenção emite UNCERTAIN — UncertainLastUsable (ADR-043 D7)"
+git commit -m "feat(flow-runtime): retenção rebaixa a UNCERTAIN sem elevar BAD (ADR-043 D7)"
 ```
 
 ---

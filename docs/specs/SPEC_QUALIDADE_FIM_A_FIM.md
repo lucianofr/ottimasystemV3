@@ -26,7 +26,7 @@ para que qualquer implementação futura obedeça.
 | D4 | **`Substatus` É o campo "status para uso futuro"** — nenhum campo novo. Códigos novos entram por ADR quando houver necessidade real. O wire carrega o Signal completo: `{v, quality, substatus, hi_limited, lo_limited}`. |
 | D5 | **`ok` vira propriedade derivada** (`quality is Quality.GOOD`) — sai do wire e do construtor; legado que lê `.ok` compila e mantém comportamento. `as_signal`/`make_signal` morrem (promoção desnecessária). |
 | D6 | **Propagação default:** `quality_out` = pior (`min` na polaridade Fieldbus) das entradas **que alimentaram o cálculo daquela saída** — não "todas as conectadas". |
-| D7 | **Retenção emite UNCERTAIN** (UncertainLastUsable): PID `_retido` (RF-553), retenção do fuzzy, lacuna/dt patológico do integrator, expiração do `bus_subscribe`. Comportamento de atuação idêntico (uncertain invalida como BAD); diagnóstico/UI (`flow.status`/WS/exchange) distinguem "valor retido" de "sem valor" — o histórico NÃO (§4). |
+| D7 | **Retenção emite `min(UNCERTAIN, pior das entradas consumidas)`** (UncertainLastUsable) nos quatro caminhos: PID `_retido` (RF-553), retenção do fuzzy, lacuna/dt patológico do integrator, expiração do `bus_subscribe`. **NUNCA eleva qualidade** — entrada BAD retida sai BAD (monotonicidade: lavar um sensor ruim em "apenas retido" seria acionável no dia em que `STATUS_OPTS` tornar UNCERTAIN usável). UNCERTAIN genuíno = entrada boa + valor não-finito/lacuna interna. Atuação idêntica hoje (uncertain invalida como BAD); diagnóstico/UI (`flow.status`/WS/exchange) distinguem "valor retido" de "sem valor" — o histórico NÃO (§4). |
 | D8 | **Script e tag calculada não veem qualidade** — runtime carimba pior-das-entradas automaticamente. API do sandbox (ADR-018/033) inalterada. |
 | D9 | **Bloco não-shell emite `substatus=NON_SPECIFIC` e `hi_limited=lo_limited=False`** — idêntico ao zeramento que `as_signal` faz hoje em toda aresta legada. Só o shell PRODUZ substatus/limites (bits direcionais, ADR-039 §4.9); blocos de barramento TRANSPORTAM verbatim. Propagação real por blocos de transformação exigiria regra de inversão por sinal de ganho (scaler reverso) — ADR futuro. |
 
@@ -44,6 +44,12 @@ class Substatus(IntEnum):                      # inalterado (ADR-039)
 @dataclass(frozen=True, slots=True)
 class Signal:
     v: float | bool | None
+    # `quality` KEYWORD-ONLY por segurança: o construtor antigo era posicional
+    # `PortSample(v, ok: bool)` em 60+ call sites. Sem kw-only, um `Signal(x, True)`
+    # sobrevivente guardaria `True` CRU no campo (dataclass não coage): `ok` viraria
+    # False e o bool contaminaria `min()` e o payload JSON — e o CI não tem mypy
+    # (ADR-035). Kw-only vira TypeError na coleta do pytest. Verificado em 3.12.9.
+    _: KW_ONLY
     quality: Quality = Quality.BAD
     substatus: Substatus = Substatus.NON_SPECIFIC
     hi_limited: bool = False
@@ -59,7 +65,7 @@ COLD = Signal(None)                            # BAD / NON_SPECIFIC — cold sta
 Invariantes:
 - `v is None` ⇒ cold start; continua o gatilho de `has_cold_input` (inalterado).
 - `ok` não é campo em lugar nenhum (memória ou wire); é sempre derivado.
-- Semente de realimentação (ADR-040 D4): `Signal(seed, Quality.GOOD)`.
+- Semente de realimentação (ADR-040 D4): `Signal(seed, quality=Quality.GOOD)`.
 
 ## 4. Tradução nas bordas (as duas únicas)
 
@@ -81,10 +87,10 @@ uncertain (medição real) segue persistindo valor como hoje — a regra do reco
 | opc_read | tradução da borda (§4); substatus NON_SPECIFIC |
 | constant | GOOD sempre (gerador) |
 | scaler, lag, first_order, kalman, filtros | default D6 (pior das entradas consumidas); emissão D9 (substatus/limites zerados) |
-| integrator | qualidade sai SÓ de `in`; `reset` fica fora (decisão documentada no módulo). Lacuna/dt patológico → saída UNCERTAIN (D7) |
+| integrator | qualidade sai SÓ de `in`; `reset` fica fora (decisão documentada no módulo). Lacuna/dt patológico → `min(UNCERTAIN, q_in)` (D7) |
 | TFS | POR LINHA de saída: `min()` dos elementos habilitados da linha (forma quality do AND atual, ADR-022); linha toda desabilitada → GOOD |
-| PID (shell) | ADR-039 vigente + emenda §4.1; `_retido` (RF-553) → UNCERTAIN (D7); saídas OUT/BKCAL_OUT mantêm semântica própria (OOS→BAD etc.) |
-| fuzzy | retenção → UNCERTAIN (D7); execução ok → default D6 |
+| PID (shell) | ADR-039 vigente + emenda §4.1; `_retido` (RF-553) → `min(UNCERTAIN, q_entradas)` (D7); saídas OUT/BKCAL_OUT mantêm semântica própria (OOS→BAD etc.) |
+| fuzzy | retenção (exceção ou saída não-finita) → `min(UNCERTAIN, q_entradas)` (D7); execução ok → default D6 |
 | MPC | portas de saída mantêm semântica atual; disponibilidade de MV (RF-626/ADR-028) INTOCADA — `mpc/availability.py` lê `tag.quality` do `ValueSnapshot`, não de porta |
 | script | default D6 automático; sandbox cego a qualidade (D8) |
 | opc_write | consumidor: suprime escrita se `not ok` (= `quality is not GOOD`) — comportamento atual |
@@ -146,4 +152,10 @@ compatibilidade dupla. Nenhuma DDL.
 - Propagação de `substatus`/`hi_limited`/`lo_limited` por blocos de transformação (D9) — ADR
   futuro com regra de inversão por sinal de ganho.
 - Emenda a RF-804/ADR-037 — persistência não muda.
+- Histórico NÃO distingue UNCERTAIN de BAD (ambos → `quality=2` → NULL): o tri-state vive
+  só em porta, `flow.status`/WS e `flow.exchange`. Retirada parcial e consciente do que a
+  pergunta de retenção do brainstorm oferecia ("valor retido historiado com quality=1"):
+  persistir o valor congelado o injetaria em `avg`/`sum`/`samples_1m` (dano que o ADR-037
+  escolheu NULL para evitar). Distinguir no histórico exigiria emendar ADR-037 para
+  `quality != 0 → NULL` — ADR futuro, se algum dia for pedido.
 - Persistência de substatus/limites; DDL de qualquer espécie.
