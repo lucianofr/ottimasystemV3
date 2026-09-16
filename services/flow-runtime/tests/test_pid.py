@@ -209,6 +209,18 @@ async def test_entrada_invalida_e_finita_e_processada_e_propagada():
     assert saida.ok is False
 
 
+async def test_uncertain_sem_retencao_computa_saida_nova_e_marca_uncertain():
+    """D6 (ADR-043 §4): PV finita mas UNCERTAIN não cai na retenção (§3.1 é sobre valor
+    não-finito, não sobre `quality != GOOD`) — o controlador COMPUTA a saída desta
+    varredura e a marca UNCERTAIN, o mínimo das entradas (nem eleva a GOOD, nem rebaixa
+    a BAD)."""
+    controlador = bloco(kc=1.0, ti_seconds=0.0, td_seconds=0.0, setpoint=10.0)
+    saida = (await controlador.step({"pv": Signal(4.0, quality=Quality.UNCERTAIN)}))["out"]
+    assert saida.v == pytest.approx(1.0 * (10.0 - 4.0))
+    assert saida.quality is Quality.UNCERTAIN
+    assert saida.ok is False
+
+
 async def test_auto_mode_desligado_nunca_emite_ok_true():
     controlador = bloco(kc=1.0, ti_seconds=0.0, td_seconds=0.0, setpoint=10.0, auto_mode=False)
     saida = await alimenta(controlador, 4.0)

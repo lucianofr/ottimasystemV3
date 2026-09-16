@@ -19,6 +19,7 @@ import httpx
 import redis
 
 from ottima_core.bus import channel_flow_status
+from ottima_core.signal import Quality
 
 from .conftest import (
     NODE_WD_FROM_SYSTEM,
@@ -334,6 +335,11 @@ def porta(status: dict[str, Any], block_id: str, handle: str) -> dict[str, Any]:
 
 def valor(status: dict[str, Any], block_id: str, handle: str) -> float | bool | None:
     return porta(status, block_id, handle)["v"]
+
+
+def porta_valida(status: dict[str, Any], block_id: str, handle: str) -> bool:
+    """Sucede `ok` no payload de `flow.status.ports`: válida ≡ `quality == GOOD` (ADR-043 §4)."""
+    return porta(status, block_id, handle)["quality"] == Quality.GOOD
 
 
 def de_varredura(status: dict[str, Any]) -> bool:

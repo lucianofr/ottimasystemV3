@@ -128,6 +128,19 @@ async def test_invalidez_da_entrada_e_processada_e_propagada():
     assert saida.v == pytest.approx(analitico(100.0, 120.0, 10.0, 1), rel=1e-12)
 
 
+async def test_uncertain_propaga_sem_elevar_nem_rebaixar():
+    """D6 (ADR-043 §4): entrada genuinamente UNCERTAIN (não retida) atravessa o filtro e
+    sai UNCERTAIN — nem elevada a GOOD nem rebaixada a BAD."""
+    filtro = bloco(tau=10.0)
+    await alimenta(filtro, 100.0)
+
+    saida = (await filtro.step({"in": Signal(120.0, quality=Quality.UNCERTAIN)}))["out"]
+
+    assert saida.quality is Quality.UNCERTAIN
+    assert saida.ok is False
+    assert saida.v == pytest.approx(analitico(100.0, 120.0, 10.0, 1), rel=1e-12)
+
+
 async def test_reset_volta_a_partir_do_valor_medido():
     filtro = bloco(tau=10.0)
     await rampa(filtro, 100.0, 5)

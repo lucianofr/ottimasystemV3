@@ -38,6 +38,7 @@ from .f3_support import (
     fabrica_de_flows,
     montar_grafo,
     porta,
+    porta_valida,
     reprovar,
 )
 
@@ -129,7 +130,7 @@ def test_e2e_fz_01_fuzzy_deployado_publica_4_saidas_finitas(
         for i, saida in enumerate(saidas, start=1):
             # RF-542: `ok=True` obriga valor finito; `ok=False` traz valor retido (finito ou
             # `None` antes do primeiro bom) — em nenhum caso um nan/inf sai como válido.
-            if saida["ok"]:
+            if porta_valida(amostra, "fuzzy", f"OUT{i}"):
                 assert isinstance(saida["v"], float) and math.isfinite(saida["v"]), (
                     f"OUT{i} não-finita com ok=True — RF-542 violado: {saida}"
                 )
@@ -137,7 +138,7 @@ def test_e2e_fz_01_fuzzy_deployado_publica_4_saidas_finitas(
                 assert saida["v"] is None or math.isfinite(saida["v"]), (
                     f"OUT{i} com ok=False propagando não-finito: {saida}"
                 )
-        if all(saida["ok"] for saida in saidas):
+        if all(porta_valida(amostra, "fuzzy", f"OUT{i}") for i in range(1, 5)):
             inferencias_completas += 1
 
     # Prova de que o motor está inferindo, não só retendo: a senoide só toca os pontos

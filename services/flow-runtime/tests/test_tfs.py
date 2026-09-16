@@ -257,6 +257,18 @@ async def test_ok_reflete_apenas_as_entradas_consumidas_pela_linha():
     assert out["y2"].ok is True
 
 
+async def test_uncertain_propaga_sem_elevar_nem_rebaixar():
+    """D6 (ADR-043 §4): entrada genuinamente UNCERTAIN (não retida) atravessa a linha e sai
+    UNCERTAIN — nem elevada a GOOD nem rebaixada a BAD."""
+    block = tfs(y1=(iopdt(Ki=1.0), off()))
+
+    out = await block.step({"u1": Signal(1.0, quality=Quality.UNCERTAIN)})
+
+    assert out["y1"].v == pytest.approx(TS)
+    assert out["y1"].quality is Quality.UNCERTAIN
+    assert out["y1"].ok is False
+
+
 async def test_invalidez_de_entrada_nao_impede_a_integracao():
     """Decisão A-6: com valor conhecido o TFS continua integrando e só propaga a flag."""
     block = tfs(y1=(iopdt(Ki=1.0), off()))

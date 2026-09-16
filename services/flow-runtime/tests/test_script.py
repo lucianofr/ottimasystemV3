@@ -859,6 +859,31 @@ async def test_invalidez_propaga_para_as_saidas(redis_client, bus, pool):
     assert await block.step({"IN1": Signal(2.0)}) == {"OUT1": Signal(6.0)}
 
 
+async def test_uncertain_propaga_sem_elevar_nem_rebaixar(redis_client, bus, pool):
+    """D6 (ADR-043 §4): entrada genuinamente UNCERTAIN (não retida) executa o script e sai
+    UNCERTAIN — nem elevada a GOOD nem rebaixada a BAD (extensão da decisão A-6 a `quality`)."""
+    block = bloco("OUT1 = IN1 * 3\n", redis_client, pool)
+
+    saida = await block.step({"IN1": Signal(2.0, quality=Quality.UNCERTAIN)})
+
+    assert saida == {"OUT1": Signal(6.0, quality=Quality.UNCERTAIN)}
+
+
+async def test_uncertain_e_good_misturadas_saem_uncertain_pelo_pior_de(redis_client, bus, pool):
+    """D6: bloco multi-entrada tira o `min()` das qualidades das entradas que alimentaram a
+    saída — uma GOOD e uma UNCERTAIN saem UNCERTAIN, nunca GOOD (o pior vence)."""
+    block = bloco("OUT1 = IN1 + IN2\n", redis_client, pool, n_inputs=2)
+
+    saida = await block.step(
+        {
+            "IN1": Signal(2.0, quality=Quality.GOOD),
+            "IN2": Signal(3.0, quality=Quality.UNCERTAIN),
+        }
+    )
+
+    assert saida == {"OUT1": Signal(5.0, quality=Quality.UNCERTAIN)}
+
+
 async def test_cold_start_nao_chama_o_script(redis_client, bus, pool):
     """Spec §3.0: entrada sem valor não executa — provado pelo contador no `state`."""
     code = "state['n'] = state.get('n', 0) + 1\nOUT1 = float(state['n'])\n"

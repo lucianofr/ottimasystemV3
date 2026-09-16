@@ -57,6 +57,7 @@ from .f3_support import (
     grafo_script_tfs,
     montar_grafo,
     porta,
+    porta_valida,
     reprovar,
     salvar,
     valor,
@@ -526,7 +527,9 @@ def test_e2e_f3_10_script_em_erro_suprime_a_escrita(
     for amostra in amostras:
         assert amostra["state"] == "running"
         saida = porta(amostra, "calculo", "OUT1")
-        assert saida["v"] is None and saida["ok"] is False, f"saída deveria ser nula: {saida}"
+        assert saida["v"] is None and not porta_valida(amostra, "calculo", "OUT1"), (
+            f"saída deveria ser nula: {saida}"
+        )
         assert porta(amostra, "escrita", "in")["v"] is None
 
     assert opcsim_client.read(NODE_MIRROR_FLOAT) == pytest.approx(espelho_antes), (

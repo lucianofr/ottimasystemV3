@@ -136,7 +136,8 @@ uncertain (medição real) segue persistindo valor como hoje — a regra do reco
 | scaler, lag, first_order, kalman, filtros | default D6 (pior das entradas consumidas); emissão D9 (substatus/limites zerados) |
 | integrator | qualidade sai SÓ de `in`; `reset` fica fora (decisão documentada no módulo). Lacuna/dt patológico → `min(UNCERTAIN, q_in)` (D7) |
 | TFS | POR LINHA de saída: `min()` dos elementos habilitados da linha (forma quality do AND atual, ADR-022); linha toda desabilitada → GOOD |
-| PID (shell) | ADR-039 vigente + emenda §4.1 (§7.1 abaixo); `_retido` (RF-553) → `min(UNCERTAIN, q_entradas)` (D7); saídas OUT/BKCAL_OUT mantêm semântica própria (OOS→BAD etc.) |
+| PID (kernel standalone, `services/flow-runtime/.../blocks/pid.py`) | `_retido` (RF-553) → `min(UNCERTAIN, q_entradas)` (D7); execução ok → default D6 |
+| PID (shell, `blocks/shell/block.py::_emit`) | ADR-039 vigente + emenda §4.1 (§7.1 abaixo); saídas OUT/BKCAL_OUT com semântica PRÓPRIA e BINÁRIA (OOS→BAD, senão GOOD; `bkcal_out` sempre GOOD) — mecanismo distinto do `_retido` do kernel, nunca `min(UNCERTAIN, ...)` |
 | fuzzy | retenção (exceção ou saída não-finita) → `min(UNCERTAIN, q_entradas)` (D7); execução ok → default D6 |
 | MPC | portas de saída mantêm semântica atual; disponibilidade de MV (RF-626/ADR-028) INTOCADA — `mpc/availability.py` lê `tag.quality` do `ValueSnapshot`, não de porta |
 | script | default D6 automático; sandbox cego a qualidade (D8) |

@@ -109,6 +109,16 @@ async def test_scaler_propaga_invalidez_da_entrada():
     assert saida.ok is False
 
 
+async def test_scaler_propaga_uncertain_sem_elevar_nem_rebaixar():
+    """D6 (ADR-043 §4): entrada genuinamente UNCERTAIN (não retida) atravessa o bloco de
+    passagem e sai UNCERTAIN — nem elevada a GOOD nem rebaixada a BAD."""
+    saida = (await scaler().step({"in": Signal(50.0, quality=Quality.UNCERTAIN)}))["out"]
+
+    assert saida.v == pytest.approx(12.0)
+    assert saida.quality is Quality.UNCERTAIN
+    assert saida.ok is False
+
+
 async def test_scaler_com_cold_start_nao_executa():
     saida = (await scaler().step({"in": Signal(None)}))["out"]
 
