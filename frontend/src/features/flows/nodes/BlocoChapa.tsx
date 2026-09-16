@@ -2,6 +2,7 @@ import { Handle, Position } from "@xyflow/react";
 import type { ReactNode } from "react";
 
 import { cn } from "../../../lib/cn";
+import { QUALITY_UNCERTAIN, portaValida } from "../canalPrimitivos";
 import { ROTULO_BLOCO, type TipoBloco } from "../graph";
 import { formatarValorPorta, type PortValue } from "../useFlowStatus";
 import { useEuHerdada, useValoresDoBloco, type PortasDoBloco } from "./contexto";
@@ -35,10 +36,22 @@ interface Props {
   children: ReactNode;
 }
 
+/** Rótulos pt-BR dos 7 substatus do ADR-039 §Substatus; `0` (NON_SPECIFIC) nunca vira
+ *  `title` — só os demais explicam a invalidez/incerteza no hover. */
+const SUBSTATUS_ROTULO: Record<number, string> = {
+  0: "não especificado",
+  1: "pedido de inicialização",
+  2: "não convidado",
+  3: "override local",
+  4: "falha de sensor",
+  5: "erro de configuração",
+  6: "falha de dispositivo",
+};
+
 /**
- * Valor ao vivo da porta. Inválido é dessaturado **e** rotulado, nunca só descolorido
- * (Regra do Canal Redundante); o número sai em mono tabular para não dançar de largura a
- * cada varredura (Regra do Número Tabular).
+ * Valor ao vivo da porta. Inválido/incerto é dessaturado **e** rotulado, nunca só
+ * descolorido (Regra do Canal Redundante); o número sai em mono tabular para não dançar de
+ * largura a cada varredura (Regra do Número Tabular).
  */
 function ValorPorta({ valor, eu }: { valor: PortValue | undefined; eu?: string | null }) {
   if (valor === undefined) {
@@ -49,18 +62,27 @@ function ValorPorta({ valor, eu }: { valor: PortValue | undefined; eu?: string |
     );
   }
   const numerico = typeof valor.v === "number";
+  const valida = portaValida(valor);
   return (
-    <span data-testid="porta-valor" className="flex items-baseline gap-1 leading-none">
+    <span
+      data-testid="porta-valor"
+      className="flex items-baseline gap-1 leading-none"
+      title={valor.substatus !== 0 ? SUBSTATUS_ROTULO[valor.substatus] : undefined}
+    >
       <span
         className={cn(
           "process-value text-[11px] font-bold",
-          valor.ok ? "text-fg" : "text-fg-muted",
+          valida ? "text-fg" : "text-fg-muted",
         )}
       >
         {formatarValorPorta(valor)}
       </span>
       {numerico && eu ? <span className="text-[9px] font-bold text-fg-muted">{eu}</span> : null}
-      {!valor.ok && <span className="text-[9px] text-fg-muted">inválido</span>}
+      {!valida && (
+        <span className="text-[9px] text-fg-muted">
+          {valor.quality === QUALITY_UNCERTAIN ? "incerto" : "inválido"}
+        </span>
+      )}
     </span>
   );
 }

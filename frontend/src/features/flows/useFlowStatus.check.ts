@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import type { Quality } from "../../lib/contracts.gen";
 import type { EstadoDoCanal } from "../../app/CanalAoVivo";
 import {
   atrasoReconexao,
@@ -8,6 +9,7 @@ import {
   ehEstado,
   lerPorts,
   mesclarPorts,
+  QUALITY_GOOD,
   urlDoWs,
   type FlowStatus,
   type PortsPorBloco,
@@ -17,11 +19,18 @@ import {
   formatarValorPorta,
   rotuloDeEspera,
   selecionarCanvas,
+  type PortValue,
 } from "./useFlowStatus";
 
 /** O `Location` do browser tem muito mais superfície do que a URL do WS precisa. */
 function origem(protocol: string, host: string): Location {
   return { protocol, host } as Location;
+}
+
+/** `PortValue` completa para os testes tipados (STATUS/`PortsPorBloco`/`formatarValorPorta`);
+ *  só `v`/`quality` variam aqui — os demais campos ficam no default neutro. */
+function porta(v: number | boolean | null, quality: Quality = QUALITY_GOOD): PortValue {
+  return { v, quality, substatus: 0, hi_limited: false, lo_limited: false };
 }
 
 const ESTADO_VAZIO: EstadoDoCanal = {
@@ -39,7 +48,7 @@ const STATUS: FlowStatus = {
   scan_ms: 3.2,
   overruns: 0,
   ts: "2026-08-04T12:00:00Z",
-  ports: { leitura_1: { out: { v: 42.5, ok: true } } },
+  ports: { leitura_1: { out: porta(42.5) } },
 };
 
 // ----------------------------------------------------------------------------------------
@@ -74,10 +83,10 @@ test("estado fora do vocabulário do flow não é um EstadoFlow válido", () => 
 
 test("porta de forma inesperada é descartada sem levar a varredura junto", () => {
   const ports = lerPorts({
-    b1: { boa: { v: 1, ok: true }, ruim: { v: 1 }, texto: { v: "x", ok: true } },
+    b1: { boa: { v: 1, quality: 2 }, ruim: { v: 1 }, texto: { v: "x", quality: 2 } },
   });
 
-  expect(ports).toEqual({ b1: { boa: { v: 1, ok: true } } });
+  expect(ports).toEqual({ b1: { boa: porta(1) } });
 });
 
 // ----------------------------------------------------------------------------------------
@@ -85,16 +94,16 @@ test("porta de forma inesperada é descartada sem levar a varredura junto", () =
 // ----------------------------------------------------------------------------------------
 
 test("transição de estado preserva os últimos valores conhecidos", () => {
-  const conhecidos: PortsPorBloco = { b1: { out: { v: 42.5, ok: true } } };
+  const conhecidos: PortsPorBloco = { b1: { out: porta(42.5) } };
 
   expect(mesclarPorts(conhecidos, {})).toBe(conhecidos);
 });
 
 test("varredura substitui a tabela inteira, inclusive apagando bloco que saiu do grafo", () => {
-  const conhecidos: PortsPorBloco = { b1: { out: { v: 1, ok: true } }, b2: { in: { v: 2, ok: true } } };
-  const nova: PortsPorBloco = { b1: { out: { v: 9, ok: true } } };
+  const conhecidos: PortsPorBloco = { b1: { out: porta(1) }, b2: { in: porta(2) } };
+  const nova: PortsPorBloco = { b1: { out: porta(9) } };
 
-  expect(mesclarPorts(conhecidos, nova)).toEqual({ b1: { out: { v: 9, ok: true } } });
+  expect(mesclarPorts(conhecidos, nova)).toEqual({ b1: { out: porta(9) } });
 });
 
 // ----------------------------------------------------------------------------------------
@@ -121,23 +130,23 @@ test("o backoff cresce e tem teto: nunca vira rajada nem espera infinita", () =>
 // ----------------------------------------------------------------------------------------
 
 test("numérico sai em pt-BR, com decimal por vírgula e sem cauda de ponto flutuante", () => {
-  expect(formatarValorPorta({ v: 42.5, ok: true })).toBe("42,5");
-  expect(formatarValorPorta({ v: 42, ok: true })).toBe("42");
-  expect(formatarValorPorta({ v: -0.125, ok: true })).toBe("-0,125");
-  expect(formatarValorPorta({ v: 0.1 + 0.2, ok: true })).toBe("0,3");
+  expect(formatarValorPorta(porta(42.5))).toBe("42,5");
+  expect(formatarValorPorta(porta(42))).toBe("42");
+  expect(formatarValorPorta(porta(-0.125))).toBe("-0,125");
+  expect(formatarValorPorta(porta(0.1 + 0.2))).toBe("0,3");
   expect(formatarNumero(1234.5678)).toBe("1234,568");
 });
 
 test("booleano e ausência de valor são texto, nunca zero", () => {
-  expect(formatarValorPorta({ v: true, ok: true })).toBe("verdadeiro");
-  expect(formatarValorPorta({ v: false, ok: true })).toBe("falso");
-  expect(formatarValorPorta({ v: null, ok: false })).toBe("sem valor");
+  expect(formatarValorPorta(porta(true))).toBe("verdadeiro");
+  expect(formatarValorPorta(porta(false))).toBe("falso");
+  expect(formatarValorPorta(porta(null, 0))).toBe("sem valor");
   // `false` é valor legítimo: não pode virar "sem valor" por queda em falsy.
-  expect(formatarValorPorta({ v: false, ok: true })).not.toBe("sem valor");
+  expect(formatarValorPorta(porta(false))).not.toBe("sem valor");
 });
 
 test("invalidez não muda o texto do valor: dessaturar e rotular é canal à parte", () => {
-  expect(formatarValorPorta({ v: 42.5, ok: false })).toBe("42,5");
+  expect(formatarValorPorta(porta(42.5, 0))).toBe("42,5");
 });
 
 // ----------------------------------------------------------------------------------------

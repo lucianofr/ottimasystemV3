@@ -3,7 +3,9 @@ import { expect, test } from "@playwright/test";
 import {
   PORT_CONTRACTS,
   type ContratoPortaDinamicaComDefault,
+  type PortValue,
 } from "../../lib/contracts.gen";
+import { QUALITY_GOOD } from "./canalPrimitivos";
 import {
   contratoFuzzyLoop,
   avisosInversao,
@@ -181,6 +183,12 @@ function aresta(
   targetHandle: string,
 ): BlocoEdge {
   return { id, source, sourceHandle, target, targetHandle };
+}
+
+/** `PortValue` mínima para as mesas de qualidade de aresta: só `v` e bom/mau importam ao
+ *  chamador — `substatus`/`hi_limited`/`lo_limited` ficam no default neutro. */
+function porta(v: number | boolean | null, boa = true): PortValue {
+  return { v, quality: boa ? QUALITY_GOOD : 0, substatus: 0, hi_limited: false, lo_limited: false };
 }
 
 /** PID Malha (ADR-039) minimalista para as mesas de ciclo/retorno. */
@@ -405,7 +413,7 @@ test("aresta de realimentação é tracejada já no modo edição", () => {
   const realimenta = { ...aresta("e1", "t", "y1", "p", "pv"), feedback_init: 0 };
 
   expect(arestaComQualidade(realimenta, {}).className).toBe("aresta-retorno");
-  expect(arestaComQualidade(realimenta, { t: { y1: { v: 3, ok: true } } }).className).toBe(
+  expect(arestaComQualidade(realimenta, { t: { y1: porta(3) } }).className).toBe(
     "aresta-boa aresta-retorno",
   );
 });
@@ -1091,13 +1099,13 @@ test("aresta sem dado ao vivo fica em 'edicao' — ports vazio ou porta da orige
   const a = aresta("e1", "r", "out", "t", "u1");
   expect(estadoDaAresta(a, {})).toBe("edicao");
   expect(estadoDaAresta(a, { r: {} })).toBe("edicao");
-  expect(estadoDaAresta(a, { b: { out: { v: 1, ok: true } } })).toBe("edicao");
+  expect(estadoDaAresta(a, { b: { out: porta(1) } })).toBe("edicao");
 });
 
-test("ok=true é 'good' e ok=false é 'bad'", () => {
+test("quality GOOD é 'good' e BAD é 'bad'", () => {
   const ports = {
-    r: { out: { v: 42.5, ok: true } },
-    b: { out: { v: null, ok: false } },
+    r: { out: porta(42.5) },
+    b: { out: porta(null, false) },
   };
   expect(estadoDaAresta(aresta("e1", "r", "out", "t", "u1"), ports)).toBe("good");
   expect(estadoDaAresta(aresta("e2", "b", "out", "t", "u1"), ports)).toBe("bad");
@@ -1105,8 +1113,8 @@ test("ok=true é 'good' e ok=false é 'bad'", () => {
 
 test("a qualidade lida é da porta exata (nó+handle) da origem", () => {
   const ports = {
-    r: { out: { v: 1, ok: true }, OUT1: { v: 2, ok: false } },
-    s: { OUT1: { v: 3, ok: true } },
+    r: { out: porta(1), OUT1: porta(2, false) },
+    s: { OUT1: porta(3) },
   };
   expect(estadoDaAresta(aresta("e1", "r", "OUT1", "t", "u1"), ports)).toBe("bad");
   expect(estadoDaAresta(aresta("e2", "r", "out", "t", "u1"), ports)).toBe("good");
@@ -1115,19 +1123,19 @@ test("a qualidade lida é da porta exata (nó+handle) da origem", () => {
 
 test("transição bad→good reflete o que recebe; ports vazio volta a 'edicao' (preservação é do provider)", () => {
   const a = aresta("e1", "r", "out", "t", "u1");
-  expect(estadoDaAresta(a, { r: { out: { v: null, ok: false } } })).toBe("bad");
-  expect(estadoDaAresta(a, { r: { out: { v: 42, ok: true } } })).toBe("good");
+  expect(estadoDaAresta(a, { r: { out: porta(null, false) } })).toBe("bad");
+  expect(estadoDaAresta(a, { r: { out: porta(42) } })).toBe("good");
   expect(estadoDaAresta(a, {})).toBe("edicao");
 });
 
 test("arestaComQualidade: bad ganha classe e marcador X; good só a classe; edicao nada", () => {
   const a = aresta("e1", "r", "out", "t", "u1");
 
-  const ruim = arestaComQualidade(a, { r: { out: { v: null, ok: false } } });
+  const ruim = arestaComQualidade(a, { r: { out: porta(null, false) } });
   expect(ruim.className).toBe("aresta-ruim");
   expect(ruim.markerStart).toBe(ID_MARCADOR_X);
 
-  const boa = arestaComQualidade(a, { r: { out: { v: 1, ok: true } } });
+  const boa = arestaComQualidade(a, { r: { out: porta(1) } });
   expect(boa.className).toBe("aresta-boa");
   expect(boa.markerStart).toBeUndefined();
 
@@ -1136,15 +1144,15 @@ test("arestaComQualidade: bad ganha classe e marcador X; good só a classe; edic
 
 test("arestaComQualidade não muta a aresta nem os ports de entrada", () => {
   const a = aresta("e1", "r", "out", "t", "u1");
-  const ports = { r: { out: { v: null, ok: false } } };
+  const ports = { r: { out: porta(null, false) } };
   arestaComQualidade(a, ports);
   expect(a).toEqual({ id: "e1", source: "r", sourceHandle: "out", target: "t", targetHandle: "u1" });
-  expect(ports).toEqual({ r: { out: { v: null, ok: false } } });
+  expect(ports).toEqual({ r: { out: porta(null, false) } });
 });
 
 test("aresta estilizada serializa exatamente como a nua: estilo nunca vai ao servidor", () => {
   const estilizada = arestaComQualidade(aresta("e1", "r", "out", "t", "u1"), {
-    r: { out: { v: null, ok: false } },
+    r: { out: porta(null, false) },
   });
   expect(paraGraphJson([], [estilizada]).edges[0]).toEqual({
     id: "e1",
@@ -1189,10 +1197,10 @@ test("aresta de retorno não gera aviso de inversão", () => {
 
 test("aresta de retorno em edicao ganha a classe tracejada", () => {
   const retorno = aresta("e2", "fic", "bkcal_out", "lic", "bkcal_in");
-  expect(arestaComQualidade(retorno, { fic: { bkcal_out: { v: 50, ok: true } } }).className).toBe(
+  expect(arestaComQualidade(retorno, { fic: { bkcal_out: porta(50) } }).className).toBe(
     "aresta-boa aresta-retorno",
   );
-  expect(arestaComQualidade(retorno, { fic: { bkcal_out: { v: 50, ok: false } } }).className).toBe(
+  expect(arestaComQualidade(retorno, { fic: { bkcal_out: porta(50, false) } }).className).toBe(
     "aresta-ruim aresta-retorno",
   );
 });

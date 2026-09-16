@@ -56,10 +56,13 @@ function tipoDe(schema) {
   throw new Error(`schema não plano, gerador não sabe traduzir: ${JSON.stringify(schema)}`);
 }
 
-/** Uma interface TS por schema de objeto com `properties` (modelo raiz ou `$defs`). Todo
- *  campo sai obrigatório: o Pydantic sempre serializa campos com default no `model_dump*`,
- *  então "opcional na construção" (JSON Schema `required`) não é "ausente no payload". */
+/** Uma interface TS por schema de objeto com `properties` (modelo raiz ou `$defs`); um
+ *  schema de `IntEnum`/`StrEnum` do Pydantic vira `$def` SEM `properties` — esses saem como
+ *  `type` (união de literais), nunca `interface` vazia. Todo campo de interface sai
+ *  obrigatório: o Pydantic sempre serializa campos com default no `model_dump*`, então
+ *  "opcional na construção" (JSON Schema `required`) não é "ausente no payload". */
 function interfaceDe(nome, schema) {
+  if (schema.enum) return `export type ${nome} = ${tipoDe(schema)};`;
   const campos = Object.entries(schema.properties ?? {})
     .map(([campo, propSchema]) => `  ${campo}: ${tipoDe(propSchema)};`)
     .join("\n");

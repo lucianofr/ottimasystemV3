@@ -29,7 +29,7 @@ import {
   type SopdtParams,
 } from "../../lib/contracts.gen";
 import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
-import type { PortsPorBloco } from "./canalPrimitivos";
+import { portaValida, type PortsPorBloco } from "./canalPrimitivos";
 import { BASES_TEMPO, PADRAO_CONSTANT, PADRAO_FIRST_ORDER, PADRAO_INTEGRATOR, PADRAO_KALMAN, PADRAO_PID, PADRAO_PID_LOOP, PADRAO_FUZZY_LOOP, PADRAO_SCALER, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
 
 /**
@@ -430,7 +430,7 @@ export function estadoDaAresta(
 ): EstadoAresta {
   const porta = ports[aresta.source]?.[aresta.sourceHandle];
   if (porta === undefined) return "edicao";
-  return porta.ok ? "good" : "bad";
+  return portaValida(porta) ? "good" : "bad";
 }
 
 /** Aresta com a vestimenta da qualidade (imutável). `edicao` devolve a mesma referência,

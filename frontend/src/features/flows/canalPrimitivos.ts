@@ -97,12 +97,27 @@ export function ehEstado(valor: unknown): valor is EstadoFlow {
   return valor === "running" || valor === "stopped" || valor === "failed";
 }
 
+/** Polaridade Fieldbus do ADR-043 (BAD=0/UNCERTAIN=1/GOOD=2). */
+export const QUALITY_GOOD = 2;
+export const QUALITY_UNCERTAIN = 1;
+
+/** Validade para atuação/render (emenda ADR-039 §4.1): só GOOD. */
+export function portaValida(valor: PortValue): boolean {
+  return valor.quality === QUALITY_GOOD;
+}
+
 export function lerPortValue(bruto: unknown): PortValue | null {
   const item = objeto(bruto);
-  if (item === null || typeof item.ok !== "boolean") return null;
+  if (item === null || typeof item.quality !== "number") return null;
   const v = item.v;
   if (v !== null && typeof v !== "number" && typeof v !== "boolean") return null;
-  return { v, ok: item.ok };
+  return {
+    v,
+    quality: item.quality as PortValue["quality"],
+    substatus: (typeof item.substatus === "number" ? item.substatus : 0) as PortValue["substatus"],
+    hi_limited: item.hi_limited === true,
+    lo_limited: item.lo_limited === true,
+  };
 }
 
 export function lerPorts(bruto: unknown): PortsPorBloco {

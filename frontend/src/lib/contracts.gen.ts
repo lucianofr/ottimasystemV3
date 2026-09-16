@@ -400,8 +400,15 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "constant" | "scr
 
 export interface PortValue {
   v: number | boolean | null;
-  ok: boolean;
+  quality: Quality;
+  substatus: Substatus;
+  hi_limited: boolean;
+  lo_limited: boolean;
 }
+
+export type Quality = 0 | 1 | 2;
+
+export type Substatus = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface FlowStatus {
   state: "running" | "stopped" | "failed";

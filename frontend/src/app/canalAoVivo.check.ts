@@ -38,7 +38,7 @@ const VARREDURA = {
   scan_ms: 3.2,
   overruns: 0,
   ts: "2026-08-04T12:00:00Z",
-  ports: { leitura_1: { out: { v: 42.5, ok: true } } },
+  ports: { leitura_1: { out: { v: 42.5, quality: 2 } } },
 };
 
 const MPC_STATE = {
@@ -188,7 +188,9 @@ test("flow.status.<id> vira mensagem de flow_status com o id do canal, não do c
   if (msg?.canal === "flow_status") {
     expect(msg.flowId).toBe(12);
     expect(msg.status.state).toBe("running");
-    expect(msg.status.ports).toEqual({ leitura_1: { out: { v: 42.5, ok: true } } });
+    expect(msg.status.ports).toEqual({
+      leitura_1: { out: { v: 42.5, quality: 2, substatus: 0, hi_limited: false, lo_limited: false } },
+    });
   }
 });
 
@@ -707,14 +709,18 @@ test("mensagem de flow_status preserva os últimos valores conhecidos na transi�
   b.sockets[0].abrir();
   b.sockets[0].receber(envelope("flow.status.12", VARREDURA));
 
-  expect(b.estado().flowStatus.get(12)?.ports).toEqual({ leitura_1: { out: { v: 42.5, ok: true } } });
+  expect(b.estado().flowStatus.get(12)?.ports).toEqual({
+    leitura_1: { out: { v: 42.5, quality: 2, substatus: 0, hi_limited: false, lo_limited: false } },
+  });
 
   b.sockets[0].receber(
     envelope("flow.status.12", { state: "stopped", scan_ms: 0, overruns: 0, ts: VARREDURA.ts, ports: {} }),
   );
 
   expect(b.estado().flowStatus.get(12)?.state).toBe("stopped");
-  expect(b.estado().flowStatus.get(12)?.ports).toEqual({ leitura_1: { out: { v: 42.5, ok: true } } });
+  expect(b.estado().flowStatus.get(12)?.ports).toEqual({
+    leitura_1: { out: { v: 42.5, quality: 2, substatus: 0, hi_limited: false, lo_limited: false } },
+  });
 });
 
 test("mensagem de mpc_state indexa por flowId/blockId e substitui a leitura inteira", () => {

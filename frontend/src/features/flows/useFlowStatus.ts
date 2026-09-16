@@ -71,7 +71,7 @@ export function formatarNumero(valor: number): string {
   return String(Number(valor.toFixed(3))).replace(".", ",");
 }
 
-/** Texto do valor de uma porta. A invalidez (`ok === false`) é canal à parte, do chamador. */
+/** Texto do valor de uma porta. A invalidez (`quality !== GOOD`) é canal à parte, do chamador. */
 export function formatarValorPorta(valor: PortValue): string {
   if (valor.v === null) return "sem valor";
   if (typeof valor.v === "boolean") return valor.v ? "verdadeiro" : "falso";
