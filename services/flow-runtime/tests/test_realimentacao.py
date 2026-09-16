@@ -19,7 +19,8 @@ from redis.asyncio import Redis
 from test_scheduler import FakeClock, run_scan
 
 from ottima_core.flowgraph import SopdtParams, TfsElement
-from ottima_flow_runtime.blocks.base import Block, PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Block, Signal
 from ottima_flow_runtime.blocks.pid import PidBlock
 from ottima_flow_runtime.blocks.tfs import TfsBlock
 from ottima_flow_runtime.scheduler import FlowDefinition, FlowTask
@@ -70,7 +71,7 @@ def _controlador() -> PidBlock:
 class FonteBlock(Block):
     """Saída roteirizada por varredura: prova o desarme da semente sem depender de dinâmica."""
 
-    def __init__(self, block_id: str, roteiro: list[PortSample]) -> None:
+    def __init__(self, block_id: str, roteiro: list[Signal]) -> None:
         super().__init__(block_id)
         self._roteiro = roteiro
         self._n = 0
@@ -84,8 +85,8 @@ class FonteBlock(Block):
         return ("out",)
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         amostra = self._roteiro[min(self._n, len(self._roteiro) - 1)]
         self._n += 1
         return {"out": amostra}
@@ -96,7 +97,7 @@ class EspiaBlock(Block):
 
     def __init__(self, block_id: str) -> None:
         super().__init__(block_id)
-        self.visto: list[PortSample] = []
+        self.visto: list[Signal] = []
 
     @property
     def input_ports(self) -> tuple[str, ...]:
@@ -107,8 +108,8 @@ class EspiaBlock(Block):
         return ()
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         self.visto.append(inputs["in"])
         return {}
 
@@ -215,7 +216,7 @@ async def test_semente_desarma_e_invalidez_volta_a_propagar(malha):
     clock = FakeClock()
     fonte = FonteBlock(
         "fonte",
-        [PortSample(None, False), PortSample(7.0, True), PortSample(None, False)],
+        [Signal(None), Signal(7.0, quality=Quality.GOOD), Signal(None)],
     )
     espia = EspiaBlock("espia")
     await malha(

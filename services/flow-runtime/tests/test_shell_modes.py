@@ -2,8 +2,9 @@
 
 from shell_harness import EPS, EventosFake, amostra, bloco, passo
 
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.shell.mode import Mode
-from ottima_flow_runtime.blocks.shell.signal import Quality, make_signal
 
 
 def _cfg_cascata() -> dict:
@@ -21,16 +22,16 @@ async def test_s7_cas_bad_rebaixa_em_1_scan_e_retorna_sozinho() -> None:
     b = bloco(eventos=eventos, **_cfg_cascata())
     await passo(b, 0.0, **{"in": amostra(50.0)})
     b.write_target(Mode.CAS)
-    await passo(b, 1.0, **{"in": amostra(50.0), "cas_in": make_signal(60.0, Quality.GOOD)})
+    await passo(b, 1.0, **{"in": amostra(50.0), "cas_in": Signal(60.0, quality=Quality.GOOD)})
     assert b.mode.actual is Mode.CAS
 
     u_antes = b.u
-    await passo(b, 2.0, **{"in": amostra(50.0), "cas_in": make_signal(60.0, Quality.BAD)})
+    await passo(b, 2.0, **{"in": amostra(50.0), "cas_in": Signal(60.0, quality=Quality.BAD)})
     assert b.mode.actual is Mode.AUTO  # shed_to_auto default
     assert abs(b.u - u_antes) <= 1.0  # continuo (kernel P zero-erro; sem salto)
     assert "loop_shed" in eventos.kinds()
 
-    await passo(b, 3.0, **{"in": amostra(50.0), "cas_in": make_signal(60.0, Quality.GOOD)})
+    await passo(b, 3.0, **{"in": amostra(50.0), "cas_in": Signal(60.0, quality=Quality.GOOD)})
     assert b.mode.actual is Mode.CAS  # retorno automatico: TARGET intocado
 
 
@@ -38,10 +39,10 @@ async def test_s17_shed_no_return_reescreve_target() -> None:
     b = bloco(shed_no_return=True, **_cfg_cascata())
     await passo(b, 0.0, **{"in": amostra(50.0)})
     b.write_target(Mode.CAS)
-    await passo(b, 1.0, **{"in": amostra(50.0), "cas_in": make_signal(60.0, Quality.GOOD)})
-    await passo(b, 2.0, **{"in": amostra(50.0), "cas_in": make_signal(60.0, Quality.BAD)})
+    await passo(b, 1.0, **{"in": amostra(50.0), "cas_in": Signal(60.0, quality=Quality.GOOD)})
+    await passo(b, 2.0, **{"in": amostra(50.0), "cas_in": Signal(60.0, quality=Quality.BAD)})
     assert b.mode.target is Mode.AUTO  # TARGET reescrito
-    await passo(b, 3.0, **{"in": amostra(50.0), "cas_in": make_signal(60.0, Quality.GOOD)})
+    await passo(b, 3.0, **{"in": amostra(50.0), "cas_in": Signal(60.0, quality=Quality.GOOD)})
     assert b.mode.actual is Mode.AUTO  # NAO volta a CAS sozinho
 
 
@@ -49,9 +50,9 @@ async def test_s8_rcas_bad_rebaixa() -> None:
     b = bloco(**_cfg_cascata())
     await passo(b, 0.0, **{"in": amostra(50.0)})
     b.write_target(Mode.RCAS)
-    await passo(b, 1.0, **{"in": amostra(50.0), "rcas_in": make_signal(55.0, Quality.GOOD)})
+    await passo(b, 1.0, **{"in": amostra(50.0), "rcas_in": Signal(55.0, quality=Quality.GOOD)})
     assert b.mode.actual is Mode.RCAS
-    await passo(b, 2.0, **{"in": amostra(50.0), "rcas_in": make_signal(55.0, Quality.BAD)})
+    await passo(b, 2.0, **{"in": amostra(50.0), "rcas_in": Signal(55.0, quality=Quality.BAD)})
     assert b.mode.actual is Mode.AUTO
 
 

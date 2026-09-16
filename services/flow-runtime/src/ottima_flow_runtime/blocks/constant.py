@@ -9,7 +9,9 @@ nem valor externo capaz de contaminar a saída. `value` já chega validado finit
 from collections.abc import Mapping
 from datetime import datetime
 
-from .base import Block, PortSample
+from ottima_core.signal import Quality
+
+from .base import Block, Signal
 
 OUTPUT_PORTS = ("out",)
 
@@ -24,6 +26,6 @@ class ConstantBlock(Block):
         return OUTPUT_PORTS
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
-        return {"out": PortSample(self._value, True)}
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
+        return {"out": Signal(self._value, quality=Quality.GOOD)}

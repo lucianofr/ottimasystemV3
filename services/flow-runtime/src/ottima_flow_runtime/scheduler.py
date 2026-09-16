@@ -45,12 +45,13 @@ from ottima_core.bus import (
     channel_flow_status,
     publish_event,
 )
+from ottima_core.signal import Quality
 
-from .blocks.base import Block, PortSample
+from .blocks.base import Block, Signal
 
 logger = logging.getLogger(__name__)
 
-COLD = PortSample(None, False)
+COLD = Signal(None)
 """Valor de porta que nunca foi escrito desde o deploy (§3.0). Imutável, logo compartilhável."""
 
 BLOCK_BUDGET_FRACTION = 1.0
@@ -116,8 +117,8 @@ class HistorizedPort(NamedTuple):
     tag_id: int
 
 
-def _historized_value(sample: PortSample) -> tuple[float, int]:
-    """`PortSample` -> `(value, quality)` de `OpcValue` (ADR-041 D4).
+def _historized_value(sample: Signal) -> tuple[float, int]:
+    """`Signal` -> `(value, quality)` de `OpcValue` (ADR-041 D4).
 
     Porta inválida (`ok=False`) ou sem valor (`v=None`) vira `0.0`/`quality=2` — o recorder
     troca por NULL sozinho (ADR-037); alargar `OpcValue.value` para aceitar `None` mudaria
@@ -180,7 +181,7 @@ class FlowTask:
         self._redis = redis_client
         self._clock: Clock = clock if clock is not None else SystemClock()
         self._state: Literal["running", "stopped", "failed"] = "stopped"
-        self._ports: dict[str, dict[str, PortSample]] = {}
+        self._ports: dict[str, dict[str, Signal]] = {}
         self._seeds_armed: dict[tuple[str, str], float] = {}
         self._historized_last: dict[tuple[str, str], datetime] = {}
         self._staged: FlowDefinition | None = None
@@ -330,7 +331,7 @@ class FlowTask:
         budget_ms = self._definition.ts_seconds * BLOCK_BUDGET_FRACTION * 1000.0
         for block in self._definition.blocks:
             ports = self._ports[block.block_id]
-            inputs: dict[str, PortSample] = {}
+            inputs: dict[str, Signal] = {}
             for handle, (source_id, source_handle) in wiring.get(block.block_id, {}).items():
                 sample = self._ports[source_id][source_handle]
                 sample = self._seeded(block.block_id, handle, sample)
@@ -345,7 +346,7 @@ class FlowTask:
                 ports[handle] = sample
             await self._check_block_budget(block.block_id, block_ms, budget_ms)
 
-    def _seeded(self, block_id: str, handle: str, sample: PortSample) -> PortSample:
+    def _seeded(self, block_id: str, handle: str, sample: Signal) -> Signal:
         """Condição inicial da aresta de realimentação (ADR-040 D4), no ponto de LEITURA.
 
         A semente é **de partida, não fallback de invalidez**: vale enquanto a porta de
@@ -364,7 +365,7 @@ class FlowTask:
         if seed is None:
             return sample
         if sample.v is None:
-            return PortSample(seed, True)
+            return Signal(seed, quality=Quality.GOOD)
         del self._seeds_armed[key]
         return sample
 

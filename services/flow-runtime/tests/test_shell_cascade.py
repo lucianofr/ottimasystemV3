@@ -2,7 +2,7 @@
 
 from shell_harness import EPS, amostra, cfg_padrao, passo
 
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.shell.block import BlockShell
 from ottima_flow_runtime.blocks.shell.kernel import StubKernel
 from ottima_flow_runtime.blocks.shell.mode import Mode
@@ -26,7 +26,7 @@ async def _scan(lic, fic, t, *, lic_pv, fic_pv, bkcal_anterior):
 
 async def test_s5_s6_fic_em_man_leva_lic_a_iman_e_volta_sem_degrau() -> None:
     lic, fic = _par_cascata()
-    bkcal = PortSample(None, False)
+    bkcal = Signal(None)
     await _scan(lic, fic, 0.0, lic_pv=50.0, fic_pv=200.0, bkcal_anterior=bkcal)
 
     lic.write_sp(50.0)

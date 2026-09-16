@@ -74,6 +74,7 @@ from ottima_core.flowgraph import (
     PidBinding,
     derive_horizons,
 )
+from ottima_core.signal import Quality
 from ottima_core.snapshot import ValueSnapshot
 
 from ..mpc.availability import (
@@ -84,7 +85,7 @@ from ..mpc.availability import (
 )
 from ..mpc.host import MpcHost
 from ..mpc.worker import SolveRequest, SolveResult
-from .base import Block, PortSample, has_cold_input, null_outputs
+from .base import Block, Signal, has_cold_input, null_outputs
 
 logger = logging.getLogger(__name__)
 
@@ -427,8 +428,8 @@ class MpcBlock(Block):
     # ------------------------------------------------------------------------------
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         is_frontier = self._n % self._multiplier == 0
         self._n += 1
         # Carimbo real da fronteira (spec F5 §2.1-1, fix round 1 achado 1): `ts` vem do
@@ -459,7 +460,7 @@ class MpcBlock(Block):
             cv = self._cvs[cv_id]
             self._sp[cv_id] = _clamp(float(tag.value), cv.sp_limits.min, cv.sp_limits.max)
 
-        samples = {pid: inputs.get(pid, PortSample(None, False)) for pid in self._entrada_ids}
+        samples = {pid: inputs.get(pid, Signal(None)) for pid in self._entrada_ids}
         if has_cold_input(samples):
             if is_frontier:
                 # Cold start (§3.0 F3): saídas nulas — mas §5.2 pede publicação a cada
@@ -553,7 +554,7 @@ class MpcBlock(Block):
             return float(serie[1])
         return self._last_measured.get(row_id)
 
-    def _avaliar_fail_actions(self, samples: Mapping[str, PortSample], simuladas: set[str]) -> None:
+    def _avaliar_fail_actions(self, samples: Mapping[str, Signal], simuladas: set[str]) -> None:
         """Debounce das fail actions (RF-613), na cadência da fronteira (Ts_mpc): 2
         execuções ruins consecutivas registram a ação final em `_fail_pending` para o
         orquestrador consumir. Só em REMOTO — em LOCAL o MPC não escreve, a ação não teria
@@ -783,13 +784,13 @@ class MpcBlock(Block):
     # Saída por modo (spec §4.3)
     # ------------------------------------------------------------------------------
 
-    def _compute_outputs(self, *, ok: bool) -> dict[str, PortSample]:
-        outputs: dict[str, PortSample] = {}
+    def _compute_outputs(self, *, ok: bool) -> dict[str, Signal]:
+        outputs: dict[str, Signal] = {}
         for mv in self._mvs.values():
             if self._local_remote == "local":
                 rastreado = self._local_output(mv)
                 if rastreado is None:
-                    outputs[mv.id] = PortSample(None, False)
+                    outputs[mv.id] = Signal(None)
                     continue
                 v = rastreado
             elif not self._mv_disponivel(mv.id):
@@ -824,7 +825,7 @@ class MpcBlock(Block):
                 v = _clamp(
                     self._mv_last[mv.id] if plano is None else plano, mv.limits.min, mv.limits.max
                 )
-            outputs[mv.id] = PortSample(v, ok)
+            outputs[mv.id] = Signal(v, quality=Quality.GOOD if ok else Quality.BAD)
         # Portas fixas de modo (decisão A-10 revista, spec F4 §2.1-5): eixos LOCAL/REMOTO e
         # MAN/AUTO do próprio bloco, nunca uma variável do usuário — sempre numéricas
         # (decisão A-5), 1.0/0.0. Mesmo `ok` do resto da varredura (decisão A-6: uma
@@ -837,8 +838,14 @@ class MpcBlock(Block):
         # do `mpc.state` segue sendo o alvo MATERIALIZADO (o seletor do faceplate e a
         # pendência de comando confirmam por ele) — a honestidade do que está vigente mora
         # aqui e no render do faceplate, não no `modes`.
-        outputs[MPC_PORT_LOCAL] = PortSample(1.0 if self._local_remote == "local" else 0.0, ok)
-        outputs[MPC_PORT_AUTO] = PortSample(1.0 if self._in_auto and self._host.ready else 0.0, ok)
+        outputs[MPC_PORT_LOCAL] = Signal(
+            1.0 if self._local_remote == "local" else 0.0,
+            quality=Quality.GOOD if ok else Quality.BAD,
+        )
+        outputs[MPC_PORT_AUTO] = Signal(
+            1.0 if self._in_auto and self._host.ready else 0.0,
+            quality=Quality.GOOD if ok else Quality.BAD,
+        )
         return outputs
 
     def _local_output(self, mv: MvVar) -> float | None:
@@ -904,7 +911,7 @@ class MpcBlock(Block):
         ultimo_bom = self._last_good_readback.get(mv.id)
         return self._mv_last[mv.id] if ultimo_bom is None else ultimo_bom
 
-    async def _write_pid(self, outputs: Mapping[str, PortSample], *, ok: bool) -> None:
+    async def _write_pid(self, outputs: Mapping[str, Signal], *, ok: bool) -> None:
         """Publica `OpcWrite` por MV com `pid`, a cada varredura, só em REMOTO com entrada
         válida (spec §4.3/§4.6) — em LOCAL não escreve nada, RF-621.
 

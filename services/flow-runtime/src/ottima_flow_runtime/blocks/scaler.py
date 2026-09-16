@@ -17,7 +17,7 @@ import math
 from collections.abc import Mapping
 from datetime import datetime
 
-from .base import Block, PortSample, has_cold_input, null_outputs
+from .base import Block, Signal, has_cold_input, null_outputs
 
 INPUT_PORTS = ("in",)
 OUTPUT_PORTS = ("out",)
@@ -47,8 +47,8 @@ class ScalerBlock(Block):
         return OUTPUT_PORTS
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         if has_cold_input(inputs):
             return null_outputs(OUTPUT_PORTS)
 
@@ -59,4 +59,4 @@ class ScalerBlock(Block):
 
         escalado = self._out_min + (valor - self._in_min) * self._ganho
         # Amostra inválida executa e propaga a flag (decisão A-6), como nos filtros.
-        return {"out": PortSample(escalado, sample.ok)}
+        return {"out": Signal(escalado, quality=sample.quality)}

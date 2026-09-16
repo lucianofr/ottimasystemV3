@@ -13,7 +13,7 @@ from redis.asyncio import Redis
 
 from ottima_core.bus import CHANNEL_OPC_WRITES, KIND_WRITE_SUPPRESSED, OpcWrite, publish_event
 
-from .base import Block, PortSample
+from .base import Block, Signal
 
 _REASON_COLD = "entrada sem valor"
 _REASON_INVALID = "entrada inválida"
@@ -53,8 +53,8 @@ class OpcWriteBlock(Block):
         return ("in",)
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         reason = _suppression_reason(inputs.get("in"))
         if reason is not None:
             await self._report_suppression(reason)
@@ -90,7 +90,7 @@ class OpcWriteBlock(Block):
         )
 
 
-def _suppression_reason(sample: PortSample | None) -> str | None:
+def _suppression_reason(sample: Signal | None) -> str | None:
     """Motivo da supressão, ou `None` quando a escrita pode sair.
 
     Entrada ausente do dicionário é grafo sem a aresta obrigatória (a validação já reprova):

@@ -772,8 +772,8 @@ def _check_feedback_closes_cycle(edges: list[FlowEdge], errors: list[str]) -> No
     """ADR-040 D2: `feedback_init` só vale em aresta que REALMENTE fecha ciclo.
 
     Sem esta regra a chave seria um injetor de valor sintético: `_seeded` entrega
-    `PortSample(seed, True)` na primeira varredura, então um `feedback_init` posto numa
-    aresta comum que alimenta um `opc_write` passaria pelo portão de cold start do bloco
+    `Signal(seed, quality=Quality.GOOD)` na primeira varredura, então um `feedback_init` posto
+    numa aresta comum que alimenta um `opc_write` passaria pelo portão de cold start do bloco
     (`v is not None`) e mandaria ao PLC um número que nenhuma planta produziu — contra o
     "falha sempre para o lado seguro". Numa entrada de MPC, faria a partida bumpless
     calcular contra uma posição fabricada (o furo que o ADR-028 fechou). O gesto do editor

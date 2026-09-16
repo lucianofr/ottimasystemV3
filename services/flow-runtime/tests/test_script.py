@@ -29,7 +29,8 @@ from ottima_core.bus import (
     KIND_SCRIPT_TIMEOUT,
 )
 from ottima_core.script_pool import ScriptPool
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.script import ScriptBlock
 
 DRAIN_TIMEOUT_S = 5.0
@@ -725,7 +726,7 @@ OUT1 = float(n + 10)
     primeiro_timeout = await block.step({})
     segundo_timeout = await block.step({})
 
-    assert sucesso == {"OUT1": PortSample(10.0, True)}
+    assert sucesso == {"OUT1": Signal(10.0, quality=Quality.GOOD)}
     assert primeiro_timeout == sucesso
     assert segundo_timeout == sucesso
 
@@ -734,7 +735,7 @@ async def test_erro_desde_a_primeira_varredura_deixa_saidas_nulas(redis_client, 
     """E2E-F3-10 em unidade: antes do 1º sucesso não há saída para manter."""
     block = bloco("OUT1 = 1 / 0\n", redis_client, pool, n_inputs=0)
 
-    assert await block.step({}) == {"OUT1": PortSample(None, False)}
+    assert await block.step({}) == {"OUT1": Signal(None)}
 
     publicados = await eventos(bus, redis_client)
     assert len(publicados) == 1
@@ -747,8 +748,8 @@ async def test_erro_desde_a_primeira_varredura_deixa_saidas_nulas(redis_client, 
 async def test_dedupe_de_script_error_por_periodo_de_falha(redis_client, bus, pool):
     code = "if IN1 > 0:\n    OUT1 = 1.0\nelse:\n    OUT1 = 1 / 0\n"
     block = bloco(code, redis_client, pool)
-    ruim = {"IN1": PortSample(-1.0, True)}
-    bom = {"IN1": PortSample(1.0, True)}
+    ruim = {"IN1": Signal(-1.0, quality=Quality.GOOD)}
+    bom = {"IN1": Signal(1.0, quality=Quality.GOOD)}
 
     for _ in range(3):
         await block.step(ruim)
@@ -767,8 +768,8 @@ async def test_transicao_erro_para_timeout_emite_os_dois_eventos(redis_client, b
     code = "if IN1 > 0:\n    while True:\n        pass\nOUT1 = 1 / 0\n"
     block = bloco(code, redis_client, pool, ts_seconds=TS_CURTO)
 
-    await block.step({"IN1": PortSample(-1.0, True)})
-    await block.step({"IN1": PortSample(1.0, True)})
+    await block.step({"IN1": Signal(-1.0, quality=Quality.GOOD)})
+    await block.step({"IN1": Signal(1.0, quality=Quality.GOOD)})
 
     publicados = await eventos(bus, redis_client)
     assert [e["payload"]["kind"] for e in publicados] == [KIND_SCRIPT_ERROR, KIND_SCRIPT_TIMEOUT]
@@ -780,8 +781,8 @@ async def test_timeout_seguido_de_sucesso_publica_recovered_uma_vez(redis_client
     code = "if IN1 > 0:\n    while True:\n        pass\nOUT1 = 1.0\n"
     block = bloco(code, redis_client, pool, ts_seconds=TS_CURTO)
 
-    await block.step({"IN1": PortSample(1.0, True)})
-    await block.step({"IN1": PortSample(-1.0, True)})
+    await block.step({"IN1": Signal(1.0, quality=Quality.GOOD)})
+    await block.step({"IN1": Signal(-1.0, quality=Quality.GOOD)})
 
     publicados = await eventos(bus, redis_client)
     assert [e["payload"]["kind"] for e in publicados] == [
@@ -808,8 +809,8 @@ async def test_erro_seguido_de_sucesso_publica_recovered(redis_client, bus, pool
     code = "if IN1 > 0:\n    OUT1 = 1.0\nelse:\n    OUT1 = 1 / 0\n"
     block = bloco(code, redis_client, pool)
 
-    await block.step({"IN1": PortSample(-1.0, True)})
-    await block.step({"IN1": PortSample(1.0, True)})
+    await block.step({"IN1": Signal(-1.0, quality=Quality.GOOD)})
+    await block.step({"IN1": Signal(1.0, quality=Quality.GOOD)})
 
     publicados = await eventos(bus, redis_client)
     assert [e["payload"]["kind"] for e in publicados] == [
@@ -821,8 +822,8 @@ async def test_erro_seguido_de_sucesso_publica_recovered(redis_client, bus, pool
 async def test_dois_ciclos_de_falha_e_rearme_emitem_dois_recovered(redis_client, bus, pool):
     code = "if IN1 > 0:\n    OUT1 = 1.0\nelse:\n    OUT1 = 1 / 0\n"
     block = bloco(code, redis_client, pool)
-    ruim = {"IN1": PortSample(-1.0, True)}
-    bom = {"IN1": PortSample(1.0, True)}
+    ruim = {"IN1": Signal(-1.0, quality=Quality.GOOD)}
+    bom = {"IN1": Signal(1.0, quality=Quality.GOOD)}
 
     await block.step(ruim)
     await block.step(bom)
@@ -846,14 +847,16 @@ async def test_entrada_booleana_chega_como_float(redis_client, bus, pool):
     """
     block = bloco("OUT1 = 0.0 if IN1 is True else IN1\n", redis_client, pool)
 
-    assert await block.step({"IN1": PortSample(True, True)}) == {"OUT1": PortSample(1.0, True)}
+    assert await block.step({"IN1": Signal(True, quality=Quality.GOOD)}) == {
+        "OUT1": Signal(1.0, quality=Quality.GOOD)
+    }
 
 
 async def test_invalidez_propaga_para_as_saidas(redis_client, bus, pool):
     """Decisão A-6: valor conhecido com flag ruim executa o script e contamina a saída."""
     block = bloco("OUT1 = IN1 * 3\n", redis_client, pool)
 
-    assert await block.step({"IN1": PortSample(2.0, False)}) == {"OUT1": PortSample(6.0, False)}
+    assert await block.step({"IN1": Signal(2.0)}) == {"OUT1": Signal(6.0)}
 
 
 async def test_cold_start_nao_chama_o_script(redis_client, bus, pool):
@@ -861,11 +864,11 @@ async def test_cold_start_nao_chama_o_script(redis_client, bus, pool):
     code = "state['n'] = state.get('n', 0) + 1\nOUT1 = float(state['n'])\n"
     block = bloco(code, redis_client, pool)
 
-    frio = await block.step({"IN1": PortSample(None, True)})
-    quente = await block.step({"IN1": PortSample(1.0, True)})
+    frio = await block.step({"IN1": Signal(None, quality=Quality.GOOD)})
+    quente = await block.step({"IN1": Signal(1.0, quality=Quality.GOOD)})
 
-    assert frio == {"OUT1": PortSample(None, False)}
-    assert quente == {"OUT1": PortSample(1.0, True)}
+    assert frio == {"OUT1": Signal(None)}
+    assert quente == {"OUT1": Signal(1.0, quality=Quality.GOOD)}
     assert await eventos(bus, redis_client) == []
 
 
@@ -878,10 +881,10 @@ state['n'] = state.get('n', 0) + 1
 OUT1 = float(state['n'])
 """
     block = bloco(code, redis_client, pool)
-    bom = {"IN1": PortSample(1.0, True)}
+    bom = {"IN1": Signal(1.0, quality=Quality.GOOD)}
 
-    assert await block.step(bom) == {"OUT1": PortSample(1.0, True)}
+    assert await block.step(bom) == {"OUT1": Signal(1.0, quality=Quality.GOOD)}
     block.reset()
 
-    assert await block.step({"IN1": PortSample(-1.0, True)}) == {"OUT1": PortSample(None, False)}
-    assert await block.step(bom) == {"OUT1": PortSample(1.0, True)}
+    assert await block.step({"IN1": Signal(-1.0, quality=Quality.GOOD)}) == {"OUT1": Signal(None)}
+    assert await block.step(bom) == {"OUT1": Signal(1.0, quality=Quality.GOOD)}

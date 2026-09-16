@@ -13,7 +13,8 @@ import pytest
 
 from ottima_core.bus import FuzzyState
 from ottima_core.contracts_export import FUZZY_DEFAULT_FLL
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.fuzzy import FUZZY_STATE_MIN_INTERVAL_S, FuzzyBlock
 
 IDENTIDADE_FLL = """Engine: identidade
@@ -148,8 +149,10 @@ def bloco(
     )
 
 
-async def passo(block: FuzzyBlock, valor: float | None, *, ok: bool = True) -> PortSample:
-    return (await block.step({"IN1": PortSample(valor, ok)}))["OUT1"]
+async def passo(block: FuzzyBlock, valor: float | None, *, ok: bool = True) -> Signal:
+    return (await block.step({"IN1": Signal(valor, quality=Quality.GOOD if ok else Quality.BAD)}))[
+        "OUT1"
+    ]
 
 
 # --------------------------------------------------------------------------------------
@@ -165,7 +168,7 @@ async def test_a_hand_calc_por_simetria():
 
 async def test_b_cold_start_devolve_null_outputs():
     saida = await passo(bloco(IDENTIDADE_FLL), None)
-    assert saida == PortSample(None, False)
+    assert saida == Signal(None)
 
 
 async def test_c_entrada_ok_false_executa_e_propaga_flag():
@@ -224,7 +227,7 @@ async def test_g_saida_nao_finita_mantem_ultimo_bom_por_porta():
     block = bloco(SEM_COBERTURA_FLL)
 
     antes_do_primeiro_bom = await passo(block, 1.0)  # fora de [4,6]: default:nan
-    assert antes_do_primeiro_bom == PortSample(None, False)
+    assert antes_do_primeiro_bom == Signal(None)
 
     scan_bom = await passo(block, 5.0)  # pico do termo: agregado não-vazio
     assert scan_bom.v is not None
@@ -446,5 +449,5 @@ async def test_deploy_default_constroi_e_processa():
     assert block.input_ports == ("IN1",)
     assert block.output_ports == ("OUT1", "OUT2", "OUT3", "OUT4")
 
-    saidas = await block.step({"IN1": PortSample(0.0, True)})
+    saidas = await block.step({"IN1": Signal(0.0, quality=Quality.GOOD)})
     assert set(saidas) == {"OUT1", "OUT2", "OUT3", "OUT4"}

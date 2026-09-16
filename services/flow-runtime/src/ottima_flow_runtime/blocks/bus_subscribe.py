@@ -8,10 +8,11 @@ A validade é por IDADE e é automática (D4): o quadro traz o `period_s` do pub
 valor mais velho que `3 × period_s` sai com `ok=False`. Os dois estados de ausência são
 distintos de propósito:
 
-- `key` **nunca publicada** ⇒ `PortSample(None, False)`: cold start, congela o bloco a
+- `key` **nunca publicada** ⇒ `Signal(None)`: cold start, congela o bloco a
   jusante por `has_cold_input`.
-- `key` publicada e **expirada** ⇒ `PortSample(último valor, ok=False)`: valor conhecido +
-  flag de invalidez, exatamente o que o OPC-Read faz com `quality != 0` (decisão A-6).
+- `key` publicada e **expirada** ⇒ `Signal(último valor, quality=UNCERTAIN)`: valor
+  conhecido + qualidade rebaixada, exatamente o que o OPC-Read faz com `quality != 0`
+  (decisão A-6).
 
 Sem a expiração, parar o flow publicador deixaria este bloco entregando o último valor com
 `ok=True` para sempre, e um MPC a jusante controlaria sobre um dado morto.
@@ -21,9 +22,10 @@ import math
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
+from ottima_core.signal import Quality
 from ottima_core.snapshot import ExchangeSnapshot
 
-from .base import Block, PortSample
+from .base import Block, Signal
 
 OUTPUT_PORTS = ("out",)
 
@@ -45,11 +47,11 @@ class BusSubscribeBlock(Block):
         return OUTPUT_PORTS
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         value = self._snapshot.get(self._key)
         if value is None:
-            return {"out": PortSample(None, False)}
+            return {"out": Signal(None)}
 
         agora = ts if ts is not None else datetime.now(UTC)
         idade = (agora - value.ts).total_seconds()
@@ -57,4 +59,6 @@ class BusSubscribeBlock(Block):
         # infinita nem invalidez permanente — cai no pior caso conservador (expira sempre).
         limite = STALE_PERIODS * value.period_s
         fresco = math.isfinite(limite) and limite > 0 and idade <= limite
-        return {"out": PortSample(value.v, value.ok and fresco)}
+        # `ExchangeValue.ok` ainda é bool cru (payload só ganha `quality` na Task 4).
+        q_pub = Quality.GOOD if value.ok else Quality.BAD
+        return {"out": Signal(value.v, quality=q_pub if fresco else min(q_pub, Quality.UNCERTAIN))}

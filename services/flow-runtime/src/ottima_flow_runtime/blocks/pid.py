@@ -39,7 +39,9 @@ from datetime import datetime
 
 from simple_pid import PID
 
-from .base import Block, PortSample, has_cold_input, null_outputs
+from ottima_core.signal import Quality
+
+from .base import Block, Signal, has_cold_input, null_outputs
 
 logger = logging.getLogger(__name__)
 
@@ -116,16 +118,16 @@ class PidBlock(Block):
         return OUTPUT_PORTS
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         if has_cold_input(inputs):
             return null_outputs(OUTPUT_PORTS)
 
         # Amostra inválida executa e propaga a flag (decisão A-6) -- mas só depois do
         # guard de finitude abaixo, que decide se o passo sequer chama o controlador.
-        ok_entradas = all(
-            sample.ok and math.isfinite(float(sample.v)) for sample in inputs.values()
-        )
+        q_entradas = min((s.quality for s in inputs.values()), default=Quality.GOOD)
+        if any(not math.isfinite(float(s.v)) for s in inputs.values()):
+            q_entradas = Quality.BAD
 
         pv = float(inputs["pv"].v)
         setpoint = float(inputs["sp"].v) if "sp" in inputs else self._setpoint
@@ -154,11 +156,13 @@ class PidBlock(Block):
             return self._retido()
 
         self._last = resultado
-        return {"out": PortSample(resultado, ok_entradas)}
+        return {"out": Signal(resultado, quality=q_entradas)}
 
-    def _retido(self) -> dict[str, PortSample]:
-        """Saída retida (RF-553): última boa conhecida, sempre `ok=False`."""
-        return {"out": PortSample(self._last, False)}
+    def _retido(self) -> dict[str, Signal]:
+        """Saída retida (RF-553): última boa conhecida, sempre BAD (comportamento
+        congelado — nunca herda `q_entradas`: a saída retida não reflete a entrada
+        corrente, então marcá-la GOOD por causa dela seria enganoso)."""
+        return {"out": Signal(self._last, quality=Quality.BAD)}
 
     def reset(self) -> None:
         # Reconstrói em vez de `self._pid.reset()`: `PID.reset()` zera `_integral` mas

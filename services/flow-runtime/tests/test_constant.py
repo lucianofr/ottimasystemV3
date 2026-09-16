@@ -8,7 +8,8 @@ varredura (`value` já validado finito no parse). Cobre também a instanciação
 from typing import Any, cast
 
 from ottima_core.flowgraph import TagRef, parse_graph
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.constant import ConstantBlock
 from ottima_flow_runtime.definition import StagedDefinition, build_definition
 
@@ -18,7 +19,7 @@ TS = 1.0
 async def test_constant_emite_o_valor_configurado_com_ok_true():
     bloco = ConstantBlock("c1", value=7.5)
 
-    assert (await bloco.step({}))["out"] == PortSample(7.5, True)
+    assert (await bloco.step({}))["out"] == Signal(7.5, quality=Quality.GOOD)
 
 
 async def test_constant_repete_o_mesmo_valor_em_varreduras_seguidas():
@@ -27,8 +28,8 @@ async def test_constant_repete_o_mesmo_valor_em_varreduras_seguidas():
     primeira = await bloco.step({})
     segunda = await bloco.step({})
 
-    assert primeira["out"] == PortSample(-3.0, True)
-    assert segunda["out"] == PortSample(-3.0, True)
+    assert primeira["out"] == Signal(-3.0, quality=Quality.GOOD)
+    assert segunda["out"] == Signal(-3.0, quality=Quality.GOOD)
 
 
 def test_constant_declara_nenhuma_entrada_e_uma_saida():

@@ -22,8 +22,9 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from ottima_core.flowgraph import IopdtParams, SopdtParams, TfsElement
+from ottima_core.signal import Quality
 
-from .base import Block, PortSample, has_cold_input, null_outputs
+from .base import Block, Signal, has_cold_input, null_outputs
 
 # O estágio de 1a ordem mora em `lag.py` desde o ADR-026, compartilhado com o bloco Filtro 1a
 # ordem. `DIRECT_PASS_RATIO` continua reexportado daqui: `mpc/discretize.py` documenta e
@@ -188,15 +189,15 @@ class TfsBlock(Block):
         return OUTPUT_PORTS
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         if has_cold_input(inputs):
             return null_outputs(OUTPUT_PORTS)
 
-        outputs: dict[str, PortSample] = {}
+        outputs: dict[str, Signal] = {}
         for index, row in enumerate(self._rows):
             total = 0.0
-            ok = True
+            q = Quality.GOOD
             for column, element in enumerate(row):
                 if element is None:
                     continue
@@ -206,8 +207,8 @@ class TfsBlock(Block):
                 if sample is None:
                     continue
                 total += element.step(float(sample.v))
-                ok = ok and sample.ok
-            outputs[OUTPUT_PORTS[index]] = PortSample(total, ok)
+                q = min(q, sample.quality)
+            outputs[OUTPUT_PORTS[index]] = Signal(total, quality=q)
         return outputs
 
     def reset(self) -> None:

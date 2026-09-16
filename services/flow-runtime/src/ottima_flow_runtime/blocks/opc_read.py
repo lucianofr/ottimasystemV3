@@ -8,9 +8,13 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal
 
+from ottima_core.signal import Quality
 from ottima_core.snapshot import ValueSnapshot
 
-from .base import Block, PortSample
+from .base import Block, Signal
+
+_QUALITY_FROM_OPC = {0: Quality.GOOD, 1: Quality.UNCERTAIN, 2: Quality.BAD}
+"""Única tradução OpcValue.quality -> Quality (ADR-043 §4)."""
 
 
 class OpcReadBlock(Block):
@@ -39,12 +43,12 @@ class OpcReadBlock(Block):
         return ("out",)
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         tag_value = self._snapshot.get(self._tag_id)
         if tag_value is None:
-            return {"out": PortSample(None, False)}
+            return {"out": Signal(None)}
         # A tipagem da porta é a da tag (decisão A-5): tag booleana entrega `bool` do
         # Python, e não 1.0, para o Script e o canvas não terem de adivinhar.
         value = tag_value.value != 0 if self._is_bool else float(tag_value.value)
-        return {"out": PortSample(value, tag_value.quality == 0)}
+        return {"out": Signal(value, quality=_QUALITY_FROM_OPC.get(tag_value.quality, Quality.BAD))}

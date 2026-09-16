@@ -17,7 +17,8 @@ from typing import Any, cast
 
 from ottima_core.bus import CHANNEL_FLOW_EXCHANGE, ExchangeValue
 from ottima_core.flowgraph import parse_graph
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.bus_publish import BusPublishBlock
 from ottima_flow_runtime.blocks.bus_subscribe import BusSubscribeBlock
 from ottima_flow_runtime.definition import StagedDefinition, build_definition
@@ -68,7 +69,7 @@ def assinante(espelho: EspelhoFake, *, key: str = KEY) -> BusSubscribeBlock:
 async def test_publica_valor_no_canal_com_o_ts_do_flow():
     bloco, redis = publicador(ts_seconds=2.0)
 
-    saida = await bloco.step({"in": PortSample(42.5, True)}, ts=T0)
+    saida = await bloco.step({"in": Signal(42.5, quality=Quality.GOOD)}, ts=T0)
 
     assert saida == {}
     assert bloco.output_ports == ()
@@ -83,7 +84,7 @@ async def test_publica_booleano_sem_virar_numero():
     """D7: o barramento é transporte — booleano chega booleano do outro lado."""
     bloco, redis = publicador()
 
-    await bloco.step({"in": PortSample(True, True)}, ts=T0)
+    await bloco.step({"in": Signal(True, quality=Quality.GOOD)}, ts=T0)
 
     assert json.loads(redis.publicados[0][1])["v"] is True
 
@@ -91,7 +92,7 @@ async def test_publica_booleano_sem_virar_numero():
 async def test_cold_start_nao_publica():
     bloco, redis = publicador()
 
-    assert await bloco.step({"in": PortSample(None, False)}, ts=T0) == {}
+    assert await bloco.step({"in": Signal(None)}, ts=T0) == {}
     assert redis.publicados == []
 
 
@@ -106,7 +107,7 @@ async def test_entrada_ausente_nao_publica():
 async def test_invalido_publica_com_flag_de_invalidez():
     bloco, redis = publicador()
 
-    await bloco.step({"in": PortSample(7.0, False)}, ts=T0)
+    await bloco.step({"in": Signal(7.0)}, ts=T0)
 
     quadro = ExchangeValue.model_validate_json(redis.publicados[0][1])
     assert (quadro.v, quadro.ok) == (7.0, False)
@@ -116,7 +117,9 @@ async def test_publica_uma_vez_por_varredura():
     bloco, redis = publicador()
 
     for i in range(3):
-        await bloco.step({"in": PortSample(float(i), True)}, ts=T0 + timedelta(seconds=i))
+        await bloco.step(
+            {"in": Signal(float(i), quality=Quality.GOOD)}, ts=T0 + timedelta(seconds=i)
+        )
 
     assert [ExchangeValue.model_validate_json(p).v for _, p in redis.publicados] == [0.0, 1.0, 2.0]
 
@@ -204,7 +207,7 @@ async def test_par_publica_e_assina_o_mesmo_contrato():
     espelho = EspelhoFake()
     assina = assinante(espelho)
 
-    await publica.step({"in": PortSample(True, True)}, ts=T0)
+    await publica.step({"in": Signal(True, quality=Quality.GOOD)}, ts=T0)
     espelho.ingest(redis.publicados[-1][1])
     saida = (await assina.step({}, ts=T0 + timedelta(seconds=0.5)))["out"]
 

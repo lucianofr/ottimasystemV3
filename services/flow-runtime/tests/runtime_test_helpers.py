@@ -36,7 +36,7 @@ from ottima_core.bus import (
 from ottima_core.models import Flow, OpcConnection, Project, Tag
 from ottima_core.script_pool import ScriptResult
 from ottima_core.snapshot import ExchangeSnapshot, ValueSnapshot
-from ottima_flow_runtime.blocks.base import Block, PortSample
+from ottima_flow_runtime.blocks.base import Block, Signal
 from ottima_flow_runtime.events import ChannelListener
 from ottima_flow_runtime.mpc.worker import SolveResult
 from ottima_flow_runtime.scheduler import FlowDefinition, FlowTask
@@ -657,8 +657,8 @@ class BlocoContado(Block):
         self.varreduras: int = 0
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         self.varreduras += 1
         if self._custo_s and self.varreduras == 1:
             time.sleep(self._custo_s)  # noqa: ASYNC251 — é o sujeito do teste

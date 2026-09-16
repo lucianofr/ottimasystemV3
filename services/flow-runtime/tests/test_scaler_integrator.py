@@ -16,7 +16,8 @@ from typing import Literal, cast
 
 import pytest
 
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.integrator import IntegratorBlock
 from ottima_flow_runtime.blocks.scaler import ScalerBlock
 
@@ -33,8 +34,10 @@ def integrator(time_base: Literal["s", "min", "h"] = "min", *, ts: float = TS) -
     return IntegratorBlock("i1", time_base=time_base, ts_seconds=ts)
 
 
-async def alimenta_scaler(bloco: ScalerBlock, valor: float, *, ok: bool = True) -> PortSample:
-    return (await bloco.step({"in": PortSample(valor, ok)}))["out"]
+async def alimenta_scaler(bloco: ScalerBlock, valor: float, *, ok: bool = True) -> Signal:
+    return (await bloco.step({"in": Signal(valor, quality=Quality.GOOD if ok else Quality.BAD)}))[
+        "out"
+    ]
 
 
 class Totaliza:
@@ -45,10 +48,12 @@ class Totaliza:
         self.passo = passo
         self.agora = T0
 
-    async def alimenta(self, valor: float, *, ok: bool = True, reset: object = ...) -> PortSample:
-        entradas: dict[str, PortSample] = {"in": PortSample(valor, ok)}
+    async def alimenta(self, valor: float, *, ok: bool = True, reset: object = ...) -> Signal:
+        entradas: dict[str, Signal] = {
+            "in": Signal(valor, quality=Quality.GOOD if ok else Quality.BAD)
+        }
         if reset is not ...:
-            entradas["reset"] = PortSample(cast("float | bool | None", reset), True)
+            entradas["reset"] = Signal(cast("float | bool | None", reset), quality=Quality.GOOD)
         saida = (await self.bloco.step(entradas, ts=self.agora))["out"]
         self.agora += timedelta(seconds=self.passo)
         return saida
@@ -105,7 +110,7 @@ async def test_scaler_propaga_invalidez_da_entrada():
 
 
 async def test_scaler_com_cold_start_nao_executa():
-    saida = (await scaler().step({"in": PortSample(None, False)}))["out"]
+    saida = (await scaler().step({"in": Signal(None)}))["out"]
 
     assert saida.v is None
     assert saida.ok is False
@@ -181,10 +186,10 @@ async def test_integrator_congela_em_salto_de_relogio():
 
 async def test_integrator_congela_em_dt_nao_positivo():
     bloco = integrator("s")
-    await bloco.step({"in": PortSample(5.0, True)}, ts=T0)
-    await bloco.step({"in": PortSample(5.0, True)}, ts=T0 + timedelta(seconds=1))
+    await bloco.step({"in": Signal(5.0, quality=Quality.GOOD)}, ts=T0)
+    await bloco.step({"in": Signal(5.0, quality=Quality.GOOD)}, ts=T0 + timedelta(seconds=1))
 
-    saida = (await bloco.step({"in": PortSample(5.0, True)}, ts=T0))["out"]
+    saida = (await bloco.step({"in": Signal(5.0, quality=Quality.GOOD)}, ts=T0))["out"]
 
     assert saida.v == pytest.approx(5.0)
     assert saida.ok is False
@@ -194,7 +199,9 @@ async def test_integrator_sem_ts_cai_no_ts_nominal():
     """Chamador fora do scheduler (teste de pureza) usa o Ts configurado."""
     bloco = integrator("s")
 
-    assert (await bloco.step({"in": PortSample(2.5, True)}))["out"].v == pytest.approx(2.5)
+    assert (await bloco.step({"in": Signal(2.5, quality=Quality.GOOD)}))["out"].v == pytest.approx(
+        2.5
+    )
 
 
 async def test_integrator_integra_a_variavel_e_nao_o_valor_instantaneo():
@@ -237,12 +244,12 @@ async def test_integrator_reset_cold_nao_zera():
 async def test_integrator_ignora_reset_sem_qualidade():
     """Tag de reset morta e congelada em 1 não apaga o total da planta."""
     bloco = integrator("s")
-    await bloco.step({"in": PortSample(5.0, True)}, ts=T0)
-    await bloco.step({"in": PortSample(5.0, True)}, ts=T0 + timedelta(seconds=1))
+    await bloco.step({"in": Signal(5.0, quality=Quality.GOOD)}, ts=T0)
+    await bloco.step({"in": Signal(5.0, quality=Quality.GOOD)}, ts=T0 + timedelta(seconds=1))
 
     saida = (
         await bloco.step(
-            {"in": PortSample(5.0, True), "reset": PortSample(1.0, False)},
+            {"in": Signal(5.0, quality=Quality.GOOD), "reset": Signal(1.0)},
             ts=T0 + timedelta(seconds=2),
         )
     )["out"]
@@ -292,7 +299,7 @@ async def test_integrator_buraco_de_qualidade_e_pulado_nunca_preenchido_retroati
 async def test_integrator_com_cold_start_nao_executa_nem_avanca_o_estado():
     totaliza = Totaliza(integrator("s"))
 
-    nula = (await totaliza.bloco.step({"in": PortSample(None, False)}))["out"]
+    nula = (await totaliza.bloco.step({"in": Signal(None)}))["out"]
     assert nula.v is None
     assert nula.ok is False
 

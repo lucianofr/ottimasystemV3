@@ -22,20 +22,40 @@ cada bloco compõe as peças conforme a própria semântica.
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from datetime import datetime
+
+from ottima_core.signal import Quality, Substatus
 
 
 @dataclass(frozen=True, slots=True)
-class PortSample:
-    """Valor de uma porta numa varredura.
+class Signal:
+    """Valor de uma porta numa varredura (ADR-043; forma do ADR-039 §4.1).
 
-    `v is None` é cold start (nunca houve valor desde o deploy). `ok=False` é invalidez com
-    valor conhecido: o bloco executa com o valor e propaga a flag (decisão A-6).
+    `v is None` é cold start. `ok` é DERIVADO: só GOOD atua (emenda ADR-039 §4.1 —
+    UNCERTAIN invalida atuação igual a BAD; a distinção é diagnóstico). Substatus e
+    limites são produzidos SÓ pelo shell (D9); os demais blocos emitem os defaults.
     """
 
     v: float | bool | None
-    ok: bool
+    # `quality` KEYWORD-ONLY por segurança (ADR-043 §3): o construtor antigo era
+    # posicional `PortSample(v, ok: bool)` em 60+ call sites. Sem kw-only, um
+    # `Signal(x, True)` sobrevivente guardaria `True` CRU (dataclass não coage):
+    # `ok` viraria False e o bool contaminaria `min()` e o payload JSON — e o CI não
+    # tem mypy (ADR-035). Kw-only vira TypeError na coleta do pytest.
+    _: KW_ONLY
+    quality: Quality = Quality.BAD
+    substatus: Substatus = Substatus.NON_SPECIFIC
+    hi_limited: bool = False
+    lo_limited: bool = False
+
+    @property
+    def ok(self) -> bool:
+        return self.quality is Quality.GOOD
+
+    @property
+    def init_request(self) -> bool:
+        return self.substatus is Substatus.INIT_REQUEST
 
 
 class Block(ABC):
@@ -55,8 +75,8 @@ class Block(ABC):
 
     @abstractmethod
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         """Executa uma varredura e devolve os valores das portas de saída.
 
         `ts` é o instante da fronteira desta varredura — o MESMO relógio publicado em
@@ -71,11 +91,11 @@ class Block(ABC):
         """Zera o estado interno (deploy/stop). Blocos sem estado não precisam sobrescrever."""
 
 
-def has_cold_input(inputs: Mapping[str, PortSample]) -> bool:
+def has_cold_input(inputs: Mapping[str, Signal]) -> bool:
     """Portão de cold start (§3.0): alguma entrada conectada ainda não tem valor."""
     return any(sample.v is None for sample in inputs.values())
 
 
-def null_outputs(ports: Iterable[str]) -> dict[str, PortSample]:
+def null_outputs(ports: Iterable[str]) -> dict[str, Signal]:
     """Saídas de uma varredura que não executou: nulas e inválidas, nunca 0.0 sintético."""
-    return {port: PortSample(None, False) for port in ports}
+    return {port: Signal(None) for port in ports}

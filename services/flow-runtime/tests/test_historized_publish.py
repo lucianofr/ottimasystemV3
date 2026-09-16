@@ -38,7 +38,8 @@ from ottima_core.bus import CHANNEL_FLOW_VALUES, OpcValue
 from ottima_core.flowgraph import TagRef, parse_graph
 from ottima_core.models import HistorizedVar, Tag
 from ottima_core.script_pool import ScriptPool
-from ottima_flow_runtime.blocks.base import Block, PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Block, Signal
 from ottima_flow_runtime.definition import build_definition
 from ottima_flow_runtime.scheduler import FlowDefinition, FlowTask, HistorizedPort
 
@@ -118,10 +119,10 @@ async def run_scan(clock: FakeClock) -> float:
 
 
 class ValueBlock(Block):
-    """Bloco-duplo: devolve sempre a MESMA `PortSample` em toda porta declarada — o throttle
+    """Bloco-duplo: devolve sempre o MESMO `Signal` em toda porta declarada — o throttle
     sob teste é o de `_publish_historized`, não a lógica de um bloco real."""
 
-    def __init__(self, block_id: str, *, outputs: tuple[str, ...], sample: PortSample) -> None:
+    def __init__(self, block_id: str, *, outputs: tuple[str, ...], sample: Signal) -> None:
         super().__init__(block_id)
         self._outputs = outputs
         self._sample = sample
@@ -131,8 +132,8 @@ class ValueBlock(Block):
         return self._outputs
 
     async def step(
-        self, inputs: dict[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: dict[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         return {port: self._sample for port in self._outputs}
 
 
@@ -244,7 +245,7 @@ async def test_ts_0_5s_publica_uma_mensagem_a_cada_duas_varreduras(
 ):
     clock = FakeClock()
     port = HistorizedPort(block_id="a", port="out", tag_id=100)
-    block = ValueBlock("a", outputs=("out",), sample=PortSample(1.0, True))
+    block = ValueBlock("a", outputs=("out",), sample=Signal(1.0, quality=Quality.GOOD))
     raw = await subscribe(CHANNEL_FLOW_VALUES)
     await flow(clock, [block], historized=(port,), ts_seconds=0.5)
 
@@ -269,7 +270,7 @@ async def test_ts_0_5s_publica_uma_mensagem_a_cada_duas_varreduras(
 async def test_ts_1s_publica_uma_mensagem_por_varredura(flow, subscribe, redis_client: Redis):
     clock = FakeClock()
     port = HistorizedPort(block_id="a", port="out", tag_id=100)
-    block = ValueBlock("a", outputs=("out",), sample=PortSample(1.0, True))
+    block = ValueBlock("a", outputs=("out",), sample=Signal(1.0, quality=Quality.GOOD))
     raw = await subscribe(CHANNEL_FLOW_VALUES)
     await flow(clock, [block], historized=(port,), ts_seconds=1.0)
 
@@ -289,7 +290,7 @@ async def test_ts_1s_com_jitter_de_parede_nao_perde_varredura(flow, subscribe, r
     1,000/2,003 s). Tolerância de meia varredura tem de publicar as 4."""
     clock = JitteredClock()
     port = HistorizedPort(block_id="a", port="out", tag_id=100)
-    block = ValueBlock("a", outputs=("out",), sample=PortSample(1.0, True))
+    block = ValueBlock("a", outputs=("out",), sample=Signal(1.0, quality=Quality.GOOD))
     raw = await subscribe(CHANNEL_FLOW_VALUES)
     await flow(clock, [block], historized=(port,), ts_seconds=1.0)
 
@@ -310,7 +311,7 @@ async def test_ts_2s_publica_uma_mensagem_por_varredura_sem_interpolar(
     entre fronteiras — o número de mensagens é exatamente o número de varreduras."""
     clock = FakeClock()
     port = HistorizedPort(block_id="a", port="out", tag_id=100)
-    block = ValueBlock("a", outputs=("out",), sample=PortSample(1.0, True))
+    block = ValueBlock("a", outputs=("out",), sample=Signal(1.0, quality=Quality.GOOD))
     raw = await subscribe(CHANNEL_FLOW_VALUES)
     await flow(clock, [block], historized=(port,), ts_seconds=2.0)
 
@@ -335,8 +336,8 @@ async def test_porta_invalida_publica_value_0_quality_2(flow, subscribe):
     clock = FakeClock()
     cold = HistorizedPort(block_id="cold", port="out", tag_id=100)
     ruim = HistorizedPort(block_id="ruim", port="out", tag_id=200)
-    bloco_cold = ValueBlock("cold", outputs=("out",), sample=PortSample(None, False))
-    bloco_ruim = ValueBlock("ruim", outputs=("out",), sample=PortSample(5.0, False))
+    bloco_cold = ValueBlock("cold", outputs=("out",), sample=Signal(None, quality=Quality.BAD))
+    bloco_ruim = ValueBlock("ruim", outputs=("out",), sample=Signal(5.0, quality=Quality.BAD))
     raw = await subscribe(CHANNEL_FLOW_VALUES)
     await flow(clock, [bloco_cold, bloco_ruim], historized=(cold, ruim), ts_seconds=1.0)
 
@@ -353,8 +354,8 @@ async def test_porta_booleana_publica_1_0_ou_0_0(flow, subscribe):
     clock = FakeClock()
     ligado = HistorizedPort(block_id="on", port="out", tag_id=100)
     desligado = HistorizedPort(block_id="off", port="out", tag_id=200)
-    bloco_on = ValueBlock("on", outputs=("out",), sample=PortSample(True, True))
-    bloco_off = ValueBlock("off", outputs=("out",), sample=PortSample(False, True))
+    bloco_on = ValueBlock("on", outputs=("out",), sample=Signal(True, quality=Quality.GOOD))
+    bloco_off = ValueBlock("off", outputs=("out",), sample=Signal(False, quality=Quality.GOOD))
     raw = await subscribe(CHANNEL_FLOW_VALUES)
     await flow(clock, [bloco_on, bloco_off], historized=(ligado, desligado), ts_seconds=1.0)
 
@@ -374,8 +375,12 @@ async def test_porta_nao_finita_com_qualidade_boa_publica_quality_2(flow, subscr
     clock = FakeClock()
     nan = HistorizedPort(block_id="nan", port="out", tag_id=100)
     inf = HistorizedPort(block_id="inf", port="out", tag_id=200)
-    bloco_nan = ValueBlock("nan", outputs=("out",), sample=PortSample(float("nan"), True))
-    bloco_inf = ValueBlock("inf", outputs=("out",), sample=PortSample(float("inf"), True))
+    bloco_nan = ValueBlock(
+        "nan", outputs=("out",), sample=Signal(float("nan"), quality=Quality.GOOD)
+    )
+    bloco_inf = ValueBlock(
+        "inf", outputs=("out",), sample=Signal(float("inf"), quality=Quality.GOOD)
+    )
     raw = await subscribe(CHANNEL_FLOW_VALUES)
     await flow(clock, [bloco_nan, bloco_inf], historized=(nan, inf), ts_seconds=1.0)
 
@@ -395,7 +400,7 @@ async def test_porta_nao_finita_com_qualidade_boa_publica_quality_2(flow, subscr
 
 async def test_historized_vazio_nao_publica_nada(flow, subscribe, redis_client: Redis):
     clock = FakeClock()
-    block = ValueBlock("a", outputs=("out",), sample=PortSample(1.0, True))
+    block = ValueBlock("a", outputs=("out",), sample=Signal(1.0, quality=Quality.GOOD))
     raw = await subscribe(CHANNEL_FLOW_VALUES)
     await flow(clock, [block], historized=(), ts_seconds=1.0)
 
@@ -415,8 +420,8 @@ async def test_hot_swap_troca_o_conjunto_e_purga_a_porta_removida(flow, subscrib
     clock = FakeClock()
     port_a = HistorizedPort(block_id="a", port="out", tag_id=100)
     port_b = HistorizedPort(block_id="b", port="out", tag_id=200)
-    bloco_a = ValueBlock("a", outputs=("out",), sample=PortSample(1.0, True))
-    bloco_b = ValueBlock("b", outputs=("out",), sample=PortSample(2.0, True))
+    bloco_a = ValueBlock("a", outputs=("out",), sample=Signal(1.0, quality=Quality.GOOD))
+    bloco_b = ValueBlock("b", outputs=("out",), sample=Signal(2.0, quality=Quality.GOOD))
     raw = await subscribe(CHANNEL_FLOW_VALUES)
     task = await flow(clock, [bloco_a, bloco_b], historized=(port_a,), ts_seconds=1.0)
 

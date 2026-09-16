@@ -13,7 +13,8 @@ import math
 
 import pytest
 
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.pid import PidBlock
 
 TS = 0.5  # Ts do critério de aceite da F3 (PRD §8)
@@ -39,10 +40,11 @@ def bloco(**overrides) -> PidBlock:
 
 async def alimenta(
     block: PidBlock, pv: float, *, sp: float | None = None, ok: bool = True
-) -> PortSample:
-    inputs = {"pv": PortSample(pv, ok)}
+) -> Signal:
+    q = Quality.GOOD if ok else Quality.BAD
+    inputs = {"pv": Signal(pv, quality=q)}
     if sp is not None:
-        inputs["sp"] = PortSample(sp, ok)
+        inputs["sp"] = Signal(sp, quality=q)
     return (await block.step(inputs))["out"]
 
 
@@ -139,7 +141,7 @@ async def test_sem_porta_sp_usa_o_setpoint_da_config():
 
 async def test_cold_start_nao_executa():
     controlador = bloco()
-    saida = (await controlador.step({"pv": PortSample(None, False)}))["out"]
+    saida = (await controlador.step({"pv": Signal(None)}))["out"]
     assert saida.v is None
     assert saida.ok is False
 

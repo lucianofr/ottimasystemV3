@@ -24,7 +24,7 @@ from redis.asyncio import Redis
 
 from ottima_core.bus import CHANNEL_FLOW_EXCHANGE, ExchangeValue
 
-from .base import Block, PortSample
+from .base import Block, Signal
 
 INPUT_PORTS = ("in",)
 
@@ -50,8 +50,8 @@ class BusPublishBlock(Block):
         return INPUT_PORTS
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         sample = inputs.get("in")
         # Entrada ausente do dicionário é grafo sem a aresta obrigatória (a validação já
         # reprova): tratada como cold, para o bloco nunca inventar um número.

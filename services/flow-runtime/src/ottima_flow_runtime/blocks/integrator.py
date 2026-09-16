@@ -28,7 +28,9 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal
 
-from .base import Block, PortSample, null_outputs
+from ottima_core.signal import Quality
+
+from .base import Block, Signal, null_outputs
 
 INPUT_PORTS = ("in", "reset")
 OUTPUT_PORTS = ("out",)
@@ -61,8 +63,8 @@ class IntegratorBlock(Block):
         return OUTPUT_PORTS
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         sample = inputs["in"]
         # Cold start é julgado só pela entrada integrada: `reset` frio (None) significa
         # "sem comando", não varredura nula.
@@ -73,30 +75,34 @@ class IntegratorBlock(Block):
         if reset is not None and reset.ok and reset.v:
             self._total = 0.0
             self._ultimo_ts = ts
-            return {"out": PortSample(0.0, sample.ok)}
+            return {"out": Signal(0.0, quality=sample.quality)}
 
         valor = float(sample.v)
         if not sample.ok or not math.isfinite(valor):
             # A brecha fica de fora do total E fora do relógio: reancora o ts para a
             # amostra boa seguinte não "cobrir" o intervalo ruim com o valor novo.
+            # Comportamento congelado: sempre BAD (não `sample.quality`) — mesmo uma
+            # amostra GOOD cujo valor seja não-finito produz total inválido aqui.
             if ts is not None:
                 self._ultimo_ts = ts
-            return {"out": PortSample(self._total, False)}
+            return {"out": Signal(self._total, quality=Quality.BAD)}
 
         if ts is None:
             # Fora do scheduler (teste unitário de pureza): cai no Ts nominal.
             dt = self._ts
         elif self._ultimo_ts is None:
             self._ultimo_ts = ts
-            return {"out": PortSample(self._total, sample.ok)}
+            return {"out": Signal(self._total, quality=sample.quality)}
         else:
             dt = (ts - self._ultimo_ts).total_seconds()
             self._ultimo_ts = ts
             if dt <= 0 or dt > _MAX_DT_FATOR * self._ts:
-                return {"out": PortSample(self._total, False)}
+                # Comportamento congelado: sempre BAD — salto de relógio invalida o
+                # total independente da qualidade da amostra corrente.
+                return {"out": Signal(self._total, quality=Quality.BAD)}
 
         self._total += valor * dt / self._fator
-        return {"out": PortSample(self._total, True)}
+        return {"out": Signal(self._total, quality=Quality.GOOD)}
 
     def reset(self) -> None:
         self._total = 0.0

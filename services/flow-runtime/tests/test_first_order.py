@@ -10,7 +10,8 @@ import math
 
 import pytest
 
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.first_order import FirstOrderBlock
 
 TS = 0.5  # Ts do critério de aceite da F3 (PRD §8)
@@ -20,8 +21,10 @@ def bloco(tau: float, *, ts: float = TS) -> FirstOrderBlock:
     return FirstOrderBlock("f1", tau=tau, ts_seconds=ts)
 
 
-async def alimenta(block: FirstOrderBlock, valor: float, *, ok: bool = True) -> PortSample:
-    return (await block.step({"in": PortSample(valor, ok)}))["out"]
+async def alimenta(block: FirstOrderBlock, valor: float, *, ok: bool = True) -> Signal:
+    return (await block.step({"in": Signal(valor, quality=Quality.GOOD if ok else Quality.BAD)}))[
+        "out"
+    ]
 
 
 async def rampa(block: FirstOrderBlock, valor: float, n: int) -> list[float]:
@@ -108,8 +111,8 @@ async def test_tau_maior_filtra_mais():
 async def test_cold_start_nao_executa_nem_avanca_o_estado():
     filtro = bloco(tau=10.0)
 
-    saida = (await filtro.step({"in": PortSample(None, False)}))["out"]
-    assert saida == PortSample(None, False)
+    saida = (await filtro.step({"in": Signal(None)}))["out"]
+    assert saida == Signal(None)
 
     # A varredura fria não consumiu a partida: a próxima amostra ainda sai sem filtrar.
     assert (await alimenta(filtro, 150.0)).v == 150.0

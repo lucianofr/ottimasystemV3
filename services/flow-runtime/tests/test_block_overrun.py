@@ -19,7 +19,7 @@ from datetime import datetime
 from redis.asyncio import Redis
 
 from ottima_core.bus import CHANNEL_EVENTS, KIND_BLOCK_OVERRUN, EventMessage
-from ottima_flow_runtime.blocks.base import Block, PortSample
+from ottima_flow_runtime.blocks.base import Block, Signal
 from ottima_flow_runtime.scheduler import FlowDefinition, FlowTask
 
 FLOW_ID = 601
@@ -46,8 +46,8 @@ class BlocoQuenteUmaVez(Block):
         self.execucoes = 0
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         self.execucoes += 1
         if self.execucoes == 1:
             time.sleep(CUSTO_S)  # noqa: ASYNC251 — custo síncrono real, o sujeito do teste

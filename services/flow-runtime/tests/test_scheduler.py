@@ -23,7 +23,8 @@ from ottima_core.bus import (
     PortValue,
     channel_flow_status,
 )
-from ottima_flow_runtime.blocks.base import Block, PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Block, Signal
 from ottima_flow_runtime.scheduler import FlowDefinition, FlowTask
 
 FLOW_ID = 7
@@ -109,7 +110,7 @@ class SpyBlock(Block):
         self._outputs = outputs
         self.cost = cost
         self.fired: list[float] = []
-        self.seen: list[Mapping[str, PortSample]] = []
+        self.seen: list[Mapping[str, Signal]] = []
         self.calls: list[str] = calls if calls is not None else []
         self.value = 0.0
         self.on_step: Callable[[], None] | None = None
@@ -123,8 +124,8 @@ class SpyBlock(Block):
         return self._outputs
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         self.fired.append(self._clock.monotonic())
         self.seen.append(dict(inputs))
         self.calls.append(self.block_id)
@@ -133,15 +134,15 @@ class SpyBlock(Block):
         if self.cost:
             self._clock.advance(self.cost)
         self.value += 1.0
-        return {port: PortSample(self.value, True) for port in self._outputs}
+        return {port: Signal(self.value, quality=Quality.GOOD) for port in self._outputs}
 
 
 class BoomBlock(Block):
     """Bloco que levanta: gatilho do isolamento de falha (RF-402)."""
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         raise RuntimeError("bloco-duplo explodiu de proposito")
 
 

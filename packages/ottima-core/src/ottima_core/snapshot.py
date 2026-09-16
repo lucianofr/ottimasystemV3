@@ -122,7 +122,7 @@ class ExchangeSnapshot:
         """Último valor publicado na chave, ou `None` se ninguém publicou nela ainda.
 
         `None` é o cold start do assinante (ADR-042 D4): chave sem publicador é legítima
-        (D6), e é o bloco que traduz a ausência em `PortSample(None, False)`.
+        (D6), e é o bloco que traduz a ausência em `Signal(None)`.
         """
         return self._values.get(key)
 
