@@ -22,6 +22,7 @@ frontend/openapi.json
 .impeccable/
 .serena/
 .tokensave/
+.codegraph/
 .worktrees/
 # servidores MCP da maquina local (caminho absoluto no `cwd`, nao portavel)
 .mcp.json
