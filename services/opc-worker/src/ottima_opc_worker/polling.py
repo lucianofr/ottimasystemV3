@@ -27,14 +27,11 @@ from ottima_core.bus import (
     channel_opc_values,
     publish_event,
 )
+from ottima_core.signal import OpcQuality
 
 from .state import ConnectionConfig, ConnectionSnapshot, TagConfig, TagSnapshot
 
 logger = logging.getLogger(__name__)
-
-QUALITY_GOOD = 0
-QUALITY_UNCERTAIN = 1
-QUALITY_BAD = 2
 
 # Folga mínima entre ciclos, mesmo quando a leitura já estourou o período (piso igual ao da
 # amostragem do watchdog): emendar requisições back-to-back num servidor lento só piora.
@@ -42,14 +39,14 @@ _MIN_IDLE_S = 0.05
 
 # A severidade da StatusCode vive nos 2 bits mais altos (OPC-UA Part 4 §7.34).
 _SEVERITY_SHIFT = 30
-_SEVERITY_TO_QUALITY = {0: QUALITY_GOOD, 1: QUALITY_UNCERTAIN}
+_SEVERITY_TO_QUALITY = {0: OpcQuality.GOOD, 1: OpcQuality.UNCERTAIN}
 
 # Bit CurrentRead do AccessLevel (OPC-UA Part 3 §5.6.2). `ua.AccessLevel.CurrentRead` é a
 # POSIÇÃO do bit, não a máscara.
 _CURRENT_READ_MASK = 1 << int(ua.AccessLevel.CurrentRead)
 
 
-def status_to_quality(status_code: ua.StatusCode | None) -> int:
+def status_to_quality(status_code: ua.StatusCode | None) -> OpcQuality:
     """StatusCode OPC-UA → quality 0/1/2 (spec F1 §3.4-4).
 
     A severidade está nos 2 bits mais altos do código: 0=Good, 1=Uncertain, 2=Bad,
@@ -57,9 +54,9 @@ def status_to_quality(status_code: ua.StatusCode | None) -> int:
     declarada o valor não pode ser dado bom.
     """
     if status_code is None:
-        return QUALITY_BAD
+        return OpcQuality.BAD
     severity = (int(status_code.value) >> _SEVERITY_SHIFT) & 0b11
-    return _SEVERITY_TO_QUALITY.get(severity, QUALITY_BAD)
+    return _SEVERITY_TO_QUALITY.get(severity, OpcQuality.BAD)
 
 
 def coerce_value(raw: Any) -> float:
@@ -81,7 +78,7 @@ async def publish_value(
     *,
     tag_id: int,
     value: float,
-    quality: int,
+    quality: OpcQuality,
     ts: datetime | None = None,
 ) -> None:
     """Ponto único de publicação em `opc.values.<conn_id>` (payload §7.1 verbatim).
@@ -138,7 +135,7 @@ def _declares_read_access(data_value: ua.DataValue | None) -> bool:
     leitura bad, que o caminho da quality já trata.
     """
     try:
-        if data_value is None or status_to_quality(data_value.StatusCode) != QUALITY_GOOD:
+        if data_value is None or status_to_quality(data_value.StatusCode) != OpcQuality.GOOD:
             return True
         return bool(int(_raw_value(data_value)) & _CURRENT_READ_MASK)
     except (TypeError, ValueError):
@@ -351,15 +348,15 @@ class ValuePoller:
         except (TypeError, ValueError) as exc:
             # Node de tipo incompatível com a tag é erro de cadastro: publica bad e avisa,
             # em vez de deixar a tag muda no canal.
-            value, quality = 0.0, QUALITY_BAD
+            value, quality = 0.0, OpcQuality.BAD
             motivo, detalhe = "valor do node não é numérico", _describe(exc)
         else:
-            if quality != QUALITY_GOOD:
+            if quality != OpcQuality.GOOD:
                 motivo, detalhe = (
                     "leitura do node falhou",
                     str(data_value.StatusCode if data_value else None),
                 )
-        if quality != QUALITY_GOOD and not self._has_series(tag):
+        if quality != OpcQuality.GOOD and not self._has_series(tag):
             # Comando que nunca leu bem ainda não tem série: "sem dado" é mais honesto que
             # "ruim 0" (mesma regra de `ValueHeartbeat._series_tags`).
             return

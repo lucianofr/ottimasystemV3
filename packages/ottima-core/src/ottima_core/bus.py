@@ -5,12 +5,13 @@ Canais são FIXOS: criar/alterar canal exige ADR (CLAUDE.md). Consumo real come�
 
 import logging
 from datetime import UTC, datetime
+from enum import IntEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from redis.asyncio import Redis
 
-from ottima_core.signal import Quality, Substatus
+from ottima_core.signal import OpcQuality, Quality, Substatus
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,26 @@ class OpcValue(BaseModel):
     tag_id: int
     ts: datetime
     value: float
-    quality: int  # 0=good, 1=uncertain, 2=bad (spec F1 §3.2)
+    quality: OpcQuality  # polaridade OPC (spec F1 §3.2) — a INVERSA de `Quality`; ver signal.py
+
+    @field_validator("quality", mode="before")
+    @classmethod
+    def _quality_no_dominio(cls, v: object) -> object:
+        """Guard de polaridade (ADR-043 §4) que nunca derruba mensagem do fio (ADR-009).
+
+        Enum de porta (`Quality`/`Substatus`) e `bool` só existem em construção Python e são
+        REJEITADOS: em lax, `Quality.BAD` (=0) viraria GOOD em silêncio — a inversão exata
+        que este campo existe para impedir. Int cru 0/1/2 passa (site legado não vira bomba
+        de runtime — ex.: heartbeat republicando `TagSnapshot.quality` com sessão caída).
+        Int fora do domínio colapsa para BAD: rejeitar descartaria o payload inteiro no
+        espelho (`snapshot._ingest` faz warning+return) e a disponibilidade do MPC seria
+        classificada sobre o último valor BOM retido — o lado errado da falha.
+        """
+        if isinstance(v, bool) or (isinstance(v, IntEnum) and not isinstance(v, OpcQuality)):
+            raise ValueError("quality exige a polaridade OPC (OpcQuality), não bool/enum de porta")
+        if isinstance(v, int) and v not in (0, 1, 2):
+            return OpcQuality.BAD
+        return v
 
 
 class ExchangeValue(BaseModel):

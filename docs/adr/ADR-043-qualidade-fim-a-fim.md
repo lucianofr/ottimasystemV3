@@ -34,6 +34,30 @@ some — substituído pela classe única.
 `opc.values.*`, `calc.values`, `flow.values`, recorder, `samples`, `/ws opc_values`, histórico.
 `opc_read` é o ÚNICO ponto de tradução entre os dois vocabulários.
 
+> **Emenda 2026-09-17.** `OpcQuality(IntEnum)` (GOOD=0/UNCERTAIN=1/BAD=2, em
+> `ottima_core.signal`) passa a tipar `OpcValue.quality` e substitui todo literal 0/1/2 do
+> lado OPC (opc-worker, recorder, calc-worker, `scheduler._historized_value`,
+> `mpc/availability.py`, `blocks/mpc.py`). Valores, polaridade, JSON do fio e persistência
+> ficam byte-idênticos; a coexistência dos dois vocabulários e os pontos de tradução do §4
+> permanecem. Validador do campo: int cru 0/1/2 passa (site legado não vira erro de
+> runtime); int fora do domínio colapsa para BAD — única mudança observável: o recorder
+> grava NULL (ADR-037) onde antes gravava o valor com quality desconhecida; enum de porta
+> (`Quality`/`Substatus`) e `bool` são rejeitados na construção. Rejeitar fora-do-domínio
+> derrubaria a mensagem inteira no espelho (`snapshot._ingest`) e a disponibilidade de MV
+> seria classificada sobre o último valor bom retido — o lado errado da falha (ADR-009).
+>
+> **Correção de fato na letra acima (pré-existente a esta emenda).** A linha "`opc_read` é o
+> ÚNICO ponto de tradução" já contradizia o §4 desde a v1: o §4 se intitula "as duas únicas"
+> e lista `scheduler._historized_value` como segundo ponto. São **dois**, e continuam dois.
+>
+> **Alcançabilidade do delta.** Nenhum produtor consegue emitir qualidade fora do domínio:
+> `polling.status_to_quality` fecha em 0/1/2 (`polling.py:56-59`), `runner._collect_inputs`
+> faz `max()` sobre valores já no domínio e `_historized_value` emite só GOOD ou BAD. O
+> colapso→BAD, portanto, não muda nenhum estado ALCANÇÁVEL de `samples`, `/api/history` ou
+> faceplate: ele só define o comportamento para um payload que apenas um produtor
+> estranho ao sistema (ou corrupção de fio) poderia gerar. O `quality: number` do frontend
+> (`CanalAoVivo.tsx`) e seus testes de tolerância seguem válidos e intocados.
+
 ### D3 — UNCERTAIN invalida atuação
 
 Emenda formal ao ADR-039 §4.1: `is_good` passa de `quality is not BAD` para `quality is GOOD`.
@@ -146,12 +170,12 @@ uncertain (medição real) segue persistindo valor como hoje — a regra do reco
 | PID (kernel standalone, `services/flow-runtime/.../blocks/pid.py`) | `_retido` (RF-553) → `min(UNCERTAIN, q_entradas)`, e **BAD quando não há valor retido anterior** (`v is None`, D7); execução ok → default D6 |
 | PID (shell, `blocks/shell/block.py::_emit`) | ADR-039 vigente + emenda §4.1 (§7.1 abaixo); saídas OUT/BKCAL_OUT com semântica PRÓPRIA e BINÁRIA (OOS→BAD, senão GOOD; `bkcal_out` sempre GOOD) — mecanismo distinto do `_retido` do kernel, nunca `min(UNCERTAIN, ...)` |
 | fuzzy | retenção (exceção ou saída não-finita) → `min(UNCERTAIN, q_entradas_crua)`, e **BAD quando a porta nunca teve valor bom** (`v is None`, D7); execução ok → default D6. **Duas variáveis de propósito:** `q_entradas_crua` é o mínimo BRUTO das flags das entradas e é o teto da retenção; `q_entradas` é ela rebaixada a BAD quando alguma entrada tem valor não-finito, e alimenta só o caminho de sucesso e o `FuzzyState.ok`. Usar `q_entradas` no teto tornaria o UNCERTAIN genuíno de D7 (entrada boa + valor não-finito) INALCANÇÁVEL e divergiria do PID para a mesma entrada. |
-| MPC | portas de saída mantêm semântica atual; disponibilidade de MV (RF-626/ADR-028) INTOCADA — `mpc/availability.py` lê `tag.quality` do `ValueSnapshot`, não de porta |
+| MPC | portas de saída mantêm semântica atual; disponibilidade de MV (RF-626/ADR-028) INTOCADA — `mpc/availability.py` lê `tag.quality` do `ValueSnapshot`, não de porta *(emenda 2026-09-17: comparações `!= 0` viram `!= OpcQuality.GOOD`; regra idêntica)* |
 | script | default D6 automático; sandbox cego a qualidade (D8) |
 | opc_write | consumidor: suprime escrita se `not ok` (= `quality is not GOOD`) — comportamento atual |
 | bus_publish | cold (`v is None`) não publica (como hoje); senão TRANSPORTA o Signal completo da entrada no payload (D9) |
 | bus_subscribe | nunca-publicada → `Signal(None)`; fresca → quality/substatus/limites publicados; expirada (idade > 3×period_s) → `min(quality publicado, UNCERTAIN)` (D7; emenda ADR-042 D4, §7.2 abaixo) |
-| calc-worker (tag calculada) | INTOCADO — já publica `max(quality)` das entradas na polaridade OpcValue (`runner.py`) |
+| calc-worker (tag calculada) | INTOCADO — já publica `max(quality)` das entradas na polaridade OpcValue (`runner.py`) *(emenda 2026-09-17: semente e comparações com membros `OpcQuality`; `max()` segue sendo o "pior de" na polaridade OPC)* |
 
 ## 6. Payloads (PRD §7.1 — linhas alteradas)
 
@@ -245,6 +269,8 @@ entrada inválida, e propaga o estado adiante" não muda — muda a granularidad
 - Dois vocabulários de qualidade continuam coexistindo no sistema (`Quality` de porta vs.
   `OpcValue.quality` de campo) — a tradução nas bordas (§4) é o único lugar que precisa saber
   disso, mas um novo desenvolvedor pode confundi-los sem ler este ADR e o GLOSSARY.
+  *(Emenda 2026-09-17: custo mitigado — os dois lados agora são enums distintos, `Quality` vs
+  `OpcQuality`, e `OpcValue.quality` rejeita enum de porta na construção.)*
 
 **Neutras**
 

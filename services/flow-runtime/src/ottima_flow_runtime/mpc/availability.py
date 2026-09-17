@@ -16,7 +16,7 @@ Precedência (do sinal mais grave para o mais brando):
 
 1. `OUT_OF_SERVICE` — tag configurada e NADA no espelho. Não se sabe onde o atuador está
    (ou em que modo o PID está). Vence tudo, inclusive um `mode_read` que diga `target`.
-2. `BAD_QUALITY` — tag no espelho com `quality != 0` (uncertain inclusive, mesma régua
+2. `BAD_QUALITY` — tag no espelho com `quality != OpcQuality.GOOD` (uncertain inclusive, mesma régua
    conservadora do `opc_read`, spec F3 §3.1). A leitura existe e não vale.
 3. `LOCAL_OVERRIDE` — leituras boas, mas o modo real do PID diverge de `mode_values.target`:
    o operador tirou a malha de RCAS no painel, ou um override a tomou. O sistema sabe onde o
@@ -42,6 +42,7 @@ from collections.abc import Iterable, Mapping
 from enum import StrEnum
 
 from ottima_core.flowgraph import MvVar
+from ottima_core.signal import OpcQuality
 from ottima_core.snapshot import ValueSnapshot
 
 
@@ -75,14 +76,14 @@ def _classify(mv: MvVar, snapshot: ValueSnapshot) -> MvAvailability:
         tag = snapshot.get(tag_id)
         if tag is None:
             return MvAvailability.OUT_OF_SERVICE
-        if tag.quality != 0:
+        if tag.quality != OpcQuality.GOOD:
             return MvAvailability.BAD_QUALITY
 
     if mv.pid is not None and mv.pid.mode_read_tag_id is not None:
         modo = snapshot.get(mv.pid.mode_read_tag_id)
         if modo is None:
             return MvAvailability.OUT_OF_SERVICE
-        if modo.quality != 0:
+        if modo.quality != OpcQuality.GOOD:
             return MvAvailability.BAD_QUALITY
         if float(modo.value) != float(mv.pid.mode_values.target):
             return MvAvailability.LOCAL_OVERRIDE

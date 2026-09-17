@@ -45,7 +45,7 @@ from ottima_core.bus import (
     channel_flow_status,
     publish_event,
 )
-from ottima_core.signal import Quality
+from ottima_core.signal import OpcQuality, Quality
 
 from .blocks.base import Block, Signal
 
@@ -117,10 +117,10 @@ class HistorizedPort(NamedTuple):
     tag_id: int
 
 
-def _historized_value(sample: Signal) -> tuple[float, int]:
+def _historized_value(sample: Signal) -> tuple[float, OpcQuality]:
     """`Signal` -> `(value, quality)` de `OpcValue` (ADR-041 D4).
 
-    Porta inválida (`ok=False`) ou sem valor (`v=None`) vira `0.0`/`quality=2` — o recorder
+    Porta inválida (`ok=False`) ou sem valor (`v=None`) vira `0.0`/`OpcQuality.BAD` — o recorder
     troca por NULL sozinho (ADR-037); alargar `OpcValue.value` para aceitar `None` mudaria
     o contrato compartilhado com `opc.values`/`calc.values`. Porta booleana vira `1.0`/`0.0`.
 
@@ -130,13 +130,13 @@ def _historized_value(sample: Signal) -> tuple[float, int]:
     ignorado por `avg`/`max` do SQL; NaN CONTAMINA o bucket do CAgg de 1 min para sempre.
     """
     if not sample.ok or sample.v is None:
-        return 0.0, 2
+        return 0.0, OpcQuality.BAD
     if isinstance(sample.v, bool):
-        return (1.0 if sample.v else 0.0), 0
+        return (1.0 if sample.v else 0.0), OpcQuality.GOOD
     value = float(sample.v)
     if not math.isfinite(value):
-        return 0.0, 2
-    return value, 0
+        return 0.0, OpcQuality.BAD
+    return value, OpcQuality.GOOD
 
 
 @dataclass(frozen=True, slots=True)

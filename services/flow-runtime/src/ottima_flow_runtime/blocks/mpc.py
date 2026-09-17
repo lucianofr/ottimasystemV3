@@ -74,7 +74,7 @@ from ottima_core.flowgraph import (
     PidBinding,
     derive_horizons,
 )
-from ottima_core.signal import Quality
+from ottima_core.signal import OpcQuality, Quality
 from ottima_core.snapshot import ValueSnapshot
 
 from ..mpc.availability import (
@@ -455,7 +455,7 @@ class MpcBlock(Block):
             if tag_id is None:
                 continue
             tag = self._snapshot.get(tag_id)
-            if tag is None or tag.quality != 0:
+            if tag is None or tag.quality != OpcQuality.GOOD:
                 continue
             cv = self._cvs[cv_id]
             self._sp[cv_id] = _clamp(float(tag.value), cv.sp_limits.min, cv.sp_limits.max)
@@ -877,7 +877,7 @@ class MpcBlock(Block):
         com qualidade ruim — quem chama decide se isso vira hold (`_effective_value`) ou
         porta fria (`_local_output`).
 
-        `quality != 0` invalida, uncertain inclusive: é a mesma régua conservadora do
+        `quality != OpcQuality.GOOD` invalida, uncertain inclusive: é a mesma régua conservadora do
         `opc_read` (spec F3 §3.1). Uma amostra ruim NÃO é medição de posição — adotá-la
         faria a MV seguir lixo em LOCAL e semear `_mv_manual` com ele na entrada em
         REMOTO+MAN. Visto em campo: num restart da planta as tags de readback voltaram
@@ -886,7 +886,7 @@ class MpcBlock(Block):
         if tag_id is None:
             return None
         tag = self._snapshot.get(tag_id)
-        if tag is None or tag.quality != 0:
+        if tag is None or tag.quality != OpcQuality.GOOD:
             return None
         return float(tag.value)
 
