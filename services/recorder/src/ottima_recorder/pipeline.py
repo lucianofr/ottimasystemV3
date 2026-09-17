@@ -504,7 +504,7 @@ class RecorderPipeline:
     async def _on_flow_value(self, raw: str) -> None:
         """Porta de bloco historiada (ADR-041 D2): mesmo payload `OpcValue`, canal próprio
         porque o produtor é o flow-runtime e não o calc-worker — o resto é idêntico a
-        `_on_calc_sample`, `ingest_sample` já resolve tudo (inclusive `quality == QUALITY_BAD`
+        `_on_calc_sample`, `ingest_sample` já resolve tudo (inclusive `quality == OpcQuality.BAD`
         virando NULL, ADR-037)."""
         self.ingest_sample(raw)
 
