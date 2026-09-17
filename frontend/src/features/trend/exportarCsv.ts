@@ -1,7 +1,7 @@
 import type uPlot from "uplot";
 
 import type { HistoryResponse } from "../../lib/api";
-import type { FaixaX } from "./zoomX";
+import type { FaixaX } from "./plugins";
 
 const SEPARADOR = ";";
 
@@ -83,7 +83,7 @@ export function montarCsvTrend(dados: uPlot.AlignedData, colunas: readonly Colun
 /**
  * Recorta a matriz na faixa visível do eixo x.
  *
- * O uPlot tem arrasto em X (`estaZoomadoEmX`, desfeito pelo "Reset layout"), então "a janela
+ * O uPlot tem arrasto em X (`pluginZoomX`, desfeito pelo "Reset layout"), então "a janela
  * que está sendo mostrada" nem sempre é a janela BUSCADA: com zoom ativo o arquivo entregaria
  * mais dado do que o engenheiro está vendo. `faixa === null` (sem zoom) devolve a matriz
  * intacta, sem cópia. O eixo é crescente por pré-condição do uPlot, então o recorte é um par de

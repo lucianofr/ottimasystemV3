@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
@@ -6,7 +6,7 @@ import { cn } from "../../lib/cn";
 import { referenciaPersistidaS, useBordaViva, type LeituraViva } from "../trend/bordaViva";
 import { JanelaTempo } from "../trend/JanelaTempo";
 import { type BadgeLegenda, type LinhaLegenda, PainelLegendaTrend } from "../trend/PainelLegendaTrend";
-import { TrendChart } from "../trend/TrendChart";
+import { TrendChart, type TrendChartHandle } from "../trend/TrendChart";
 import { CLASSES_PENA, LIMITE_PENAS } from "../trend/trendTheme";
 import { useJanelaDeslizante } from "../trend/useJanelaDeslizante";
 import {
@@ -68,6 +68,7 @@ export function TrendFuzzy({
   );
   const [janelaSegundos, setJanelaSegundos] = useState(JANELA_DEFAULT_SEGUNDOS);
   const deslizante = useJanelaDeslizante(janelaSegundos);
+  const chartRef = useRef<TrendChartHandle>(null);
   const historico = useHistoryFuzzy(flowId, blockId, selecionadas, janelaSegundos, deslizante.fimEpochS);
 
   // Ponta viva: o histórico do TimescaleDB desenha o passado até agora e daí em diante o
@@ -169,6 +170,9 @@ export function TrendFuzzy({
               size="sm"
               data-testid="fuzzy-trend-janela-reset"
               onClick={() => {
+                // Solta o recorte do arrasto junto com a janela: o aviso do gráfico manda o
+                // usuário usar este botão, e sem o `resetZoom` a vista ficaria congelada.
+                chartRef.current?.resetZoom();
                 deslizante.reset();
               }}
             >
@@ -225,7 +229,18 @@ export function TrendFuzzy({
           )}
 
           {dados && (
-            <TrendChart dados={dados} ids={ids} rotulos={rotulos} janelaSegundos={janelaSegundos} escalas={{}} />
+            // `foco={null}`: esta legenda não escolhe dono do eixo Y, então o gráfico desenha
+            // um eixo por porta — as portas fuzzy têm grandezas diferentes entre si.
+            <TrendChart
+              ref={chartRef}
+              dados={dados}
+              ids={ids}
+              rotulos={rotulos}
+              janelaSegundos={janelaSegundos}
+              fimEpochS={deslizante.fimEpochS}
+              escalas={{}}
+              foco={null}
+            />
           )}
 
           {resumos.length > 0 && (

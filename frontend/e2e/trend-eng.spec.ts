@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { criarAmbiente, entrarNoShell, NODES, type AmbienteE2E } from "./fixtures";
+import {
+  criarAmbiente,
+  entrarNoShell,
+  escalaXDoGrafico,
+  NODES,
+  type AmbienteE2E,
+} from "./fixtures";
 
 /**
  * PW-TR-01/02 — trend de engenharia: escala Y por variável e janela deslizante.
@@ -212,5 +218,104 @@ test.describe("Trend de engenharia", () => {
       (Date.parse(ultima.searchParams.get("end") ?? "") -
         Date.parse(ultima.searchParams.get("start") ?? "")) / 1000;
     expect(Math.round(janelaS)).toBe(1440);
+  });
+
+  test("PW-TR-05: leitura no cursor, vista seguindo o relógio e zoom que congela até o duplo-clique", async ({
+    page,
+  }) => {
+    // Histórico DETERMINADO por interceptação: o valor no cursor é a entrega central desta
+    // tela e não pode depender de o recorder já ter gravado dado bom (e muito menos do
+    // opcsim). Duas penas com valores constantes e DISJUNTOS provam também o mapeamento
+    // pena→coluna: a pena `indice` desenha a coluna `indice + 1`, e uma troca de coluna
+    // apareceria como 93,5 na linha da primeira pena.
+    const VALOR_PENA = [41.25, 93.5] as const;
+    // Bloco de amostras encerrado 3 min antes de agora: fica longe da borda viva do WS, então
+    // o carimbo sob o ponteiro é sempre um ponto interceptado, nunca um ponto vivo.
+    const FIM_BLOCO_MS = 3 * 60_000;
+    await page.route("**/api/history?*", async (rota) => {
+      const url = new URL(rota.request().url());
+      const ids = (url.searchParams.get("tag_ids") ?? "")
+        .split(",")
+        .filter((texto) => texto !== "")
+        .map(Number);
+      const fim = Date.now() - FIM_BLOCO_MS;
+      // 7 min a cada 5 s: abaixo do teto de carry-forward do modo bruto (20 s), então nenhuma
+      // marca de silêncio cai DENTRO do bloco (elas são `null` por construção e esvaziariam a
+      // coluna do cursor sem que nada estivesse errado).
+      const carimbos = Array.from({ length: 85 }, (_, i) =>
+        new Date(fim - (84 - i) * 5000).toISOString(),
+      );
+      await rota.fulfill({
+        json: {
+          mode: "raw",
+          start: url.searchParams.get("start"),
+          end: url.searchParams.get("end"),
+          series: ids.map((tagId, indice) => ({
+            tag_id: tagId,
+            t: carimbos,
+            v: carimbos.map(() => VALOR_PENA[indice] ?? 0),
+            q: carimbos.map(() => 0),
+          })),
+        },
+      });
+    });
+
+    await marcarTag(page, ambiente.tags["sine"]);
+    await marcarTag(page, ambiente.tags["static"]);
+    await expect(page.getByTestId("trend-legend-item")).toHaveCount(2);
+
+    // `.u-over` é a camada de interação do uPlot (o canvas inclui os eixos, e `page.mouse` não
+    // rola a página sozinho como o `click` de um locator faz).
+    const tela = page.getByTestId("trend-chart").locator(".u-over");
+    await expect(tela).toBeVisible();
+    const caixa = await tela.boundingBox();
+    if (caixa === null) throw new Error("área de interação do trend sem caixa delimitadora");
+    const meioY = caixa.y + caixa.height / 2;
+    const carimboEm = async (fracao: number): Promise<string | null> => {
+      // Dois movimentos: o uPlot só reemite `setCursor` quando o ponteiro muda de posição.
+      await page.mouse.move(caixa.x + caixa.width * (fracao - 0.01), meioY);
+      await page.mouse.move(caixa.x + caixa.width * fracao, meioY);
+      return page.getByTestId("trend-cursor-hora").textContent();
+    };
+
+    // Hover em 0,8 da janela de 30 min ≈ agora − 6 min: dentro do bloco interceptado.
+    const chips = page.getByTestId("trend-legend-valor-cursor");
+    await expect.poll(async () => carimboEm(0.8)).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+    await expect(chips.nth(0)).toHaveText("41,25");
+    await expect(chips.nth(1)).toHaveText("93,5");
+    // Ponteiro fora da área de plotagem: a coluna do cursor esvazia (o valor corrente fica).
+    await page.mouse.move(caixa.x + caixa.width / 2, caixa.y + caixa.height + 150);
+    await expect(page.getByTestId("trend-cursor-hora")).toHaveCount(0);
+    await expect(chips.nth(0)).toBeEmpty();
+    await expect(chips.nth(1)).toBeEmpty();
+
+    // Ao vivo a janela é a ESCOLHIDA no seletor e anda com o relógio — não é a extensão do
+    // dado (o defeito: com `range` automático, uma janela de 30 min sobre 5 min de histórico
+    // desenhava 5 min esticados, e a borda direita só mexia quando chegava amostra).
+    const escala = async () => escalaXDoGrafico(page, "trend-chart");
+    const aoVivo = await escala();
+    expect(Math.round(aoVivo.max - aoVivo.min)).toBe(JANELA_30M_S);
+    await expect
+      .poll(async () => (await escala()).max, { message: "borda direita seguindo o relógio" })
+      .toBeGreaterThan(aoVivo.max);
+
+    // Zoom por arrasto: recorta o eixo de verdade (o aviso sozinho não provaria nada) e a
+    // vista congela — dado novo do polling não pode piscar de volta para a janela cheia.
+    await page.mouse.move(caixa.x + caixa.width * 0.3, meioY);
+    await page.mouse.down();
+    await page.mouse.move(caixa.x + caixa.width * 0.6, meioY, { steps: 10 });
+    await page.mouse.up();
+    await expect(page.getByTestId("trend-zoom")).toBeVisible();
+    const recorte = await escala();
+    expect(recorte.max - recorte.min).toBeLessThan(JANELA_30M_S / 2);
+    await page.waitForTimeout(6000);
+    expect(await escala()).toEqual(recorte);
+
+    // Duplo-clique solta o recorte e a vista volta a seguir o relógio.
+    await page.mouse.dblclick(caixa.x + caixa.width / 2, meioY);
+    await expect(page.getByTestId("trend-zoom")).toHaveCount(0);
+    const solto = await escala();
+    expect(Math.round(solto.max - solto.min)).toBe(JANELA_30M_S);
+    expect(solto.max).toBeGreaterThan(recorte.max);
   });
 });

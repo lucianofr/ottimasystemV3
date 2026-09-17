@@ -15,6 +15,7 @@ import {
   type EscalaVar,
 } from "../trend/escalas";
 import { useMotorTrend } from "../trend/motorTrend";
+import { pluginCursorIdx, pluginZoomX } from "../trend/plugins";
 import { JanelaTempo } from "../trend/JanelaTempo";
 import { referenciaPersistidaS } from "../trend/bordaViva";
 import { FORMATO_VALOR, lerTemaTrend, type TemaTrend } from "../trend/trendTheme";
@@ -147,46 +148,10 @@ function pluginLinhaAgora(agoraRef: { current: number | null }, tema: TemaTrend)
   };
 }
 
-/** Recorte em X que o operador arrastou no gráfico; `null` = a janela da tela manda. */
+/** Recorte em X que o operador arrastou no gráfico; `null` = a janela da tela manda. Tupla
+ *  porque é o que o `range` do eixo x devolve direto; o plugin compartilhado
+ *  (`../trend/plugins`) publica os dois números e não tem opinião sobre a forma. */
 type ZoomX = readonly [number, number];
-
-/** Zoom manual em X. O eixo x desta tela tem `range` próprio (a janela precisa incluir o
- *  horizonte da predição, o que a extensão dos dados não daria), e o uPlot chama esse `range`
- *  também no zoom por arrasto — devolver a janela da tela ali é o que engolia o recorte pedido.
- *  O `setSelect` dispara ANTES do `setScale` do zoom (uPlot `mouseUp`), então guardar o recorte
- *  aqui faz o `range` já responder com ele. Guardado em ref, e não dentro da instância, para
- *  sobreviver à recriação do gráfico (trocar o eixo Y, ligar/desligar pena, editar faixa). */
-function pluginZoomX(aoRecortar: (faixa: ZoomX) => void): uPlot.Plugin {
-  return {
-    hooks: {
-      setSelect: (u: uPlot) => {
-        if (u.select.width <= 0) return;
-        aoRecortar([
-          u.posToVal(u.select.left, "x"),
-          u.posToVal(u.select.left + u.select.width, "x"),
-        ]);
-      },
-    },
-  };
-}
-
-/** Leitura no cursor (hover): publica o índice do carimbo sob o ponteiro. O uPlot já resolve o
- *  ponto mais próximo (`cursor.idx`, `null` fora da área de plotagem) — aqui só se filtra a
- *  repetição, senão cada pixel de mousemove viraria um `setState` e um re-render da legenda
- *  inteira. Quem traduz índice em valor por pena é `valoresNoCursor` (lógica pura). */
-function pluginCursorIdx(aoMover: (idx: number | null) => void): uPlot.Plugin {
-  let ultimo: number | null = null;
-  return {
-    hooks: {
-      setCursor: (u: uPlot) => {
-        const idx = u.cursor.idx ?? null;
-        if (idx === ultimo) return;
-        ultimo = idx;
-        aoMover(idx);
-      },
-    },
-  };
-}
 
 /** Paleta resolvida do trend de operação — mesmo padrão de `lerTemaTrend` (`getComputedStyle`
  *  sobre `document.documentElement`), mas com a paleta PRÓPRIA de 8 posições
@@ -513,7 +478,9 @@ function construirOpcoesOperacao(
     plugins: [
       pluginLinhaAgora(agoraDivisorRef, tema),
       pluginSecaoFutura(agoraDivisorRef, semPredicaoRef, tema),
-      pluginZoomX(aoZoom),
+      pluginZoomX((min, max) => {
+        aoZoom([min, max]);
+      }),
       pluginCursorIdx(aoMoverCursor),
     ],
     axes: [
