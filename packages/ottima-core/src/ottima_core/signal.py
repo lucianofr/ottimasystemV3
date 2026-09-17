@@ -1,9 +1,11 @@
-"""Vocabulário de qualidade de porta (ADR-043 D1; valores do ADR-039 §4.1).
+"""Vocabulários de qualidade — os DOIS dialetos, num arquivo só (ADR-043 §4).
 
-Polaridade Fieldbus: BAD=0 < UNCERTAIN=1 < GOOD=2 — `min()` é "pior de".
-NUNCA confundir com `OpcValue.quality` (0=good/1=uncertain/2=bad, spec F1 §3.2):
-a tradução entre os dois vocabulários acontece SÓ no bloco OPC-Read e em
-`scheduler._historized_value` (ADR-043 §4).
+`Quality` (porta, ADR-039 §4.1): polaridade Fieldbus, BAD=0 < UNCERTAIN=1 < GOOD=2 —
+ordenada por utilidade, "pior de" é `min()`.
+`OpcQuality` (barramento/histórico, spec F1 §3.2): polaridade OPC, GOOD=0 < BAD=2 —
+herdada do StatusCode (0 = sem erro), "pior de" é `max()`.
+NUNCA misturar: a tradução entre os dois acontece SÓ no bloco OPC-Read e em
+`scheduler._historized_value` (ADR-043 §4); `OpcValue.quality` rejeita enum de porta.
 """
 
 from enum import IntEnum
@@ -23,3 +25,17 @@ class Substatus(IntEnum):
     SENSOR_FAILURE = 4
     CONFIG_ERROR = 5
     DEVICE_FAILURE = 6
+
+
+class OpcQuality(IntEnum):
+    """Qualidade OPC (spec F1 §3.2): 0=good, 1=uncertain, 2=bad — a INVERSA de `Quality`.
+
+    Valores imutáveis: estão gravados em `samples.quality` (até 1 mês de hypertable) e no
+    JSON dos canais `opc.values.*`/`calc.values`/`flow.values`. Definição ÚNICA do lado OPC:
+    opc-worker, recorder, calc-worker e flow-runtime importam daqui — nenhum literal 0/1/2
+    de qualidade OPC fora deste arquivo.
+    """
+
+    GOOD = 0
+    UNCERTAIN = 1
+    BAD = 2

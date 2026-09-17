@@ -23,6 +23,7 @@ from redis.asyncio import Redis
 
 from ottima_core.bus import CHANNEL_FLOW_EXCHANGE, ExchangeValue, OpcValue
 from ottima_core.pubsub import ChannelListener, PatternListener
+from ottima_core.signal import OpcQuality
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class TagValue:
     """
 
     value: float
-    quality: int  # 0=good, 1=uncertain, 2=bad (spec F1 §3.2)
+    quality: OpcQuality  # polaridade OPC (spec F1 §3.2) — a INVERSA de `Quality`; ver signal.py
     ts: datetime
 
 

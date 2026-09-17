@@ -8,21 +8,25 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal
 
-from ottima_core.signal import Quality
+from ottima_core.signal import OpcQuality, Quality
 from ottima_core.snapshot import ValueSnapshot
 
 from .base import Block, Signal
 
-_QUALITY_FROM_OPC = {0: Quality.GOOD, 1: Quality.UNCERTAIN, 2: Quality.BAD}
-"""Única tradução OpcValue.quality -> Quality (ADR-043 §4)."""
+_QUALITY_FROM_OPC = {
+    OpcQuality.GOOD: Quality.GOOD,
+    OpcQuality.UNCERTAIN: Quality.UNCERTAIN,
+    OpcQuality.BAD: Quality.BAD,
+}
+"""Única tradução OpcValue.quality -> Quality (ADR-043 §4) — polaridades INVERSAS."""
 
 
 class OpcReadBlock(Block):
     """Sem entradas; saída `out`.
 
-    Invalidez (§3.1) é conservadora: `quality != 0` invalida a porta (uncertain inclusive),
-    mas o valor lido continua propagado — quem decide o que fazer com ele é o bloco a
-    jusante (decisão A-6). Tag ausente do espelho é cold start: `(None, False)`.
+    Invalidez (§3.1) é conservadora: `quality != OpcQuality.GOOD` invalida a porta (uncertain
+    inclusive), mas o valor lido continua propagado — quem decide o que fazer com ele é o
+    bloco a jusante (decisão A-6). Tag ausente do espelho é cold start: `(None, False)`.
     """
 
     def __init__(

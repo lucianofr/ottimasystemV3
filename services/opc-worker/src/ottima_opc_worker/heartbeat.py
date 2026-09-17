@@ -15,7 +15,9 @@ from dataclasses import replace
 
 from redis.asyncio import Redis
 
-from .polling import QUALITY_BAD, publish_value
+from ottima_core.signal import OpcQuality
+
+from .polling import publish_value
 from .state import ConnectionConfig, ConnectionSnapshot, ConnectionState, TagConfig
 
 logger = logging.getLogger(__name__)
@@ -62,7 +64,7 @@ class ValueHeartbeat:
         chamadas publicam duas rajadas — o dado cíclico quer o ponto.
         """
         for tag in self._series_tags():
-            await self._republish(tag, quality=QUALITY_BAD)
+            await self._republish(tag, quality=OpcQuality.BAD)
 
     def apply_tags(self, tags: tuple[TagConfig, ...]) -> None:
         """Acompanha a reconciliação de tags do runtime (tarefa 1.4)."""
@@ -90,10 +92,10 @@ class ValueHeartbeat:
                 continue
             # Fora de `up` o dado é ruim por definição; sem último valor não há qualidade
             # boa a repetir.
-            quality = last.quality if session_up and last is not None else QUALITY_BAD
+            quality = last.quality if session_up and last is not None else OpcQuality.BAD
             await self._republish(tag, quality=quality)
 
-    async def _republish(self, tag: TagConfig, *, quality: int) -> None:
+    async def _republish(self, tag: TagConfig, *, quality: OpcQuality) -> None:
         """Publica o último valor conhecido (ou 0.0) com `ts` novo, pelo ponto único."""
         last = self._snapshot.last_values.get(tag.id)
         await publish_value(
