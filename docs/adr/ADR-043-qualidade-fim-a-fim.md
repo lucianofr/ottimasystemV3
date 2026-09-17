@@ -66,6 +66,13 @@ que `STATUS_OPTS` tornar UNCERTAIN usável). UNCERTAIN genuíno = entrada boa + 
 interna. Atuação idêntica hoje (uncertain invalida como BAD, D3); diagnóstico/UI (`flow.status`/WS/
 exchange) distinguem "valor retido" de "sem valor" — o histórico NÃO (§4/§8).
 
+**Sem valor retido anterior (`v is None`) ⇒ BAD**, nunca UNCERTAIN: ausência de dado não é
+retenção, e anunciar "último valor utilizável" quando nunca houve um seria mentira de
+diagnóstico. Vale para os três caminhos internos (`pid._retido`, os dois ramos do fuzzy) e é
+o que mantém o cold start (`has_cold_input` olha `v is None`) coerente com a qualidade
+publicada. O `bus_subscribe` já satisfaz a regra por construção: chave nunca publicada devolve
+`Signal(None)`, que é BAD pelo default.
+
 ### D8 — Script e tag calculada não veem qualidade
 
 O runtime carimba pior-das-entradas automaticamente. API do sandbox (ADR-018/033) inalterada.
@@ -136,9 +143,9 @@ uncertain (medição real) segue persistindo valor como hoje — a regra do reco
 | scaler, lag, first_order, kalman, filtros | default D6 (pior das entradas consumidas); emissão D9 (substatus/limites zerados) |
 | integrator | qualidade sai SÓ de `in`; `reset` fica fora (decisão documentada no módulo). Lacuna/dt patológico → `min(UNCERTAIN, q_in)` (D7) |
 | TFS | POR LINHA de saída: `min()` dos elementos habilitados da linha (forma quality do AND atual, ADR-022); linha toda desabilitada → GOOD |
-| PID (kernel standalone, `services/flow-runtime/.../blocks/pid.py`) | `_retido` (RF-553) → `min(UNCERTAIN, q_entradas)` (D7); execução ok → default D6 |
+| PID (kernel standalone, `services/flow-runtime/.../blocks/pid.py`) | `_retido` (RF-553) → `min(UNCERTAIN, q_entradas)`, e **BAD quando não há valor retido anterior** (`v is None`, D7); execução ok → default D6 |
 | PID (shell, `blocks/shell/block.py::_emit`) | ADR-039 vigente + emenda §4.1 (§7.1 abaixo); saídas OUT/BKCAL_OUT com semântica PRÓPRIA e BINÁRIA (OOS→BAD, senão GOOD; `bkcal_out` sempre GOOD) — mecanismo distinto do `_retido` do kernel, nunca `min(UNCERTAIN, ...)` |
-| fuzzy | retenção (exceção ou saída não-finita) → `min(UNCERTAIN, q_entradas)` (D7); execução ok → default D6 |
+| fuzzy | retenção (exceção ou saída não-finita) → `min(UNCERTAIN, q_entradas)`, e **BAD quando a porta nunca teve valor bom** (`v is None`, D7); execução ok → default D6 |
 | MPC | portas de saída mantêm semântica atual; disponibilidade de MV (RF-626/ADR-028) INTOCADA — `mpc/availability.py` lê `tag.quality` do `ValueSnapshot`, não de porta |
 | script | default D6 automático; sandbox cego a qualidade (D8) |
 | opc_write | consumidor: suprime escrita se `not ok` (= `quality is not GOOD`) — comportamento atual |
