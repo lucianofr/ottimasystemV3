@@ -90,7 +90,7 @@ uncertain (medição real) segue persistindo valor como hoje — a regra do reco
 | integrator | qualidade sai SÓ de `in`; `reset` fica fora (decisão documentada no módulo). Lacuna/dt patológico → `min(UNCERTAIN, q_in)` (D7) |
 | TFS | POR LINHA de saída: `min()` dos elementos habilitados da linha (forma quality do AND atual, ADR-022); linha toda desabilitada → GOOD |
 | PID (shell) | ADR-039 vigente + emenda §4.1; `_retido` (RF-553) → `min(UNCERTAIN, q_entradas)`, BAD se `v is None` (D7); saídas OUT/BKCAL_OUT mantêm semântica própria (OOS→BAD etc.) |
-| fuzzy | retenção (exceção ou saída não-finita) → `min(UNCERTAIN, q_entradas)`, BAD se a porta nunca teve valor bom (D7); execução ok → default D6 |
+| fuzzy | retenção (exceção ou saída não-finita) → `min(UNCERTAIN, q_entradas_crua)` — mínimo BRUTO das flags —, BAD se a porta nunca teve valor bom (D7); execução ok → default D6 com `q_entradas` (a rebaixada por valor não-finito), que também alimenta `FuzzyState.ok` |
 | MPC | portas de saída mantêm semântica atual; disponibilidade de MV (RF-626/ADR-028) INTOCADA — `mpc/availability.py` lê `tag.quality` do `ValueSnapshot`, não de porta |
 | script | default D6 automático; sandbox cego a qualidade (D8) |
 | opc_write | consumidor: suprime escrita se `not ok` (= `quality is not GOOD`) — comportamento atual |

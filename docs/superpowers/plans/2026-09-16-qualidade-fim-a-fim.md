@@ -668,4 +668,53 @@ git commit -m "docs: ADR-043 qualidade fim-a-fim + emendas ADR-039/042, PRD §7.
 
 - **Spec coverage:** D1→T1/T2 · D2→T2 (opc_read) + constraint global · D3→T2 Step 5 + T6 · D4/D9→T2/T4 (defaults+transporte) + T6 · D5→T2 · D6→T2 Step 4 · D7→T3 + T4 (subscribe) · D8→T2 (script) · §4→T2 (opc_read; `_historized_value` fica correto SEM edição — `not sample.ok → 2` já cobre não-GOOD) · §6→T4 · §7→T5 · §8→T6 · §9→T7 · §10 respeitado (nenhuma task toca recorder/calc-worker/opc-worker/DDL).
 - **Placeholders:** nenhum TBD; os dois pontos deliberadamente delegados ao executor (nomes reais de fixtures em T3, lista de arquivos de teste via grep em T2/T4/T5) vêm com o comando exato de descoberta.
-- **Type consistency:** `Signal(v, quality, substatus=, hi_limited=, lo_limited=)` idêntico em T2/T3/T4; `portaValida`/`QUALITY_GOOD` definidos em T5 Step 2 e usados em T5 Step 3; `_QUALITY_FROM_OPC` definido e usado só em opc_read.
+- **Type consistency:** `Signal(v, *, quality=…, substatus=…, hi_limited=…, lo_limited=…)` — `quality` é KEYWORD-ONLY (`_: KW_ONLY`); forma posicional em qualquer snippet deste plano é erro de redação, não contrato. `portaValida`/`QUALITY_GOOD` definidos em T5 Step 2 e usados em T5 Step 3; `_QUALITY_FROM_OPC` definido e usado só em opc_read.
+
+---
+
+## EXECUTADO — 2026-09-16, mergeado em `main` (82604f8)
+
+10 commits (`6b36bb3`…`82604f8`). Resultado merged verificado: **1958 passed, 0 failed, 1 xfail**
+(flow-runtime + ottima-core + api). Frontend: typecheck limpo, `test:unit` 770 passed, build verde,
+`generate:contracts` idempotente.
+
+### Débitos que sobreviveram à entrega
+
+**D-1 — TD novo: contaminação entre suítes de teste (PRÉ-EXISTENTE, não desta entrega).**
+`uv run pytest` completo fica VERMELHO em
+`services/opc-worker/tests/test_heartbeat.py::test_tag_que_muda_nao_e_republicada_pelo_heartbeat`
+(`assert [22] == []`). Reprodutor de 44 s:
+`uv run pytest packages/ottima-core services/opc-worker/tests/test_heartbeat.py -q`.
+Evidência de que não é regressão: o MESMO corte falha idêntico no commit base (04837bd), e
+`git diff --stat -- services/opc-worker` da entrega é VAZIO. Mais: `opc-worker` sozinho = 130
+passed; `flow-runtime` + heartbeat = 780 passed; metades de 12 arquivos de `ottima-core` falham
+mas quartos de 6 passam ⇒ é ACÚMULO, não um arquivo culpado. Vetor provável: Redis de escopo
+*session* no `conftest.py` da raiz com `flushdb()`, que limpa chaves mas NÃO encerra assinante
+nem task de fundo — um `ChannelListener` não parado contamina o coletor de outra suíte. Fix
+candidato (fora desta entrega): encerrar listener no teardown, ou DB distinto por suíte.
+
+**D-2 — RNF-09 e L3 não exercitados contra esta entrega.** A aceitação MPC↔TFS mora em
+`tests/e2e/` com marcador `e2e` e caiu nos deselected; a stack de 8 serviços não foi subida para
+não recriar containers de terceiro em uso (o projeto Compose chama-se `ottima`) nem arriscar
+`deploy/.env` (FERNET/SECRET novos tornariam senhas OPC cifradas indecifráveis). Os testes e2e
+FORAM corrigidos (liam `["ok"]`, campo extinto ⇒ `KeyError`), mas só por inspeção +
+`--collect-only`. Ao rodar, atenção: a suíte tem AS DUAS polaridades de `quality` lado a lado —
+`test_qe_quality_propagation.py` assere `quality=0` = bom (OpcValue, via `/api/history`), enquanto
+porta usa Fieldbus (GOOD=2). O helper `porta_valida()` em `tests/e2e/f3_support.py` codifica a
+polaridade de porta num lugar só; use-o em vez do literal.
+
+**D-3 — Minors diferidos, triados como não-bloqueantes pela revisão final.**
+(a) teste de `Substatus` não trava nome→valor de 5 dos 7 membros (uma asserção de dicionário
+fecharia); (b) `Signal.init_request is True` sem teste de unidade positivo (coberto só
+indiretamente por `test_shell_cascade.py` S5); (c) ramo de exceção do fuzzy sem asserção de
+`.quality` (o ramo gêmeo tem); (d) `min(UNCERTAIN, q)` redundante em `integrator.py` no ramo de
+salto de relógio (alcançável só com `sample.ok`); (e) citações `(D7)`/`(D9)` ambíguas entre ADRs
+em `blocks/base.py` e `tests/test_bus_blocks.py`; (f) `lerPortValue` não valida faixa
+(`quality` 0-2, `substatus` 0-6) — fail-safe, pois qualquer ≠2 é inválido; (g) `QUALITY_BAD` não
+exportado de `canalPrimitivos.ts`; (h) tooltip renderiza "undefined" se `substatus` vier fora de
+0..6.
+
+**D-4 — Fora de escopo por decisão registrada:** `STATUS_OPTS` (política configurável de
+UNCERTAIN, ADR-039 §9); propagação real de `substatus`/limites por blocos de transformação
+(exige regra de inversão por sinal de ganho); terceiro estado visual no canvas (spec §10);
+histórico distinguir UNCERTAIN de BAD (exigiria emendar ADR-037 para `quality != 0 → NULL`).
