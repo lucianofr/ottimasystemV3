@@ -589,8 +589,12 @@ class FlowTask:
             self._historized_last[key] = ts
             sample = self._ports.get(port.block_id, {}).get(port.port, COLD)
             value, quality = _historized_value(sample)
-            payload = OpcValue(tag_id=port.tag_id, ts=ts, value=value, quality=quality)
             try:
+                # A construção fica DENTRO do try: desde que `OpcValue.quality` é
+                # `OpcQuality` validado (ADR-043 §4, emenda 2026-09-17), instanciar pode
+                # levantar. Fora do try, a exceção subiria de `_publish_historized` para o
+                # laço de varredura e mataria o flow por causa de telemetria (ADR-004/009).
+                payload = OpcValue(tag_id=port.tag_id, ts=ts, value=value, quality=quality)
                 await self._redis.publish(CHANNEL_FLOW_VALUES, payload.model_dump_json())
             except Exception:
                 logger.exception(
