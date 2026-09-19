@@ -1,14 +1,271 @@
 # Planos de melhoria — auditoria do advisor
 
-Gerados em 2026-08-16 sobre o commit `8f9fe76` (branch `improve`, worktree
-`.worktrees/improve`). Execute na ordem abaixo, salvo o que as dependências disserem. Cada
-executor: leia o plano inteiro antes de começar, honre as Condições de PARADA e atualize a
-sua linha na tabela ao terminar.
+Duas rodadas até agora. A mais recente vem primeiro; a de 2026-08-16 (planos 001-009, **todos
+FEITOS e na `main`**) começa em "Rodada de 2026-08-16".
 
 **Por que `docs/reports/advisor/` e não `plans/`**: neste repo `docs/plans/` já significa "plano de
 fase do PRD §8" (`CLAUDE.md:82`), com processo próprio, e `docs/` é normativo — proibido de
 editar sem o processo do item 4 do `CLAUDE.md`. Um `plans/` na raiz leria como a mesma
 coisa. Estes são planos de conserto pontual, não de fase.
+
+---
+
+# Rodada de 2026-09-19 — commit `37b0caa`, branch `main`
+
+179 commits e +43k linhas depois da rodada anterior. Nove auditores paralelos (corretude do
+runtime de controle · corretude da borda HTTP/WS · corretude dos workers periféricos e MCP ·
+segurança · desempenho · cobertura de teste · dívida/arquitetura/docs · dependências e DX ·
+corretude React) mais a categoria "direção" feita pelo agente principal.
+
+Cada `file:line` citado nos planos foi aberto e conferido pelo agente principal, não herdado do
+relatório do subagente. Onde a conferência derrubou o achado, ele foi rebaixado ou rejeitado — ver
+"Achados considerados e rejeitados" desta rodada.
+
+**Nada foi executado contra o stack**: os 8 serviços do dono estavam no ar com planta simulada viva
+durante toda a auditoria. Nenhum `docker compose`, nenhum `pytest -m e2e`, nenhum Playwright sem
+`--list`, nenhuma ferramenta de escrita do servidor MCP `ottima`.
+
+## Ordem de execução e status
+
+| Plano | Título | Prioridade | Esforço | Depende de | Status |
+|---|---|---|---|---|---|
+| [013](013-ao-vivo-nas-telas-de-operacao.md) | Telas de operação deixam de mostrar número congelado como se fosse ao vivo | **P1** | M | — | TODO |
+| [010](010-loop-types-fonte-unica.md) | `LOOP_TYPES` passa a ter uma fonte só | P1 | S | — | TODO |
+| [011](011-escrita-opc-timeout-e-fila-observavel.md) | Escrita OPC ganha timeout de I/O e fila observável | P1 | S | — | TODO (Passo 5 = decisão do dono) |
+| [014](014-nginx-log-sem-token-e-hardening.md) | Proxy para de gravar JWT no access log + cabeçalhos de hardening | P1 | S | — | TODO |
+| [012](012-operacao-loop-na-navegacao.md) | `/operacao/loop` entra na navegação; contrato de nav pinhado | P1 | S/M | 010 (preferível) | TODO |
+| [015](015-grafo-invalido-422-nas-rotas-de-bloco.md) | `graph_json` inválido devolve 422, não 500 | P1 | S | 010 (mesmo arquivo) | TODO |
+| [017](017-loop-state-carimbado-na-fronteira.md) | `loop.state` carimbado na fronteira da varredura | P2 | S | — | TODO |
+| [016](016-patch-connections-coerencia-de-auth.md) | `PATCH /connections` valida coerência sobre o estado final | P2 | S | — | TODO |
+| [018](018-lacunas-de-teste-da-camada-rapida.md) | Três lacunas de teste da camada rápida | P2 | S | — | TODO |
+| [019](019-proposta-de-emendas-documentais.md) | Emendas documentais | — | S | **aval do dono** | PROPOSTA |
+
+Valores de status: TODO · EM ANDAMENTO · FEITO · BLOQUEADO (com o motivo em uma linha) ·
+REJEITADO (com a justificativa em uma linha) · PROPOSTA (aguarda decisão, não é executável).
+
+**Comece pelo 013.** É o achado de maior severidade da rodada: durante uma queda de WebSocket as
+telas de operação continuam exibindo PV/SP/MV congelados como se fossem a leitura de agora, sem
+nenhum indicador. A regra contrária já está **escrita e implementada** no próprio repo, para a tela
+de Tags (`frontend/src/features/tags/tagsOnline.ts:39-43`: *"exibir aquele número como se fosse a
+leitura de agora é a falha perigosa desta tela"*) — só não foi aplicada às telas que escrevem na
+planta.
+
+## Notas de dependência
+
+- **010 antes de 012**: o teste que o 010 acrescenta (`set(LOOP_TYPES)` cruzado com os tipos
+  `*_loop` de `NODE_TYPES`) é a rede que impede o próximo kernel de repetir exatamente o buraco que
+  o 012 conserta. Não é dependência dura — o 012 roda sozinho — mas a ordem dá mais valor.
+- **010 antes de 015**: os dois tocam `services/api/src/ottima_api/routers/operate.py`. O 010 remove
+  `_LOOP_TYPES_API` (`:62`); o 015 mexe em três helpers (`:287`, `:302`, `:646`). Não colidem em
+  linha, mas serialize para a revisão ficar legível.
+- **013 e 012 tocam telas vizinhas** (`AppShell.tsx` no 012; `operate`/`loop`/`fuzzy` no 013). Sem
+  colisão de arquivo — o 013 está proibido de editar `AppShell.tsx` — mas ambos pedem conferência
+  visual em browser; agrupe as duas verificações numa passada só.
+- **014 é o único a tocar `frontend/nginx.conf`**, em dois commits separados (a exigência vem do
+  plano 003 da rodada anterior, mesmo arquivo).
+- **019 não é executável** sem aval do dono; o item 4c dele (rota `/operacao/loop` no `CLAUDE.md`)
+  só faz sentido depois do 012.
+
+## Verificação de browser fica com o revisor
+
+Mesma regra da rodada anterior, e pelos mesmos três motivos: `playwright.config.ts:11` aponta
+`baseURL` para `http://localhost:8080` — o container **do dono**, servindo o bundle da `main`, então
+um executor rodando Playwright da própria worktree teria **verde falso**; `fullyParallel: false,
+workers: 1` seria violado por execuções concorrentes; e `frontend/e2e/fixtures.ts::criarAmbiente`
+ativa projeto próprio, o que derruba os flows em execução do dono.
+
+Os planos 012, 013 e 014 entregam código + gates offline (`typecheck`, `build`, `test:unit`,
+`--list`, contagens de `grep`, sintaxe do nginx). A prova em browser é serializada depois, contra um
+stack reconstruído — runbook nos Passos 1-3 do [plano 009](009-td-026-rebaixado-com-prova-de-suite-completa.md).
+
+## Achados vetados que ainda não têm plano
+
+Todos confirmados por leitura do código citado, em `37b0caa`. Em ordem de leverage; qualquer um
+pode virar plano.
+
+- **`useLoopSurface` com `staleTime: Infinity`** — `frontend/src/features/loop/useLoops.ts:27-41`.
+  A superfície de controle do heatmap nunca revalida enquanto a aba viver. O comentário assume que
+  trocar o `.fll` é sempre deploy estrutural, mas a ADR-011 permite hot-swap de flow rodando; numa
+  sessão de operação que dura semanas, o ponto de operação ao vivo passa a ser plotado sobre uma
+  superfície que não é mais a deployada. S, LOW, MED.
+- **`useAssinatura` lê o interesse uma vez no mount** — `frontend/src/app/CanalAoVivo.tsx` (~`:975`),
+  consumido por `frontend/src/features/operate/OperatePage.tsx:39-52`. Se o mapeamento
+  variável→tag de um MPC mudar sem remontar o componente, a tag nova nunca é assinada (o PV cai
+  silenciosamente para a cadência do `mpc.state`) e a antiga continua assinada. S, LOW, MED.
+- **`AnnunciatorBar` nunca olha o estado da conexão** — `frontend/src/app/AnnunciatorBar.tsx:78`
+  desestrutura só `{ eventos, flowStatus, mpcStates }`. É a versão app-wide do achado do plano 013;
+  ficou de fora dele porque toca `AppShell.tsx` (plano 012). S, LOW, HIGH.
+- **`TrendOperacao.tsx:583` lê `canal.tagValues` sem consultar `estado`** — mesmo achado do 013,
+  deliberadamente fora dele: 1052 linhas, arquivo dos planos 002/007 e do TD-026. Plano próprio. S.
+- **`FuzzyState.ok` continua `bool` cru pós-ADR-043** —
+  `services/flow-runtime/src/ottima_flow_runtime/blocks/fuzzy.py:231-236`, com comentário do autor
+  dizendo "fora do escopo desta migração (Task 4)"; `packages/ottima-core/src/ottima_core/bus.py:259-267`
+  não tem campo de qualidade. UNCERTAIN retido e BAD genuíno ficam indistinguíveis no faceplate
+  fuzzy. Não há TD registrado. M, LOW, MED.
+- **`calc-worker` sem detecção de task morta** —
+  `services/calc-worker/src/ottima_calc_worker/runner.py:108-131` e `supervisor.py:277-286` comparam
+  só `restart_key`, nunca se a task está viva. O `opc-worker` tem `is_dead` para o caso idêntico
+  (`watchdog.py:88-92`). Tag calculada morreria em silêncio. S, LOW, MED.
+- **`encrypt_secret` sem guarda de chave vazia** — `packages/ottima-core/src/ottima_core/security.py:33-34`;
+  call sites `routers/connections.py:164` e `:206` sem `try/except` ⇒ 500 opaco no primeiro cadastro
+  com senha, justamente no comissionamento. (Carry-over #4 de 2026-08-16, **AINDA VALE**.) S, LOW, HIGH.
+- **Dois unions para o estado da conexão, diferindo no gênero** —
+  `frontend/src/features/flows/useFlowStatus.ts:28` (`EstadoConexao`, `"aberta"`) e
+  `frontend/src/app/CanalAoVivo.tsx:80` (`EstadoConexaoCanal`, `"aberto"`). `ROTULO_CONEXAO` é
+  tipado sobre o primeiro e **não tem chave `aberto`**. O plano 013 contorna com estreitamento
+  local e proíbe explicitamente unificar (transversal demais). S, MED, HIGH.
+- **CAggs `_1m` sem índice composto** — `0003_mpc_samples.py`, `0010_fuzzy_samples.py`,
+  `0015_loop_tables.py` não criam índice para `mpc_samples_1m`/`fuzzy_samples_1m`/`loop_samples_1m`,
+  enquanto as hypertables cruas têm `(flow_id, block_id, var_id, ts DESC)`. Medido na base viva:
+  261 ms para 31 dias × 3 variáveis, com **um** bloco MPC no sistema. O ganho vem da escala-alvo
+  (RNF-01, ~10 flows), não do tráfego de hoje. S, LOW, MED.
+- **Só uma rota tem code-split** — `frontend/src/app/router.tsx:5-20`; medido com `npm run build`
+  real: chunk inicial único de **534,29 kB** (169,15 kB gzip). Cinco telas de engenharia/admin
+  (`Connections`, `Events`, `Projects`, `Settings`, `Tags`) são importadas ansiosamente e só
+  `FlowEditorPage` usa `lazy()`. S, LOW, HIGH.
+- **Testes que decidem por relógio de parede, fora dos TDs registrados** —
+  `services/flow-runtime/tests/test_mpc_arming.py:101-119` (helper reusado por
+  `test_mpc_shed_degradado.py:20,41`) e `services/opc-worker/tests/test_watchdog.py:473-505`
+  (`sleep(1.5)` para provar uma negativa). Mesma classe de TD-008/027/028. Consertar exige seam de
+  clock em `watch_arm` e `FlowWatchdog`, então não cabe num plano "só testes". M, MED, HIGH.
+- **Sem lint nem formatador no frontend** — (carry-over #5, **AINDA VALE**): sem script `lint`, sem
+  eslint/prettier em `devDependencies`, sem `eslint.config.*`/`.eslintrc*`/`.prettierrc*`/
+  `.editorconfig`/`.pre-commit-config.yaml`. Nada checa regra de hooks do React justamente nos
+  arquivos de maior churn. M, MED (a primeira passada gera onda; mitigue com `warn`).
+- **Sem gate local apesar do incidente que criou o `gates.yml`** — `.github/workflows/gates.yml:1-11`
+  nomeia o incidente (`e38f528`, `ruff format` + `typecheck` vermelhos) no próprio cabeçalho; não há
+  pre-commit nem `scripts/check.sh` agrupando os cinco comandos. S, LOW, HIGH.
+- **Sem request/correlation id no logger compartilhado** —
+  `packages/ottima-core/src/ottima_core/logging.py:14-27` emite `ts/level/logger/service/message`.
+  Um comando de operador atravessa 5 serviços sem chave comum; correlacionar incidente é por
+  proximidade de timestamp. Começar só pela API é a fatia barata; propagar pelo barramento exige
+  ADR (ADR-002). M, MED, HIGH.
+- **`.env.example` omite 6 variáveis reais** — `OTTIMA_CERTS_DIR`, `OTTIMA_MPC_QUEUE_MAX` e as 4
+  `OTTIMA_HEALTH_URL_*` existem em `config.py:35-42` e são citadas no `CLAUDE.md`, mas não estão no
+  template. **Ressalva**: todas têm default coerente com o compose e várias são nomes DNS de
+  container — listá-las como editáveis pode induzir o instalador a quebrar o `/health`. Se virar
+  plano, faça como bloco comentado "overrides avançados — não altere sem mudar o compose". S, LOW.
+- **Teto `<3.13` com gatilho de revisão vencido** — `pyproject.toml:4`; a razão mora só em
+  `docs/specs/F1-fundacao.md:70` ("teto em 3.12 por disponibilidade de wheels casadi/do-mpc.
+  Revisitar no início da F4"), e a F4 foi entregue há muito. Mínimo: registrar que hoje é escolha
+  deliberada, não bloqueio de wheel. S, LOW (documentar) / MED (bumpar — é a matemática do MPC).
+
+## Direção — opções para o dono pesar
+
+Não são defeitos. Esforço grosseiro de propósito.
+
+- **A campanha de identificação já rodou contra a planta e o resultado não voltou para o flow.**
+  `scripts/identificacao/` é ferramenta viva: quatro scripts versionados (`coleta.py`,
+  `identifica.py`, `valida.py`, `exporta_csv.py`) e um `RELATORIO.md` de 13/09/2026 — seis dias
+  antes deste HEAD — contra a planta real (flow 987, bloco `mpc_f376ff5d`, Ts = 2 s), com 6 pares
+  MV→CV identificados, R² de 0,94 a 0,998, já na forma que o bloco MPC aceita. O achado de cabeçalho
+  (`RELATORIO.md:44-45`): o ganho hoje configurado para FV-201 → LT-201 é **metade** do identificado
+  (0,002191 vs 0,004547). São duas decisões distintas: (1) realimentar a matriz `models` é operação,
+  não produto — S; (2) absorver identificação **como funcionalidade** contradiz o não-objetivo v1 de
+  `PRODUCT.md:41`, então registro a contradição em vez de propor por cima — L, e exige decisão de
+  escopo.
+- **Exportação CSV existe em 1 das 3 telas de tendência.** `frontend/src/features/trend/TrendPage.tsx:177`
+  monta o CSV no cliente a partir da matriz visível, respeitando o zoom — bem feito. A tendência de
+  **operação** e a de fuzzy não têm. É o operador de turno quem mais precisa levar evidência de
+  distúrbio, e o caminho já está pronto. S por tela.
+- **`ssto_runs` continua a tabela de auditoria que ninguém consulta, e a assimetria piorou.**
+  `/api/history` tem quatro endpoints de faixa (`""`, `/mpc`, `/fuzzy`, `/loop` — este último novo
+  desde a rodada anterior) e o SSTO segue com **só** `GET /api/history/ssto/last`, um ponto. A
+  pergunta que justifica a tabela existir ("por que o otimizador desistiu daquela linha às 14:30?")
+  continua inalcançável, e o índice composto para essa consulta já existe na migration. M para o
+  endpoint, M-L com tela.
+- **O MCP expõe `mpc_history` mas não `fuzzy_history` nem `loop_history`**, embora os dois endpoints
+  REST existam. Um agente lê tendência de MPC e não de malha nem de fuzzy. S.
+- **`GurobiBackend` continua stub declarado** —
+  `services/flow-runtime/src/ottima_flow_runtime/target_calculation/solver.py:193`, com teste
+  assertando o `NotImplementedError`. Vale saber se ainda é caminho ou se deve sair. Indefinido até
+  haver caso de uso.
+
+## Achados considerados e rejeitados
+
+Para ninguém re-auditar. Vários destes vieram de subagente e **caíram na conferência** — a
+conferência é a parte que importa.
+
+- **`KeyError` em comando de malha malformado** (`blocks/shell/block.py:158-161`, `mode.py:33-37`).
+  Reportado como bug; **não é alcançável**. `services/api/src/ottima_api/routers/operate.py:86`
+  tipa o corpo como `Literal["oos","man","auto","cas","rcas","rout"]`, o Pydantic recusa com 422
+  antes de publicar, e `_BY_NAME` contém os oito nomes. Só uma publicação artesanal direta em
+  `flow.commands` produziria o erro. Somado à regra do `AGENTS.md` ("No error handling for
+  impossible scenarios"), a metade irmã da sugestão (espalhar `args.get` por `mpc.py`) seria
+  exatamente o trabalho defensivo especulativo que a regra proíbe.
+- **`list_mpcs`/`list_loop` sem `asyncio.to_thread` como "regressão do TD-002"**. Rebaixado. O
+  `to_thread` de `operate.py` está exatamente onde o trabalho é CPU-bound de verdade: `_fuzzy_nodes`
+  chama `introspect_fll` (`:670`) e `/loop/.../surface` chama `sample_surface` (`:865`) — ambos
+  envolvidos. `_mpc_nodes` (`:540-544`) e `_loop_nodes` (`:744`) fazem parse + projeção Pydantic
+  sobre o corpus de ~10 flows do `PRODUCT.md:35`. É julgamento consistente, não descuido.
+  Reconsiderar só com medição do custo real de `_mpc_nodes` — a rodada anterior já rejeitou item de
+  desempenho não medido com "Reconsidere só com telemetria".
+- **"`loop.state` é canal não documentado, viola o `CLAUDE.md`"**. Encolhido, não rejeitado: o canal
+  **está** autorizado por `docs/adr/ADR-039-block-shell.md:338-339`, e o ADR vence o PRD. O que
+  sobra é o PRD §7.1 estar defasado — item 1 da proposta 019, que exige o processo do dono, não um
+  executor.
+- **"O token do `/ws` deveria virar ticket de curta duração"**. Recusado: a forma `?token=` na URL é
+  **risco aceito e registrado** em `docs/specs/F3-motor-canvas.md:193` ("forma; risco aceito coerente
+  com HTTP interno, ADR-023"). Propor outro transporte relitiga decisão normativa. O que **não**
+  estava coberto por aquela aceitação — persistência indefinida do token em access log de container,
+  com a conta `agente` do MCP em papel admin trafegando pelo mesmo caminho — é o plano 014.
+- **Split de `MpcBlock`** (1079 linhas numa classe, `blocks/mpc.py:127-1205`; ARCH-10 confirmado
+  ainda aberto e maior). **Não vira plano de executor**: L de esforço, MED-HIGH de risco, no arquivo
+  onde um erro move atuador, e o único portão real é a suíte RNF-09 MPC↔TFS mais stack — ambos
+  manuais por decisão (ADR-035). Falha o critério da própria skill ("prefira achados com história de
+  verificação limpa"). Fica medido-e-vigiado, ou vira spike para o dono. O 010 é a versão deste
+  problema que **tem** portão limpo.
+- **Dívida de TODO/dead code**: `grep` case-sensitive por `TODO:|FIXME|XXX|HACK|NotImplementedError`
+  em `packages/`, `services/` e `frontend/src` devolve **um** hit real (`GurobiBackend`, stub
+  declarado com teste). Todo o resto é a palavra portuguesa "TODO/TODOS" em prosa. Não há bloco
+  comentado, nem flag totalmente lançada ainda ramificando.
+- **"Módulo de produção importado por nenhum teste"**: a varredura mecânica produziu 10 candidatos e
+  **os 10 são falsos positivos** (teste via HTTP, `Table` do SQLAlchemy referenciado por variável,
+  cobertura no nível do `Supervisor`). Registrado para ninguém repetir a varredura achando que achou
+  algo.
+- **Junk drawer em `frontend/src/lib/`**: 8 arquivos, sem `utils.ts`, sem fan-in de depósito.
+- **Violação de camada no MCP**: `packages/ottima-mcp/.../cliente.py` fala com a REST real; não há
+  atalho para o banco nem para o barramento.
+- **`override-dependencies = numpy>=2.5` sobre o `numpy<2.0` declarado pelo `pyfuzzylite`**:
+  verificado **sólido**. `pyfuzzylite` é Python puro (sem extensão compilada, logo sem quebra de
+  ABI C), e o caminho de maior risco — `packages/ottima-core/src/ottima_core/flowgraph/fuzzy_surface.py:16-32`,
+  que entrega `ndarray` cru ao engine e lê de volta — é exercitado ponta a ponta por
+  `test_fuzzy_surface.py` e `test_lut_gates.py` com asserção sobre valores computados.
+- **Ausência de `uv run pytest` e do gate E2E no CI**: ADR-035/TD-023, decisão explícita. Não é achado.
+- **Tudo que a rodada de 2026-08-16 já rejeitou** continua rejeitado e não foi re-auditado: paginação
+  das rotas de lista (RNF-01), `estaZoomadoEmX(undefined) === true`, rebuild da matriz de tendência a
+  cada tique, profundidade de JSON no import, "os 19 min da suíte são IPOPT".
+- **TD-026, TD-027, TD-028**: dívida aberta e registrada. O TD-027 foi **reconferido** nesta rodada —
+  `heartbeat.py` decide staleness por `time.monotonic()` de forma corretamente monotônica; **não há
+  bug de produto atrás dele**, é defeito do teste, como o registro já dizia.
+
+## O que esta auditoria NÃO cobriu
+
+- **Qualquer execução contra o stack**: L1/L2/L3, `deploy/smoke.sh`, Playwright em browser,
+  `docker compose`. Os 8 serviços do dono estavam no ar com planta viva; tudo foi leitura. As duas
+  exceções read-only: `npm run build` (escreve só em `dist/`, ignorado) e consultas `EXPLAIN`/
+  `pg_indexes` no Postgres pelo auditor de desempenho.
+- **A suíte `uv run pytest` completa** (~20 min, testcontainers, dois flaky registrados). Nenhum
+  achado depende de tê-la rodado; onde um plano precisa de prova, ele traz o recorte por pacote.
+- **`uv run pytest -m slow`** (carga do MPC, RNF-02).
+- **Cobertura de linha medida.** O cruzamento foi mecânico + conferência manual, não `coverage`.
+- **Cruzamento de `uv.lock`/`package-lock.json` contra base de CVE viva.** As versões resolvidas são
+  recentes (2026) e nenhuma levantou bandeira na inspeção, mas isso **não** equivale a consulta de
+  advisory — registrado como lacuna explícita, não como "limpo".
+- **`frontend/src/features/flows/config/*` e `.../mpc/*`**, e o miolo de `graph.ts` (1273 linhas):
+  o auditor de React priorizou as superfícies de operação 24/7 e o canal ao vivo.
+- **`docs/PRD.md` e `docs/adr/` como objeto de crítica de conteúdo.** Foram lidos como fonte
+  normativa e auditados apenas quanto a *drift* (código ≠ documento) — nunca quanto ao mérito da
+  decisão.
+
+---
+
+# Rodada de 2026-08-16 — commit `8f9fe76`
+
+Gerados em 2026-08-16 sobre o commit `8f9fe76` (branch `improve`, worktree
+`.worktrees/improve`). Execute na ordem abaixo, salvo o que as dependências disserem. Cada
+executor: leia o plano inteiro antes de começar, honre as Condições de PARADA e atualize a
+sua linha na tabela ao terminar.
 
 ## Ordem de execução e status
 
@@ -530,7 +787,8 @@ do plano 006.
 Todos confirmados por leitura do código citado. Estão aqui para não se perderem, em ordem
 de leverage; qualquer um pode virar plano quando quiser.
 
-- **Cabeçalhos de hardening ausentes no proxy da SPA.** `frontend/nginx.conf:10` define
+- **→ VIROU O PLANO [014](014-nginx-log-sem-token-e-hardening.md) na rodada de 2026-09-19.** Não escreva plano novo para isto.
+  **Cabeçalhos de hardening ausentes no proxy da SPA.** `frontend/nginx.conf:10` define
   apenas `Content-Security-Policy`, sem `frame-ancestors`, `X-Frame-Options` nem
   `X-Content-Type-Options`. O comentário da linha 9 registra que o token JWT vive em
   `localStorage`. Sem `frame-ancestors`/`X-Frame-Options`, a SPA pode ser embutida em
@@ -543,7 +801,8 @@ de leverage; qualquer um pode virar plano quando quiser.
   `SAVEPOINT` + rollback (`conftest.py:53-65`) não exige recriar o engine, só a conexão.
   Afeta ~114 testes de `services/api/tests` mais dezenas de `flow-runtime` e `ottima-core`.
   S, LOW, MED (o ganho em segundos não foi medido).
-- **`routers/system_settings.py` só tem cobertura E2E.** Os outros 12 routers têm arquivo
+- **→ VIROU O PLANO [018](018-lacunas-de-teste-da-camada-rapida.md) (item C) na rodada de 2026-09-19.** Não escreva plano novo para isto.
+  **`routers/system_settings.py` só tem cobertura E2E.** Os outros 12 routers têm arquivo
   de teste homônimo em `services/api/tests/`; este não. O único teste que o exercita é
   `tests/e2e/test_settings_log_level.py`, marcado `e2e`, que exige o stack docker completo.
   A rota é `require_admin`, muta o log level do processo inteiro e publica evento de
