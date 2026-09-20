@@ -22,6 +22,7 @@
 - Teto da razão lead/lag: **10**. Teto da fila do `dead_time`: **`MAX_DELAY_SAMPLES = 7200`**, a constante que já existe em `validate.py:31` — não criar um segundo número.
 - Arredondamento de amostras: `round()` do Python (banker's, half-even), a mesma convenção do TFS e do modelo interno do MPC.
 - Nenhuma tarefa roda o gate E2E de 3 camadas nem `docker compose`. Lint e build do projeto inteiro só na Task 9.
+- **NUNCA `git add -A` / `git add .`.** Todo commit lista caminhos explícitos. `node_modules/`, `package.json` e `pnpm-lock.yaml` da RAIZ são untracked e o `.gitignore` só cobre `frontend/node_modules/` — um `git add -A` estagia dezenas de milhares de arquivos. Pelo mesmo motivo, `git status --porcelain` NUNCA fica vazio nesta worktree: para saber se algo mudou, use `git diff --name-only` (rastreados).
 
 **Ordem é dependência real, não preferência.** `portasFixas()` do frontend indexa `PORT_CONTRACTS[tipo]` do arquivo GERADO (`graph.ts:471-475`); enquanto o contrato não for regenerado (Task 3), nenhum arquivo de frontend compila com os tipos novos. Por isso a geração vem antes do frontend, e não junto dos gates finais.
 
@@ -2067,13 +2068,28 @@ Esperado: exit 0.
 
 - [ ] **Step 5: Commit apenas se algum gate exigiu correção**
 
+**NUNCA `git add -A` neste repositório.** `node_modules/`, `package.json` e
+`pnpm-lock.yaml` da RAIZ são untracked e **não** estão no `.gitignore` (ele só cobre
+`frontend/node_modules/`). Um `git add -A` estagia dezenas de milhares de arquivos. O
+CLAUDE.md nomeia esse comando como risco conhecido.
+
+A pergunta certa não é "há algo no `git status`" — há sempre, por causa dos três untracked
+acima. É "algum arquivo RASTREADO mudou":
+
 ```bash
 cd /home/luciano/orca/workspaces/ottimaSystemV3/new-lead-lag
-git status --porcelain
-# se houver mudança:
-git add -A && git commit -m "style: ruff format apos os blocos de compensacao"
+git diff --name-only
 ```
-Se `git status --porcelain` estiver limpo (ignorados `node_modules/`, `package.json` e `pnpm-lock.yaml`, que já eram untracked antes deste trabalho), não há o que commitar.
+
+Saída vazia ⇒ nenhum gate exigiu correção, não há o que commitar; siga para o Step 6.
+
+Saída não-vazia ⇒ commite **exatamente os caminhos listados**, um a um:
+
+```bash
+cd /home/luciano/orca/workspaces/ottimaSystemV3/new-lead-lag
+git add <caminho-1> <caminho-2>   # os que `git diff --name-only` imprimiu, nada além
+git commit -m "style: ruff format apos os blocos de compensacao"
+```
 
 - [ ] **Step 6: Provar que nada vazou para o checkout principal**
 
