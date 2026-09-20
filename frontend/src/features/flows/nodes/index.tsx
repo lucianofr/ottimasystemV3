@@ -9,6 +9,8 @@ import {
   portasFixas,
   portasScript,
   type NoConstant,
+  type NoDeadTime as NoDeadTimeData,
+  type NoLeadLag as NoLeadLagData,
   type NoBusPublish as NoBusPublishData,
   type NoBusSubscribe as NoBusSubscribeData,
   type NoEscrita,
@@ -316,6 +318,47 @@ export function NoIntegrator({ id, data, selected }: NodeProps<NoIntegratorData>
   );
 }
 
+/** Lead-Lag: ganho e as duas constantes no resumo — o engenheiro lê a compensação inteira
+ *  sem abrir o modal. */
+export function NoLeadLag({ id, data, selected }: NodeProps<NoLeadLagData>) {
+  return (
+    <BlocoChapa
+      tipo="lead_lag"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("lead_lag", "input"))}
+      saidas={portas(portasFixas("lead_lag", "output"))}
+      blockId={id}
+    >
+      <div className="space-y-0.5">
+        <LinhaResumo rotulo="Ganho" valor={FORMATO_PARAM.format(data.gain)} />
+        <LinhaResumo
+          rotulo="τ avanço / atraso"
+          valor={`${FORMATO_PARAM.format(data.tau_lead)} / ${FORMATO_PARAM.format(data.tau_lag)} s`}
+        />
+      </div>
+    </BlocoChapa>
+  );
+}
+
+/** Tempo morto: o θ configurado no resumo. */
+export function NoDeadTime({ id, data, selected }: NodeProps<NoDeadTimeData>) {
+  return (
+    <BlocoChapa
+      tipo="dead_time"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("dead_time", "input"))}
+      saidas={portas(portasFixas("dead_time", "output"))}
+      blockId={id}
+    >
+      <LinhaResumo rotulo="θ" valor={`${FORMATO_PARAM.format(data.theta)} s`} />
+    </BlocoChapa>
+  );
+}
+
 /** Constante: bloco-fonte sem entrada — `value` fixo no resumo. */
 export function NoConstante({ id, data, selected }: NodeProps<NoConstant>) {
   return (
@@ -527,6 +570,8 @@ export const TIPOS_DE_NO: Record<TipoBloco, ComponenteNo> = {
   fuzzy_loop: NoFuzzyLoop,
   scaler: NoScaler,
   integrator: NoIntegrator,
+  lead_lag: NoLeadLag,
+  dead_time: NoDeadTime,
   bus_publish: NoBusPublish,
   bus_subscribe: NoBusSubscribe,
 };
