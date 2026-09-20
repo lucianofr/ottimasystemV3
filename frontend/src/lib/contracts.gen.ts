@@ -52,7 +52,7 @@ export type ContratoPorta =
   | ContratoPortaDinamica
   | ContratoPortaDinamicaComDefault;
 
-export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "constant" | "script" | "fuzzy" | "first_order" | "kalman" | "scaler" | "integrator" | "bus_publish" | "bus_subscribe" | "pid" | "tfs" | "mpc" | "pid_loop" | "fuzzy_loop", ContratoPorta> = {
+export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "constant" | "script" | "fuzzy" | "first_order" | "kalman" | "scaler" | "integrator" | "lead_lag" | "dead_time" | "bus_publish" | "bus_subscribe" | "pid" | "tfs" | "mpc" | "pid_loop" | "fuzzy_loop", ContratoPorta> = {
   "opc_read": {
     "dynamic": false,
     "ports": [
@@ -184,6 +184,36 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "constant" | "scr
       },
       {
         "name": "reset",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
+  },
+  "lead_lag": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
+  },
+  "dead_time": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
         "direction": "input",
         "type": "num"
       },
@@ -771,4 +801,14 @@ export interface ConstantConfig {
 
 export interface BusKeyConfig {
   key: string;
+}
+
+export interface LeadLagConfig {
+  gain: number;
+  tau_lead: number;
+  tau_lag: number;
+}
+
+export interface DeadTimeConfig {
+  theta: number;
 }
