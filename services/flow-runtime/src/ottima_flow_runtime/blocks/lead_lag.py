@@ -81,9 +81,7 @@ class LeadLagBlock(Block):
                 # dado não é retenção.
                 return null_outputs(OUTPUT_PORTS)
             # Teto `min(UNCERTAIN, ...)`: entrada BAD retida permanece BAD (monotonicidade).
-            return {
-                "out": Signal(self._ultima_boa, quality=min(Quality.UNCERTAIN, sample.quality))
-            }
+            return {"out": Signal(self._ultima_boa, quality=min(Quality.UNCERTAIN, sample.quality))}
 
         if not self._started:
             self._lag.prime(valor)
