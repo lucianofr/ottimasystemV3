@@ -25,6 +25,29 @@
 
 **Ordem é dependência real, não preferência.** `portasFixas()` do frontend indexa `PORT_CONTRACTS[tipo]` do arquivo GERADO (`graph.ts:471-475`); enquanto o contrato não for regenerado (Task 3), nenhum arquivo de frontend compila com os tipos novos. Por isso a geração vem antes do frontend, e não junto dos gates finais.
 
+## Disciplina de worktree (LEIA ANTES DO PRIMEIRO `read`)
+
+Este plano roda na worktree **`/home/luciano/orca/workspaces/ottimaSystemV3/new-lead-lag`**. O
+checkout principal é outro: `~/Documentos/ProjetosClaudeCode/ottimaSystemV3`.
+
+**Uma sessão de subagente resolve caminho RELATIVO contra a raiz do repositório principal, não
+contra a worktree** — mesmo tendo lido o arquivo pelo caminho absoluto da worktree momentos
+antes. O agente escreve de um lado, verifica do outro, conclui que "a edição foi revertida", e
+o `main` amanhece sujo. O CLAUDE.md documenta o episódio duas vezes; na segunda, 5 de 7
+agentes de um lote paralelo caíram nisso e um gastou ~20 min caçando um `git reset` que nunca
+houve.
+
+Portanto, em TODA tarefa deste plano:
+
+1. Todo `read`/`write`/`edit` usa o caminho **absoluto**, do `/home/luciano/...` em diante.
+   Nunca `packages/...`, nunca `./frontend/...`.
+2. Todo comando de shell passa `cwd` explícito da worktree — nunca herda o diretório da sessão.
+3. Depois de cada escrita, **confirme por shell** (`grep`/`wc -l`) que o conteúdo chegou ao
+   arquivo certo. A resposta de sucesso da ferramenta de edição NÃO é prova.
+4. Antes de relatar tarefa concluída, `git status --porcelain` no **checkout principal**
+   (`git -C ~/Documentos/ProjetosClaudeCode/ottimaSystemV3 status --porcelain`) tem de estar
+   vazio. Rodar `git status` dentro da worktree não revela vazamento: é outra árvore.
+
 ## Review Focus
 
 Cinco entradas que a spec implica, que nenhum molde de teste existente cobre, e que morderiam quem usa o sistema. Cada linha tem o teste apontado na tarefa que possui o código.
@@ -405,13 +428,36 @@ uv run pytest packages/ottima-core/tests/test_flowgraph_compensacao.py -q
 ```
 Esperado: PASS em todos os casos do arquivo.
 
-- [ ] **Step 10: Confirmar que o export carrega os dois tipos**
+- [ ] **Step 10: Travar o contrato exportado com asserção, não com o gate**
+
+Acrescentar a `packages/ottima-core/tests/test_flowgraph_compensacao.py`:
+
+```python
+def test_contrato_exportado_carrega_portas_e_schema_dos_dois_blocos():
+    """`_NODE_CONFIG_MODELS` é fácil de esquecer e o gate do CI NÃO pega o esquecimento:
+    sem a classe na tupla não há schema, logo o arquivo gerado não muda, logo
+    `git diff --exit-code` passa VERDE com o contrato incompleto — e o frontend volta a
+    tipar `DadosLeadLag` à mão, quebrando o espelho do ADR-034 em silêncio."""
+    from ottima_core.contracts_export import build_contracts
+
+    contratos = build_contracts()
+
+    for tipo in ("lead_lag", "dead_time"):
+        portas = contratos["port_contracts"][tipo]
+        assert portas["dynamic"] is False
+        assert [p["name"] for p in portas["ports"]] == ["in", "out"]
+        assert all(p["type"] == "num" for p in portas["ports"])
+
+    assert "LeadLagConfig" in contratos["node_configs"]
+    assert "DeadTimeConfig" in contratos["node_configs"]
+```
 
 ```bash
 cd /home/luciano/orca/workspaces/ottimaSystemV3/new-lead-lag
-uv run python -m ottima_core.contracts_export | python -c "import json,sys; d=json.load(sys.stdin); print(sorted(k for k in d['port_contracts'] if k in ('lead_lag','dead_time'))); print(sorted(k for k in d['node_configs'] if 'Lead' in k or 'DeadTime' in k))"
+uv run pytest packages/ottima-core/tests/test_flowgraph_compensacao.py -q
 ```
-Esperado: `['dead_time', 'lead_lag']` e `['DeadTimeConfig', 'LeadLagConfig']`.
+Esperado: PASS. Se a asserção de `node_configs` falhar, faltou acrescentar as classes a
+`_NODE_CONFIG_MODELS` no Step 8.
 
 - [ ] **Step 11: Commit**
 
@@ -1372,9 +1418,9 @@ Acrescentar a `packages/ottima-mcp/tests/test_server.py`, logo depois do teste d
 
 ```python
 def test_literal_de_flow_add_block_cobre_todo_node_type() -> None:
-    """O enum de `flow_add_block` é espelho MANUAL de NODE_TYPES e já ficou defasado uma vez
-    (9 tipos contra 16): bloco novo nascia invisível para agente. Este teste é o que impede
-    a terceira vez."""
+    """O enum de `flow_add_block` é espelho MANUAL de `NODE_TYPES`: hoje está em dia, e é
+    justamente por isso que vale travar agora. Um tipo novo registrado em `parse.py` e
+    esquecido aqui nasce invisível para agente, sem nada quebrar."""
     from typing import get_args
 
     from ottima_core.flowgraph.parse import NODE_TYPES
@@ -1414,8 +1460,9 @@ TipoBlocoLiteral = Literal[
     "dead_time",
 ]
 """Espelho MANUAL de `NODE_TYPES` — o enum precisa ser estático para aparecer no schema da
-tool. `test_literal_de_flow_add_block_cobre_todo_node_type` compara os dois; sem ele o
-espelho deriva em silêncio, como já derivou (9 contra 16)."""
+tool (`block_catalog` já devolve a lista dinâmica, mas o schema da tool não pode).
+`test_literal_de_flow_add_block_cobre_todo_node_type` compara os dois; sem ele o espelho
+deriva em silêncio."""
 ```
 
 E substituir o bloco `Literal[...]` inline da anotação de `type` (linhas 495-515) por:
@@ -1440,11 +1487,11 @@ Esperado: PASS.
 ```bash
 cd /home/luciano/orca/workspaces/ottimaSystemV3/new-lead-lag
 git add packages/ottima-mcp/src/ottima_mcp/server.py packages/ottima-mcp/tests/test_server.py
-git commit -m "fix(mcp): ressincroniza o enum de flow_add_block com NODE_TYPES
+git commit -m "feat(mcp): lead_lag e dead_time no enum de flow_add_block
 
-O espelho manual listava 9 tipos contra os 16 de parse.py — blocos novos
-nasciam invisiveis para agente. Vira o alias TipoBlocoLiteral com os 18, e um
-teste o compara a NODE_TYPES para impedir a proxima deriva."
+O Literal inline vira o alias TipoBlocoLiteral e ganha os dois tipos novos.
+Junto, um teste que o compara a NODE_TYPES: o espelho e manual e hoje esta em
+dia — o teste e o que garante que continue."
 ```
 
 ---
@@ -2027,6 +2074,16 @@ git status --porcelain
 git add -A && git commit -m "style: ruff format apos os blocos de compensacao"
 ```
 Se `git status --porcelain` estiver limpo (ignorados `node_modules/`, `package.json` e `pnpm-lock.yaml`, que já eram untracked antes deste trabalho), não há o que commitar.
+
+- [ ] **Step 6: Provar que nada vazou para o checkout principal**
+
+```bash
+git -C ~/Documentos/ProjetosClaudeCode/ottimaSystemV3 status --porcelain
+```
+Esperado: **vazio**. É o item 4 da Disciplina de worktree e o único check que revela o
+vazamento de caminho relativo — o `git status` da worktree é outra árvore e não o veria.
+Se houver saída, alguma escrita caiu no repositório errado: inspecione o diff, mova a mudança
+para a worktree e limpe o principal ANTES de relatar a tarefa concluída.
 
 ---
 

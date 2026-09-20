@@ -258,7 +258,7 @@ dele.
    `DeadTimeConfig`, união `NodeConfig`, despacho para `_parse_loop_config`
 2. `flowgraph/__init__.py` — reexport dos dois modelos
 3. `flowgraph/validate.py` — portas fixas `in`/`out`, entrada obrigatória, teto de fila
-4. `contracts_export.py` — `PORT_CONTRACTS` dos dois tipos
+4. `contracts_export.py` — `PORT_CONTRACTS` **e `_NODE_CONFIG_MODELS`** dos dois tipos
 5. `flow-runtime/definition.py` — instanciação (recebe `ts_seconds`, como `first_order`)
 6. `blocks/lead_lag.py`, `blocks/dead_time.py`
 
@@ -276,10 +276,20 @@ dele.
 13. `docs/GLOSSARY.md` — verbetes **Lead-Lag** e **Tempo morto (bloco)**
 14. `docs/adr/ADR-043-qualidade-fim-a-fim.md` §5 — duas linhas na tabela de propagação
 
-O `Literal` do MCP **já está defasado**: 9 tipos contra os 16 do `parse.py` (ADR-036 o torna
-sítio de registro real). Ressincronizar os 16 + 2 na mesma passada — sem isso os blocos novos
-nascem invisíveis para agente, e a deriva continua sem dono. É conserto de deriva alheia,
-declarado aqui para não passar de contrabando.
+O `Literal` de `flow_add_block` é **espelho manual** de `NODE_TYPES` (ADR-036 torna o MCP
+sítio de registro real). Hoje ele está **em dia** — 16 tipos, conferido em
+`server.py:495-514` na árvore atual. Uma versão anterior desta spec afirmou que estava
+defasado em 9 contra 16; era leitura do worktree 72 commits atrasado, e está errada. O
+trabalho aqui é só acrescentar os dois tipos — mais um teste que compare o espelho a
+`NODE_TYPES`, para que a próxima deriva apareça sozinha.
+
+**Armadilha do item 4, que o gate NÃO pega:** `_NODE_CONFIG_MODELS` (`contracts_export.py:326-343`)
+já carrega `ScalerConfig`, `IntegratorConfig`, `ConstantConfig` e `BusKeyConfig` — é essa tupla
+que faz `build_contracts()` emitir o JSON Schema de cada config. Esquecê-la não quebra nada
+visivelmente: o arquivo gerado simplesmente não ganha as interfaces novas, `git diff
+--exit-code` fica **verde** porque não há diff, e o frontend volta a tipar `DadosLeadLag` à
+mão, quebrando o espelho do ADR-034 em silêncio. Exige asserção explícita em teste, não
+confiança no gate.
 
 **Rótulos pt-BR** (GLOSSARY é o cânone): `lead_lag` → "Lead-Lag"; `dead_time` → "Tempo
 morto". A chave de config do atraso é **`theta`**, não `dead_time`: o GLOSSARY já fixa θ como
@@ -307,15 +317,21 @@ reprovado; não-finito reprovado em todo campo; chave desconhecida reprovada.
 **Frontend** — `utilitarios.check.ts` no molde existente: presença na paleta, rótulos, uma
 entrada e uma saída, defaults que passam no save, round-trip da config.
 
-**Gate** — `npm run generate:contracts` + `git diff --exit-code` (o contrato gerado é parte do
-CI hermético, ADR-035).
+**Contrato exportado** — asserção EXPLÍCITA de que `node_configs` do
+`ottima_core.contracts_export` contém `LeadLagConfig` e `DeadTimeConfig`. O gate
+`npm run generate:contracts` + `git diff --exit-code` (ADR-035) **não** cobre isso: sem a
+entrada em `_NODE_CONFIG_MODELS` não há schema, logo não há diff, logo o gate passa verde
+com o contrato incompleto.
 
 ## 9. Dívidas observadas, deliberadamente não consertadas aqui
 
 - **`first_order` não guarda não-finito.** Faz `float(sample.v)` e entra na recorrência; um
   `nan` envenena o estado para sempre. O `lead_lag` nasce com a guarda (D9); o `first_order`
   fica como está — é deriva alheia ao pedido.
-- **`Literal` do MCP defasado** (§7) — este sim entra, porque o bloco novo não funciona sem.
+- **Espelho manual do `Literal` do MCP.** Está em dia hoje (16 tipos, conferidos em
+  `server.py:495-514`); entra o teste que o compara a `NODE_TYPES` para que a próxima deriva
+  apareça sozinha. Não é conserto de nada quebrado — a alegação de deriva numa versão
+  anterior desta spec era leitura do worktree 72 commits atrasado.
 
 ## 10. Artefato de decisão
 
