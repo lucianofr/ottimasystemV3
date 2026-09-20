@@ -28,7 +28,7 @@ export function CamposLeadLag({ dados }: { dados: NoLeadLag["data"] }) {
           id="tau_lag"
           rotulo="τ atraso (s)"
           valor={dados.tau_lag}
-          ajuda="Constante de tempo do denominador; precisa ser maior que zero. A razão avanço/atraso é o ganho do bloco em alta frequência e está limitada a 10 — acima disso, ligue dois blocos em série."
+          ajuda="Constante de tempo do denominador; precisa ser maior que zero. O ganho do bloco em alta frequência é Ganho × (τ avanço / τ atraso), e essa razão avanço/atraso está limitada a 10 — acima disso, ligue dois blocos em série."
         />
       </div>
     </div>
