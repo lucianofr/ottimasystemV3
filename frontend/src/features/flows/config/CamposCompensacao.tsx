@@ -41,7 +41,7 @@ export function CamposDeadTime({ dados }: { dados: NoDeadTime["data"] }) {
       id="theta"
       rotulo="Tempo morto θ (s)"
       valor={dados.theta}
-      ajuda="Atraso puro de transporte, contado em varreduras do flow (θ dividido pelo Ts, arredondado). Abaixo de meio Ts o bloco vira passagem direta."
+      ajuda="Atraso puro de transporte, contado em varreduras do flow (θ dividido pelo Ts, arredondado). Até meio Ts (inclusive) o bloco vira passagem direta."
     />
   );
 }

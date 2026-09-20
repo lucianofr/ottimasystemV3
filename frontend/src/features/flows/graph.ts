@@ -54,8 +54,6 @@ export const TIPOS_BLOCO = [
   "script",
   "first_order",
   "kalman",
-  "lead_lag",
-  "dead_time",
   "tfs",
   "mpc",
   "fuzzy",
@@ -64,6 +62,8 @@ export const TIPOS_BLOCO = [
   "fuzzy_loop",
   "scaler",
   "integrator",
+  "lead_lag",
+  "dead_time",
   "bus_publish",
   "bus_subscribe",
 ] as const;
