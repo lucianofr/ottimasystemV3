@@ -14,6 +14,7 @@ import pytest
 
 from ottima_core.signal import Quality
 from ottima_flow_runtime.blocks.base import Signal
+from ottima_flow_runtime.blocks.dead_time import DeadTimeBlock
 from ottima_flow_runtime.blocks.lead_lag import LeadLagBlock
 
 TS = 1.0
@@ -243,4 +244,118 @@ def test_lead_lag_instancia_com_o_ts_do_flow():
     bloco = _instancia(_no("lead_lag", gain=2.0, tau_lead=20.0, tau_lag=10.0))
 
     assert isinstance(bloco, LeadLagBlock)
+    assert bloco.input_ports == ("in",)
+
+
+# --------------------------------------------------------------------------------------
+# Tempo morto
+# --------------------------------------------------------------------------------------
+
+
+def dead_time(theta: float = 3.0, *, ts: float = TS) -> DeadTimeBlock:
+    return DeadTimeBlock("d1", theta=theta, ts_seconds=ts)
+
+
+async def test_dead_time_atrasa_exatamente_d_varreduras():
+    bloco = dead_time(3.0)
+
+    saidas = [(await alimenta(bloco, valor)).v for valor in (10.0, 11.0, 12.0, 13.0, 14.0, 15.0)]
+
+    # A fila nasce cheia de 10.0 (as `d=3` cópias da partida) e SÓ ENTÃO recebe o append da
+    # própria amostra 1 — quatro instâncias de 10.0 entram antes do primeiro pop, não três.
+    # As 4 primeiras saídas repetem a partida (índices 0-3) e, a partir da quinta, cada saída
+    # é a entrada de exatamente 3 varreduras atrás: saida[4]=entrada[1]=11, saida[5]=entrada[2]=12.
+    assert saidas == [10.0, 10.0, 10.0, 10.0, 11.0, 12.0]
+
+
+async def test_dead_time_zero_e_passagem_direta():
+    bloco = dead_time(0.0)
+
+    assert (await alimenta(bloco, 7.0)).v == 7.0
+    assert (await alimenta(bloco, 9.0)).v == 9.0
+
+
+async def test_dead_time_abaixo_de_meio_ts_vira_passagem_direta_em_silencio():
+    """`round(0.4/1.0) == 0`: o bloco não atrasa e não reclama. Comportamento aceito — mas
+    quem configurar 0,4 s achando que atrasou vê o sinal passar direto."""
+    bloco = dead_time(0.4)
+
+    assert (await alimenta(bloco, 7.0)).v == 7.0
+    assert (await alimenta(bloco, 9.0)).v == 9.0
+
+
+async def test_dead_time_arredonda_half_even_como_o_tfs():
+    """`round(2.5) == 2` (banker's): a mesma convenção do TFS, do validate e do MPC."""
+    bloco = dead_time(2.5)
+
+    saidas = [(await alimenta(bloco, valor)).v for valor in (1.0, 2.0, 3.0, 4.0)]
+
+    assert saidas == [1.0, 1.0, 1.0, 2.0]
+
+
+async def test_dead_time_nao_injeta_zero_na_partida():
+    """Zero-fill é correto no TFS (variável-desvio) e seria um degrau aqui, onde o sinal está
+    na EU absoluta — ligado a `bias_in`, um degrau na válvula por `d` varreduras."""
+    assert (await alimenta(dead_time(5.0), 150.0)).v == 150.0
+
+
+async def test_dead_time_emite_a_qualidade_historica_da_amostra():
+    """A saída é a amostra de `d` varreduras atrás: carrega a qualidade DAQUELA amostra, não
+    a da entrada corrente."""
+    bloco = dead_time(2.0)
+    await alimenta(bloco, 1.0)
+    await alimenta(bloco, 2.0, quality=Quality.BAD)
+    await alimenta(bloco, 3.0)
+
+    saida = await alimenta(bloco, 4.0)
+
+    assert saida.v == 2.0
+    assert saida.quality is Quality.BAD
+
+
+async def test_dead_time_com_cold_start_nao_executa_nem_enche_a_fila():
+    bloco = dead_time(2.0)
+
+    nula = (await bloco.step({"in": Signal(None)}))["out"]
+    assert nula.v is None
+    assert nula.ok is False
+
+    # A fila nasce da PRIMEIRA amostra válida, não da varredura fria.
+    assert (await alimenta(bloco, 50.0)).v == 50.0
+
+
+@pytest.mark.parametrize("ruim", [float("nan"), float("inf")])
+async def test_dead_time_nao_finito_sai_nulo_e_invalido(ruim: float):
+    """Convenção do `scaler`: nunca nan/inf com ok=True a jusante."""
+    bloco = dead_time(1.0)
+    await alimenta(bloco, 5.0)
+    await alimenta(bloco, ruim)
+
+    saida = await alimenta(bloco, 6.0)
+
+    assert saida.v is None
+    assert saida.ok is False
+
+
+async def test_dead_time_reset_esvazia_a_fila():
+    bloco = dead_time(2.0)
+    for valor in (1.0, 2.0, 3.0):
+        await alimenta(bloco, valor)
+
+    bloco.reset()
+
+    assert (await alimenta(bloco, 99.0)).v == 99.0
+
+
+def test_dead_time_declara_uma_entrada_e_uma_saida():
+    bloco = dead_time()
+
+    assert bloco.input_ports == ("in",)
+    assert bloco.output_ports == ("out",)
+
+
+def test_dead_time_instancia_com_o_ts_do_flow():
+    bloco = _instancia(_no("dead_time", theta=30.0))
+
+    assert isinstance(bloco, DeadTimeBlock)
     assert bloco.input_ports == ("in",)

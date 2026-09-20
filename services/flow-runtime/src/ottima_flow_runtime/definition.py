@@ -60,6 +60,7 @@ from .blocks.base import Block
 from .blocks.bus_publish import BusPublishBlock
 from .blocks.bus_subscribe import BusSubscribeBlock
 from .blocks.constant import ConstantBlock
+from .blocks.dead_time import DeadTimeBlock
 from .blocks.first_order import FirstOrderBlock
 from .blocks.fuzzy import FuzzyBlock
 from .blocks.integrator import IntegratorBlock
@@ -347,6 +348,8 @@ def _instantiate(
             tau_lag=config.tau_lag,
             ts_seconds=ts_seconds,
         )
+    if node.type == "dead_time":
+        return DeadTimeBlock(node.id, theta=config.theta, ts_seconds=ts_seconds)
     if node.type == "scaler":
         return ScalerBlock(
             node.id,
