@@ -489,28 +489,37 @@ async def flow_create(
     return await _grafo_create(_cliente(ctx), project_id, name, ts_seconds)
 
 
+TipoBlocoLiteral = Literal[
+    "opc_read",
+    "opc_write",
+    "constant",
+    "script",
+    "fuzzy",
+    "tfs",
+    "mpc",
+    "first_order",
+    "kalman",
+    "pid",
+    "pid_loop",
+    "fuzzy_loop",
+    "scaler",
+    "integrator",
+    "bus_publish",
+    "bus_subscribe",
+    "lead_lag",
+    "dead_time",
+]
+"""Espelho MANUAL de `NODE_TYPES` — o enum precisa ser estático para aparecer no schema da
+tool (`block_catalog` já devolve a lista dinâmica, mas o schema da tool não pode).
+`test_literal_de_flow_add_block_cobre_todo_node_type` compara os dois; sem ele o espelho
+deriva em silêncio."""
+
+
 @mcp.tool()
 async def flow_add_block(
     flow_id: Annotated[int, Field(description="Id do flow")],
     type: Annotated[
-        Literal[
-            "opc_read",
-            "opc_write",
-            "constant",
-            "script",
-            "fuzzy",
-            "tfs",
-            "mpc",
-            "first_order",
-            "kalman",
-            "pid",
-            "pid_loop",
-            "fuzzy_loop",
-            "scaler",
-            "integrator",
-            "bus_publish",
-            "bus_subscribe",
-        ],
+        TipoBlocoLiteral,
         Field(description="Tipo do bloco — ver block_catalog para os campos de config"),
     ],
     config: Annotated[
