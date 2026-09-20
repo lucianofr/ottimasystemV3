@@ -32,6 +32,10 @@ Logo: nenhuma porta `ff` nova, nenhum bloco de soma, nenhuma alteração em `she
 A saída do `lead_lag` entra em `bias_in` e o shell já a trata de forma bumpless, escalada por
 `ff_gain`.
 
+**Alcance exato dessa garantia:** ela vale para a operação normal e para o hot-swap de
+sintonia do próprio shell. Ela **não** cobre a re-instanciação de um bloco a montante —
+ver D10, que é o preço a pagar por este desenho.
+
 ### Não-escopo
 
 Porta de feedforward dedicada no `pid`/`pid_loop`; bloco de soma; filtro de ordem
@@ -153,14 +157,30 @@ No `dead_time` não há recorrência; o valor atravessa a fila e, na emissão, n
 nulo + BAD (convenção do `scaler`: "nunca `nan`/`inf` com `ok=True` contaminando o consumidor
 a jusante").
 
-### D10 — Hot-swap: mudança de config re-instancia, e isso é bumpless por D2/D7
+### D10 — Hot-swap destes blocos DÁ degrau na válvula; a garantia do ADR-039 D10 não cobre
 
-Alterar `tau_*`/`gain`/`dead_time` com o flow rodando descarta o estado do bloco (ADR-011
-preserva estado só enquanto a config não muda). O `prime` do D2 e o preenchimento do D7 fazem
-a instância nova partir da amostra corrente, sem degrau. Efeito colateral documentado: o
-`dead_time` re-instanciado perde o histórico da fila — o sinal atrasado "alcança" o corrente
-na hora. É mudança de engenharia deliberada, mesma classe do `mpc_mode_changed
-{reason: hot_swap}`.
+Alterar `tau_lead`/`tau_lag`/`gain`/`theta` com o flow rodando descarta o estado do bloco
+(ADR-011 preserva estado só enquanto a config não muda). O `prime` do D2 e o preenchimento
+do D7 fazem a instância nova partir da amostra corrente — o que é bumpless **em regime
+permanente e só lá**. No meio de um transiente há salto, de módulo `u[n] − u[n−d]` no
+`dead_time` e até `gain·(1−r)·(u − x_velho)` no `lead_lag`.
+
+**E a válvula sente.** A §1 cita o D10 do ADR-039 ("a saída total nunca dá degrau") como
+razão para não mexer no lado do PID; essa garantia **não se estende a este caso**.
+`_rebase_bias = True` é escrito num único lugar, `apply_tuning()` (`shell/block.py:193`) —
+ou seja, só no hot-swap de sintonia do **próprio shell**. Quando quem re-instancia é o bloco
+a montante, `bias` muda na linha 239 com `_rebase_bias` ainda `False`, o rebase das linhas
+240-242 não roda, e o degrau vai direto para OUT por `u_int + du_dt*dt + bias`, atenuado
+apenas pelo rate limit de OUT.
+
+Consequência aceita nesta entrega: reconfigurar um `lead_lag`/`dead_time` que alimenta
+`bias_in` com a malha em AUTO é ato de engenharia sob malha fechada, da mesma classe do
+`mpc_mode_changed {reason: hot_swap}` — que o ADR-011/A-11 resolveu **sedando para LOCAL**,
+não fingindo que é bumpless. Aqui não há sedação: o degrau passa.
+
+**Pendência para o plano:** decidir se isso basta documentado, ou se merece evento
+(`block_reconfigured` warning quando o consumidor a jusante é porta `bias_in`) ou aviso no
+save. Sem decisão, fica documentado e passa.
 
 ## 3. Contrato — `lead_lag`
 
