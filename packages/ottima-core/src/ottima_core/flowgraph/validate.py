@@ -97,6 +97,7 @@ def validate_graph(
     _check_exec_order(graph.nodes, errors)
     _check_tags(graph.nodes, tags, errors)
     _check_tfs_delay(graph.nodes, ts_seconds, errors)
+    _check_dead_time_delay(graph.nodes, ts_seconds, errors)
     _check_script_code(graph.nodes, errors)
     _check_fuzzy_nodes(graph.nodes, errors)
     _check_loop_nodes(graph.nodes, graph.edges, errors)
@@ -172,7 +173,13 @@ def _output_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[
         return ("out",)
     if node.type in LOOP_TYPES:
         return ("out", "bkcal_out")
-    if node.type in _FILTER_TYPES or node.type in ("scaler", "integrator", "constant"):
+    if node.type in _FILTER_TYPES or node.type in (
+        "scaler",
+        "integrator",
+        "constant",
+        "lead_lag",
+        "dead_time",
+    ):
         return ("out",)
     if node.type == "bus_subscribe":
         # Bloco-fonte (ADR-042): o valor vem do barramento, não de uma aresta.
@@ -224,6 +231,8 @@ def _input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[s
     if node.type == "integrator":
         # `reset` é opcional: sem aresta, o totalizador nunca zera pela porta.
         return ("in", "reset")
+    if node.type in ("lead_lag", "dead_time"):
+        return ("in",)
     if node.type in _FILTER_TYPES:
         return ("in",)
     return ()
@@ -333,6 +342,26 @@ def _check_tfs_delay(nodes: list[FlowNode], ts_seconds: float, errors: list[str]
                         f"{samples} amostras de tempo morto (theta={element.params.theta} s, "
                         f"Ts={ts_seconds} s), acima do teto de {MAX_DELAY_SAMPLES}"
                     )
+
+
+def _check_dead_time_delay(nodes: list[FlowNode], ts_seconds: float, errors: list[str]) -> None:
+    """Teto da fila do bloco Tempo morto: mesma constante e mesmo arredondamento do TFS.
+
+    O teto é em AMOSTRAS, não em segundos — por isso depende do Ts e não pode morar no parse
+    (`validate_graph` já exige `ts_seconds > 0` justamente para esta classe de checagem).
+    """
+    for node in nodes:
+        if node.type != "dead_time":
+            continue
+        # Banker's (half-even) do round() do Python: o mesmo theta precisa virar o mesmo
+        # número de amostras aqui e em `ottima_flow_runtime.blocks.dead_time`.
+        samples = round(node.config.theta / ts_seconds)
+        if samples > MAX_DELAY_SAMPLES:
+            errors.append(
+                f"nó '{node.id}' (dead_time): precisa de {samples} amostras de tempo morto "
+                f"(theta={node.config.theta} s, Ts={ts_seconds} s), acima do teto de "
+                f"{MAX_DELAY_SAMPLES}"
+            )
 
 
 _INJECTED_MUTABLE_ATTRS = frozenset({"math", "numpy", "np"})

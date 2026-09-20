@@ -11,10 +11,13 @@ from ottima_core.flowgraph import (
     DeadTimeConfig,
     GraphParseError,
     LeadLagConfig,
+    TagRef,
     parse_graph,
+    validate_graph,
 )
 
 POS = {"x": 0, "y": 0}
+TS = 1.0
 
 
 def _node(node_id: str, tipo: str, exec_order: int, **data: object) -> dict:
@@ -184,3 +187,61 @@ def test_contrato_exportado_carrega_portas_e_schema_dos_dois_blocos():
 
     assert "LeadLagConfig" in contratos["node_configs"]
     assert "DeadTimeConfig" in contratos["node_configs"]
+
+
+# --------------------------------------------------------------------------------------
+# Portas no grafo validado
+# --------------------------------------------------------------------------------------
+
+
+def _tags(data_type: str = "float") -> dict[int, TagRef]:
+    return {10: TagRef(id=10, conn_id=1, name="TT101", data_type=data_type, direction="r")}
+
+
+@pytest.mark.parametrize("bloco", [_lead_lag, _dead_time])
+def test_grafo_valido_nao_tem_erro(bloco):
+    resultado = validate_graph(parse_graph(_ligado(bloco())), _tags(), TS)
+
+    assert resultado.errors == []
+
+
+@pytest.mark.parametrize("bloco", [_lead_lag, _dead_time])
+def test_entrada_obrigatoria(bloco):
+    """RF-302: `in` desligada é erro de validação, como nos filtros."""
+    no = bloco()
+    resultado = validate_graph(parse_graph(_graph(_leitura(), no)), _tags(), TS)
+
+    assert any(no["id"] in erro for erro in resultado.errors)
+
+
+@pytest.mark.parametrize("bloco", [_lead_lag, _dead_time])
+def test_recusa_entrada_booleana(bloco):
+    """Portas dos dois blocos são numéricas: tag `bool` na entrada não passa no save."""
+    resultado = validate_graph(parse_graph(_ligado(bloco())), _tags("bool"), TS)
+
+    assert resultado.errors
+
+
+# --------------------------------------------------------------------------------------
+# dead_time — teto da fila (depende do Ts, por isso vive no validate)
+# --------------------------------------------------------------------------------------
+
+
+def test_dead_time_reprova_fila_acima_do_teto():
+    """Mesmo teto e mesma constante do TFS (`MAX_DELAY_SAMPLES`): 7201 amostras não passam."""
+    resultado = validate_graph(parse_graph(_ligado(_dead_time(theta=7201.0))), _tags(), TS)
+
+    assert any("7201" in erro and "7200" in erro for erro in resultado.errors)
+
+
+def test_dead_time_aceita_a_fila_no_teto_exato():
+    resultado = validate_graph(parse_graph(_ligado(_dead_time(theta=7200.0))), _tags(), TS)
+
+    assert resultado.errors == []
+
+
+def test_dead_time_conta_amostras_e_nao_segundos():
+    """O teto é em AMOSTRAS: com Ts = 2 s, 7201 s cabe (3601 amostras)."""
+    resultado = validate_graph(parse_graph(_ligado(_dead_time(theta=7201.0))), _tags(), 2.0)
+
+    assert resultado.errors == []
