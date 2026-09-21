@@ -109,8 +109,9 @@ def test_lead_lag_aceita_a_razao_no_teto_exato():
 
 
 def test_lead_lag_reprova_razao_acima_do_teto():
-    """A razão é o ganho de alta frequência; ligada a `bias_in` ela chega à válvula sem
-    atenuação integral (ADR-039 D10 soma depois do integrador)."""
+    """`r` é o realce de alta frequência relativo ao ganho DC; o ganho de alta frequência do
+    bloco é `gain*r`. Ligada a `bias_in`, essa amplificação chega à válvula sem atenuação
+    integral (ADR-039 D10 soma depois do integrador)."""
     erros = parse_errors(_ligado(_lead_lag(tau_lead=101.0, tau_lag=10.0)))
 
     assert has(erros, "tau_lead/tau_lag")
