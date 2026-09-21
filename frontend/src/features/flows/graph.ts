@@ -7,12 +7,14 @@ import {
   type ContratoPortaDinamica,
   type ContratoPortaFixaComDefault,
   type CvVar,
+  type DeadTimeConfig,
   type DirecaoPorta,
   type DvVar,
   type FuzzyConfig,
   type FuzzyLoopConfig,
   type IntegratorConfig,
   type IopdtParams,
+  type LeadLagConfig,
   type Limits,
   type ModeValues,
   type MpcConfig,
@@ -30,7 +32,7 @@ import {
 } from "../../lib/contracts.gen";
 import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
 import { portaValida, type PortsPorBloco } from "./canalPrimitivos";
-import { BASES_TEMPO, PADRAO_CONSTANT, PADRAO_FIRST_ORDER, PADRAO_INTEGRATOR, PADRAO_KALMAN, PADRAO_PID, PADRAO_PID_LOOP, PADRAO_FUZZY_LOOP, PADRAO_SCALER, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
+import { BASES_TEMPO, PADRAO_CONSTANT, PADRAO_DEAD_TIME, PADRAO_FIRST_ORDER, PADRAO_INTEGRATOR, PADRAO_KALMAN, PADRAO_LEAD_LAG, PADRAO_PID, PADRAO_PID_LOOP, PADRAO_FUZZY_LOOP, PADRAO_SCALER, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
 
 /**
  * Modelo do grafo do editor + as regras que o editor espelha do servidor.
@@ -60,6 +62,8 @@ export const TIPOS_BLOCO = [
   "fuzzy_loop",
   "scaler",
   "integrator",
+  "lead_lag",
+  "dead_time",
   "bus_publish",
   "bus_subscribe",
 ] as const;
@@ -175,6 +179,13 @@ export function passagemDireta(tau: number, tsFlowSegundos: number): boolean {
 /** Os dois campos são **desvio padrão na EU do sinal** (RF-533), nunca variância: o bloco
  *  eleva ao quadrado no runtime. `process_noise` é por varredura, não por segundo. */
 export type DadosKalman = DadosBase & { measurement_noise: number; process_noise: number };
+
+/** Lead-Lag: compensação dinâmica `gain*(tau_lead*s+1)/(tau_lag*s+1)`. `gain` aceita
+ *  qualquer sinal; `tau_lag > 0`; a razão `tau_lead/tau_lag` é limitada a 10 no save. */
+export type DadosLeadLag = DadosBase & Pick<LeadLagConfig, keyof LeadLagConfig>;
+
+/** Tempo morto: atrasa o sinal em `theta` segundos (`round(theta/Ts)` amostras). */
+export type DadosDeadTime = DadosBase & Pick<DeadTimeConfig, keyof DeadTimeConfig>;
 
 /** Scaler: reescala linear de [`in_min`,`in_max`] para [`out_min`,`out_max`] (a faixa de
  *  saída pode inverter — ação reversa). */
@@ -341,6 +352,8 @@ export type DadosBloco =
   | DadosMpc
   | DadosFirstOrder
   | DadosKalman
+  | DadosLeadLag
+  | DadosDeadTime
   | DadosFuzzy
   | DadosPid
   | DadosPidLoop
@@ -360,6 +373,8 @@ export type NoTfs = Bloco<DadosTfs, "tfs">;
 export type NoMpc = Bloco<DadosMpc, "mpc">;
 export type NoFirstOrder = Bloco<DadosFirstOrder, "first_order">;
 export type NoKalman = Bloco<DadosKalman, "kalman">;
+export type NoLeadLag = Bloco<DadosLeadLag, "lead_lag">;
+export type NoDeadTime = Bloco<DadosDeadTime, "dead_time">;
 export type NoFuzzy = Bloco<DadosFuzzy, "fuzzy">;
 export type NoPid = Bloco<DadosPid, "pid">;
 export type NoPidLoop = Bloco<DadosPidLoop, "pid_loop">;
@@ -378,6 +393,8 @@ export type BlocoNode =
   | NoMpc
   | NoFirstOrder
   | NoKalman
+  | NoLeadLag
+  | NoDeadTime
   | NoFuzzy
   | NoPid
   | NoPidLoop
@@ -533,7 +550,9 @@ export function tipoPorta(no: BlocoNode, tags: MapaTags): TipoPorta {
     no.type === "kalman" ||
     no.type === "scaler" ||
     no.type === "integrator" ||
-    no.type === "constant"
+    no.type === "constant" ||
+    no.type === "lead_lag" ||
+    no.type === "dead_time"
   )
     return "num";
   if (no.type === "fuzzy") return "num";
@@ -1121,6 +1140,30 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           exec_order,
           label,
           time_base: BASES_TEMPO.find((base) => base === dados.time_base) ?? PADRAO_INTEGRATOR.time_base,
+        },
+      };
+    case "lead_lag":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          gain: numero(dados.gain, PADRAO_LEAD_LAG.gain),
+          tau_lead: numero(dados.tau_lead, PADRAO_LEAD_LAG.tau_lead),
+          tau_lag: numero(dados.tau_lag, PADRAO_LEAD_LAG.tau_lag),
+        },
+      };
+    case "dead_time":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          theta: numero(dados.theta, PADRAO_DEAD_TIME.theta),
         },
       };
     case "constant":

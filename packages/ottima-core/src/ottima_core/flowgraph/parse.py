@@ -30,6 +30,8 @@ NodeType = Literal[
     "integrator",
     "bus_publish",
     "bus_subscribe",
+    "lead_lag",
+    "dead_time",
 ]
 NODE_TYPES: tuple[str, ...] = (
     "opc_read",
@@ -48,6 +50,8 @@ NODE_TYPES: tuple[str, ...] = (
     "integrator",
     "bus_publish",
     "bus_subscribe",
+    "lead_lag",
+    "dead_time",
 )
 
 MAX_SCRIPT_PORTS = 8  # spec §3.3
@@ -156,6 +160,8 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
     "integrator": ("time_base",),
     "bus_publish": ("key",),
     "bus_subscribe": ("key",),
+    "lead_lag": ("gain", "tau_lead", "tau_lag"),
+    "dead_time": ("theta",),
 }
 # Blocos de filtro (ADR-026): config é só um punhado de escalares, e o valor do dicionário
 # diz se o campo exige positivo estrito (divisor) ou apenas não-negativo.
@@ -363,6 +369,56 @@ class IntegratorConfig(BaseModel):
     time_base: Literal["s", "min", "h"]
 
 
+MAX_LEAD_LAG_RATIO = 10.0
+"""Teto de `tau_lead/tau_lag`. A razão `r` é o REALCE de alta frequência relativo ao ganho DC:
+em regime (s→0) o ganho do bloco é `gain`; em alta frequência (s→∞) é `gain*r`. A saída do
+lead-lag tipicamente alimenta `bias_in`, somada DEPOIS do integrador (ADR-039 D10) — ruído no
+distúrbio medido chega à válvula multiplicado por `r`, sem atenuação integral. 10 é a ordem
+de grandeza que o DeltaV pratica; acima disso a saída é cascatear dois blocos, como o ADR-026
+já decidiu para filtro de ordem superior. `gain` fica FORA do teto porque ele limita o realce
+relativo, não o ganho absoluto: `gain` negativo e grande em módulo (ex. `gain = -3`) é
+legítimo e não diz nada sobre ruído."""
+
+
+class LeadLagConfig(BaseModel):
+    """Bloco Lead-Lag: `gain * (tau_lead*s + 1)/(tau_lag*s + 1)`, discretizado no Ts do flow.
+
+    `gain` aceita QUALQUER sinal: ganho de feedforward negativo é rotineiro (distúrbio que
+    empurra a CV para cima pede correção para baixo na válvula), e `gain = 0` desliga o
+    feedforward sem apagar o bloco do canvas.
+
+    `tau_lag > 0` porque é divisor tanto na razão quanto na discretização — `tau_lag = 0` com
+    `tau_lead > 0` é função de transferência imprópria (derivador puro), NÃO passagem direta:
+    a convenção `tau = 0` do ADR-026 não vale aqui. `tau_lead = 0` é lag puro, legítimo.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    gain: float = Field(allow_inf_nan=False)
+    tau_lead: float = Field(ge=0.0, allow_inf_nan=False)
+    tau_lag: float = Field(gt=0.0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _razao_lead_lag(self) -> "LeadLagConfig":
+        if self.tau_lead / self.tau_lag > MAX_LEAD_LAG_RATIO:
+            raise ValueError(
+                f"tau_lead/tau_lag precisa ser no máximo {MAX_LEAD_LAG_RATIO:g} — a razão é o "
+                "realce de alta frequência relativo ao ganho DC; para mais, cascateie dois blocos"
+            )
+        return self
+
+
+class DeadTimeConfig(BaseModel):
+    """Bloco Tempo morto: atrasa `in` em `theta` segundos.
+
+    `theta` é o mesmo termo dos modelos SOPDT/IOPDT (GLOSSARY) e vira `round(theta/Ts)`
+    amostras, com o mesmo arredondamento half-even do TFS. O teto da fila depende do Ts, que
+    o parse não conhece: mora em `validate.py`, ao lado do teto do TFS.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    theta: float = Field(ge=0.0, allow_inf_nan=False)
+
+
 class ConstantConfig(BaseModel):
     """Bloco Constante: uma saída `out` com o valor fixo de `value`, sem entradas.
 
@@ -535,6 +591,8 @@ NodeConfig = (
     | IntegratorConfig
     | ConstantConfig
     | BusKeyConfig
+    | LeadLagConfig
+    | DeadTimeConfig
 )
 
 
@@ -740,6 +798,10 @@ def _parse_config(where: str, node_type: str, data: dict, errors: list[str]) -> 
         return _parse_loop_config(where, node_type, ConstantConfig, data, errors)
     if node_type in BUS_TYPES:
         return _parse_loop_config(where, node_type, BusKeyConfig, data, errors)
+    if node_type == "lead_lag":
+        return _parse_loop_config(where, node_type, LeadLagConfig, data, errors)
+    if node_type == "dead_time":
+        return _parse_loop_config(where, node_type, DeadTimeConfig, data, errors)
     if node_type in _FILTER_KEYS:
         return _parse_filter_config(where, node_type, data, errors)
     return _parse_tfs_config(where, data, errors)

@@ -25,6 +25,7 @@ import {
 import { BASES_TEMPO } from "../registro";
 import { inteiroDoCampo, matrizDoFormulario, montarDadosPid, numeroDoCampo } from "./campos";
 import { CamposBlocoPid } from "./CamposBlocoPid";
+import { CamposDeadTime, CamposLeadLag } from "./CamposCompensacao";
 import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
 import { CamposHistoriar } from "./CamposHistoriar";
 import { CamposBusKey, CamposConstant, CamposIntegrator, CamposScaler } from "./CamposUtilitarios";
@@ -435,6 +436,34 @@ export function ModalConfigBloco({
         );
         break;
       }
+      case "lead_lag":
+        onAplicar(
+          {
+            ...no,
+            data: {
+              ...no.data,
+              label,
+              gain: numeroDoCampo(campos.get("gain"), no.data.gain),
+              tau_lead: numeroDoCampo(campos.get("tau_lead"), no.data.tau_lead),
+              tau_lag: numeroDoCampo(campos.get("tau_lag"), no.data.tau_lag),
+            },
+          },
+          execOrder,
+        );
+        break;
+      case "dead_time":
+        onAplicar(
+          {
+            ...no,
+            data: {
+              ...no.data,
+              label,
+              theta: numeroDoCampo(campos.get("theta"), no.data.theta),
+            },
+          },
+          execOrder,
+        );
+        break;
       case "constant":
         onAplicar(
           { ...no, data: { ...no.data, label, value: numeroDoCampo(campos.get("value"), no.data.value) } },
@@ -531,6 +560,8 @@ export function ModalConfigBloco({
           {no.type === "kalman" && <CamposFiltroKalman dados={no.data} />}
           {no.type === "scaler" && <CamposScaler dados={no.data} />}
           {no.type === "integrator" && <CamposIntegrator dados={no.data} />}
+          {no.type === "lead_lag" && <CamposLeadLag dados={no.data} />}
+          {no.type === "dead_time" && <CamposDeadTime dados={no.data} />}
           {no.type === "constant" && <CamposConstant dados={no.data} />}
           {no.type === "bus_publish" && <CamposBusKey dados={no.data} />}
           {no.type === "bus_subscribe" && <CamposBusKey dados={no.data} />}

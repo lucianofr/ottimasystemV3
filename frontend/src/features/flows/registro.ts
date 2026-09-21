@@ -7,10 +7,12 @@ import {
   type DadosBusPublish,
   type DadosBusSubscribe,
   type DadosConstant,
+  type DadosDeadTime,
   type DadosFirstOrder,
   type DadosFuzzy,
   type DadosKalman,
   type DadosIntegrator,
+  type DadosLeadLag,
   type DadosMpc,
   type DadosPid,
   type DadosFuzzyLoop,
@@ -60,6 +62,8 @@ type ConfigDoBloco =
   | Omit<DadosFuzzyLoop, keyof DadosBase>
   | Omit<DadosScaler, keyof DadosBase>
   | Omit<DadosIntegrator, keyof DadosBase>
+  | Omit<DadosLeadLag, keyof DadosBase>
+  | Omit<DadosDeadTime, keyof DadosBase>
   | Omit<DadosConstant, keyof DadosBase>
   | Omit<DadosBusPublish, keyof DadosBase>
   | Omit<DadosBusSubscribe, keyof DadosBase>;
@@ -90,6 +94,13 @@ export const BASES_TEMPO = ["s", "min", "h"] as const;
  *  e o Integrator na base por minuto (totalização de vazão é o caso típico). */
 export const PADRAO_SCALER = { in_min: 0, in_max: 100, out_min: 4, out_max: 20 } as const;
 export const PADRAO_INTEGRATOR = { time_base: "min" } as const;
+
+/** Lead-Lag nasce NEUTRO (`tau_lead == tau_lag`, ganho 1): o bloco recém-arrastado não altera
+ *  o sinal até ser configurado. Um default que já compensasse alguma coisa seria surpresa na
+ *  válvula. Razão 1 e `tau_lag > 0` passam no save. */
+export const PADRAO_LEAD_LAG = { gain: 1, tau_lead: 10, tau_lag: 10 } as const;
+/** Tempo morto nasce em 0 s: passagem direta até o engenheiro informar o θ. */
+export const PADRAO_DEAD_TIME = { theta: 0 } as const;
 
 /** Constante nasce em 0 — valor neutro que passa no save sem exigir ajuste imediato. */
 export const PADRAO_CONSTANT = { value: 0 } as const;
@@ -230,6 +241,16 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
     rotulo: "Integrador",
     descricao: "Totaliza o sinal no tempo (base s/min/h), com reset",
     defaults: () => ({ ...PADRAO_INTEGRATOR }),
+  },
+  lead_lag: {
+    rotulo: "Lead-Lag",
+    descricao: "Compensação dinâmica: ganho, avanço (τ lead) e atraso (τ lag)",
+    defaults: () => ({ ...PADRAO_LEAD_LAG }),
+  },
+  dead_time: {
+    rotulo: "Tempo morto",
+    descricao: "Atrasa o sinal em θ segundos",
+    defaults: () => ({ ...PADRAO_DEAD_TIME }),
   },
   bus_publish: {
     rotulo: "Barramento-Publicar",

@@ -48,11 +48,13 @@ from ottima_core.flowgraph import (
     ConstantConfig,
     ConstraintVar,
     CvVar,
+    DeadTimeConfig,
     DvVar,
     FuzzyConfig,
     FuzzyLoopConfig,
     IntegratorConfig,
     IopdtParams,
+    LeadLagConfig,
     MpcConfig,
     MvVar,
     PidConfig,
@@ -224,6 +226,22 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
             {"name": "out", "direction": "output", "type": "num"},
         ],
     },
+    # Blocos de compensação dinâmica: Lead-Lag e Tempo morto. Uma entrada, uma saída,
+    # numéricas; a config (gain/tau_lead/tau_lag, theta) não muda porta nenhuma.
+    "lead_lag": {
+        "dynamic": False,
+        "ports": [
+            {"name": "in", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+        ],
+    },
+    "dead_time": {
+        "dynamic": False,
+        "ports": [
+            {"name": "in", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+        ],
+    },
     # Blocos de barramento (ADR-042): uma porta só cada, BIVALENTE (o barramento transporta
     # `float | bool` sem reinterpretar, D7). `bus_publish` não tem saída e `bus_subscribe`
     # não tem entrada — o outro lado é o canal `flow.exchange`.
@@ -340,6 +358,8 @@ _NODE_CONFIG_MODELS = (
     IntegratorConfig,
     ConstantConfig,
     BusKeyConfig,
+    LeadLagConfig,
+    DeadTimeConfig,
 )
 
 
