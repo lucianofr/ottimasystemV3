@@ -238,13 +238,23 @@ def _instancia(no, *, ts: float = TS):
     )
 
 
-def test_lead_lag_instancia_com_o_ts_do_flow():
+async def test_lead_lag_instancia_com_o_ts_do_flow():
     """O bloco recebe o Ts pelo parâmetro de `build_definition`, nunca de `node.config` — o
-    scheduler é a única autoridade de tempo do laço."""
+    scheduler é a única autoridade de tempo do laço. Alimenta o bloco INSTANCIADO (não o
+    helper `lead_lag()`) com duas amostras distintas e compara a segunda com a resposta
+    analítica dos parâmetros informados — uma transposição `tau_lead`↔`tau_lag` em
+    `definition.py` daria `r = 0,5` em vez de `r = 2` e reprovaria aqui."""
     bloco = _instancia(_no("lead_lag", gain=2.0, tau_lead=20.0, tau_lag=10.0))
 
     assert isinstance(bloco, LeadLagBlock)
     assert bloco.input_ports == ("in",)
+
+    await alimenta(bloco, 10.0)  # prima em u0 = 10
+    saida = await alimenta(bloco, 15.0)
+
+    assert saida.v == pytest.approx(
+        resposta_analitica(1, u0=10.0, u1=15.0, gain=2.0, tau_lead=20.0, tau_lag=10.0, ts=TS)
+    )
 
 
 # --------------------------------------------------------------------------------------

@@ -78,7 +78,8 @@ Como `tau_lead ≥ 0` e `tau_lag > 0`, `r ≥ 0` sempre — o teto de D4 dispens
 
 ### D4 — Teto de razão `r ≤ 10`, validado no parse
 
-O ganho de alta frequência do bloco é exatamente `r`, e com `gain` incluído o pico é `K·r`.
+`r` é o REALCE de alta frequência relativo ao ganho DC (`K`): em regime o ganho do bloco é
+`K`, em alta frequência é `K·r`.
 Pelo D10 do ADR-039 a saída cai em `bias_in`, somada **depois** do integrador: ruído no
 distúrbio medido chega à válvula multiplicado por `K·r`, sem nenhuma atenuação integral. O
 rate limit de OUT (`shell/block.py`) apara o pico, mas ao aparar distorce justamente o
@@ -232,7 +233,7 @@ precedente, e é a razão de ele quase escapar deste checklist.
 
 | termo | verbete proposto |
 |---|---|
-| **Lead-Lag** | Bloco de uma entrada (`in`) e uma saída (`out`) de compensação dinâmica: `G(s) = gain·(tau_lead·s + 1)/(tau_lag·s + 1)`, discretizado no Ts do flow. `gain` aceita qualquer sinal (feedforward negativo é rotineiro); `tau_lag > 0` (é divisor); razão `tau_lead/tau_lag` limitada a 10 no save, porque ela é o ganho de alta frequência do bloco. Uso típico: compensação de feedforward ligada à porta `bias_in` de um bloco malha. |
+| **Lead-Lag** | Bloco de uma entrada (`in`) e uma saída (`out`) de compensação dinâmica: `G(s) = gain·(tau_lead·s + 1)/(tau_lag·s + 1)`, discretizado no Ts do flow. `gain` aceita qualquer sinal (feedforward negativo é rotineiro); `tau_lag > 0` (é divisor); razão `tau_lead/tau_lag` limitada a 10 no save, porque ela é o realce de alta frequência relativo ao ganho DC (o ganho de alta frequência do bloco é `gain·tau_lead/tau_lag`). Uso típico: compensação de feedforward ligada à porta `bias_in` de um bloco malha. |
 | **Tempo morto (bloco)** | Bloco de uma entrada (`in`) e uma saída (`out`) que atrasa o sinal em `theta` segundos, contados em amostras nominais do flow (`d = round(theta/Ts)`, mesmo arredondamento do θ do TFS/MPC). A fila nasce cheia da primeira amostra válida — não injeta zeros na partida — e transporta a qualidade junto do valor: a saída carrega a qualidade da amostra de `d` varreduras atrás. Não confundir com o **θ** dos modelos SOPDT/IOPDT/IFOPDT, que é parâmetro de modelo, não bloco. |
 
 ## 6. Validação — divisão parse × validate

@@ -40,7 +40,8 @@ tratamento de não-finito por bloco, propagação de qualidade — mora nos docs
 
 ## Teto de razão `tau_lead/tau_lag ≤ 10`
 
-A razão `r` **é** o ganho de alta frequência do bloco (pico `K·r` com `gain` incluído), e a
+A razão `r` é o REALCE de alta frequência relativo ao ganho DC: em regime o ganho do bloco é
+`K`, em alta frequência é `K·r` — e a
 saída do `lead_lag` tipicamente alimenta `bias_in`, somada **depois** do integrador (ADR-039
 D10): ruído no distúrbio medido chega à válvula multiplicado por `K·r`, sem nenhuma atenuação
 integral. O rate limit de OUT apara o pico, mas ao aparar distorce justamente o transiente de

@@ -370,11 +370,14 @@ class IntegratorConfig(BaseModel):
 
 
 MAX_LEAD_LAG_RATIO = 10.0
-"""Teto de `tau_lead/tau_lag`. A razão É o ganho de alta frequência do bloco, e a saída do
+"""Teto de `tau_lead/tau_lag`. A razão `r` é o REALCE de alta frequência relativo ao ganho DC:
+em regime (s→0) o ganho do bloco é `gain`; em alta frequência (s→∞) é `gain*r`. A saída do
 lead-lag tipicamente alimenta `bias_in`, somada DEPOIS do integrador (ADR-039 D10) — ruído no
-distúrbio medido chega à válvula multiplicado por ela, sem atenuação integral. 10 é a ordem
+distúrbio medido chega à válvula multiplicado por `r`, sem atenuação integral. 10 é a ordem
 de grandeza que o DeltaV pratica; acima disso a saída é cascatear dois blocos, como o ADR-026
-já decidiu para filtro de ordem superior."""
+já decidiu para filtro de ordem superior. `gain` fica FORA do teto porque ele limita o realce
+relativo, não o ganho absoluto: `gain` negativo e grande em módulo (ex. `gain = -3`) é
+legítimo e não diz nada sobre ruído."""
 
 
 class LeadLagConfig(BaseModel):
@@ -399,7 +402,7 @@ class LeadLagConfig(BaseModel):
         if self.tau_lead / self.tau_lag > MAX_LEAD_LAG_RATIO:
             raise ValueError(
                 f"tau_lead/tau_lag precisa ser no máximo {MAX_LEAD_LAG_RATIO:g} — a razão é o "
-                "ganho de alta frequência do bloco; para mais, cascateie dois blocos"
+                "realce de alta frequência relativo ao ganho DC; para mais, cascateie dois blocos"
             )
         return self
 
