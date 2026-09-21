@@ -166,6 +166,8 @@ uncertain (medição real) segue persistindo valor como hoje — a regra do reco
 | constant | GOOD sempre (gerador) |
 | scaler, lag, first_order, kalman, filtros | default D6 (pior das entradas consumidas); emissão D9 (substatus/limites zerados) |
 | integrator | qualidade sai SÓ de `in`; `reset` fica fora (decisão documentada no módulo). Lacuna/dt patológico → `min(UNCERTAIN, q_in)` (D7) |
+| `lead_lag` | caminho normal: default D6 (pior das entradas consumidas); emissão D9 (substatus/limites zerados). Entrada não-finita → retém a última saída boa com `min(UNCERTAIN, q_in)`, e **BAD quando nunca houve saída boa** (`v is None`, D7) — mesmo mecanismo do `_retido` do `pid.py` *(emenda 2026-09-20, ADR-044)* |
+| `dead_time` | emite a qualidade **histórica** da amostra desenfileirada, não a da entrada corrente (a fila transporta `Signal`). Valor não-finito na emissão → nulo + BAD (convenção do `scaler`). Fila primada na primeira amostra válida, logo não há janela de `d` nulos *(emenda 2026-09-20, ADR-044)* |
 | TFS | POR LINHA de saída: `min()` dos elementos habilitados da linha (forma quality do AND atual, ADR-022); linha toda desabilitada → GOOD |
 | PID (kernel standalone, `services/flow-runtime/.../blocks/pid.py`) | `_retido` (RF-553) → `min(UNCERTAIN, q_entradas)`, e **BAD quando não há valor retido anterior** (`v is None`, D7); execução ok → default D6 |
 | PID (shell, `blocks/shell/block.py::_emit`) | ADR-039 vigente + emenda §4.1 (§7.1 abaixo); saídas OUT/BKCAL_OUT com semântica PRÓPRIA e BINÁRIA (OOS→BAD, senão GOOD; `bkcal_out` sempre GOOD) — mecanismo distinto do `_retido` do kernel, nunca `min(UNCERTAIN, ...)` |
