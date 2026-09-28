@@ -33,7 +33,7 @@ durante toda a auditoria. Nenhum `docker compose`, nenhum `pytest -m e2e`, nenhu
 | [010](010-loop-types-fonte-unica.md) | `LOOP_TYPES` passa a ter uma fonte só | P1 | S | — | TODO |
 | [011](011-escrita-opc-timeout-e-fila-observavel.md) | Escrita OPC ganha timeout de I/O e fila observável | P1 | S | — | TODO (Passo 5 = decisão do dono) |
 | [014](014-nginx-log-sem-token-e-hardening.md) | Proxy para de gravar JWT no access log + cabeçalhos de hardening | P1 | S | — | TODO |
-| [012](012-operacao-loop-na-navegacao.md) | `/operacao/loop` entra na navegação; contrato de nav pinhado | P1 | S/M | 010 (preferível) | TODO |
+| [012](012-operacao-loop-na-navegacao.md) | `/operacao/loop` entra na navegação; contrato de nav pinhado | P1 | S/M | 010 (preferível) | EM ANDAMENTO (Passos 1-3 feitos; Passo 4, spec de browser, pendente do revisor) |
 | [015](015-grafo-invalido-422-nas-rotas-de-bloco.md) | `graph_json` inválido devolve 422, não 500 | P1 | S | 010 (mesmo arquivo) | TODO |
 | [017](017-loop-state-carimbado-na-fronteira.md) | `loop.state` carimbado na fronteira da varredura | P2 | S | — | TODO |
 | [016](016-patch-connections-coerencia-de-auth.md) | `PATCH /connections` valida coerência sobre o estado final | P2 | S | — | TODO |

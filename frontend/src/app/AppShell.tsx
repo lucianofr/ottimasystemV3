@@ -7,16 +7,17 @@ import { useAuth } from "../features/auth/useAuth";
 import { AnnunciatorBar } from "./AnnunciatorBar";
 import { CanalAoVivoProvider, useCanalAoVivo } from "./CanalAoVivo";
 
-/* Navegação em dois grupos (decisão A-10, spec F5 §7.3-1): Operação·Eventos são de
+/* Navegação em três grupos (decisão A-10, spec F5 §7.3-1): Operação·Fuzzy·Malha·Eventos são de
    operador (admin herda); Projetos·Conexões·Tags·Flows·Trend seguem visíveis para leitura —
    a ocultação de mutações é a tarefa 6.5. */
-const NAV_OPERACAO = [
+export const NAV_OPERACAO = [
   { rotulo: "Operação", para: "/operacao", testid: "nav-operacao" },
   { rotulo: "Fuzzy", para: "/operacao/fuzzy", testid: "nav-fuzzy" },
+  { rotulo: "Malha", para: "/operacao/loop", testid: "nav-malha" },
   { rotulo: "Eventos", para: "/eventos", testid: "nav-eventos" },
 ] as const;
 
-const NAV_ENGENHARIA = [
+export const NAV_ENGENHARIA = [
   { rotulo: "Projetos", para: "/engenharia/projetos", testid: "nav-projetos" },
   { rotulo: "Conexões", para: "/engenharia/conexoes", testid: "nav-conexoes" },
   { rotulo: "Tags", para: "/engenharia/tags", testid: "nav-tags" },
@@ -26,7 +27,7 @@ const NAV_ENGENHARIA = [
 
 /* Configurações gerais (RF-805): grupo próprio, só admin — operador nem vê o item (a rota
    também redireciona, SettingsPage). */
-const NAV_ADMIN = [
+export const NAV_ADMIN = [
   { rotulo: "Configurações", para: "/configuracoes", testid: "nav-configuracoes" },
 ] as const;
 
