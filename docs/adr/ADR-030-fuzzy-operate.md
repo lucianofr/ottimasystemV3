@@ -86,8 +86,10 @@ nenhuma camada — SVG puro desenha as funções de pertinência.
 
 ## Emenda 2026-09-29 — SP do operador na página (PRD Changelog 3.1)
 
-A página deixou de ser somente leitura para o bloco **com `setpoint` configurado**
-(RF-541 revisado): uma barra mostra o **SP publicado** pelo runtime (campo `sp` do payload
+A página deixou de ser somente leitura para o bloco **com SP habilitado**
+(RF-541 revisado). A fonte do SP é `sp_source`: `operador` (semente em `setpoint`,
+comando `fuzzy_sp`, barra com escrita) ou `entrada` (porta dedicada `sp` alimentada por
+fio do flow — a barra vira somente leitura e a rota `/sp` responde 422 nomeando a fonte): uma barra mostra o **SP publicado** pelo runtime (campo `sp` do payload
 `FuzzyState`, nunca eco de comando — Regra do Estado Publicado), a medida da porta `IN1` e o
 desvio `sp − pv`, e escreve o SP por `POST /api/operate/{flow_id}/{block_id}/sp`, que publica
 `fuzzy_sp` em `flow.commands` (mesmo desenho dos comandos do §4.8: a API não audita nem
