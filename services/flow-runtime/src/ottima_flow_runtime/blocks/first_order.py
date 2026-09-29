@@ -12,7 +12,7 @@ o filtro reportaria uma temperatura subindo de 0 a 150 °C que ninguém viu acon
 from collections.abc import Mapping
 from datetime import datetime
 
-from .base import Block, PortSample, has_cold_input, null_outputs
+from .base import Block, Signal, has_cold_input, null_outputs
 from .lag import FirstOrderLag
 
 INPUT_PORTS = ("in",)
@@ -42,8 +42,8 @@ class FirstOrderBlock(Block):
         return OUTPUT_PORTS
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         if has_cold_input(inputs):
             return null_outputs(OUTPUT_PORTS)
 
@@ -54,7 +54,7 @@ class FirstOrderBlock(Block):
             self._started = True
         # Amostra inválida executa e propaga a flag (decisão A-6): descartá-la congelaria o
         # filtro num valor velho sem que o consumidor a jusante soubesse.
-        return {"out": PortSample(self._lag.step(value), sample.ok)}
+        return {"out": Signal(self._lag.step(value), quality=sample.quality)}
 
     def reset(self) -> None:
         self._lag.reset()

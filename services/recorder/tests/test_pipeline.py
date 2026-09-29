@@ -4,6 +4,7 @@ Engine e `session_factory` dedicados (não as fixtures em SAVEPOINT): o pipeline
 por conta própria e o teste precisa ver o dado commitado.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -153,6 +154,24 @@ async def test_n_samples_publicados_geram_n_linhas(redis_client, session_factory
         (v.ts, v.tag_id, None if v.quality == 2 else v.value, v.quality) for v in published
     ]
     assert pipeline.last_flush_ts is not None
+
+
+async def test_quality_fora_do_dominio_no_fio_vira_bad_e_grava_null(
+    redis_client, session_factory, make_pipeline
+):
+    """Emenda 2026-09-17 do ADR-043 D2: `quality=8` cru no fio colapsa para BAD no parse do
+    `OpcValue` — a mensagem NÃO é descartada (lado seguro, ADR-009) e a linha grava NULL
+    (ADR-037) no lugar do valor de qualidade desconhecida (antes: gravava 42.5 com quality=8).
+    """
+    await make_pipeline(session_factory)
+    raw = json.dumps({"tag_id": 91, "ts": BASE_TS.isoformat(), "value": 42.5, "quality": 8})
+    await redis_client.publish(channel_opc_values(91), raw)
+
+    await wait_rows(session_factory, samples_table, 1)
+    async with session_factory() as session:
+        row = (await session.execute(select(samples_table))).one()
+
+    assert (row.tag_id, row.value, row.quality) == (91, None, 2)
 
 
 async def test_evento_publicado_gera_linha_em_events(redis_client, session_factory, make_pipeline):

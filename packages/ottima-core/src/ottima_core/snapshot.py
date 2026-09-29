@@ -21,8 +21,9 @@ from datetime import datetime
 from pydantic import ValidationError
 from redis.asyncio import Redis
 
-from ottima_core.bus import OpcValue
-from ottima_core.pubsub import PatternListener
+from ottima_core.bus import CHANNEL_FLOW_EXCHANGE, ExchangeValue, OpcValue
+from ottima_core.pubsub import ChannelListener, PatternListener
+from ottima_core.signal import OpcQuality
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class TagValue:
     """
 
     value: float
-    quality: int  # 0=good, 1=uncertain, 2=bad (spec F1 §3.2)
+    quality: OpcQuality  # polaridade OPC (spec F1 §3.2) — a INVERSA de `Quality`; ver signal.py
     ts: datetime
 
 
@@ -92,3 +93,53 @@ class ValueSnapshot:
             logger.warning("Payload inválido descartado pelo espelho de valores: %.200s", raw)
             return
         self._values[value.tag_id] = TagValue(value=value.value, quality=value.quality, ts=value.ts)
+
+
+class ExchangeSnapshot:
+    """Espelho de `flow.exchange`: último `ExchangeValue` por `key` (ADR-042).
+
+    Um por processo de `flow-runtime`, como o `ValueSnapshot` — e pelo mesmo motivo: a
+    leitura do bloco `bus_subscribe` é síncrona e O(1) porque roda dentro do laço de
+    varredura (ADR-004). É um `SUBSCRIBE` só (canal fixo, D1), e cada processo recebe todas
+    as chaves: filtrar por `key` em memória é mais barato que N assinaturas, e a partição por
+    processo (`OTTIMA_FLOW_PARTITIONS`) precisa que qualquer processo possa ler qualquer
+    chave.
+
+    A idade do valor NÃO é decidida aqui: o espelho guarda o `ts`/`period_s` publicados e o
+    bloco compara contra o instante da varredura (D4) — a mesma divisão de trabalho do
+    `ValueSnapshot`, que guarda `quality` e deixa a interpretação para o OPC-Read.
+    """
+
+    def __init__(self, redis_client: Redis) -> None:
+        self._values: dict[str, ExchangeValue] = {}
+        self._listener = ChannelListener(
+            redis_client,
+            CHANNEL_FLOW_EXCHANGE,
+            self._ingest,
+            name=f"snapshot-{CHANNEL_FLOW_EXCHANGE}",
+        )
+
+    def get(self, key: str) -> ExchangeValue | None:
+        """Último valor publicado na chave, ou `None` se ninguém publicou nela ainda.
+
+        `None` é o cold start do assinante (ADR-042 D4): chave sem publicador é legítima
+        (D6), e é o bloco que traduz a ausência em `Signal(None)`.
+        """
+        return self._values.get(key)
+
+    async def start(self) -> None:
+        """Assina o canal e sobe a task de leitura; retorna já. Idempotente."""
+        await self._listener.start()
+
+    async def stop(self) -> None:
+        """Encerra a inscrição. Idempotente e nunca levanta: é desmonte."""
+        await self._listener.stop()
+
+    async def _ingest(self, raw: str) -> None:
+        """Grava o último valor da chave; payload ruim é descartado e o laço segue."""
+        try:
+            value = ExchangeValue.model_validate_json(raw)
+        except ValidationError:
+            logger.warning("Payload inválido descartado pelo espelho de barramento: %.200s", raw)
+            return
+        self._values[value.key] = value

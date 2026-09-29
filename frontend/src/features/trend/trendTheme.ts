@@ -77,6 +77,23 @@ export interface OpcoesTrend {
   readonly janelaSegundos: number;
   readonly largura: number;
   readonly altura: number;
+  /**
+   * Pena dona do ÚNICO eixo Y desenhado (mesma política do trend de operação: a legenda
+   * aponta de quem é o eixo). `null` = um eixo por pena — é o que a tela fuzzy usa, onde a
+   * legenda não tem como escolher o dono. As escalas continuam sendo uma por pena nos dois
+   * casos: o eixo desenhado é apresentação, não restringe de quem a faixa pode ser editada.
+   */
+  readonly foco: string | null;
+  /**
+   * Extremos do eixo x a cada re-range. Função (e não par de números) porque o uPlot a
+   * reavalia sem recriar a instância: é assim que a janela anda com o relógio e que o recorte
+   * do arrasto tem precedência sobre ela sem o gráfico piscar.
+   */
+  readonly rangeX: () => readonly [number, number];
+  /** Plugins de interação da tela (`./plugins`: zoom rastreado, índice do cursor). */
+  readonly plugins: readonly uPlot.Plugin[];
+  /** Duplo-clique = reset de zoom do uPlot; a tela precisa soltar o recorte que rastreia. */
+  readonly aoLimparZoom: () => void;
 }
 
 /**
@@ -109,6 +126,7 @@ export function montarEixosValor(
  */
 export function construirOpcoes(opcoes: OpcoesTrend): uPlot.Options {
   const { tema, rotulos, ids, escalas, janelaSegundos, largura, altura } = opcoes;
+  const { foco, rangeX, plugins, aoLimparZoom } = opcoes;
   const fonte = `${String(ALTURA_TEXTO_EIXO)}px ${tema.mono}`;
   const grade = { stroke: tema.linha, width: 1 };
 
@@ -120,9 +138,16 @@ export function construirOpcoes(opcoes: OpcoesTrend): uPlot.Options {
     ...(janelaSegundos <= SEGUNDOS_2H ? { second: "2-digit" as const } : {}),
   });
 
-  // Um eixo Y por tag selecionada (teto de 6, `LIMITE_PENAS`, já garantido por quem monta a
-  // seleção); o uPlot empilha os eixos extras à esquerda sozinho.
-  const eixosValor: uPlot.Axis[] = montarEixosValor(ids, tema.penas, escalas.scaleKeyPorVar).map(
+  // Eixo Y desenhado: só o da pena focada (tela de engenharia — a legenda diz de quem ele é)
+  // ou um por pena quando não há foco (tela fuzzy). Foco fora da seleção cai na primeira pena:
+  // gráfico sem nenhum eixo Y é pior do que um eixo com o dono errado por um quadro.
+  const idsEixo = foco === null ? ids : ids.includes(foco) ? [foco] : ids.slice(0, 1);
+  const coresEixo = idsEixo.map((id) => tema.penas[ids.indexOf(id) % tema.penas.length]);
+  const eixosValor: uPlot.Axis[] = montarEixosValor(
+    idsEixo,
+    coresEixo,
+    escalas.scaleKeyPorVar,
+  ).map(
     (eixo): uPlot.Axis => ({
       scale: eixo.scale,
       stroke: eixo.stroke,
@@ -139,9 +164,29 @@ export function construirOpcoes(opcoes: OpcoesTrend): uPlot.Options {
     width: largura,
     height: altura,
     legend: { show: false },
-    cursor: { y: false, points: { show: false } },
-    // `construirEscalasUplot` devolve só as escalas Y; a de tempo entra aqui.
-    scales: { x: {}, ...escalas.scales },
+    cursor: {
+      y: false,
+      // `points` fica no default (ligado): o ponto que o uPlot desenha em cada pena no carimbo
+      // sob o ponteiro é a metade visual da leitura no cursor — a legenda diz o número, o ponto
+      // diz de qual linha ele é. `series.points.show: false` (abaixo) é outra coisa: aquilo é o
+      // marcador de CADA amostra, que numa janela de minutos viraria parede de bolinhas.
+      // Duplo-clique é o reset de zoom do uPlot (`autoScaleX`): o recorte rastreado pela tela
+      // precisa cair ANTES, senão o `range` abaixo devolveria o recorte velho e o reset não
+      // resetaria nada.
+      bind: {
+        dblclick: (_u, _alvo, padrao) => (evento) => {
+          if (evento.button !== 0) return null;
+          aoLimparZoom();
+          return padrao(evento);
+        },
+      },
+    },
+    plugins: [...plugins],
+    // `construirEscalasUplot` devolve só as escalas Y; a de tempo entra aqui. O `range` é a
+    // janela escolhida na tela (não a extensão do dado): é o que faz a vista andar com o
+    // relógio e reservar o espaço da janela inteira mesmo com pouco histórico gravado. O `as`
+    // é só interoperabilidade: `Range.MinMax` é tupla mutável e o uPlot nunca escreve nela.
+    scales: { x: { range: (): uPlot.Range.MinMax => rangeX() as [number, number] }, ...escalas.scales },
     axes: [
       {
         stroke: tema.texto,

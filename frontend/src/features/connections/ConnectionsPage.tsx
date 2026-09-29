@@ -12,6 +12,7 @@ import { EFEITO_PENDENCIA, pendenciasDaConexao, ROTULO_PENDENCIA } from "./pende
 import { useConnections, useDeleteConnection } from "./useConnections";
 import { useActiveProject } from "../projects/useProjects";
 import { useLastConnectionState, type UltimoEstado } from "./useLastConnectionState";
+import { useConnectionsLive } from "./useConnectionsLive";
 import {
   certificadoExcedeLimite,
   MAX_SERVER_CERT_BYTES,
@@ -99,7 +100,26 @@ function CelulaPendencias({
   );
 }
 
-function CelulaUltimoEstado({ estado }: { estado: UltimoEstado | undefined }) {
+function CelulaUltimoEstado({
+  estado,
+  conectado,
+}: {
+  estado: UltimoEstado | undefined;
+  conectado: boolean | undefined;
+}) {
+  // Sessão OPC viva AGORA (opc-worker /health) sobrepõe o estado derivado de eventos: a
+  // janela de 200 eventos expira o `comm_restored` e segura `comm_failure` obsoleto.
+  if (conectado === true) {
+    // Bolinha verde + texto (Regra do Canal Redundante, DESIGN.md §Colors)
+    return (
+      <span data-testid="conn-last-state" className="inline-flex items-center gap-1.5 text-success-fg">
+        <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="currentColor" className="shrink-0">
+          <circle cx="5" cy="5" r="4" />
+        </svg>
+        Conectado
+      </span>
+    );
+  }
   if (!estado) {
     return (
       <span data-testid="conn-last-state" className="text-fg-muted">
@@ -223,6 +243,7 @@ export function ConnectionsPage() {
   const projectId = projeto.data?.id ?? null;
   const conexoes = useConnections(projectId);
   const estados = useLastConnectionState();
+  const vivos = useConnectionsLive();
   const excluir = useDeleteConnection();
   const [formAberto, setFormAberto] = useState(false);
   const [emEdicao, setEmEdicao] = useState<ConnectionOut | null>(null);
@@ -358,7 +379,7 @@ export function ConnectionsPage() {
                   <CelulaPendencias conexao={conexao} appCertExiste={appCertExiste} />
                 </td>
                 <td className="px-3 py-2">
-                  <CelulaUltimoEstado estado={estados.get(conexao.id)} />
+                  <CelulaUltimoEstado estado={estados.get(conexao.id)} conectado={vivos.get(conexao.id)} />
                 </td>
                 {podeMutar && (
                   <td className="px-3 py-2">

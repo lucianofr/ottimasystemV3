@@ -35,8 +35,9 @@ import fuzzylite as fl
 import numpy as np
 
 from ottima_core.bus import FuzzyState, FuzzyTermDegree, FuzzyVarState
+from ottima_core.signal import Quality
 
-from .base import Block, PortSample, has_cold_input, null_outputs
+from .base import Block, Signal, has_cold_input, null_outputs
 
 logger = logging.getLogger(__name__)
 
@@ -136,17 +137,22 @@ class FuzzyBlock(Block):
         return self._output_ports
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         if has_cold_input(inputs):
             return null_outputs(self._output_ports)
 
         # RF-542: a entrada só é "ok" para o motor se TODA amostra tiver a flag boa E for
         # finita — diferente de decisão A-6 (flag isolada), porque aqui um nan de entrada
-        # contaminaria o resultado da inferência em silêncio, não só a flag.
-        ok_entradas = all(
-            sample.ok and math.isfinite(float(sample.v)) for sample in inputs.values()
-        )
+        # contaminaria o resultado da inferência em silêncio, não só a flag. `q_entradas`
+        # rebaixa a BAD por valor não-finito (usado no caminho de sucesso e em
+        # `FuzzyState.ok`, fora do escopo desta migração — Task 4). `q_entradas_crua` NÃO
+        # rebaixa: é o que permite aos ramos de retenção abaixo diferenciar entrada GOOD
+        # retida (-> UNCERTAIN) de entrada já BAD (permanece BAD) -- ADR-043 D7.
+        q_entradas_crua = min((s.quality for s in inputs.values()), default=Quality.GOOD)
+        q_entradas = q_entradas_crua
+        if any(not math.isfinite(float(s.v)) for s in inputs.values()):
+            q_entradas = Quality.BAD
         # A ausência de porta em `inputs` não ocorre enquanto `validate_graph` exigir
         # conexão de toda IN (invariante cross-package); o guard abaixo transforma a
         # quebra do invariante em retenção graciosa em vez do KeyError que derrubaria o
@@ -169,26 +175,42 @@ class FuzzyBlock(Block):
                 "Bloco fuzzy '%s': falha na inferência — retendo as últimas saídas (ok=False)",
                 self.block_id,
             )
+            # Retenção de falha (exceção): teto `min(UNCERTAIN, q_entradas_crua)`
+            # (ADR-043 D7) -- entrada boa retida vira UNCERTAIN (UncertainLastUsable);
+            # entrada BAD permanece BAD, nunca eleva. Porta sem saída boa anterior
+            # (`v is None`) não tem o que reter -- ausência de dado, não retenção: BAD.
             self._last_outputs = {
-                port: PortSample(sample.v, False) for port, sample in self._last_outputs.items()
+                port: Signal(
+                    sample.v,
+                    quality=Quality.BAD
+                    if sample.v is None
+                    else min(Quality.UNCERTAIN, q_entradas_crua),
+                )
+                for port, sample in self._last_outputs.items()
             }
             return dict(self._last_outputs)
 
         # O gate do throttle vem ANTES de montar qualquer estado: nas varreduras descartadas
         # não se paga `activation_degree`/`membership` por termo (ADR-030, custo sub-ms).
         publicar = self._deve_publicar()
-        outputs: dict[str, PortSample] = {}
+        outputs: dict[str, Signal] = {}
         output_states: list[FuzzyVarState] = []
         for port, variable in zip(self._output_ports, self._engine.output_variables, strict=True):
             # `OutputVariable.value` pode vir como float ou array numpy shape (1,) depois do
             # defuzzify — normaliza para escalar Python nos dois casos.
             value = float(np.asarray(variable.value).reshape(-1)[-1])
             if math.isfinite(value):
-                outputs[port] = PortSample(value, ok_entradas)
+                outputs[port] = Signal(value, quality=q_entradas)
             else:
                 # RF-542: nunca nan/inf com ok=True — retém o último valor finito DAQUELA
-                # porta (None antes do primeiro bom).
-                outputs[port] = PortSample(self._last_outputs[port].v, False)
+                # porta (None antes do primeiro bom). Teto `min(UNCERTAIN, q_entradas_crua)`
+                # (ADR-043 D7): entrada boa retida vira UNCERTAIN, entrada BAD permanece
+                # BAD. Sem saída boa anterior (`v is None`) não há o que reter: fica BAD.
+                ultimo = self._last_outputs[port]
+                quality = (
+                    Quality.BAD if ultimo.v is None else min(Quality.UNCERTAIN, q_entradas_crua)
+                )
+                outputs[port] = Signal(ultimo.v, quality=quality)
             if publicar:
                 output_states.append(
                     FuzzyVarState(
@@ -208,7 +230,10 @@ class FuzzyBlock(Block):
 
         if publicar:
             assert self._publish is not None  # `_deve_publicar` já garantiu
-            await self._publicar_estado(self._publish, ts, ok_entradas, output_states)
+            # `FuzzyState.ok` (ADR-030) é bool cru, fora do escopo desta migração (Task 4).
+            await self._publicar_estado(
+                self._publish, ts, q_entradas is Quality.GOOD, output_states
+            )
 
         return dict(outputs)
 

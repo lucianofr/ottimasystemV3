@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { useAssinaturaOpcValues, useCanalAoVivo } from "../../app/CanalAoVivo";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
+import { baixarBlob } from "../../lib/arquivos";
 import { cn } from "../../lib/cn";
 import { useConnections } from "../connections/useConnections";
 import { useActiveProject } from "../projects/useProjects";
@@ -13,7 +14,15 @@ import {
   type LeituraViva,
 } from "./bordaViva";
 import { EditorEscala } from "./EditorEscala";
-import { ESCALA_AUTO, gravarEscalas, lerEscalas, limparEscalas, type EscalaVar } from "./escalas";
+import {
+  ESCALA_AUTO,
+  foraDaFaixa,
+  gravarEscalas,
+  lerEscalas,
+  limparEscalas,
+  type EscalaVar,
+} from "./escalas";
+import { montarCsvTrend, nomeCsvTrend, recortarEmX } from "./exportarCsv";
 import { JanelaTempo } from "./JanelaTempo";
 import {
   type BadgeLegenda,
@@ -43,6 +52,13 @@ export function TrendPage() {
   const [escalas, setEscalas] = useState<Record<string, EscalaVar>>(() =>
     lerEscalas(CHAVE_ESCALAS),
   );
+  // Tag dona do único eixo Y desenhado (mesma política do trend de operação): com um eixo por
+  // tag, seis penas comiam seis colunas de eixo à esquerda do gráfico. A última tag marcada
+  // assume o eixo; clicar no nome na legenda traz o eixo para ela sem mexer na seleção.
+  const [foco, setFoco] = useState<number | null>(null);
+  // Índice do carimbo sob o ponteiro (publicado pelo gráfico): a legenda lê dali o valor de
+  // cada pena no instante apontado, ao lado do valor corrente — nunca no lugar dele.
+  const [idxCursor, setIdxCursor] = useState<number | null>(null);
   const chartRef = useRef<TrendChartHandle>(null);
 
   const deslizante = useJanelaDeslizante(janelaSegundos);
@@ -114,7 +130,11 @@ export function TrendPage() {
 
   function alternar(tagId: number): void {
     if (selecionadas.includes(tagId)) {
-      setSelecionadas(selecionadas.filter((id) => id !== tagId));
+      const restantes = selecionadas.filter((id) => id !== tagId);
+      setSelecionadas(restantes);
+      // O eixo desenhado é de uma tag que está no gráfico: desmarcar a dona passa o eixo para
+      // a primeira tag que sobrou (ou nenhuma, se essa era a última).
+      if (foco === tagId) setFoco(restantes[0] ?? null);
       setAviso(null);
       return;
     }
@@ -123,7 +143,18 @@ export function TrendPage() {
       return;
     }
     setSelecionadas([...selecionadas, tagId]);
+    setFoco(tagId);
     setAviso(null);
+  }
+
+  /** Valor da pena `indice` no carimbo sob o ponteiro. A pena `indice` desenha a coluna
+   *  `indice + 1` da matriz (a coluna 0 é o tempo) — mesma matriz do gráfico, sem segundo
+   *  caminho de número. `null` = ponteiro fora do gráfico OU silêncio da pena naquele carimbo:
+   *  a legenda escreve coluna vazia, nunca zero. */
+  function valorNoCursor(indice: number): number | null {
+    if (idxCursor === null || dados === null) return null;
+    const valor = dados[indice + 1]?.[idxCursor] ?? null;
+    return valor !== null && Number.isFinite(valor) ? valor : null;
   }
 
   function definirEscala(tagId: number, escala: EscalaVar): void {
@@ -141,6 +172,25 @@ export function TrendPage() {
     // persistida some — senão o próximo reload ressuscitaria a escala que o reset apagou).
     limparEscalas(CHAVE_ESCALAS);
     setEscalas({});
+  }
+
+  function exportarCsv(): void {
+    // `dados` é a MESMA matriz que o <TrendChart> desenha (inclui a ponta viva do WS e os gaps),
+    // recortada na faixa VISÍVEL: com zoom em X aplicado, a janela buscada é maior do que a que
+    // o engenheiro está vendo, e o arquivo tem de ser o que está na tela.
+    if (!dados || !resposta) return;
+    const matriz = recortarEmX(dados, chartRef.current?.faixaX() ?? null);
+    const csv = montarCsvTrend(
+      matriz,
+      selecionadas.map((id) => ({
+        rotulo: porId.get(id)?.name ?? String(id),
+        eu: porId.get(id)?.eu ?? "",
+      })),
+    );
+    baixarBlob(
+      new Blob([csv], { type: "text/csv;charset=utf-8" }),
+      nomeCsvTrend(matriz, resposta.mode),
+    );
   }
 
   return (
@@ -186,6 +236,16 @@ export function TrendPage() {
               }}
             >
               {">"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="trend-export-csv"
+              disabled={!dados}
+              onClick={exportarCsv}
+            >
+              Exportar CSV
             </Button>
             <Button
               type="button"
@@ -270,7 +330,10 @@ export function TrendPage() {
               ids={selecionadas}
               rotulos={rotulos}
               janelaSegundos={janelaSegundos}
+              fimEpochS={deslizante.fimEpochS}
               escalas={escalas}
+              foco={foco}
+              onCursorIdx={setIdxCursor}
             />
           )}
 
@@ -297,12 +360,41 @@ export function TrendPage() {
                     className: "plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg",
                   });
                 }
+                // Pena cortada pela moldura: a faixa fixada não alcança o valor de agora.
+                // Sem isto a linha some sem explicação e o engenheiro conclui que a
+                // variável parou de historiar (achado de campo) — mesma família de
+                // `SEM DADO`: aviso na legenda quando o gráfico não pode mostrar a pena.
+                const escalaDaTag = escalas[String(resumo.tagId)] ?? ESCALA_AUTO;
+                if (foraDaFaixa(escalaDaTag, resumo.valor)) {
+                  badges.push({
+                    testId: "trend-legend-fora-escala",
+                    texto: "FORA DA ESCALA",
+                    className: "plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg",
+                  });
+                }
+                const donaDoEixo = resumo.tagId === foco;
+                if (donaDoEixo) {
+                  badges.push({ texto: "Eixo Y", className: "plaqueta text-xs text-fg-muted" });
+                }
                 const linha: LinhaLegenda = {
                   chave: String(resumo.tagId),
                   testId: "trend-legend-item",
+                  dataAttrs: { "data-tag-id": String(resumo.tagId) },
                   className: "flex items-center gap-3 px-3 py-2",
                   identificacao: (
-                    <>
+                    // `aria-current`, não `aria-pressed`: o eixo é de uma tag só, então marcar
+                    // uma desmarca a outra sem o engenheiro tocar nela — seleção única, não um
+                    // interruptor por linha. Clicar aqui NUNCA tira a pena do gráfico: quem
+                    // liga e desliga pena é o seletor de tags à esquerda.
+                    <button
+                      type="button"
+                      aria-current={donaDoEixo ? "true" : undefined}
+                      title="Trazer o eixo Y para esta tag"
+                      className="focus-ring flex min-h-6 grow cursor-pointer items-center gap-3 text-left"
+                      onClick={() => {
+                        setFoco(resumo.tagId);
+                      }}
+                    >
                       <span
                         aria-hidden="true"
                         className={cn("h-1 w-6 shrink-0", CLASSES_PENA[indice % CLASSES_PENA.length])}
@@ -310,13 +402,21 @@ export function TrendPage() {
                       <span className="plaqueta grow text-xs">
                         {tag?.name ?? String(resumo.tagId)}
                       </span>
-                    </>
+                    </button>
                   ),
                   badges,
-                  valorEu: { valor: resumo.valor, eu: tag?.eu ?? "", muted: resumo.bad || resumo.semDado },
+                  valorEu: {
+                    valor: resumo.valor,
+                    eu: tag?.eu ?? "",
+                    muted: resumo.bad || resumo.semDado,
+                    // Duas colunas, nunca substituição: o valor corrente continua na tela
+                    // enquanto o engenheiro inspeciona um instante passado no gráfico.
+                    valorCursor: valorNoCursor(indice),
+                    testIdValorCursor: "trend-legend-valor-cursor",
+                  },
                   filhoEscala: (
                     <EditorEscala
-                      escala={escalas[String(resumo.tagId)] ?? ESCALA_AUTO}
+                      escala={escalaDaTag}
                       prefixoTestid="trend"
                       aoMudar={(escala) => {
                         definirEscala(resumo.tagId, escala);

@@ -29,7 +29,8 @@ from test_mpc_block import (
 )
 
 from ottima_core.bus import KIND_MPC_MV_STATUS_CHANGED
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.mpc import MpcBlock
 from ottima_flow_runtime.mpc.availability import MvAvailability
 
@@ -170,7 +171,7 @@ async def test_saida_da_mv_indisponivel_segue_a_posicao_real_sem_saltar() -> Non
     snapshot.set(MODE_READ_PID, 0.0)
     snapshot.set(READBACK_PID, 70.0)  # o PID local levou o atuador para outro lugar
     saida = await block.step(entradas(20.0))
-    assert saida["mv_pid"] == PortSample(70.0, True)
+    assert saida["mv_pid"] == Signal(70.0, quality=Quality.GOOD)
 
 
 async def test_volta_a_rcas_parte_da_posicao_real_e_nao_do_plano_antigo() -> None:
@@ -204,7 +205,7 @@ async def test_volta_a_rcas_nao_reaplica_o_plano_anterior_a_perda_da_malha() -> 
     _tudo_saudavel(snapshot)
     await _arma_auto(block)
     host.pending = _resultado_ok({"mv_pid": 44.0, "mv_direto": 3.0})
-    assert (await block.step(entradas(20.0)))["mv_pid"] == PortSample(44.0, True)
+    assert (await block.step(entradas(20.0)))["mv_pid"] == Signal(44.0, quality=Quality.GOOD)
 
     snapshot.set(MODE_READ_PID, 0.0)
     snapshot.set(READBACK_PID, 70.0)  # o PID local moveu o atuador
@@ -212,8 +213,8 @@ async def test_volta_a_rcas_nao_reaplica_o_plano_anterior_a_perda_da_malha() -> 
 
     snapshot.set(MODE_READ_PID, 1.0)
     saida = await block.step(entradas(20.0))
-    assert saida["mv_pid"] == PortSample(70.0, True)
-    assert saida["mv_direto"] == PortSample(3.0, True), "MV saudável mantém seu plano"
+    assert saida["mv_pid"] == Signal(70.0, quality=Quality.GOOD)
+    assert saida["mv_direto"] == Signal(3.0, quality=Quality.GOOD), "MV saudável mantém seu plano"
 
 
 # --------------------------------------------------------------------------------------
@@ -228,7 +229,7 @@ async def test_mv_saudavel_segue_recebendo_o_plano_com_a_outra_congelada() -> No
     snapshot.set(READBACK_PID, 40.0, quality=2)
     host.pending = _resultado_ok({"mv_pid": 40.0, "mv_direto": 4.0})
     saida = await block.step(entradas(20.0))
-    assert saida["mv_direto"] == PortSample(4.0, True)
+    assert saida["mv_direto"] == Signal(4.0, quality=Quality.GOOD)
 
 
 async def test_bloco_nao_sai_de_auto_por_causa_de_uma_mv_indisponivel() -> None:

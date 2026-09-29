@@ -190,3 +190,57 @@ export async function criarAmbiente(
     },
   };
 }
+
+/**
+ * Escala x REALMENTE aplicada pelo uPlot num trend, lida da instância pela fibra do React.
+ *
+ * O aviso de zoom e os botões de janela saem do estado do React, então sozinhos não provam
+ * nada sobre o eixo: o defeito original (tela de operação) era exatamente o `range` do eixo x
+ * devolver a janela inteira enquanto o resto da tela achava que havia recorte. O eixo é
+ * desenhado no canvas, sem superfície no DOM — daí ler a instância. Compartilhado entre os
+ * specs das telas de trend (engenharia e operação) para a navegação de fibra existir uma vez.
+ */
+export async function escalaXDoGrafico(
+  page: Page,
+  testid: string,
+): Promise<{ readonly min: number; readonly max: number }> {
+  return page.evaluate((id) => {
+    // Fibra do React e instância do uPlot não têm tipo público: navegação campo a campo,
+    // com guarda em cada passo (o `as` existe só para indexar por nome).
+    const campo = (valor: unknown, nome: string): unknown =>
+      valor !== null && typeof valor === "object" && nome in valor
+        ? (valor as Record<string, unknown>)[nome]
+        : null;
+
+    const escalaDoGrafico = (valor: unknown): { min: number; max: number } | null => {
+      if (!Array.isArray(campo(valor, "series"))) return null;
+      const x = campo(campo(valor, "scales"), "x");
+      const min = campo(x, "min");
+      const max = campo(x, "max");
+      return typeof min === "number" && typeof max === "number" ? { min, max } : null;
+    };
+
+    let no: Element | null = document.querySelector(`[data-testid="${id}"] .u-wrap`);
+    let fibra: unknown = null;
+    while (no !== null && fibra === null) {
+      const chave = Object.keys(no).find((nome) => nome.startsWith("__reactFiber$"));
+      if (chave === undefined) no = no.parentElement;
+      else fibra = (no as unknown as Record<string, unknown>)[chave];
+    }
+
+    // Teto de 200 é guarda anti-loop-infinito, não orçamento de hooks: as telas de trend têm
+    // dezenas de hooks e ganham mais a cada feature, e um teto perto do número real
+    // transforma "adicionar um hook" em teste vermelho — já aconteceu (`useTema`).
+    for (let f = fibra, nivel = 0; f !== null && nivel < 200; f = campo(f, "return"), nivel++) {
+      for (
+        let gancho = campo(f, "memoizedState"), i = 0;
+        gancho !== null && i < 200;
+        gancho = campo(gancho, "next"), i++
+      ) {
+        const escala = escalaDoGrafico(campo(campo(gancho, "memoizedState"), "current"));
+        if (escala !== null) return escala;
+      }
+    }
+    throw new Error("instância do uPlot não encontrada na fibra do React");
+  }, testid);
+}

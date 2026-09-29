@@ -37,8 +37,9 @@ from ottima_core.bus import (
     OpcWrite,
 )
 from ottima_core.flowgraph import MpcConfig
+from ottima_core.signal import Quality
 from ottima_core.snapshot import TagValue
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.mpc import MpcBlock
 from ottima_flow_runtime.mpc.worker import SolveRequest, SolveResult
 
@@ -253,8 +254,8 @@ def _block(
     return block, host, snapshot, publish, write_opc, emit_event
 
 
-def entradas(cv_a: float | None, *, ok: bool = True) -> dict[str, PortSample]:
-    return {"cv_a": PortSample(cv_a, ok)}
+def entradas(cv_a: float | None, *, ok: bool = True) -> dict[str, Signal]:
+    return {"cv_a": Signal(cv_a, quality=Quality.GOOD if ok else Quality.BAD)}
 
 
 async def _entra_remoto_auto(block: MpcBlock) -> None:
@@ -283,7 +284,7 @@ async def test_local_com_pid_segue_o_readback_do_snapshot() -> None:
     block, _, snapshot, *_ = _block()
     snapshot.set(503, 42.0)
     saida = await block.step(entradas(20.0))
-    assert saida["mv_pid"] == PortSample(42.0, True)
+    assert saida["mv_pid"] == Signal(42.0, quality=Quality.GOOD)
 
 
 async def test_local_com_readback_configurado_e_sem_valor_sai_frio() -> None:
@@ -294,7 +295,7 @@ async def test_local_com_readback_configurado_e_sem_valor_sai_frio() -> None:
     `auto_arm_blocked_reason()` já classifica como `cold_input`: a porta agora concorda."""
     block, *_ = _block()
     saida = await block.step(entradas(20.0))
-    assert saida["mv_pid"] == PortSample(None, False)
+    assert saida["mv_pid"] == Signal(None, quality=Quality.BAD)
 
 
 async def test_local_sem_tag_de_readback_segura_o_initial_value() -> None:
@@ -302,7 +303,7 @@ async def test_local_sem_tag_de_readback_segura_o_initial_value() -> None:
     direta "cega", que não tem como saber a posição real."""
     block, *_ = _block()
     saida = await block.step(entradas(20.0))
-    assert saida["mv_direto"] == PortSample(1.5, True)
+    assert saida["mv_direto"] == Signal(1.5, quality=Quality.GOOD)
 
 
 async def test_local_mv_direta_com_readback_configurado_e_sem_valor_sai_fria() -> None:
@@ -314,7 +315,7 @@ async def test_local_mv_direta_com_readback_configurado_e_sem_valor_sai_fria() -
 
     saida = await block.step(entradas(20.0))
 
-    assert saida["mv_direto"] == PortSample(None, False)
+    assert saida["mv_direto"] == Signal(None, quality=Quality.BAD)
 
 
 async def test_local_sem_pid_segue_o_readback_configurado() -> None:
@@ -327,7 +328,7 @@ async def test_local_sem_pid_segue_o_readback_configurado() -> None:
 
     saida = await block.step(entradas(20.0))
 
-    assert saida["mv_direto"] == PortSample(4.25, True)
+    assert saida["mv_direto"] == Signal(4.25, quality=Quality.GOOD)
 
 
 async def test_readback_com_qualidade_ruim_nao_e_posicao() -> None:
@@ -344,7 +345,7 @@ async def test_readback_com_qualidade_ruim_nao_e_posicao() -> None:
     snapshot.set(601, 0.0, quality=2)  # planta reiniciando: valor ruim
     saida = await block.step(entradas(20.0))
 
-    assert saida["mv_direto"] == PortSample(None, False), (
+    assert saida["mv_direto"] == Signal(None, quality=Quality.BAD), (
         "sem posição confiável a porta sai fria — o `opc_write` a jusante suprime a escrita"
     )
 
@@ -354,7 +355,7 @@ async def test_readback_com_qualidade_ruim_nao_e_posicao() -> None:
     await block.command("mpc_mode", {"axis": "local_remote", "value": "remote"}, OPERADOR)
     saida = await block.step(entradas(20.0))
 
-    assert saida["mv_direto"] == PortSample(4.25, True)
+    assert saida["mv_direto"] == Signal(4.25, quality=Quality.GOOD)
 
 
 async def test_local_para_remoto_man_parte_do_readback_sem_degrau() -> None:
@@ -368,7 +369,7 @@ async def test_local_para_remoto_man_parte_do_readback_sem_degrau() -> None:
     await block.command("mpc_mode", {"axis": "local_remote", "value": "remote"}, OPERADOR)
     saida = await block.step(entradas(20.0))
 
-    assert saida["mv_direto"] == PortSample(4.25, True)
+    assert saida["mv_direto"] == Signal(4.25, quality=Quality.GOOD)
 
 
 async def test_auto_arm_blocked_reason_exige_readback_da_mv_direta() -> None:
@@ -390,7 +391,7 @@ async def test_remoto_man_e_o_valor_manual_clampado_em_limits() -> None:
     await block.command("mpc_mode", {"axis": "local_remote", "value": "remote"}, OPERADOR)
     await block.command("mpc_mv", {"var_id": "mv_direto", "value": 999.0}, OPERADOR)
     saida = await block.step(entradas(20.0))
-    assert saida["mv_direto"] == PortSample(10.0, True)  # clamp em limits.max=10.0
+    assert saida["mv_direto"] == Signal(10.0, quality=Quality.GOOD)  # clamp em limits.max=10.0
 
 
 async def test_remoto_auto_aplica_o_ultimo_plano() -> None:
@@ -403,15 +404,15 @@ async def test_remoto_auto_aplica_o_ultimo_plano() -> None:
     await _entra_remoto_auto(block)
     host.pending = _resultado_ok({"mv_pid": 33.0, "mv_direto": -4.0})
     saida = await block.step(entradas(20.0))
-    assert saida["mv_pid"] == PortSample(33.0, True)
-    assert saida["mv_direto"] == PortSample(-4.0, True)
+    assert saida["mv_pid"] == Signal(33.0, quality=Quality.GOOD)
+    assert saida["mv_direto"] == Signal(-4.0, quality=Quality.GOOD)
 
 
 async def test_remoto_auto_sem_plano_ainda_segura_o_valor_vigente() -> None:
     block, *_ = _block()
     await _entra_remoto_auto(block)
     saida = await block.step(entradas(20.0))
-    assert saida["mv_pid"] == PortSample(10.0, True)
+    assert saida["mv_pid"] == Signal(10.0, quality=Quality.GOOD)
 
 
 async def test_reentrar_em_auto_nao_reaplica_o_plano_velho() -> None:
@@ -429,18 +430,18 @@ async def test_reentrar_em_auto_nao_reaplica_o_plano_velho() -> None:
     await _entra_remoto_auto(block)
     host.pending = _resultado_ok({"mv_pid": 33.0, "mv_direto": -4.0})
     await block.step(entradas(20.0))
-    assert (await block.step(entradas(20.0)))["mv_pid"] == PortSample(33.0, True)
+    assert (await block.step(entradas(20.0)))["mv_pid"] == Signal(33.0, quality=Quality.GOOD)
 
     # Operador assume e reposiciona a MV
     await block.command("mpc_mode", {"axis": "man_auto", "value": "man"}, OPERADOR)
     await block.command("mpc_mv", {"var_id": "mv_pid", "value": 60.0}, OPERADOR)
-    assert (await block.step(entradas(20.0)))["mv_pid"] == PortSample(60.0, True)
+    assert (await block.step(entradas(20.0)))["mv_pid"] == Signal(60.0, quality=Quality.GOOD)
 
     # Devolve para AUTO: sem plano novo ainda, a saída segura os 60 % do MAN
     await block.command("mpc_mode", {"axis": "man_auto", "value": "auto"}, OPERADOR)
     saida = await block.step(entradas(20.0))
 
-    assert saida["mv_pid"] == PortSample(60.0, True), (
+    assert saida["mv_pid"] == Signal(60.0, quality=Quality.GOOD), (
         "voltar para AUTO reaplicou o plano velho em vez de segurar o valor do MAN"
     )
 
@@ -530,20 +531,20 @@ async def test_resultado_entre_fronteiras_so_muda_a_porta_na_fronteira_seguinte(
     await _entra_remoto_auto(block)
 
     primeira = await block.step(entradas(20.0))  # n=0: fronteira, dispara o solve
-    assert primeira["mv_pid"] == PortSample(10.0, True)
+    assert primeira["mv_pid"] == Signal(10.0, quality=Quality.GOOD)
 
     # o worker "termina" entre fronteiras: fica só no buffer do host até ser consumido
     host.pending = _resultado_ok({"mv_pid": 77.0, "mv_direto": 2.0})
 
     segunda = await block.step(entradas(20.0))  # n=1: não é fronteira
-    assert segunda["mv_pid"] == PortSample(10.0, True)
+    assert segunda["mv_pid"] == Signal(10.0, quality=Quality.GOOD)
 
     terceira = await block.step(entradas(20.0))  # n=2: não é fronteira
-    assert terceira["mv_pid"] == PortSample(10.0, True)
+    assert terceira["mv_pid"] == Signal(10.0, quality=Quality.GOOD)
 
     quarta = await block.step(entradas(20.0))  # n=3: fronteira seguinte -> aplica agora
-    assert quarta["mv_pid"] == PortSample(77.0, True)
-    assert quarta["mv_direto"] == PortSample(2.0, True)
+    assert quarta["mv_pid"] == Signal(77.0, quality=Quality.GOOD)
+    assert quarta["mv_direto"] == Signal(2.0, quality=Quality.GOOD)
 
     assert len(host.requests) == 2, "só as duas fronteiras (n=0 e n=3) disparam solve"
     assert host.requests[0].reinit is True, "MAN->AUTO exige reinit na 1a dispatch (bumpless)"
@@ -572,7 +573,7 @@ async def test_overrun_mantem_mv_soma_contador_e_dedupe_do_evento() -> None:
 
     host.pending = overrun
     primeira = await block.step(entradas(20.0))
-    assert primeira["mv_pid"] == PortSample(10.0, True)  # MV mantida
+    assert primeira["mv_pid"] == Signal(10.0, quality=Quality.GOOD)  # MV mantida
     assert block.health()["overruns"] == 1
     assert events.of_kind(KIND_MPC_OVERRUN)[-1]["payload"] == {"overruns": 1}
 
@@ -665,8 +666,8 @@ async def test_no_convergence_emite_solver_error_e_nao_move_a_mv() -> None:
         detail="iterate not converged",
     )
     saida = await block.step(entradas(20.0))
-    assert saida["mv_pid"] == PortSample(10.0, True)
-    assert saida["mv_direto"] == PortSample(1.5, True)
+    assert saida["mv_pid"] == Signal(10.0, quality=Quality.GOOD)
+    assert saida["mv_direto"] == Signal(1.5, quality=Quality.GOOD)
 
     erros = events.of_kind(KIND_MPC_SOLVER_ERROR)
     assert len(erros) == 1
@@ -769,12 +770,12 @@ async def test_command_mpc_sp_so_materializa_em_auto_com_clamp_em_sp_limits() ->
 
 async def test_cold_start_produz_saidas_nulas() -> None:
     block, *_ = _block()
-    saida = await block.step({"cv_a": PortSample(None, False)})
+    saida = await block.step({"cv_a": Signal(None, quality=Quality.BAD)})
     assert saida == {
-        "mv_pid": PortSample(None, False),
-        "mv_direto": PortSample(None, False),
-        "local": PortSample(None, False),
-        "auto": PortSample(None, False),
+        "mv_pid": Signal(None, quality=Quality.BAD),
+        "mv_direto": Signal(None, quality=Quality.BAD),
+        "local": Signal(None, quality=Quality.BAD),
+        "auto": Signal(None, quality=Quality.BAD),
     }
 
 
@@ -795,24 +796,42 @@ async def test_boot_local_man_publica_local_1_e_auto_0() -> None:
     """Deploy nasce sempre LOCAL/MAN (RF-621, RNF-03) — sem nenhum command()."""
     block, *_ = _block()
     saida = await block.step(entradas(20.0))
-    assert saida["local"] == PortSample(1.0, True)
-    assert saida["auto"] == PortSample(0.0, True)
+    assert saida["local"] == Signal(1.0, quality=Quality.GOOD)
+    assert saida["auto"] == Signal(0.0, quality=Quality.GOOD)
 
 
 async def test_remoto_man_publica_local_0_e_auto_0() -> None:
     block, *_ = _block()
     await block.command("mpc_mode", {"axis": "local_remote", "value": "remote"}, OPERADOR)
     saida = await block.step(entradas(20.0))
-    assert saida["local"] == PortSample(0.0, True)
-    assert saida["auto"] == PortSample(0.0, True)
+    assert saida["local"] == Signal(0.0, quality=Quality.GOOD)
+    assert saida["auto"] == Signal(0.0, quality=Quality.GOOD)
 
 
 async def test_remoto_auto_publica_local_0_e_auto_1() -> None:
     block, *_ = _block()
     await _entra_remoto_auto(block)
     saida = await block.step(entradas(20.0))
-    assert saida["local"] == PortSample(0.0, True)
-    assert saida["auto"] == PortSample(1.0, True)
+    assert saida["local"] == Signal(0.0, quality=Quality.GOOD)
+    assert saida["auto"] == Signal(1.0, quality=Quality.GOOD)
+
+
+async def test_remoto_auto_com_host_indisponivel_publica_auto_0() -> None:
+    """Porta `auto` é ESTADO REAL, não pedido (emenda 2026-09-11): com o worker em build o
+    bloco não comanda nada — `auto` = 0.0 mesmo com `man_auto` interno em "auto". Sem isto,
+    o canvas e qualquer lógica a jusante acendem AUTO sobre um bloco que ainda não resolveu
+    um solve sequer (defeito de campo: faceplate em AUTO + "build em andamento" ao mesmo
+    tempo)."""
+    block, host, *_ = _block()
+    host.ready = False
+    await _entra_remoto_auto(block)
+    saida = await block.step(entradas(20.0))
+    assert saida["local"] == Signal(0.0, quality=Quality.GOOD)
+    assert saida["auto"] == Signal(0.0, quality=Quality.GOOD)
+
+    host.ready = True  # worker fica pronto: a porta vira 1.0 na varredura seguinte
+    saida = await block.step(entradas(20.0))
+    assert saida["auto"] == Signal(1.0, quality=Quality.GOOD)
 
 
 async def test_entrada_invalida_propaga_ok_false_tambem_em_local_e_auto() -> None:
@@ -820,8 +839,8 @@ async def test_entrada_invalida_propaga_ok_false_tambem_em_local_e_auto() -> Non
     exceção só porque o valor não depende da CV/Restrição/DV."""
     block, *_ = _block()
     saida = await block.step(entradas(20.0, ok=False))
-    assert saida["local"] == PortSample(1.0, False)
-    assert saida["auto"] == PortSample(0.0, False)
+    assert saida["local"] == Signal(1.0, quality=Quality.BAD)
+    assert saida["auto"] == Signal(0.0, quality=Quality.BAD)
 
 
 async def test_mv_last_e_mv_manual_nunca_herdam_local_ou_auto() -> None:
@@ -938,7 +957,7 @@ async def test_status_error_sem_respawn_nao_e_crash_e_carrega_o_detail() -> None
         detail="ValueError: NaN na matriz de estados",
     )
     saida = await block.step(entradas(20.0))
-    assert saida["mv_pid"] == PortSample(10.0, True)  # MV mantida (RF-624)
+    assert saida["mv_pid"] == Signal(10.0, quality=Quality.GOOD)  # MV mantida (RF-624)
 
     erros = events.of_kind(KIND_MPC_SOLVER_ERROR)
     assert len(erros) == 1
@@ -1007,13 +1026,13 @@ async def test_cold_start_publica_frame_com_input_valid_false_na_fronteira() -> 
     publicação a cada execução, inclusive fora de AUTO (achado F-5)."""
     block, *_, publish, _, _ = _block()
 
-    saida = await block.step({"cv_a": PortSample(None, False)})
+    saida = await block.step({"cv_a": Signal(None, quality=Quality.BAD)})
 
     assert saida == {
-        "mv_pid": PortSample(None, False),
-        "mv_direto": PortSample(None, False),
-        "local": PortSample(None, False),
-        "auto": PortSample(None, False),
+        "mv_pid": Signal(None, quality=Quality.BAD),
+        "mv_direto": Signal(None, quality=Quality.BAD),
+        "local": Signal(None, quality=Quality.BAD),
+        "auto": Signal(None, quality=Quality.BAD),
     }
     assert len(publish.states) == 1, "fronteira em cold start precisa publicar um frame"
     estado = publish.states[0]

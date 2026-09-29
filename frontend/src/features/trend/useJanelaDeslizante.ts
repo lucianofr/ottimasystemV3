@@ -49,6 +49,28 @@ export function fimAoAvancar(
   return alvo >= agoraEpochS ? null : alvo;
 }
 
+/**
+ * Extremos do eixo x de um trend sem seção futura (engenharia, fuzzy): a janela ESCOLHIDA no
+ * seletor, não a extensão do dado.
+ *
+ * É a política que faz a vista andar com o relógio ao vivo (quem chama reaplica a cada tique
+ * de 1 s) e reservar a janela inteira mesmo com histórico curto — com `range` automático, uma
+ * janela de 30 min sobre 5 min de dado desenhava 5 min esticados e a borda direita só mexia
+ * quando chegava amostra nova. Deslizado no tempo, a vista termina exatamente no fim escolhido
+ * pelo operador.
+ *
+ * Relógio injetado (`agoraEpochS`) para ser pura: é o irmão de `calcularRangeXOperacao`
+ * (`../operate/secaoFutura.ts`), que acrescenta o horizonte de predição no lado direito.
+ */
+export function faixaJanelaX(
+  fimEpochS: number | null,
+  janelaSegundos: number,
+  agoraEpochS: number,
+): readonly [number, number] {
+  const fim = fimEpochS ?? agoraEpochS;
+  return [fim - janelaSegundos, fim];
+}
+
 export interface JanelaDeslizante {
   /** `null` = ao vivo. */
   readonly fimEpochS: number | null;

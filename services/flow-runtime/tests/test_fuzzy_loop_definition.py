@@ -218,6 +218,7 @@ def _build(graph: dict, reuse: dict | None = None):
         redis_client=cast(Any, _RedisFake()),
         pool=none,
         snapshot=none,
+        exchange=none,
     )
 
 

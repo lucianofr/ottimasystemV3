@@ -119,8 +119,24 @@ def test_ganho_do_par_degenerado_vem_do_direct_gain():
 @pytest.mark.parametrize("ts", [1.0, 4.0])
 def test_ganho_do_iopdt_e_a_taxa_de_rampa_Ki(ki: float, ts: float):
     """Linha integradora não tem ganho estático finito (ADR-027 §4): o que o LP usa é a
-    taxa de rampa `Ki` [EU/(EU·s)], recuperada do `PairSS` como `(c·b)/Ts`."""
+    taxa de rampa `Ki_EU` [EU/(EU·s)] — o valor JÁ convertido por `eu_gain_params`, que este
+    teste passa direto pro `discretize_iopdt` —, recuperada do `PairSS` como `(c·b)/Ts`."""
     pair = discretize_iopdt(ki, 0.0, ts)
+
+    assert pair_steady_state_gain(
+        pair, direct_gain=None, kind="integrating", ts=ts
+    ) == pytest.approx(ki)
+
+
+@pytest.mark.parametrize("ki", [0.5, -0.25])
+@pytest.mark.parametrize("ts", [1.0, 4.0])
+def test_taxa_de_rampa_do_ifopdt_nao_depende_do_tau1(ki: float, ts: float):
+    """Com lag (`tau1 > 0`) o par tem 2 estados e `(c·b)/Ts` mediria só o PRIMEIRO passo
+    (`Ki·(1−a₁)`) — o LP precisa da taxa de REGIME, que o lag atrasa mas não muda. Sem este
+    caminho o SSTO subestimaria a rampa por um fator `(1−e^(−Ts/τ1))` (com τ1=60 s e Ts=1 s,
+    60×) e mandaria a MV muito além do necessário pra zerar a taxa."""
+    pair = discretize_iopdt(ki, 0.0, ts, tau1=60.0)
+    assert pair.a.shape == (2, 2)
 
     assert pair_steady_state_gain(
         pair, direct_gain=None, kind="integrating", ts=ts
@@ -196,6 +212,7 @@ def test_linha_integradora_usa_taxa_de_rampa_na_matriz():
     model = build_steady_state_model(config, TS)
 
     assert model.row_kind["cv_lvl"] == "integrating"
+    # Ki=0.4 %/%/s com spans iguais ⇒ 0.4 EU/s por EU na matriz (razão de spans pura).
     assert model.g == pytest.approx(np.array([[0.4]]))
 
 
@@ -239,4 +256,5 @@ def test_base_de_linha_integradora_e_a_taxa_atual_sem_bias():
 
     base = model.base(u={"mv_a": 25.0}, d={}, bias={"cv_lvl": 99.0})
 
+    # Ki_EU = 0.4 (base %/%/s, razão de spans 1) × Δu de 5 EU acima do ponto de operação.
     assert base == pytest.approx(np.array([0.4 * 5.0]))

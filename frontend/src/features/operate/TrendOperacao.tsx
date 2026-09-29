@@ -15,6 +15,7 @@ import {
   type EscalaVar,
 } from "../trend/escalas";
 import { useMotorTrend } from "../trend/motorTrend";
+import { pluginCursorIdx, pluginZoomX } from "../trend/plugins";
 import { JanelaTempo } from "../trend/JanelaTempo";
 import { referenciaPersistidaS } from "../trend/bordaViva";
 import { FORMATO_VALOR, lerTemaTrend, type TemaTrend } from "../trend/trendTheme";
@@ -40,6 +41,7 @@ import {
   tetoCarryForwardOperacaoS,
   tracoPenaSp,
   ultimoCarimboHistorico,
+  valoresNoCursor,
   type AmostraViva,
   type OverlayPrevisao,
   type PenaLegenda,
@@ -107,6 +109,17 @@ function tracoComFade(corBase: string, agora: number | null): uPlot.Series.Strok
   };
 }
 
+/** Ponto do cursor de uma pena de predição. O `stroke` dessas séries é uma FUNÇÃO que devolve
+ *  `CanvasGradient` (`tracoComFade`): o uPlot cacheia esse retorno em `series.points._stroke` e
+ *  reusa o MESMO valor como cor do ponto do cursor, que é um nó do DOM (`elColor`) — e um
+ *  gradiente de canvas ali não é cor nenhuma, então o ponto saía incolor justamente na seção
+ *  futura, onde a pena medida já não tem valor. Cor explícita em string resolve sem segundo
+ *  caminho de paleta: é o mesmo matiz claro que o traço usa no início do gradiente. */
+function pontoCursorPrevisto(cor: string): uPlot.Series.Points {
+  const clara = corClara(cor);
+  return { show: false, stroke: clara, fill: clara };
+}
+
 /** Linha-cursor "agora" (§7.4-6): plugin de desenho, não série — não compete por espaço no
  *  teto de penas e não precisa de Y-range próprio. Lê de uma ref para atualizar a cada
  *  `setData` sem recriar a instância (mesma separação estrutura/dados do resto do arquivo).
@@ -135,28 +148,10 @@ function pluginLinhaAgora(agoraRef: { current: number | null }, tema: TemaTrend)
   };
 }
 
-/** Recorte em X que o operador arrastou no gráfico; `null` = a janela da tela manda. */
+/** Recorte em X que o operador arrastou no gráfico; `null` = a janela da tela manda. Tupla
+ *  porque é o que o `range` do eixo x devolve direto; o plugin compartilhado
+ *  (`../trend/plugins`) publica os dois números e não tem opinião sobre a forma. */
 type ZoomX = readonly [number, number];
-
-/** Zoom manual em X. O eixo x desta tela tem `range` próprio (a janela precisa incluir o
- *  horizonte da predição, o que a extensão dos dados não daria), e o uPlot chama esse `range`
- *  também no zoom por arrasto — devolver a janela da tela ali é o que engolia o recorte pedido.
- *  O `setSelect` dispara ANTES do `setScale` do zoom (uPlot `mouseUp`), então guardar o recorte
- *  aqui faz o `range` já responder com ele. Guardado em ref, e não dentro da instância, para
- *  sobreviver à recriação do gráfico (trocar o eixo Y, ligar/desligar pena, editar faixa). */
-function pluginZoomX(aoRecortar: (faixa: ZoomX) => void): uPlot.Plugin {
-  return {
-    hooks: {
-      setSelect: (u: uPlot) => {
-        if (u.select.width <= 0) return;
-        aoRecortar([
-          u.posToVal(u.select.left, "x"),
-          u.posToVal(u.select.left + u.select.width, "x"),
-        ]);
-      },
-    },
-  };
-}
 
 /** Paleta resolvida do trend de operação — mesmo padrão de `lerTemaTrend` (`getComputedStyle`
  *  sobre `document.documentElement`), mas com a paleta PRÓPRIA de 8 posições
@@ -178,6 +173,10 @@ interface ColunasOperacao {
   readonly dados: uPlot.AlignedData;
   readonly series: uPlot.Series[];
   readonly bands: uPlot.Band[];
+  /** Colunas de `dados` que cada pena da legenda desenha, medido antes de predição — é o que
+   *  `valoresNoCursor` lê para a legenda mostrar o valor sob o ponteiro. As colunas invisíveis
+   *  da banda de Restrição (mín./máx.) ficam fora: ninguém aponta uma linha que não existe. */
+  readonly colunasPorPena: Readonly<Record<string, readonly number[]>>;
 }
 
 function montarColunas(
@@ -211,6 +210,13 @@ function montarColunas(
   const dados: (number | null)[][] = [];
   const series: uPlot.Series[] = [{ label: "Tempo" }];
   const bands: uPlot.Band[] = [];
+  const colunasPorPena: Record<string, number[]> = {};
+
+  /** Liga a coluna recém-empilhada à pena da legenda que a desenha (a ordem das chamadas é a
+   *  precedência de leitura no cursor: medido, depois predição). */
+  function registrar(penaId: string, coluna: number): void {
+    (colunasPorPena[penaId] ??= []).push(coluna);
+  }
 
   type OpcoesSerie = Omit<uPlot.Series, "label"> & { label: string };
 
@@ -258,37 +264,49 @@ function montarColunas(
     const cor = cores.get(cv.id) ?? corPadrao;
     const scale = chaveEscala(cv.id);
     if (cvLigada) {
-      pushHistorico(historica.t, historica.v, {
-        label: `${cv.name} PV`,
-        stroke: cor,
-        width: 1.5,
-        spanGaps: false,
-        points: { show: false },
-        scale,
-      });
-      pushPrevisao(overlay.cv[indiceLinha] ?? [], false, {
-        label: `${cv.name} previsto`,
-        stroke: tracoComFade(cor, overlay.agora),
-        width: 1.5,
-        dash: [5, 5],
-        points: { show: false },
-        scale,
-      });
+      registrar(
+        cv.id,
+        pushHistorico(historica.t, historica.v, {
+          label: `${cv.name} PV`,
+          stroke: cor,
+          width: 1.5,
+          spanGaps: false,
+          points: { show: false },
+          scale,
+        }),
+      );
+      registrar(
+        cv.id,
+        pushPrevisao(overlay.cv[indiceLinha] ?? [], false, {
+          label: `${cv.name} previsto`,
+          stroke: tracoComFade(cor, overlay.agora),
+          width: 1.5,
+          dash: [5, 5],
+          points: pontoCursorPrevisto(cor),
+          scale,
+        }),
+      );
     }
     if (spLigada) {
       const divisao = dividirSpPorAuto(historica.sp, historica.auto);
-      pushHistorico(historica.t, divisao.comandado, {
-        label: `${cv.name} SP`,
-        ...tracoPenaSp(cor, tema.texto, false),
-        points: { show: false },
-        scale,
-      });
-      pushHistorico(historica.t, divisao.rastreado, {
-        label: `${cv.name} SP rastreado`,
-        ...tracoPenaSp(cor, tema.texto, true),
-        points: { show: false },
-        scale,
-      });
+      registrar(
+        idPenaSp(cv.id),
+        pushHistorico(historica.t, divisao.comandado, {
+          label: `${cv.name} SP`,
+          ...tracoPenaSp(cor, tema.texto, false),
+          points: { show: false },
+          scale,
+        }),
+      );
+      registrar(
+        idPenaSp(cv.id),
+        pushHistorico(historica.t, divisao.rastreado, {
+          label: `${cv.name} SP rastreado`,
+          ...tracoPenaSp(cor, tema.texto, true),
+          points: { show: false },
+          scale,
+        }),
+      );
     }
   });
 
@@ -301,22 +319,28 @@ function montarColunas(
     const historica = porId.get(restricao.id) ?? SERIE_VAZIA(restricao.id);
     const cor = cores.get(restricao.id) ?? corPadrao;
     const scale = chaveEscala(restricao.id);
-    pushHistorico(historica.t, historica.v, {
-      label: `${restricao.name} PV`,
-      stroke: cor,
-      width: 1.5,
-      spanGaps: false,
-      points: { show: false },
-      scale,
-    });
-    pushPrevisao(overlay.cv[indiceLinha] ?? [], false, {
-      label: `${restricao.name} previsto`,
-      stroke: tracoComFade(cor, overlay.agora),
-      width: 1.5,
-      dash: [5, 5],
-      points: { show: false },
-      scale,
-    });
+    registrar(
+      restricao.id,
+      pushHistorico(historica.t, historica.v, {
+        label: `${restricao.name} PV`,
+        stroke: cor,
+        width: 1.5,
+        spanGaps: false,
+        points: { show: false },
+        scale,
+      }),
+    );
+    registrar(
+      restricao.id,
+      pushPrevisao(overlay.cv[indiceLinha] ?? [], false, {
+        label: `${restricao.name} previsto`,
+        stroke: tracoComFade(cor, overlay.agora),
+        width: 1.5,
+        dash: [5, 5],
+        points: pontoCursorPrevisto(cor),
+        scale,
+      }),
+    );
     // A faixa da Restrição não expira em "agora": a banda atravessa o horizonte inteira, então
     // entra por `pushColuna` — sem carry-forward para repetir e sem fronteira para cortar.
     const idxLow = pushColuna(
@@ -349,26 +373,32 @@ function montarColunas(
     const historica = porId.get(mv.id) ?? SERIE_VAZIA(mv.id);
     const cor = cores.get(mv.id) ?? corPadrao;
     const scale = chaveEscala(mv.id);
-    pushHistorico(historica.t, historica.v, {
-      label: `${mv.name} PV`,
-      stroke: cor,
-      width: 1.5,
-      spanGaps: false,
-      points: { show: false },
-      scale,
-    });
-    pushPrevisao(overlay.mv[indiceMv] ?? [], true, {
-      label: `${mv.name} previsto`,
-      stroke: corClara(cor),
-      width: 1.5,
-      dash: [5, 5],
-      paths: (u, seriesIdx, idx0, idx1) =>
-        (uPlot.paths.stepped as (opts: typeof OPCOES_DEGRAU_MV) => uPlot.Series.PathBuilder)(
-          OPCOES_DEGRAU_MV,
-        )(u, seriesIdx, idx0, idx1),
-      points: { show: false },
-      scale,
-    });
+    registrar(
+      mv.id,
+      pushHistorico(historica.t, historica.v, {
+        label: `${mv.name} PV`,
+        stroke: cor,
+        width: 1.5,
+        spanGaps: false,
+        points: { show: false },
+        scale,
+      }),
+    );
+    registrar(
+      mv.id,
+      pushPrevisao(overlay.mv[indiceMv] ?? [], true, {
+        label: `${mv.name} previsto`,
+        stroke: corClara(cor),
+        width: 1.5,
+        dash: [5, 5],
+        paths: (u, seriesIdx, idx0, idx1) =>
+          (uPlot.paths.stepped as (opts: typeof OPCOES_DEGRAU_MV) => uPlot.Series.PathBuilder)(
+            OPCOES_DEGRAU_MV,
+          )(u, seriesIdx, idx0, idx1),
+        points: pontoCursorPrevisto(cor),
+        scale,
+      }),
+    );
   });
 
   // DVs — somente leitura, sem predição (não entram em `overlay`, §5.1 do F4). Opt-in.
@@ -376,17 +406,20 @@ function montarColunas(
     if (!ligadas.has(dv.id)) return;
     const historica = porId.get(dv.id) ?? SERIE_VAZIA(dv.id);
     const cor = cores.get(dv.id) ?? corPadrao;
-    pushHistorico(historica.t, historica.v, {
-      label: `${dv.name} PV`,
-      stroke: cor,
-      width: 1.5,
-      spanGaps: false,
-      points: { show: false },
-      scale: chaveEscala(dv.id),
-    });
+    registrar(
+      dv.id,
+      pushHistorico(historica.t, historica.v, {
+        label: `${dv.name} PV`,
+        stroke: cor,
+        width: 1.5,
+        spanGaps: false,
+        points: { show: false },
+        scale: chaveEscala(dv.id),
+      }),
+    );
   });
 
-  return { dados: [eixoX, ...dados] as uPlot.AlignedData, series, bands };
+  return { dados: [eixoX, ...dados] as uPlot.AlignedData, series, bands, colunasPorPena };
 }
 
 function construirOpcoesOperacao(
@@ -399,6 +432,7 @@ function construirOpcoesOperacao(
   rangeXRef: { current: readonly [number, number] },
   zoomXRef: { current: ZoomX | null },
   aoZoom: (faixa: ZoomX | null) => void,
+  aoMoverCursor: (idx: number | null) => void,
   escalasY: uPlot.Scales,
   eixoYChave: string,
   eixoYCor: string,
@@ -411,7 +445,10 @@ function construirOpcoesOperacao(
     legend: { show: false },
     cursor: {
       y: false,
-      points: { show: false },
+      // `points` fica no default (ligado): o ponto que o uPlot desenha em cada pena no carimbo
+      // sob o ponteiro é a metade visual da leitura no cursor — a legenda diz o número, o ponto
+      // diz de qual linha ele é. `series.points.show: false` (acima) é outra coisa: aquilo é o
+      // marcador de CADA amostra, que a 5 min de janela viraria uma parede de bolinhas.
       // Duplo-clique é o reset de zoom do uPlot (`autoScaleX`): o recorte precisa cair ANTES,
       // senão o `range` abaixo devolveria o recorte velho e o reset não resetaria nada. Do bind
       // default do uPlot (`filtBtn0`) só o filtro de botão principal é replicado — o alvo não,
@@ -441,7 +478,10 @@ function construirOpcoesOperacao(
     plugins: [
       pluginLinhaAgora(agoraDivisorRef, tema),
       pluginSecaoFutura(agoraDivisorRef, semPredicaoRef, tema),
-      pluginZoomX(aoZoom),
+      pluginZoomX((min, max) => {
+        aoZoom([min, max]);
+      }),
+      pluginCursorIdx(aoMoverCursor),
     ],
     axes: [
       {
@@ -758,6 +798,11 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     setZoomX(faixa);
   }
 
+  // Leitura no cursor (hover): só o ÍNDICE do carimbo mora aqui — o valor de cada pena sai de
+  // `valoresNoCursor` sobre as colunas já montadas, sem segundo caminho de dados. `null` = o
+  // ponteiro está fora da área de plotagem e a legenda volta a mostrar o valor vivo.
+  const [idxCursor, setIdxCursor] = useState<number | null>(null);
+
   // Âncora do divisor "agora"/seção futura — política em `ancoraDivisorAgora` (uma só, também
   // usada pelo tique de 1 s abaixo): relógio de parede ao vivo (B-5), congelada sob zoom manual,
   // nula na janela deslizada. O overlay de predição segue ancorado em `prediction.ts` (F5R-01),
@@ -812,6 +857,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
             rangeXRef,
             zoomXRef,
             aplicarZoomX,
+            setIdxCursor,
             escalasUplot.scales,
             eixoYChave,
             eixoYCor,
@@ -866,6 +912,20 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
     setEscalasPorVar({});
     motor.aplicarDadosComRerange();
   }
+
+  // Valor de cada pena sob o ponteiro + o carimbo apontado. Derivado das MESMAS colunas que o
+  // gráfico desenha (nenhuma segunda fonte de número), e nulo quando o mouse está fora: aí a
+  // legenda volta ao vivo. O carimbo vai no cabeçalho do poço para o operador nunca confundir
+  // leitura de hover com valor corrente.
+  const valoresCursor = useMemo(
+    () =>
+      colunas === null
+        ? null
+        : valoresNoCursor(colunas.dados, colunas.colunasPorPena, idxCursor),
+    [colunas, idxCursor],
+  );
+  const carimboCursor =
+    colunas !== null && idxCursor !== null ? colunas.dados[0][idxCursor] : undefined;
 
   return (
     <div data-testid="operate-trend" className="space-y-2">
@@ -938,6 +998,11 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
         >
           <div className="flex justify-between px-1 text-xs text-well-chart-fg">
             <span>Histórico</span>
+            {carimboCursor !== undefined && (
+              <span data-testid="operate-trend-cursor-hora" className="process-value">
+                {FORMATO_HORA.format(new Date(carimboCursor * 1000))}
+              </span>
+            )}
             {janelaDeslizante.aoVivo && (
               <span data-testid="operate-trend-secao-futura">Previsão</span>
             )}
@@ -968,6 +1033,7 @@ export function TrendOperacao({ flowId, blockId, mpc, mpcState }: TrendOperacaoP
         porIdDefinicao={porIdDefinicao}
         cores={cores}
         vars={mpcState?.vars ?? {}}
+        valoresCursor={valoresCursor}
         foco={foco}
         escalas={escalasPorVar}
         onAlternarPena={alternarPena}

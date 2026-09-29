@@ -18,8 +18,9 @@ import pytest
 
 from ottima_core.bus import KIND_MPC_INPUT_INVALID, MpcState, OpcWrite
 from ottima_core.flowgraph import MpcConfig
+from ottima_core.signal import Quality
 from ottima_core.snapshot import TagValue
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.mpc import MpcBlock
 from ottima_flow_runtime.mpc.worker import SolveRequest, SolveResult
 
@@ -164,8 +165,11 @@ def _block(
     return block, host, publish, emit_event
 
 
-def entradas(cv_a: float, *, dv: float | None = 7.0, dv_ok: bool = True) -> dict[str, PortSample]:
-    return {"cv_a": PortSample(cv_a, True), "dv_1": PortSample(dv, dv_ok)}
+def entradas(cv_a: float, *, dv: float | None = 7.0, dv_ok: bool = True) -> dict[str, Signal]:
+    return {
+        "cv_a": Signal(cv_a, quality=Quality.GOOD),
+        "dv_1": Signal(dv, quality=Quality.GOOD if dv_ok else Quality.BAD),
+    }
 
 
 async def _entra_remoto_auto(block: MpcBlock) -> None:
@@ -246,7 +250,9 @@ async def test_dv_que_nunca_chegou_continua_sendo_cold_input() -> None:
     saídas nulas, nenhum solve, nada mais avaliado nessa varredura."""
     block, host, *_ = _block()
     await _entra_remoto_auto(block)
-    saida = await block.step({"cv_a": PortSample(20.0, True), "dv_1": PortSample(None, False)})
+    saida = await block.step(
+        {"cv_a": Signal(20.0, quality=Quality.GOOD), "dv_1": Signal(None, quality=Quality.BAD)}
+    )
 
-    assert saida["mv_1"] == PortSample(None, False), "varredura fria sai nula"
+    assert saida["mv_1"] == Signal(None, quality=Quality.BAD), "varredura fria sai nula"
     assert host.requests == [], "cold start não dispara solve"

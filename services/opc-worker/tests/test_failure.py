@@ -38,9 +38,9 @@ from ottima_core.bus import (
     KIND_COMM_RESTORED,
     channel_opc_values,
 )
+from ottima_core.signal import OpcQuality
 from ottima_opc_worker import connection as connection_module
 from ottima_opc_worker.connection import ConnectionRuntime
-from ottima_opc_worker.polling import QUALITY_BAD
 from ottima_opc_worker.state import (
     ConnectionConfig,
     ConnectionSnapshot,
@@ -187,7 +187,7 @@ def bad_values(trail: BusTrail) -> list[dict]:
     return [
         message
         for channel, message in list(trail)
-        if channel != CHANNEL_EVENTS and message["quality"] == QUALITY_BAD
+        if channel != CHANNEL_EVENTS and message["quality"] == OpcQuality.BAD
     ]
 
 

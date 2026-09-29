@@ -2,7 +2,8 @@
 
 from datetime import UTC, datetime, timedelta
 
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.shell.block import BlockShell
 from ottima_flow_runtime.blocks.shell.config import ShellCfg
 from ottima_flow_runtime.blocks.shell.kernel import StubKernel
@@ -40,11 +41,11 @@ def bloco(
     )
 
 
-def amostra(v: float | bool | None, ok: bool = True) -> PortSample:
-    return PortSample(v, ok)
+def amostra(v: float | bool | None, ok: bool = True) -> Signal:
+    return Signal(v, quality=Quality.GOOD if ok else Quality.BAD)
 
 
-async def passo(b: BlockShell, segundos: float, **portas) -> dict[str, PortSample]:
+async def passo(b: BlockShell, segundos: float, **portas) -> dict[str, Signal]:
     """Executa um scan na marca `segundos` do relogio de teste."""
     inputs = {nome: valor for nome, valor in portas.items()}
     return await b.step(inputs, ts=TS0 + timedelta(seconds=segundos))

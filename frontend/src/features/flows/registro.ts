@@ -2,15 +2,23 @@ import {
   contratoFuzzy,
   contratoFuzzyLoop,
   matrizPadrao,
+  y0Padrao,
   type DadosBase,
+  type DadosBusPublish,
+  type DadosBusSubscribe,
+  type DadosConstant,
+  type DadosDeadTime,
   type DadosFirstOrder,
   type DadosFuzzy,
   type DadosKalman,
+  type DadosIntegrator,
+  type DadosLeadLag,
   type DadosMpc,
   type DadosPid,
   type DadosFuzzyLoop,
   type DadosPidLoop,
   type DadosScript,
+  type DadosScaler,
   type DadosTag,
   type DadosTfs,
   type TipoBloco,
@@ -51,7 +59,14 @@ type ConfigDoBloco =
   | Omit<DadosFuzzy, keyof DadosBase>
   | Omit<DadosPid, keyof DadosBase>
   | Omit<DadosPidLoop, keyof DadosBase>
-  | Omit<DadosFuzzyLoop, keyof DadosBase>;
+  | Omit<DadosFuzzyLoop, keyof DadosBase>
+  | Omit<DadosScaler, keyof DadosBase>
+  | Omit<DadosIntegrator, keyof DadosBase>
+  | Omit<DadosLeadLag, keyof DadosBase>
+  | Omit<DadosDeadTime, keyof DadosBase>
+  | Omit<DadosConstant, keyof DadosBase>
+  | Omit<DadosBusPublish, keyof DadosBase>
+  | Omit<DadosBusSubscribe, keyof DadosBase>;
 
 export interface DefinicaoBloco {
   rotulo: string;
@@ -70,6 +85,31 @@ export interface DefinicaoBloco {
  *  vez de virar `NaN`. */
 export const PADRAO_FIRST_ORDER = { tau: 5 } as const;
 export const PADRAO_KALMAN = { measurement_noise: 1, process_noise: 0.1 } as const;
+
+/** Bases de tempo do Integrator — a mesma lista do `IntegratorConfig.time_base` no
+ *  servidor (`parse.py`), espelhada aqui para o `lerNo` e o modal. */
+export const BASES_TEMPO = ["s", "min", "h"] as const;
+
+/** Defaults dos blocos utilitários: Scaler nasce 0-100 → 4-20 (a conversão canônica %→mA)
+ *  e o Integrator na base por minuto (totalização de vazão é o caso típico). */
+export const PADRAO_SCALER = { in_min: 0, in_max: 100, out_min: 4, out_max: 20 } as const;
+export const PADRAO_INTEGRATOR = { time_base: "min" } as const;
+
+/** Lead-Lag nasce NEUTRO (`tau_lead == tau_lag`, ganho 1): o bloco recém-arrastado não altera
+ *  o sinal até ser configurado. Um default que já compensasse alguma coisa seria surpresa na
+ *  válvula. Razão 1 e `tau_lag > 0` passam no save. */
+export const PADRAO_LEAD_LAG = { gain: 1, tau_lead: 10, tau_lag: 10 } as const;
+/** Tempo morto nasce em 0 s: passagem direta até o engenheiro informar o θ. */
+export const PADRAO_DEAD_TIME = { theta: 0 } as const;
+
+/** Constante nasce em 0 — valor neutro que passa no save sem exigir ajuste imediato. */
+export const PADRAO_CONSTANT = { value: 0 } as const;
+
+/** Barramento (ADR-042): os dois nascem com `key` vazia — o bloco recém-arrastado ainda não
+ *  identifica variável nenhuma, e o engenheiro preenche antes do primeiro save (o servidor
+ *  rejeita chave vazia). */
+export const PADRAO_BUS_PUBLISH = { key: "" } as const;
+export const PADRAO_BUS_SUBSCRIBE = { key: "" } as const;
 
 /** Defaults do PID (ADR-031, RF-551): estrutura ISA, tempos em segundos, derivativa
  *  desligada de fábrica (PI é o padrão industrial), faixa de saída 0..100 (MV em %). */
@@ -133,6 +173,11 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
     descricao: "Escreve o valor da entrada em uma tag do projeto",
     defaults: () => ({ tag_id: null }),
   },
+  constant: {
+    rotulo: "Constante",
+    descricao: "Valor numérico fixo (float) na saída",
+    defaults: () => ({ ...PADRAO_CONSTANT }),
+  },
   script: {
     rotulo: "Script",
     descricao: "Código Python com IN1..INn e OUT1..OUTn",
@@ -151,7 +196,7 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
   tfs: {
     rotulo: "TFS",
     descricao: "Matriz 2x2 de funções de transferência (SOPDT/IOPDT)",
-    defaults: () => ({ matrix: matrizPadrao(), output_eu: {} }),
+    defaults: () => ({ matrix: matrizPadrao(), output_eu: {}, y0: y0Padrao() }),
   },
   mpc: {
     rotulo: "MPC",
@@ -187,6 +232,36 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
     rotulo: "Fuzzy Malha",
     descricao: "Controle fuzzy industrial com modos e cascata (ADR-039)",
     defaults: () => ({ ...PADRAO_FUZZY_LOOP, fll: contratoFuzzyLoop.default_fll }),
+  },
+  scaler: {
+    rotulo: "Scaler",
+    descricao: "Reescala o sinal da faixa de entrada para a faixa de saída",
+    defaults: () => ({ ...PADRAO_SCALER }),
+  },
+  integrator: {
+    rotulo: "Integrador",
+    descricao: "Totaliza o sinal no tempo (base s/min/h), com reset",
+    defaults: () => ({ ...PADRAO_INTEGRATOR }),
+  },
+  lead_lag: {
+    rotulo: "Lead-Lag",
+    descricao: "Compensação dinâmica: ganho, avanço (τ lead) e atraso (τ lag)",
+    defaults: () => ({ ...PADRAO_LEAD_LAG }),
+  },
+  dead_time: {
+    rotulo: "Tempo morto",
+    descricao: "Atrasa o sinal em θ segundos",
+    defaults: () => ({ ...PADRAO_DEAD_TIME }),
+  },
+  bus_publish: {
+    rotulo: "Barramento-Publicar",
+    descricao: "Publica o valor da entrada no barramento, para outro flow consumir",
+    defaults: () => ({ ...PADRAO_BUS_PUBLISH }),
+  },
+  bus_subscribe: {
+    rotulo: "Barramento-Assinar",
+    descricao: "Consome do barramento um valor publicado por outro flow",
+    defaults: () => ({ ...PADRAO_BUS_SUBSCRIBE }),
   },
 };
 

@@ -20,7 +20,7 @@ Aritmética escalar com `math`: são dois estados, e o bloco roda inline no laç
 from collections.abc import Mapping
 from datetime import datetime
 
-from .base import Block, PortSample, has_cold_input, null_outputs
+from .base import Block, Signal, has_cold_input, null_outputs
 
 INPUT_PORTS = ("in",)
 OUTPUT_PORTS = ("out",)
@@ -51,8 +51,8 @@ class KalmanBlock(Block):
         return OUTPUT_PORTS
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         if has_cold_input(inputs):
             return null_outputs(OUTPUT_PORTS)
 
@@ -67,7 +67,7 @@ class KalmanBlock(Block):
             self._x += gain * (measurement - self._x)
             self._p = (1.0 - gain) * predicted
         # Amostra inválida executa e propaga a flag (decisão A-6).
-        return {"out": PortSample(self._x, sample.ok)}
+        return {"out": Signal(self._x, quality=sample.quality)}
 
     def reset(self) -> None:
         self._x = None

@@ -15,7 +15,7 @@ def test_settings_le_env_com_prefixo(monkeypatch):
 
 def test_settings_defaults():
     s = Settings(_env_file=None)
-    assert s.token_ttl_hours == 12
+    assert s.token_ttl_hours == 8760  # sem timeout de inatividade na tela de operação
     assert s.admin_name == "Administrador"
     assert s.log_level == "INFO"
 

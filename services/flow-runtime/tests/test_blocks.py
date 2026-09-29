@@ -16,10 +16,11 @@ from ottima_core.bus import (
     CHANNEL_OPC_WRITES,
     KIND_WRITE_SUPPRESSED,
 )
+from ottima_core.signal import Quality
 from ottima_core.snapshot import TagValue
 from ottima_flow_runtime.blocks.base import (
     Block,
-    PortSample,
+    Signal,
     has_cold_input,
     null_outputs,
 )
@@ -63,7 +64,7 @@ class _AccumulatorBlock(Block):
             return null_outputs(self.output_ports)
         sample = inputs["in"]
         self._total += float(sample.v)
-        return {"out": PortSample(self._total, sample.ok)}
+        return {"out": Signal(self._total, quality=sample.quality)}
 
 
 def tag_value(value: float, quality: int = 0) -> TagValue:
@@ -111,23 +112,23 @@ async def test_read_de_tag_sem_valor_e_invalida():
 
     out = await block.step({})
 
-    assert out == {"out": PortSample(None, False)}
+    assert out == {"out": Signal(None)}
 
 
 async def test_read_com_quality_boa_e_valida():
     snapshot = FakeSnapshot({9: tag_value(42.5)})
     block = OpcReadBlock("b1", tag_id=9, data_type="float", snapshot=snapshot)
 
-    assert await block.step({}) == {"out": PortSample(42.5, True)}
+    assert await block.step({}) == {"out": Signal(42.5, quality=Quality.GOOD)}
 
 
-@pytest.mark.parametrize("quality", [1, 2])
-async def test_read_com_quality_ruim_preserva_o_valor(quality: int):
+@pytest.mark.parametrize(("quality", "esperado"), [(1, Quality.UNCERTAIN), (2, Quality.BAD)])
+async def test_read_com_quality_ruim_preserva_o_valor(quality: int, esperado: Quality):
     """Uncertain e bad invalidam (§3.1), mas o valor é propagado (decisão A-6)."""
     snapshot = FakeSnapshot({9: tag_value(42.5, quality=quality)})
     block = OpcReadBlock("b1", tag_id=9, data_type="float", snapshot=snapshot)
 
-    assert await block.step({}) == {"out": PortSample(42.5, False)}
+    assert await block.step({}) == {"out": Signal(42.5, quality=esperado)}
 
 
 @pytest.mark.parametrize(("raw", "expected"), [(0.0, False), (1.0, True), (2.0, True)])
@@ -165,7 +166,7 @@ async def test_read_nao_declara_entradas():
 async def test_write_publica_opc_write_com_source_do_bloco(redis_client, bus):
     block = writer(redis_client)
 
-    assert await block.step({"in": PortSample(12.5, True)}) == {}
+    assert await block.step({"in": Signal(12.5, quality=Quality.GOOD)}) == {}
 
     collected = await drain(bus, redis_client)
     assert CHANNEL_EVENTS not in collected
@@ -181,7 +182,7 @@ async def test_write_de_entrada_booleana_publica_float(redis_client, bus):
     """Contrato de barramento: `value` é float; a coerção de Variant é do opc-worker."""
     block = writer(redis_client)
 
-    await block.step({"in": PortSample(True, True)})
+    await block.step({"in": Signal(True, quality=Quality.GOOD)})
 
     (write,) = (await drain(bus, redis_client))[CHANNEL_OPC_WRITES]
     assert write["value"] == 1.0
@@ -191,7 +192,7 @@ async def test_write_de_entrada_booleana_publica_float(redis_client, bus):
 async def test_write_com_entrada_invalida_suprime_e_avisa(redis_client, bus):
     block = writer(redis_client)
 
-    await block.step({"in": PortSample(12.5, False)})
+    await block.step({"in": Signal(12.5)})
 
     collected = await drain(bus, redis_client)
     assert CHANNEL_OPC_WRITES not in collected
@@ -207,7 +208,7 @@ async def test_write_com_entrada_nula_suprime_e_avisa(redis_client, bus):
     """Caso do E2E-F3-10: cold start a montante não vira escrita de 0.0."""
     block = writer(redis_client)
 
-    await block.step({"in": PortSample(None, True)})
+    await block.step({"in": Signal(None, quality=Quality.GOOD)})
 
     collected = await drain(bus, redis_client)
     assert CHANNEL_OPC_WRITES not in collected
@@ -220,13 +221,13 @@ async def test_write_dedupe_um_evento_por_periodo_de_supressao(redis_client, bus
     block = writer(redis_client)
 
     for _ in range(3):
-        await block.step({"in": PortSample(None, True)})
+        await block.step({"in": Signal(None, quality=Quality.GOOD)})
 
     collected = await drain(bus, redis_client)
     assert len(collected[CHANNEL_EVENTS]) == 1
 
-    await block.step({"in": PortSample(1.0, True)})
-    await block.step({"in": PortSample(None, True)})
+    await block.step({"in": Signal(1.0, quality=Quality.GOOD)})
+    await block.step({"in": Signal(None, quality=Quality.GOOD)})
 
     collected = await drain(bus, redis_client)
     assert len(collected[CHANNEL_OPC_WRITES]) == 1
@@ -236,11 +237,11 @@ async def test_write_dedupe_um_evento_por_periodo_de_supressao(redis_client, bus
 async def test_write_reset_rearma_o_dedupe(redis_client, bus):
     """`reset()` é o deploy/stop: o próximo período de supressão avisa de novo."""
     block = writer(redis_client)
-    await block.step({"in": PortSample(None, True)})
+    await block.step({"in": Signal(None, quality=Quality.GOOD)})
     await drain(bus, redis_client)
 
     block.reset()
-    await block.step({"in": PortSample(None, True)})
+    await block.step({"in": Signal(None, quality=Quality.GOOD)})
 
     assert len((await drain(bus, redis_client))[CHANNEL_EVENTS]) == 1
 
@@ -261,17 +262,19 @@ async def test_cold_start_nao_executa_e_nao_avanca_estado():
     """Spec §3.0: entrada `null` não executa o bloco nem move o estado interno."""
     block = _AccumulatorBlock("b3")
 
-    assert await block.step({"in": PortSample(None, False)}) == {"out": PortSample(None, False)}
+    assert await block.step({"in": Signal(None)}) == {"out": Signal(None)}
 
     # O efeito observável do não-avanço: a varredura seguinte parte do zero.
-    assert await block.step({"in": PortSample(5.0, True)}) == {"out": PortSample(5.0, True)}
+    assert await block.step({"in": Signal(5.0, quality=Quality.GOOD)}) == {
+        "out": Signal(5.0, quality=Quality.GOOD)
+    }
 
 
 async def test_invalidez_propaga_sem_impedir_execucao():
     """Decisão A-6: valor conhecido com flag ruim executa e contamina a saída."""
     block = _AccumulatorBlock("b3")
 
-    out = await block.step({"in": PortSample(5.0, False)})
+    out = await block.step({"in": Signal(5.0)})
 
     assert out["out"].v == 5.0
     assert out["out"].ok is False
@@ -280,12 +283,17 @@ async def test_invalidez_propaga_sem_impedir_execucao():
 def test_has_cold_input_ignora_portas_ausentes():
     """Contrato do scheduler: porta desconectada não aparece em `inputs` e não bloqueia."""
     assert has_cold_input({}) is False
-    assert has_cold_input({"a": PortSample(1.0, True)}) is False
-    assert has_cold_input({"a": PortSample(1.0, True), "b": PortSample(None, True)}) is True
+    assert has_cold_input({"a": Signal(1.0, quality=Quality.GOOD)}) is False
+    assert (
+        has_cold_input(
+            {"a": Signal(1.0, quality=Quality.GOOD), "b": Signal(None, quality=Quality.GOOD)}
+        )
+        is True
+    )
 
 
 def test_null_outputs_marca_todas_as_saidas_como_invalidas():
     assert null_outputs(("y1", "y2")) == {
-        "y1": PortSample(None, False),
-        "y2": PortSample(None, False),
+        "y1": Signal(None),
+        "y2": Signal(None),
     }

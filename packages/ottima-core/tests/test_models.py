@@ -9,6 +9,7 @@ def test_metadata_tem_todas_as_tabelas_relacionais():
         "tags",
         "calculated_tags",
         "calculated_tag_inputs",
+        "historized_vars",
         "flows",
         "mpc_setpoints",
         "loop_setpoints",

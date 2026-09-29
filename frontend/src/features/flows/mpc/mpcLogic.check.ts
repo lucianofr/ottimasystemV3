@@ -302,16 +302,62 @@ test("parModeloDoFormulario troca a forma dos params quando o kind da linha muda
   const atual = { enabled: true, params: { K: 1.2, tau1: 120, tau2: 30, theta: 15 } };
   const dados = formulario({
     [nomeCampoModelo("cv_a1b2", "mv_x7k2", "Ki")]: "0,4",
+    [nomeCampoModelo("cv_a1b2", "mv_x7k2", "tau1")]: "60",
     [nomeCampoModelo("cv_a1b2", "mv_x7k2", "theta")]: "2",
   });
   const novo = parModeloDoFormulario(atual, "cv_a1b2", "mv_x7k2", "integrating", dados);
-  expect(Object.keys(novo.params).sort()).toEqual(["Ki", "theta"]);
-  expect(novo.params).toEqual({ Ki: 0.4, theta: 2 });
+  expect(Object.keys(novo.params).sort()).toEqual(["Ki", "tau1", "theta"]);
+  expect(novo.params).toEqual({ Ki: 0.4, tau1: 60, theta: 2 });
 });
 
-test("paramsPadraoLinha devolve a forma SOPDT/IOPDT conforme kind", () => {
+test("troca selfreg→integrating carrega o τ1 do SOPDT como lag do IFOPDT", () => {
+  // Decisão deliberada: τ1 é a MESMA grandeza nas duas formas (constante de tempo de 1ª
+  // ordem, em segundos), então o fallback `atual.params.tau1` preserva o número que o
+  // usuário digitou em vez de zerá-lo. O campo fica visível na matriz para ele revisar.
+  const atual = { enabled: true, params: { K: 1.2, tau1: 120, tau2: 30, theta: 15 } };
+  const dados = formulario({ [nomeCampoModelo("cv_a1b2", "mv_x7k2", "Ki")]: "0,4" });
+
+  const novo = parModeloDoFormulario(atual, "cv_a1b2", "mv_x7k2", "integrating", dados);
+
+  expect(novo.params).toEqual({ Ki: 0.4, tau1: 120, theta: 15 });
+});
+
+test("paramsPadraoLinha devolve a forma SOPDT/IFOPDT conforme kind", () => {
   expect(paramsPadraoLinha("selfreg")).toEqual({ K: 1, tau1: 1, tau2: 0, theta: 0 });
-  expect(paramsPadraoLinha("integrating")).toEqual({ Ki: 1, theta: 0 });
+  // Integrador: τ1 é o lag opcional do IFOPDT e nasce 0 (integrador puro).
+  expect(paramsPadraoLinha("integrating")).toEqual({ Ki: 1, tau1: 0, theta: 0 });
+});
+
+test("par integrador gravado sem tau1 continua íntegro (config anterior ao campo)", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [mv("mv_1")],
+    cvs: [cv("cv_1", { kind: "integrating", tss: 600 })],
+    constraints: [],
+    dvs: [],
+  };
+  const semTau1 = { cv_1: { mv_1: parIntegrating() } };
+  const comTau1 = { cv_1: { mv_1: parIntegrating({ tau1: 60 }) } };
+
+  expect(validarConfigMpc(variaveis, semTau1, 10, 1).erros).toEqual([]);
+  expect(validarConfigMpc(variaveis, comTau1, 10, 1).erros).toEqual([]);
+  // O lag vira um estado a mais no modelo agregado (espelho de `mpc_state_dimension`).
+  expect(dimensaoEstado(variaveis, semTau1, 5)).toBe(1 + 1);
+  expect(dimensaoEstado(variaveis, comTau1, 5)).toBe(1 + 2);
+});
+
+test("par integrador com tau1 negativo ou chave desconhecida reprova", () => {
+  const variaveis: VariaveisMpc = {
+    mvs: [mv("mv_1")],
+    cvs: [cv("cv_1", { kind: "integrating", tss: 600 })],
+    constraints: [],
+    dvs: [],
+  };
+
+  const invalidos: Record<string, number>[] = [{ tau1: -1 }, { tau2: 5 }];
+  for (const params of invalidos) {
+    const { erros } = validarConfigMpc(variaveis, { cv_1: { mv_1: parIntegrating(params) } }, 10, 1);
+    expect(erros.join(" ")).toContain("parâmetros inválidos");
+  }
 });
 
 test("tagsPorDirecao filtra por W (write/mode_cmd) e R (readback/mode_read)", () => {

@@ -1,6 +1,12 @@
 import { expect, test } from "@playwright/test";
 
-import { faixaDaEscala, limiteOperacional, type FaceplateVariavelProps, type VariavelTipo } from "./FaceplateVariavel";
+import {
+  faixaDaEscala,
+  limiteOperacional,
+  percentualNaBarra,
+  type FaceplateVariavelProps,
+  type VariavelTipo,
+} from "./FaceplateVariavel";
 import { gradeDeVariaveis } from "./gradeVariaveis";
 import type { MpcNodeOut } from "./useMpcs";
 
@@ -95,6 +101,27 @@ test("gradeDeVariaveis sem range na DV: definição null, barra na faixa do inst
   const dv = grade.find((item) => item.tipo === "dv");
   expect(dv?.definicao.range).toBeNull();
   expect(faixaDaEscala(dv as FaceplateVariavelProps)).toEqual({ min: 0, max: 100 });
+});
+
+/**
+ * `percentualNaBarra` — mapeamento valor→altura da barra. Os rótulos desenhados no topo/base
+ * são `faixa.max`/`faixa.min`, então fim de escala TEM de cair em 100%/0%: qualquer folga
+ * empurra o marcador de um limite igual ao fim de escala (MV 0-100 em faixa 0-100) para
+ * dentro da barra e mente sobre "chegou no limite?" — foi o bug corrigido aqui.
+ */
+
+test("percentualNaBarra leva a faixa publicada às bordas da barra e clampa fora dela", () => {
+  const faixa = { min: 0, max: 100 };
+  expect(percentualNaBarra(0, faixa)).toBe(0);
+  expect(percentualNaBarra(100, faixa)).toBe(100);
+  expect(percentualNaBarra(25, faixa)).toBe(25);
+  // Faixa deslocada (zero/span ≠ 0/100): fim de escala continua nas bordas.
+  expect(percentualNaBarra(20, { min: 20, max: 70 })).toBe(0);
+  expect(percentualNaBarra(70, { min: 20, max: 70 })).toBe(100);
+  // PV fora da faixa fica grudado na borda; faixa degenerada não divide por zero.
+  expect(percentualNaBarra(140, faixa)).toBe(100);
+  expect(percentualNaBarra(-40, faixa)).toBe(0);
+  expect(percentualNaBarra(5, { min: 10, max: 10 })).toBe(0);
 });
 
 /**

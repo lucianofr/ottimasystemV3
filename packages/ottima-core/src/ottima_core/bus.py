@@ -5,10 +5,13 @@ Canais são FIXOS: criar/alterar canal exige ADR (CLAUDE.md). Consumo real come�
 
 import logging
 from datetime import UTC, datetime
+from enum import IntEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from redis.asyncio import Redis
+
+from ottima_core.signal import OpcQuality, Quality, Substatus
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +22,24 @@ CHANNEL_CALC_VALUES = "calc.values"
 """Valores de tags calculadas (ADR-033). Canal fixo, sem sufixo: o produtor é um só
 (`calc-worker`) e nenhum consumidor filtra por origem — todos casam por `tag_id` no payload.
 Reusa `OpcValue` verbatim, então recorder e `/ws` gravam e distribuem sem tradução."""
+
+CHANNEL_FLOW_VALUES = "flow.values"
+"""Valores de portas de bloco historiadas (ADR-041). Canal fixo, sem sufixo: o produtor é um
+só (`flow-runtime`) e o consumidor (`recorder`) casa por `tag_id` no payload, não pela origem.
+Reusa `OpcValue` verbatim — o recorder grava por `ingest_sample`, igual a `calc.values`.
+
+Cadência: `max(Ts_flow, 1 s)` por porta (ADR-041 D3) — o throttle é na ORIGEM, não no
+recorder. `PortValue` inválida (`ok=False` ou `v=None`) viaja como `value=0.0, quality=2`:
+`OpcValue.value` é `float` estrito e alargá-lo mudaria o contrato compartilhado de
+`opc.values`/`calc.values`; o recorder troca por NULL sozinho ao ver `quality=2` (ADR-037)."""
+
+CHANNEL_FLOW_EXCHANGE = "flow.exchange"
+"""Troca de variável ENTRE flows (ADR-042). Canal fixo, sem sufixo: a identidade da variável
+é a `key` DENTRO do payload (`ExchangeValue`), como `tag_id` em `calc.values`/`flow.values` —
+o canvas nunca cria nome de canal (ADR-042 D1). Produtor e consumidor são o mesmo serviço
+(`flow-runtime`): o bloco `bus_publish` publica, o espelho `ExchangeSnapshot` de cada
+processo assina, e o bloco `bus_subscribe` lê do espelho. Nada é persistido — sem recorder,
+sem `/ws`."""
 
 
 def channel_opc_values(conn_id: int) -> str:
@@ -45,7 +66,50 @@ class OpcValue(BaseModel):
     tag_id: int
     ts: datetime
     value: float
-    quality: int  # 0=good, 1=uncertain, 2=bad (spec F1 §3.2)
+    quality: OpcQuality  # polaridade OPC (spec F1 §3.2) — a INVERSA de `Quality`; ver signal.py
+
+    @field_validator("quality", mode="before")
+    @classmethod
+    def _quality_no_dominio(cls, v: object) -> object:
+        """Guard de polaridade (ADR-043 §4) que nunca derruba mensagem do fio (ADR-009).
+
+        Enum de porta (`Quality`/`Substatus`) e `bool` só existem em construção Python e são
+        REJEITADOS: em lax, `Quality.BAD` (=0) viraria GOOD em silêncio — a inversão exata
+        que este campo existe para impedir. Int cru 0/1/2 passa (site legado não vira bomba
+        de runtime — ex.: heartbeat republicando `TagSnapshot.quality` com sessão caída).
+        Int fora do domínio colapsa para BAD: rejeitar descartaria o payload inteiro no
+        espelho (`snapshot._ingest` faz warning+return) e a disponibilidade do MPC seria
+        classificada sobre o último valor BOM retido — o lado errado da falha.
+        """
+        if isinstance(v, bool) or (isinstance(v, IntEnum) and not isinstance(v, OpcQuality)):
+            raise ValueError("quality exige a polaridade OPC (OpcQuality), não bool/enum de porta")
+        if isinstance(v, int) and v not in (0, 1, 2):
+            return OpcQuality.BAD
+        return v
+
+
+class ExchangeValue(BaseModel):
+    """Payload de `flow.exchange` (ADR-042 D1, campos de qualidade emendados por ADR-043 §6).
+
+    `v` é `float | bool` porque as portas dos dois blocos são bivalentes (decisão A-5): um
+    booleano publicado chega booleano do outro lado, sem virar `1.0` no caminho. O bloco
+    `bus_publish` transporta o `Signal` completo da entrada verbatim (ADR-043 D9) — `quality`,
+    `substatus` e os dois bits de limitação viajam tal como chegaram, nunca reinterpretados;
+    cold start nunca é publicado, então não existe `v: None` aqui.
+
+    `period_s` é o Ts do flow publicador e é o que dá validade automática ao assinante:
+    `idade > 3 × period_s` ⇒ saída rebaixada para `min(quality, UNCERTAIN)`, nunca elevada
+    (D4). Vem no payload em vez de config porque só o publicador conhece a própria cadência.
+    """
+
+    key: str
+    ts: datetime
+    v: float | bool
+    quality: Quality
+    substatus: Substatus = Substatus.NON_SPECIFIC
+    hi_limited: bool = False
+    lo_limited: bool = False
+    period_s: float
 
 
 class OpcWrite(BaseModel):
@@ -58,12 +122,19 @@ class OpcWrite(BaseModel):
 
 
 class PortValue(BaseModel):
-    """Valor de uma porta de bloco numa varredura (spec F3 §4.2, decisão A-3)."""
+    """Valor de uma porta de bloco numa varredura (spec F3 §4.2; ADR-043 §6).
+
+    Polaridade Fieldbus (BAD=0/UNCERTAIN=1/GOOD=2) — NUNCA a de OpcValue.
+    Validade para render: `quality == GOOD`; o canvas dessatura o resto.
+    """
 
     # União em modo smart do Pydantic v2: `True` continua bool e `42.5` continua float no
     # round-trip. O canvas desenha lâmpada para bool e número para float; coerção seria defeito.
     v: float | bool | None
-    ok: bool  # False = valor inválido; o canvas dessatura e rotula (decisão #6)
+    quality: Quality
+    substatus: Substatus = Substatus.NON_SPECIFIC
+    hi_limited: bool = False
+    lo_limited: bool = False
 
 
 class FlowStatus(BaseModel):
@@ -305,6 +376,13 @@ KIND_LOOP_LIMITED = "loop_limited"
 KIND_LOOP_TARGET_WRITTEN = "loop_target_written"
 KIND_LOOP_SP_WRITTEN = "loop_sp_written"
 KIND_LOOP_OUT_WRITTEN = "loop_out_written"
+
+# Vocabulário `kind` novo da variável historiada (ADR-041). `pruned` é o único não disparado
+# por ação direta do usuário: o save do flow apaga o cadastro de uma porta que deixou de
+# existir, e a auditoria é a única pista que sobra para quem perdeu a série.
+KIND_HISTORIZED_VAR_CREATED = "historized_var_created"
+KIND_HISTORIZED_VAR_DELETED = "historized_var_deleted"
+KIND_HISTORIZED_VAR_PRUNED = "historized_var_pruned"
 
 # Vocabulário `kind` novo da F5 (spec F5 §7.2-2, F5R-02b).
 KIND_SCRIPT_RECOVERED = "script_recovered"  # severity "info"

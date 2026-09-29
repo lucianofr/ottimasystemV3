@@ -133,7 +133,11 @@ def test_mv_saudavel_segue_se_movendo_com_a_outra_congelada(worker_2x1) -> None:
         worker_2x1,
         _pedido(u_applied={"mv_1": 10.0, "mv_2": 20.0}, frozen=frozenset({"mv_2"})),
     )
-    assert result.u_plan["mv_1"] == pytest.approx(10.0 + DU_MAX, abs=1e-3)
+    # abs=1e-2: o teto é o `du_max` da MV saudável; o IPOPT (warm start, término
+    # "acceptable") entrega a restrição de taxa satisfeita dentro da tolerância do solver
+    # (~6e-3 no pior caso medido), não bit-a-bit. A folga continua pegando o defeito real
+    # (MV saudável congelada junto, ou andando além do rate).
+    assert result.u_plan["mv_1"] == pytest.approx(10.0 + DU_MAX, abs=1e-2)
 
 
 def test_predicao_da_mv_congelada_e_plana_no_valor_medido(worker_2x1) -> None:
@@ -171,7 +175,9 @@ def test_mv_congelada_fora_dos_limites_e_clampada_e_nao_quebra_o_solve(worker_2x
         _pedido(u_applied={"mv_1": 10.0, "mv_2": 1500.0}, frozen=frozenset({"mv_2"})),
     )
     assert result.status == "ok"
-    assert result.u_plan["mv_2"] == pytest.approx(LIMITES[1], abs=1e-6)
+    # abs=1e-4: clamp no limite duro, com a violação de restrição que o IPOPT aceita no
+    # término (~2.5e-6 medido) — nunca além disso.
+    assert result.u_plan["mv_2"] == pytest.approx(LIMITES[1], abs=1e-4)
 
 
 def test_congelamento_vale_tambem_sem_reinit(worker_2x1) -> None:

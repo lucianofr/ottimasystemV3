@@ -39,7 +39,9 @@ from datetime import datetime
 
 from simple_pid import PID
 
-from .base import Block, PortSample, has_cold_input, null_outputs
+from ottima_core.signal import Quality
+
+from .base import Block, Signal, has_cold_input, null_outputs
 
 logger = logging.getLogger(__name__)
 
@@ -116,16 +118,16 @@ class PidBlock(Block):
         return OUTPUT_PORTS
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         if has_cold_input(inputs):
             return null_outputs(OUTPUT_PORTS)
 
-        # Amostra inválida executa e propaga a flag (decisão A-6) -- mas só depois do
-        # guard de finitude abaixo, que decide se o passo sequer chama o controlador.
-        ok_entradas = all(
-            sample.ok and math.isfinite(float(sample.v)) for sample in inputs.values()
-        )
+        # Amostra inválida executa e propaga a flag (decisão A-6). `q_entradas` é a
+        # qualidade CRUA das entradas (mínimo das flags) -- NUNCA rebaixada aqui por
+        # valor não-finito: essa distinção é o que permite `_retido` diferenciar
+        # retenção genuína (entrada GOOD, valor nan/inf) de entrada já BAD (ADR-043 D7).
+        q_entradas = min((s.quality for s in inputs.values()), default=Quality.GOOD)
 
         pv = float(inputs["pv"].v)
         setpoint = float(inputs["sp"].v) if "sp" in inputs else self._setpoint
@@ -134,7 +136,7 @@ class PidBlock(Block):
         # envenenaria a integral para sempre, e a saída ficaria `nan` mesmo depois do
         # sinal se recuperar (ver docstring do módulo).
         if not (math.isfinite(pv) and math.isfinite(setpoint)):
-            return self._retido()
+            return self._retido(q_entradas)
 
         self._pid.setpoint = setpoint
         try:
@@ -146,19 +148,25 @@ class PidBlock(Block):
                 "Bloco PID '%s': falha no controlador -- retendo a última saída (ok=False)",
                 self.block_id,
             )
-            return self._retido()
+            return self._retido(q_entradas)
 
         # `auto_mode=False` sem cômputo anterior devolve `None` (`_last_output` do
         # simple-pid ainda não setado) -- trata como qualquer outra saída ruim.
         if resultado is None or not math.isfinite(resultado):
-            return self._retido()
+            return self._retido(q_entradas)
 
         self._last = resultado
-        return {"out": PortSample(resultado, ok_entradas)}
+        return {"out": Signal(resultado, quality=q_entradas)}
 
-    def _retido(self) -> dict[str, PortSample]:
-        """Saída retida (RF-553): última boa conhecida, sempre `ok=False`."""
-        return {"out": PortSample(self._last, False)}
+    def _retido(self, q: Quality) -> dict[str, Signal]:
+        """Saída retida (RF-553): último bom conhecido, rebaixado a UNCERTAIN sem
+        elevar entrada BAD (ADR-043 D7) -- teto `min(UNCERTAIN, q_entradas)`: entrada
+        boa retida vira UNCERTAIN (UncertainLastUsable), entrada BAD permanece BAD.
+        Sem saída boa anterior (`self._last is None`) não há o que reter -- ausência de
+        dado, não retenção: fica BAD como `null_outputs`, independente de `q`."""
+        if self._last is None:
+            return {"out": Signal(None, quality=Quality.BAD)}
+        return {"out": Signal(self._last, quality=min(Quality.UNCERTAIN, q))}
 
     def reset(self) -> None:
         # Reconstrói em vez de `self._pid.reset()`: `PID.reset()` zera `_integral` mas

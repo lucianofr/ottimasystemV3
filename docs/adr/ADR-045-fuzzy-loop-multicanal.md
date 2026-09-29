@@ -58,7 +58,7 @@ O custo do save fica em `n_loops × resolução²` avaliações. No pior caso (4
 
 - **Sem canal novo** (ADR-002). O `LoopState` ganha o campo `channel`, com default 0, e o bloco publica um `LoopState` por canal no **mesmo** canal do barramento.
 - **Recorder:** o `var_id` do canal 0 continua `pv`/`sp`/`out`/`mode`. Os demais canais ganham sufixo: `pv:1`, `sp:1` e assim por diante. Histórico SISO existente não muda de nome, e `/api/history/loop` aceita o sufixo.
-- **`loop_setpoints`:** a PK passa a ser `(flow_id, block_id, channel)`. A migration de dados sobre `flows.graph_json` (mesmo padrão da 0009) converte os `fuzzy_loop` SISO gravados:
+- **`loop_setpoints`:** a PK passa a ser `(flow_id, block_id, channel)`. A migration `0017_loop_setpoints_channel` (sobre a `0016_historized_vars`) também migra dados de `flows.graph_json`, no mesmo padrão da 0009, e converte os `fuzzy_loop` SISO gravados:
   - `in` vira `pv_1` e `out` vira `out_1`;
   - os modos remotos saem de `permitted`/`normal`.
 
@@ -98,10 +98,9 @@ O custo do save fica em `n_loops × resolução²` avaliações. No pior caso (4
   - §5.3: portões por canal (D6).
   - §6.1: retirar as portas remotas e adicionar `N_LOOPS`.
   - §6.3: `N_LOOPS` passa a ser estrutural.
-  - §8: a migration `0015_loop_tables` deixa de ser a única, porque esta ADR acrescenta a migration de canal (D7), e o nó ganha portas por canal.
+  - §8: a migration `0015_loop_tables` deixa de ser a única, porque esta ADR acrescenta a `0017_loop_setpoints_channel` (D7), e o nó ganha portas por canal.
   - §9: F1 cobre os códigos novos de contagem; incluir o cenário MIMO acoplado (`test_fuzzy_loop_mimo.py`).
-- **Rebase no `main`:**
-  - A migration desta branch nasceu como `0016_loop_setpoints_channel` e colide com a `0016_historized_vars` do `main`. Ela vira `0017_…` com `down_revision = "0016_historized_vars"`.
-  - O shell precisa ser reconciliado com o `Signal` do ADR-043. Esta branch ainda tem `is_good = quality is not BAD` (UNCERTAIN tratado como GOOD); no `main`, `is_good` só é verdadeiro para GOOD e as regras de shed 5–8 disparam também em UNCERTAIN. O `pv_ok` por canal do D5 tem de ser re-derivado sobre essa regra.
-  - A garantia "o `pid_loop` segue byte a byte no caminho SISO" foi conferida contra `bd1489c`, não contra o `block.py` atual do `main`: refazer essa conferência depois do rebase.
+- **Integração com o `main` (feita no merge):**
+  - A migration nasceu como `0016_loop_setpoints_channel` e colidia com a `0016_historized_vars`. Virou `0017_loop_setpoints_channel`, com `down_revision = "0016_historized_vars"`.
+  - O shell multicanal usa o `Signal` do ADR-043: o `pv_ok` de cada canal é `Signal.ok` (verdadeiro só para GOOD). Portanto, PV UNCERTAIN em qualquer canal também rebaixa o bloco para MAN (D5).
 - **ADR-040:** com a aresta de realimentação, a demo MIMO (`scripts/setup-malha-fuzzy.py`) poderia fechar a malha no canvas em vez de pelo OPC. Ela continua fechando pelo OPC, que é o mesmo caminho da suíte RNF-09 e exercita watchdog e escrita.

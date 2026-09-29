@@ -20,8 +20,8 @@ from typing import Any
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0016_loop_setpoints_channel"
-down_revision = "0015_loop_tables"
+revision = "0017_loop_setpoints_channel"
+down_revision = "0016_historized_vars"
 branch_labels = None
 depends_on = None
 
@@ -111,7 +111,7 @@ def downgrade() -> None:
     ]
     if multicanal:
         raise RuntimeError(
-            "downgrade da 0016 impossível: fuzzy_loop com n_loops > 1 em "
+            "downgrade da 0017 impossível: fuzzy_loop com n_loops > 1 em "
             + ", ".join(multicanal)
             + ". Reduza esses blocos para 1 canal antes de voltar a revisão."
         )
@@ -122,7 +122,7 @@ def downgrade() -> None:
         sujo = False
         for node in nos:
             if isinstance(node.get("data"), dict) and "n_loops" in node["data"]:
-                del node["data"]["n_loops"]  # a 0015 tem extra="forbid" no config
+                del node["data"]["n_loops"]  # sem esta revisao, o config tem extra="forbid"
                 sujo = True
         ids = {n["id"] for n in nos if isinstance(n.get("id"), str)}
         inverso_saidas = {v: k for k, v in _SAIDAS.items()}

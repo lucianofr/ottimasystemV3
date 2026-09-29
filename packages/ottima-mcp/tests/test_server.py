@@ -173,6 +173,7 @@ def test_block_catalog_expoe_node_types_e_contratos() -> None:
     assert catalogo["node_types"] == [
         "opc_read",
         "opc_write",
+        "constant",
         "script",
         "fuzzy",
         "tfs",
@@ -180,6 +181,25 @@ def test_block_catalog_expoe_node_types_e_contratos() -> None:
         "first_order",
         "kalman",
         "pid",
+        "pid_loop",
+        "fuzzy_loop",
+        "scaler",
+        "integrator",
+        "bus_publish",
+        "bus_subscribe",
+        "lead_lag",
+        "dead_time",
     ]
     assert "port_contracts" in catalogo
     assert "node_configs" in catalogo
+
+
+def test_literal_de_flow_add_block_cobre_todo_node_type() -> None:
+    """O enum de `flow_add_block` é espelho MANUAL de `NODE_TYPES`: hoje está em dia, e é
+    justamente por isso que vale travar agora. Um tipo novo registrado em `parse.py` e
+    esquecido aqui nasce invisível para agente, sem nada quebrar."""
+    from typing import get_args
+
+    from ottima_core.flowgraph.parse import NODE_TYPES
+
+    assert set(get_args(server.TipoBlocoLiteral)) == set(NODE_TYPES)

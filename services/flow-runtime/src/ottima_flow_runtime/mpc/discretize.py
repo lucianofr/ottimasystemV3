@@ -87,6 +87,10 @@ def _stage(tau: float, ts: float) -> tuple[float, float] | None:
 def discretize_sopdt(K: float, tau1: float, tau2: float, theta: float, ts: float) -> PairSS:
     """SOPDT (dois estágios de 1a ordem em série, ganho `K` aplicado na saída) no `Ts_mpc`.
 
+    UNIDADES (contrato do config, RF-602): `K` chega aqui já em EU (Δy_EU/Δu_EU, convertido
+    de %/% por `eu_gain_params`); `tau1`/`tau2`/`theta`/`ts` TODOS em segundos — o config do
+    usuário informa tempos em segundos e nada neste módulo converte base de tempo.
+
     **Dois estágios ativos:** 2 estados, forma companion triangular inferior — pólos
     `e^(-Ts/tau1)` e `e^(-Ts/tau2)` (autovalores de `a`, a própria diagonal por
     triangularidade). Derivação: o estágio 2 consome a saída JÁ ATUALIZADA do estágio 1 na
@@ -128,28 +132,76 @@ def discretize_sopdt(K: float, tau1: float, tau2: float, theta: float, ts: float
     return PairSS(a=a, b=b, c=c, delay=delay)
 
 
-def discretize_iopdt(Ki: float, theta: float, ts: float) -> PairSS:
-    """IOPDT: integrador retangular `acc += Ki*Ts*u` — idêntico ao `_Iopdt` do TFS, 1 estado
-    sem limiar de passagem direta (a spec só aplica `Ts/DIRECT_PASS_RATIO` aos estágios do
-    SOPDT — §3.1; um integrador nunca degrada a passagem direta)."""
-    a = np.array([[1.0]])
-    b = np.array([[Ki * ts]])
-    c = np.array([[1.0]])
-    return PairSS(a=a, b=b, c=c, delay=_delay_samples(theta, ts))
+def discretize_iopdt(Ki: float, theta: float, ts: float, *, tau1: float = 0.0) -> PairSS:
+    """IOPDT/IFOPDT: integrador retangular `acc += Ki*Ts*u`, opcionalmente alimentado por um
+    estágio de 1a ordem (`tau1 > 0`) — `Ki·e^(-θs)/(s·(τ1·s+1))`.
+
+    `tau1 = 0` (ou abaixo de `Ts/DIRECT_PASS_RATIO`, o mesmo limiar do SOPDT) devolve o
+    integrador puro de 1 estado — forma idêntica à de antes do campo existir, então todo
+    config gravado sem `tau1` carrega bit a bit igual. Com o lag ativo são 2 estados
+    `[x_lag, acumulador]`, na MESMA composição "atualiza-e-emite" do SOPDT: o acumulador
+    consome a saída JÁ atualizada do estágio (`acc[k+1] = acc[k] + Ki·Ts·x1[k+1]`), o que dá
+    `a = [[a1, 0], [Ki·Ts·a1, 1]]`, `b = [[b1], [Ki·Ts·b1]]`, `c = [[0, 1]]` — pólos `a1` e
+    `1`. A saída é SEMPRE o acumulador (último estado): `bumpless` e o SSTO dependem disso.
+
+    O lag não altera a taxa de regime — `y` converge para `Ki·u` por segundo, só deslocado
+    no tempo pelo transiente do estágio; quem lê a taxa de rampa do `PairSS` tem de resolver
+    o estágio assentado, não `(c·b)/Ts` (ver `target_calculation.model`).
+
+    UNIDADES (contrato do config, RF-602): `Ki` chega aqui já em EU/s por EU — convertido em
+    `eu_gain_params` do ganho NORMALIZADO **%/%/s** informado pelo usuário (taxa da linha em
+    % do span DELA por segundo, por **1% do span da coluna**): `Ki_EU = Ki ×
+    span_linha/span_coluna`, a MESMA razão de spans do SOPDT. `b = Ki_EU*ts` com `ts` em
+    segundos entrega o incremento por amostra; `tau1`/`theta`/`ts` também em segundos. Ki em
+    %/min produziria modelo 60× lento: a UI rotula o campo com a base completa
+    (`Ki (%/(%·s))`, TabModels)."""
+    delay = _delay_samples(theta, ts)
+    stage = _stage(tau1, ts)
+    if stage is None:
+        a = np.array([[1.0]])
+        b = np.array([[Ki * ts]])
+        c = np.array([[1.0]])
+        return PairSS(a=a, b=b, c=c, delay=delay)
+
+    a1, b1 = stage
+    ki_ts = Ki * ts
+    a = np.array([[a1, 0.0], [ki_ts * a1, 1.0]])
+    b = np.array([[b1], [ki_ts * b1]])
+    c = np.array([[0.0, 1.0]])
+    return PairSS(a=a, b=b, c=c, delay=delay)
 
 
 def eu_gain_params(
     params: dict[str, float], *, kind: RowKind, row_span: float, col_span: float
 ) -> dict[str, float]:
-    """Converte o ganho do config — adimensional %/% (ΔCV%/ΔMV%, RF-602 revisado) — para a
-    forma em EU que `discretize_*` espera: multiplica `K` (selfreg) ou `Ki` (integrating)
-    por `span_linha / span_coluna`. Os defaults 0/100 dão razão 1, então config sem
-    zero/span explícito reproduz o ganho de antes bit a bit. Cópia rasa: `params` do
-    chamador nunca é mutado."""
-    escala = row_span / col_span
+    """Converte os ganhos NORMALIZADOS do config para a forma em EU que `discretize_*`
+    espera, ANTES de qualquer montagem/worker (RF-602/609).
+
+    BASE DAS UNIDADES (RF-602/609 — o texto normativo do PRD manda converter os DOIS ganhos
+    por `span_linha/span_coluna`, e é o que esta função faz):
+
+    - `K` (SOPDT): adimensional %/% — `ΔCV%/ΔMV%` sobre as faixas de instrumento (zero/span,
+      RF-609). Conversão: `K_EU = K × span_linha/span_coluna`.
+    - `Ki` (IOPDT): **%/%/s** — taxa da linha em % do span DELA por segundo, por **1% do
+      span da coluna**. Conversão: `Ki_EU = Ki × span_linha/span_coluna`, em EU/s por EU (a
+      base de tempo do ganho integral já é o segundo). A ÚNICA diferença entre as duas formas
+      é a dimensão de TEMPO, nunca a normalização por span.
+
+    Ponto ÚNICO de conversão: builder dinâmico e SSTO (`target_calculation/model.py`)
+    consomem esta função, então nunca divergem.
+
+    Defaults 0/100 de zero/span dão razão de span 1, então config sem faixa explícita
+    reproduz a normalização pura. Cópia rasa: `params` do chamador nunca é mutado.
+
+    HISTÓRICO (2026-09-11 → 2026-09-12): por um dia esta função aplicou um ÷100 EXTRA no
+    integrador ("coluna sustentada em 100% do span"). Removido por ordem do dono do produto —
+    o número do campo é `%/%/s` e nada mais é dividido. Config NOVO não tem nada a converter:
+    digite o `Ki` em %/%/s e pronto. Só o modelo cujo `Ki` foi ESCOLHIDO naquela janela (para
+    compensar o ÷100) fica 100× grande e tem de ser DIVIDIDO por 100 ao migrar — flow 987,
+    linha de nível: 0,2191 gravado ⇒ 0,002191 nesta base (o Ki_EU dos dois é o mesmo).
+    REVALIDAR `economics.integrating_tolerance` e o `sp_range_pct` das linhas integradoras: a
+    faixa de taxa do SSTO traduzida em movimento de MV é `ε/Ki_EU` e encolhe 100× nesta base."""
+    chave = "K" if kind == "selfreg" else "Ki"
     convertido = dict(params)
-    if kind == "selfreg":
-        convertido["K"] = params["K"] * escala
-    else:
-        convertido["Ki"] = params["Ki"] * escala
+    convertido[chave] = params[chave] * (row_span / col_span)
     return convertido

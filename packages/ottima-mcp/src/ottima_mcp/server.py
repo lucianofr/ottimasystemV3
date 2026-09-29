@@ -489,21 +489,37 @@ async def flow_create(
     return await _grafo_create(_cliente(ctx), project_id, name, ts_seconds)
 
 
+TipoBlocoLiteral = Literal[
+    "opc_read",
+    "opc_write",
+    "constant",
+    "script",
+    "fuzzy",
+    "tfs",
+    "mpc",
+    "first_order",
+    "kalman",
+    "pid",
+    "pid_loop",
+    "fuzzy_loop",
+    "scaler",
+    "integrator",
+    "bus_publish",
+    "bus_subscribe",
+    "lead_lag",
+    "dead_time",
+]
+"""Espelho MANUAL de `NODE_TYPES` — o enum precisa ser estático para aparecer no schema da
+tool (`block_catalog` já devolve a lista dinâmica, mas o schema da tool não pode).
+`test_literal_de_flow_add_block_cobre_todo_node_type` compara os dois; sem ele o espelho
+deriva em silêncio."""
+
+
 @mcp.tool()
 async def flow_add_block(
     flow_id: Annotated[int, Field(description="Id do flow")],
     type: Annotated[
-        Literal[
-            "opc_read",
-            "opc_write",
-            "script",
-            "fuzzy",
-            "tfs",
-            "mpc",
-            "first_order",
-            "kalman",
-            "pid",
-        ],
+        TipoBlocoLiteral,
         Field(description="Tipo do bloco — ver block_catalog para os campos de config"),
     ],
     config: Annotated[
@@ -564,13 +580,24 @@ async def flow_connect(
     target: Annotated[str, Field(description="Id do bloco de destino")],
     target_handle: Annotated[str, Field(description="Porta de entrada do bloco de destino")],
     ctx: Context[ContextoOttima],
+    feedback_init: Annotated[
+        float | None,
+        Field(
+            description=(
+                "Só para ARESTA DE REALIMENTAÇÃO (ADR-040): valor lido na partida, até a"
+                " porta de origem produzir o primeiro valor. Preencher é o que permite"
+                " fechar malha (ex.: TFS.y1 -> PID.pv); sem isto a ligação que fecha ciclo"
+                " é 422. Numa aresta comum, omita."
+            )
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """Conecta a saída de um bloco à entrada de outro. Portas: ver `block_catalog` para
     contratos fixos/dinâmicos; blocos MPC usam os ids das variáveis como porta (entrada:
     cvs/constraints/dvs; saída: mvs + `local`/`auto` fixas). 422 se a porta não existir, o
-    tipo não bater, ou a conexão fechar um ciclo."""
+    tipo não bater, ou a conexão fechar um ciclo SEM `feedback_init`."""
     return await _grafo_connect(
-        _cliente(ctx), flow_id, source, source_handle, target, target_handle
+        _cliente(ctx), flow_id, source, source_handle, target, target_handle, feedback_init
     )
 
 

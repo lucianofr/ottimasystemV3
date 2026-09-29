@@ -9,9 +9,10 @@ import math
 
 from shell_harness import EventosFake, amostra, bloco, passo
 
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.shell.kernel import StubKernel
 from ottima_flow_runtime.blocks.shell.mode import Mode
-from ottima_flow_runtime.blocks.shell.signal import Quality, make_signal
 
 
 def _alarmes(eventos: EventosFake, code: str) -> list[dict]:
@@ -27,11 +28,11 @@ async def test_loop_shed_uma_vez_por_episodio() -> None:
     b.write_target(Mode.CAS)
 
     for t in (1.0, 2.0, 3.0):  # cas_in BAD persistente
-        await passo(b, t, **{"in": amostra(50.0), "cas_in": make_signal(50.0, Quality.BAD)})
+        await passo(b, t, **{"in": amostra(50.0), "cas_in": Signal(50.0, quality=Quality.BAD)})
     assert eventos.kinds().count("loop_shed") == 1
 
-    await passo(b, 4.0, **{"in": amostra(50.0), "cas_in": make_signal(50.0, Quality.GOOD)})
-    await passo(b, 5.0, **{"in": amostra(50.0), "cas_in": make_signal(50.0, Quality.BAD)})
+    await passo(b, 4.0, **{"in": amostra(50.0), "cas_in": Signal(50.0, quality=Quality.GOOD)})
+    await passo(b, 5.0, **{"in": amostra(50.0), "cas_in": Signal(50.0, quality=Quality.BAD)})
     assert eventos.kinds().count("loop_shed") == 2  # sanou e falhou de novo: novo evento
 
 
@@ -110,9 +111,9 @@ async def test_shed_rearma_por_rota_que_nao_avalia_a_fonte() -> None:
     b = bloco(eventos=eventos, permitted=Mode.OOS | Mode.MAN | Mode.AUTO | Mode.CAS)
     await passo(b, 0.0, **{"in": amostra(50.0)})
     b.write_target(Mode.CAS)
-    await passo(b, 1.0, **{"in": amostra(50.0), "cas_in": make_signal(50.0, Quality.BAD)})
+    await passo(b, 1.0, **{"in": amostra(50.0), "cas_in": Signal(50.0, quality=Quality.BAD)})
     assert eventos.kinds().count("loop_shed") == 1
 
     await passo(b, 2.0, **{"in": amostra(50.0, ok=False)})  # cai por PV, sem avaliar cas_in
-    await passo(b, 3.0, **{"in": amostra(50.0), "cas_in": make_signal(50.0, Quality.BAD)})
+    await passo(b, 3.0, **{"in": amostra(50.0), "cas_in": Signal(50.0, quality=Quality.BAD)})
     assert eventos.kinds().count("loop_shed") == 2

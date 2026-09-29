@@ -43,6 +43,15 @@ export interface AmbienteAoVivo {
 /** Fechamento por sessão inválida (§5.3); qualquer outro código é queda de rede. */
 export const CODIGO_SESSAO_INVALIDA = 1008;
 
+/** Fechamento provocado pelo vigia de canal mudo (`rearmarVigia`, `CanalAoVivo.tsx`): faixa
+ *  privada do protocolo (4000-4999), então nunca colide com código do servidor. */
+export const CODIGO_CANAL_MUDO = 4001;
+
+/** Teto de silêncio tolerado no `/ws`. O servidor manda um `ping` a cada `HEARTBEAT_S` = 10 s
+ *  (`ws.py`), logo 30 s são três heartbeats perdidos — folga para soluço de rede e para o
+ *  throttling de timer de aba em segundo plano, sem deixar o canvas mudo por minutos. */
+export const TIMEOUT_CANAL_MUDO_MS = 30000;
+
 const ATRASO_BASE_MS = 1000;
 const ATRASO_TETO_MS = 15000;
 
@@ -88,12 +97,27 @@ export function ehEstado(valor: unknown): valor is EstadoFlow {
   return valor === "running" || valor === "stopped" || valor === "failed";
 }
 
+/** Polaridade Fieldbus do ADR-043 (BAD=0/UNCERTAIN=1/GOOD=2). */
+export const QUALITY_GOOD = 2;
+export const QUALITY_UNCERTAIN = 1;
+
+/** Validade para atuação/render (emenda ADR-039 §4.1): só GOOD. */
+export function portaValida(valor: PortValue): boolean {
+  return valor.quality === QUALITY_GOOD;
+}
+
 export function lerPortValue(bruto: unknown): PortValue | null {
   const item = objeto(bruto);
-  if (item === null || typeof item.ok !== "boolean") return null;
+  if (item === null || typeof item.quality !== "number") return null;
   const v = item.v;
   if (v !== null && typeof v !== "number" && typeof v !== "boolean") return null;
-  return { v, ok: item.ok };
+  return {
+    v,
+    quality: item.quality as PortValue["quality"],
+    substatus: (typeof item.substatus === "number" ? item.substatus : 0) as PortValue["substatus"],
+    hi_limited: item.hi_limited === true,
+    lo_limited: item.lo_limited === true,
+  };
 }
 
 export function lerPorts(bruto: unknown): PortsPorBloco {

@@ -13,7 +13,8 @@ import math
 
 import pytest
 
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.pid import PidBlock
 
 TS = 0.5  # Ts do critério de aceite da F3 (PRD §8)
@@ -39,10 +40,11 @@ def bloco(**overrides) -> PidBlock:
 
 async def alimenta(
     block: PidBlock, pv: float, *, sp: float | None = None, ok: bool = True
-) -> PortSample:
-    inputs = {"pv": PortSample(pv, ok)}
+) -> Signal:
+    q = Quality.GOOD if ok else Quality.BAD
+    inputs = {"pv": Signal(pv, quality=q)}
     if sp is not None:
-        inputs["sp"] = PortSample(sp, ok)
+        inputs["sp"] = Signal(sp, quality=q)
     return (await block.step(inputs))["out"]
 
 
@@ -139,7 +141,7 @@ async def test_sem_porta_sp_usa_o_setpoint_da_config():
 
 async def test_cold_start_nao_executa():
     controlador = bloco()
-    saida = (await controlador.step({"pv": PortSample(None, False)}))["out"]
+    saida = (await controlador.step({"pv": Signal(None)}))["out"]
     assert saida.v is None
     assert saida.ok is False
 
@@ -179,11 +181,43 @@ async def test_sp_nao_finito_retem_a_ultima_saida_boa():
     assert ruim.ok is False
 
 
+async def test_retido_com_entrada_boa_sai_uncertain():
+    """RF-553 + ADR-043 D7: valor não-finito com entrada boa = retenção genuína -> teto
+    UNCERTAIN (UncertainLastUsable), nunca BAD hardcoded."""
+    controlador = bloco(kc=1.0, ti_seconds=0.0, td_seconds=0.0, setpoint=10.0)
+    boa = await alimenta(controlador, 4.0)
+    retida = await alimenta(controlador, math.nan)
+    assert retida.v == pytest.approx(boa.v)
+    assert retida.quality is Quality.UNCERTAIN
+    assert retida.ok is False
+
+
+async def test_retido_nao_lava_entrada_bad():
+    """Monotonicidade (D7): retenção NUNCA eleva — PV não-finita E com flag ruim retida
+    sai BAD, não UNCERTAIN."""
+    controlador = bloco(kc=1.0, ti_seconds=0.0, td_seconds=0.0, setpoint=10.0)
+    await alimenta(controlador, 4.0)
+    retida = await alimenta(controlador, math.nan, ok=False)
+    assert retida.quality is Quality.BAD
+
+
 async def test_entrada_invalida_e_finita_e_processada_e_propagada():
     """Decisão A-6: `ok=False` com valor finito ainda executa o controlador e propaga."""
     controlador = bloco(kc=1.0, ti_seconds=0.0, td_seconds=0.0, setpoint=10.0)
     saida = await alimenta(controlador, 4.0, ok=False)
     assert saida.v == pytest.approx(1.0 * (10.0 - 4.0))
+    assert saida.ok is False
+
+
+async def test_uncertain_sem_retencao_computa_saida_nova_e_marca_uncertain():
+    """D6 (ADR-043 §4): PV finita mas UNCERTAIN não cai na retenção (§3.1 é sobre valor
+    não-finito, não sobre `quality != GOOD`) — o controlador COMPUTA a saída desta
+    varredura e a marca UNCERTAIN, o mínimo das entradas (nem eleva a GOOD, nem rebaixa
+    a BAD)."""
+    controlador = bloco(kc=1.0, ti_seconds=0.0, td_seconds=0.0, setpoint=10.0)
+    saida = (await controlador.step({"pv": Signal(4.0, quality=Quality.UNCERTAIN)}))["out"]
+    assert saida.v == pytest.approx(1.0 * (10.0 - 4.0))
+    assert saida.quality is Quality.UNCERTAIN
     assert saida.ok is False
 
 

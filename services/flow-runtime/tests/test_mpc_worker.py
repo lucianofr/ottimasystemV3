@@ -315,8 +315,14 @@ def test_du_min_zero_reproduz_o_resultado_atual_sem_quantizar(
     spawn_worker: Callable[[MpcConfig], tuple[SpawnProcess, Connection]],
 ) -> None:
     """Guard de não-regressão (TD-007): `du_min=0.0`/`move_weight=1.0` são os defaults de
-    `MvVar` — sem quantização nenhuma, o resultado bate byte-a-byte com o valor fixado
-    ANTES desta tarefa (capturado do build sem banda morta nem ponderação de movimento)."""
+    `MvVar` — sem quantização nenhuma, o resultado reproduz o valor fixado ANTES da tarefa
+    da banda morta. Recapturado em 2026-09-11 com as opções IPOPT finais do builder (flags
+    de derivada constante + `tol=1e-10` + `bound_relax_factor=0`, sem warm start dual): o
+    oráculo de custo (cost 1.17058e-7 estabilizado de 1e-10 a 1e-12) mostra este valor como o
+    ótimo do QP convexo — o pin histórico 30.43002 JÁ era o ótimo (o tol default aterrissou
+    nele por acaso), e o valor intermediário 30.40504 (tol 1e-6) é que estava ~0.025 fora.
+    Nota: o custo é fracamente determinado perto do ótimo (~0.03 de MV move o custo em ~2%),
+    então a banda morta (`du_min`) é a proteção contra catraca nessa região, não o solver."""
     config = _config()  # du_min=0.0 (default) -> _aplicar_banda_morta nunca quantiza
     proc, conn = spawn_worker(config)
     _wait_ready(conn)
@@ -328,5 +334,76 @@ def test_du_min_zero_reproduz_o_resultado_atual_sem_quantizar(
     resultado = _recv(conn)
 
     assert resultado.status == "ok"
-    assert resultado.u_plan["mv_1"] == pytest.approx(30.43001689428463, abs=1e-6)
+    assert resultado.u_plan["mv_1"] == pytest.approx(30.429663800718, abs=1e-6)
     assert proc.is_alive()
+
+
+# --------------------------------------------------------------------------------------
+# Prime de boot — solver quente antes do handshake, sem história falsa
+# --------------------------------------------------------------------------------------
+
+
+def _config_com_ssto() -> MpcConfig:
+    """`_config()` com a camada de alvos LIGADA (ADR-027): MV com `objective != "none"` basta
+    para `optimization_enabled` — sem isto `runtime.ssto` é `None` e `_run_ssto` nunca grava
+    as âncoras, deixando qualquer asserção sobre elas vazia."""
+    raw = _config().model_dump()
+    raw["variables"]["mvs"][0]["objective"] = "minimize"
+    return MpcConfig.model_validate(raw)
+
+
+def test_prime_devolve_ancoras_do_ssto_que_um_solve_normal_preenche() -> None:
+    """Contraste que morde: num bloco com SSTO ligado, um `_solve` normal DEIXA as âncoras de
+    ΔDV/ΔMV preenchidas (ADR-027 §2/§8); o `_prime` precisa devolvê-las a `None`, senão o
+    primeiro ciclo real mira num ΔMV fantasma do pedido neutro. Sem o contraste (config sem
+    SSTO) a asserção passa mesmo com o reset apagado."""
+    from ottima_flow_runtime.mpc.worker import _build_runtime, _prime, _solve
+
+    config = _config_com_ssto()
+
+    runtime = _build_runtime(config, TS_FLOW)
+    assert runtime.ssto is not None, "premissa: esta config precisa ligar a camada de alvos"
+    normal = _solve(
+        runtime,
+        SolveRequest(
+            y={"cv_1": 60.0}, u_applied={"mv_1": 30.0}, d={}, sp={"cv_1": 60.5}, reinit=True
+        ),
+    )
+    assert normal.status == "ok"
+    assert runtime.ssto_dv_prev is not None
+    assert runtime.ssto_delta_prev is not None
+
+    primado = _build_runtime(config, TS_FLOW)
+    resultado = _prime(primado)
+    assert resultado.status == "ok", f"prime falhou: {resultado.detail}"
+    assert primado.ssto_dv_prev is None
+    assert primado.ssto_delta_prev is None
+    assert primado.built.mpc.data._x.shape[0] == 0, (
+        "a linha do prime ficou no histórico do do-mpc: `data.init_storage()` não rodou"
+    )
+
+
+def test_historico_do_do_mpc_nao_cresce_entre_solves(
+    spawn_worker: Callable[[MpcConfig], tuple[SpawnProcess, Connection]],
+) -> None:
+    """`store_full_solution` (warm start) faz o do-mpc acumular cada solve em `mpc.data` via
+    `np.append` — O(n²) e sem teto num worker longevo. `_solve` zera o storage a cada ciclo;
+    sem isso, a memória e o custo crescem hora após hora (defeito mascarado enquanto o
+    worker morria a cada poucos segundos)."""
+    from ottima_flow_runtime.mpc.worker import _build_runtime, _solve
+
+    runtime = _build_runtime(_config(), TS_FLOW)
+    request = SolveRequest(
+        y={"cv_1": 60.0}, u_applied={"mv_1": 30.0}, d={}, sp={"cv_1": 60.5}, reinit=True
+    )
+    for _ in range(5):
+        resultado = _solve(runtime, request)
+        assert resultado.status == "ok"
+        request = SolveRequest(
+            y={"cv_1": 60.0},
+            u_applied=resultado.u_plan,
+            d={},
+            sp={"cv_1": 60.5},
+            reinit=False,
+        )
+    assert runtime.built.mpc.data._x.shape[0] == 0

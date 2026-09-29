@@ -17,6 +17,7 @@ from ottima_core.models import (
     CalculatedTag,
     CalculatedTagInput,
     Flow,
+    HistorizedVar,
     OpcConnection,
     Project,
     Tag,
@@ -26,6 +27,7 @@ from ottima_core.portability.schemas import (
     BundleCalcInputRef,
     BundleConnection,
     BundleFlow,
+    BundleHistorizedVar,
     BundleProject,
     BundleTag,
     ProjectBundle,
@@ -61,20 +63,31 @@ def montar_bundle(
     exported_at: datetime,
     calculated_tags: Sequence[CalculatedTag] = (),
     calculated_tag_inputs: Sequence[CalculatedTagInput] = (),
+    historized_vars: Sequence[HistorizedVar] = (),
 ) -> ProjectBundle:
     """Projeta o estado vivo de um projeto no arquivo de portabilidade (spec §2.1-7).
 
-    `tags` traz as duas naturezas de `Tag` do projeto (OPC, com `connection_id`, e
-    calculada, com `connection_id IS NULL` — `ck_tags_owner`); `calculated_tags` e
-    `calculated_tag_inputs` são as tabelas que só existem para a segunda (RF-208,
-    ADR-033). Ordem estável — conexões e flows por `name`; tags OPC antes das
-    calculadas (a fronteira que o próprio banco já impõe), OPC por `(connection, name)`
-    como antes, calculadas por `name` — para que um arquivo que circula entre plantas
-    nunca produza diff espúrio entre duas execuções do mesmo export.
+    `tags` traz as três naturezas de `Tag` do projeto (OPC, com `connection_id`; calculada
+    e historiada, ambas com `connection_id IS NULL` — `ck_tags_owner`); `calculated_tags`/
+    `calculated_tag_inputs` só existem para a segunda (RF-208, ADR-033) e `historized_vars`
+    só para a terceira (RF-308, ADR-041 D1). A linha de `tags` de uma variável historiada é
+    filtrada AQUI, antes de qualquer coisa — nunca vai para `ProjectBundle.tags` (cairia
+    fora do XOR de `BundleTag._coerencia`, que só conhece OPC e calculada) — mesmo que o
+    chamador esqueça de excluí-la da consulta; ela é reconstruída só a partir do próprio
+    `BundleHistorizedVar` (`tag`, `eu`) no import. Ordem estável — conexões e flows por
+    `name`; tags OPC antes das calculadas (a fronteira que o próprio banco já impõe), OPC
+    por `(connection, name)` como antes, calculadas por `name`, historiadas por
+    `(flow, block_id, port)` — para que um arquivo que circula entre plantas nunca produza
+    diff espúrio entre duas execuções do mesmo export.
     """
     refs = ref_por_id(connections, tags)
     nome_da_conexao = {connection.id: connection.name for connection in connections}
+    nome_do_flow = {f.id: f.name for f in flows}
     spec_por_tag_id = {ct.tag_id: ct for ct in calculated_tags}
+    tag_por_id = {t.id: t for t in tags}
+
+    tags_historiadas_por_id = {hv.tag_id: hv for hv in historized_vars}
+    tags = [t for t in tags if t.id not in tags_historiadas_por_id]
 
     entradas_por_calculada: dict[int, list[int]] = {}
     for entrada in sorted(calculated_tag_inputs, key=lambda e: (e.calc_tag_id, e.position)):
@@ -90,6 +103,9 @@ def montar_bundle(
         ),
     )
     flows_ordenados = sorted(flows, key=lambda f: f.name)
+    historizadas_ordenadas = sorted(
+        historized_vars, key=lambda hv: (nome_do_flow[hv.flow_id], hv.block_id, hv.port)
+    )
 
     def _bundle_tag(t: Tag) -> BundleTag:
         if t.connection_id is not None:
@@ -148,6 +164,16 @@ def montar_bundle(
                 watchdog_timeout_s=f.watchdog_timeout_s,
             )
             for f in flows_ordenados
+        ],
+        historized_vars=[
+            BundleHistorizedVar(
+                tag=refs[hv.tag_id][1],
+                eu=tag_por_id[hv.tag_id].eu,
+                flow=nome_do_flow[hv.flow_id],
+                block_id=hv.block_id,
+                port=hv.port,
+            )
+            for hv in historizadas_ordenadas
         ],
     )
 
@@ -229,5 +255,52 @@ def problemas_de_coerencia_interna(bundle: ProjectBundle) -> list[str]:
         problemas.extend(
             f"tag calculada '{tag.name}': {p}" for p in problemas_do_script(tag.code, len(refs))
         )
+
+    # Variáveis historiadas (RF-308, ADR-041 D5/D7): cada registro tem de resolver para um
+    # flow do bundle, apontar para um bloco que realmente existe no grafo daquele flow, não
+    # repetir a chave natural `(flow, block_id, port)` (mesma unicidade de
+    # `uq_historized_vars_port`) e não colidir de nome com nenhuma outra tag do bundle — OPC,
+    # calculada, ou outra variável historiada (o `Tag.name` que o import cria teria colisão
+    # em `uq_tags_project_name`/`uq_tags_connection_name` só na hora do `flush()`, tarde
+    # demais para um 422 agregado).
+    nomes_flow = {f.name: f for f in bundle.flows}
+    for hv in bundle.historized_vars:
+        if hv.flow not in nomes_flow:
+            problemas.append(
+                f"variável historiada '{hv.tag}' referencia flow '{hv.flow}' que não existe "
+                "no bundle"
+            )
+
+    for chave, contagem in Counter(
+        (hv.flow, hv.block_id, hv.port) for hv in bundle.historized_vars
+    ).items():
+        if contagem > 1:
+            problemas.append(
+                f"variável historiada: porta '{chave[2]}' do bloco '{chave[1]}' do flow "
+                f"'{chave[0]}' historiada duas vezes no bundle"
+            )
+
+    nomes_tag_existentes = {t.name for t in bundle.tags}
+    for nome, contagem in Counter(hv.tag for hv in bundle.historized_vars).items():
+        if contagem > 1 or nome in nomes_tag_existentes:
+            problemas.append(
+                f"variável historiada '{nome}' colide com o nome de outra tag do bundle"
+            )
+
+    for hv in bundle.historized_vars:
+        flow = nomes_flow.get(hv.flow)
+        if flow is None:
+            continue  # já reportado acima (referencia flow inexistente)
+        nodes = flow.graph.get("nodes")
+        ids_de_no = (
+            {n.get("id") for n in nodes if isinstance(n, dict)}
+            if isinstance(nodes, list)
+            else set()
+        )
+        if hv.block_id not in ids_de_no:
+            problemas.append(
+                f"variável historiada '{hv.tag}' referencia bloco '{hv.block_id}' que não "
+                f"existe no flow '{hv.flow}'"
+            )
 
     return problemas

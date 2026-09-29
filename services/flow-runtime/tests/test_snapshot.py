@@ -1,4 +1,5 @@
-"""Contratos do espelho de valores do flow-runtime (RF-401, spec F3 §2.1, §3.0, §3.1)."""
+"""Contratos dos espelhos do flow-runtime: valores de tag (RF-401, spec F3 §2.1, §3.0,
+§3.1) e troca entre flows (`flow.exchange`, ADR-042)."""
 
 import asyncio
 from datetime import UTC, datetime
@@ -7,8 +8,14 @@ import pytest
 from redis.asyncio import Redis
 from runtime_test_helpers import AWAIT_TIMEOUT_S, await_until
 
-from ottima_core.bus import OpcValue, channel_opc_values
-from ottima_core.snapshot import ValueSnapshot
+from ottima_core.bus import (
+    CHANNEL_FLOW_EXCHANGE,
+    ExchangeValue,
+    OpcValue,
+    channel_opc_values,
+)
+from ottima_core.signal import Quality
+from ottima_core.snapshot import ExchangeSnapshot, ValueSnapshot
 
 TS = datetime(2026, 8, 4, 12, 0, 0, tzinfo=UTC)
 
@@ -145,3 +152,82 @@ async def test_queda_do_assinante_e_reassinada(redis_client):
         assert snap.get(7).value == 7.0
     finally:
         await snap.stop()
+
+
+# --------------------------------------------------------------------------------------
+# ExchangeSnapshot — espelho de `flow.exchange` (ADR-042)
+# --------------------------------------------------------------------------------------
+
+
+async def publish_exchange(
+    redis_client: Redis,
+    key: str,
+    v: float | bool,
+    *,
+    quality: Quality = Quality.GOOD,
+    period_s: float = 1.0,
+) -> int:
+    payload = ExchangeValue(key=key, ts=TS, v=v, quality=quality, period_s=period_s)
+    return await redis_client.publish(CHANNEL_FLOW_EXCHANGE, payload.model_dump_json())
+
+
+@pytest.fixture
+async def exchange(redis_client: Redis):
+    snap = ExchangeSnapshot(redis_client)
+    await snap.start()
+    yield snap
+    await snap.stop()
+
+
+async def test_chave_publicada_aparece_no_espelho(redis_client, exchange):
+    await publish_exchange(redis_client, "nivel_tanque", 42.5, period_s=2.0)
+
+    await await_until(lambda: exchange.get("nivel_tanque") is not None)
+    value = exchange.get("nivel_tanque")
+    assert (value.v, value.quality, value.period_s, value.ts) == (42.5, Quality.GOOD, 2.0, TS)
+
+
+async def test_chave_sem_publicador_devolve_none(exchange):
+    """Cold start do assinante (ADR-042 D4/D6): ausência é `None`, nunca valor sintético."""
+    assert exchange.get("ninguem_publica") is None
+
+
+async def test_chaves_distintas_convivem_no_mesmo_espelho(redis_client, exchange):
+    """Canal fixo (D1): o espelho discrimina por `key` do payload, não por nome de canal."""
+    await publish_exchange(redis_client, "a", 1.0)
+    await publish_exchange(redis_client, "b", True)
+
+    await await_until(lambda: exchange.get("a") is not None and exchange.get("b") is not None)
+    assert exchange.get("a").v == 1.0
+    assert exchange.get("b").v is True
+
+
+async def test_ultima_publicacao_da_chave_vence(redis_client, exchange):
+    await publish_exchange(redis_client, "a", 1.0)
+    await await_until(lambda: exchange.get("a") is not None)
+
+    await publish_exchange(redis_client, "a", 2.0, quality=Quality.BAD)
+
+    await await_until(lambda: exchange.get("a").v == 2.0)
+    assert exchange.get("a").quality is Quality.BAD
+
+
+async def test_payload_invalido_de_barramento_nao_derruba_o_assinante(redis_client, exchange):
+    await redis_client.publish(CHANNEL_FLOW_EXCHANGE, "{isso nao e json}")
+    await redis_client.publish(CHANNEL_FLOW_EXCHANGE, '{"key": 1}')
+
+    await publish_exchange(redis_client, "a", 9.0)
+
+    await await_until(lambda: exchange.get("a") is not None)
+    assert exchange.get("a").v == 9.0
+
+
+async def test_stop_do_espelho_de_barramento_encerra_a_absorcao(redis_client, exchange):
+    await publish_exchange(redis_client, "a", 1.0)
+    await await_until(lambda: exchange.get("a") is not None)
+
+    await exchange.stop()
+    await exchange.stop()  # desmonte não levanta na segunda chamada
+
+    assert await publish_exchange(redis_client, "a", 2.0) == 0
+    assert exchange.get("a").v == 1.0

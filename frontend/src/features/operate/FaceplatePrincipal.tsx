@@ -250,7 +250,11 @@ export function FaceplatePrincipal({ mpc, flowStatus, mpcState, flowId, blockId 
   const semDados = mpcState === undefined;
   const building = mpcState?.status.solver === "building";
   const localRemotoAtual: PosicaoLocalRemoto = mpcState?.modes.local_remote ?? "local";
-  const manAutoAtual: PosicaoManAuto = mpcState?.modes.man_auto ?? "man";
+  // ESTADO REAL, não pedido: enquanto o solver está em build o bloco não comanda nada —
+  // o modo vigente é MAN, mesmo que o operador já tenha pedido AUTO (mesma régua da porta
+  // `auto` do bloco, `blocks/mpc.py::_compute_outputs`). Sem isto o comutador acende AUTO
+  // sobre um bloco que ainda não resolveu um solve sequer.
+  const manAutoAtual: PosicaoManAuto = building ? "man" : (mpcState?.modes.man_auto ?? "man");
   const pendenteLocalRemoto =
     pendencia?.alvo === "modes.local_remote" ? (pendencia.valorComandado as PosicaoLocalRemoto) : null;
   const pendenteManAuto =

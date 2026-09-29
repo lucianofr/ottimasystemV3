@@ -683,9 +683,16 @@ TAU2_CV = 0.5
 da TFS `planta`: sem mismatch deliberado de modelo, o E2E-F4-04 testa a malha fechada de
 verdade, não a robustez a erro de modelo (isso é TDD, spec §9.1)."""
 GANHO_INTEGRADOR_CO = 0.01
-"""Ki de `co1` (IOPDT) — fraco o bastante pra `mv_pid` chegar a um SP moderado sem estourar
-a faixa (E2E-F4-04), mas um SP perto do teto de `LIMITES_SP_CV` (E2E-F4-05) estoura mesmo
-assim: só `mv_pid` move `co1` de verdade (`mv_direta` entra com Ki desprezível)."""
+"""Ki de `co1` (IOPDT) **na planta TFS**, em EU/s por EU (o TFS não tem conversão por span,
+é ganho direto) — fraco o bastante pra `mv_pid` chegar a um SP moderado sem estourar a faixa
+(E2E-F4-04), mas um SP perto do teto de `LIMITES_SP_CV` (E2E-F4-05) estoura mesmo assim: só
+`mv_pid` move `co1` de verdade (`mv_direta` entra com Ki desprezível)."""
+GANHO_INTEGRADOR_CO_MPC = GANHO_INTEGRADOR_CO * 100.0
+"""O MESMO ganho físico declarado no `models` do MPC, onde a base do `Ki` é %/s com a coluna
+em 100% do span (`eu_gain_params` divide por 100 antes do worker, 2026-09-11). Sem o ×100
+aqui, o modelo do controlador ficaria 100× mais fraco que a planta TFS e os cenários de
+malha fechada (F4-04/05, restrição-vence-CV, bumpless) passariam vazios — o oposto do que o
+docstring de `GANHO_CV` promete (sem mismatch deliberado de modelo)."""
 
 LIMITES_MV = {"min": 0.0, "max": 100.0}
 DU_MAX_MV = 5.0
@@ -853,9 +860,9 @@ def _config_mpc_malha(ambiente: AmbienteMpc, *, multiplier: int = MULTIPLICADOR_
             "co_1": {
                 "mv_pid": {
                     "enabled": True,
-                    "params": {"Ki": GANHO_INTEGRADOR_CO, "theta": 0.0},
+                    "params": {"Ki": GANHO_INTEGRADOR_CO_MPC, "theta": 0.0},
                 },
-                "mv_direta": {"enabled": True, "params": {"Ki": 1e-4, "theta": 0.0}},
+                "mv_direta": {"enabled": True, "params": {"Ki": 1e-2, "theta": 0.0}},
             },
         },
     }
@@ -891,7 +898,9 @@ def grafo_mpc_tfs(
             "id": "planta",
             "type": "tfs",
             "position": {"x": 0.0, "y": 0.0},
-            "data": {"exec_order": 3, "matrix": _matriz_planta()},
+            # `y0` explícito em zero (e não o default 50): a malha de aceite mede a planta
+            # em variável-desvio, partindo do repouso.
+            "data": {"exec_order": 3, "matrix": _matriz_planta(), "y0": [0.0, 0.0]},
         },
         {
             "id": mpc_id,

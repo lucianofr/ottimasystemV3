@@ -6,7 +6,7 @@ para não colidir com o arquivo de outra tarefa do mesmo batch.
 
 import pytest
 
-from ottima_core.flowgraph import GraphParseError, parse_graph
+from ottima_core.flowgraph import TFS_DEFAULT_Y0, GraphParseError, parse_graph
 
 
 def _iopdt(*, enabled: bool = False) -> dict:
@@ -37,10 +37,12 @@ def _script(node_id: str = "s1", *, n_outputs: int = 2, output_eu: dict | None =
     return _node(node_id, "script", 1, **data)
 
 
-def _tfs(node_id: str = "t1", *, output_eu: dict | None = None) -> dict:
+def _tfs(node_id: str = "t1", *, output_eu: dict | None = None, y0: object | None = None) -> dict:
     data: dict = {"matrix": _tfs_matrix()}
     if output_eu is not None:
         data["output_eu"] = output_eu
+    if y0 is not None:
+        data["y0"] = y0
     return _node(node_id, "tfs", 1, **data)
 
 
@@ -118,6 +120,39 @@ def test_tfs_sem_output_eu_e_valido_com_dict_vazio():
     graph = _graph(_tfs())
     node = parse_graph(graph).node("t1")
     assert node.config.output_eu == {}
+
+
+# --------------------------------------------------------------------------------------
+# tfs — y0 (condição inicial das saídas)
+# --------------------------------------------------------------------------------------
+
+
+def test_tfs_aceita_y0_por_saida():
+    graph = _graph(_tfs(y0=[30.0, -5.0]))
+    node = parse_graph(graph).node("t1")
+    assert node.config.y0 == [30.0, -5.0]
+
+
+def test_tfs_sem_y0_cai_no_default():
+    """Flow salvo antes do campo continua parseando — e parte do meio da faixa."""
+    graph = _graph(_tfs())
+    node = parse_graph(graph).node("t1")
+    assert node.config.y0 == [TFS_DEFAULT_Y0, TFS_DEFAULT_Y0]
+
+
+def test_tfs_reprova_y0_com_tamanho_errado():
+    assert has(parse_errors(_graph(_tfs(y0=[10.0]))), "t1", "y0")
+
+
+def test_tfs_reprova_y0_nao_numerico():
+    assert has(parse_errors(_graph(_tfs(y0=[10.0, "x"]))), "t1", "y0[1]")
+
+
+def test_tfs_reprova_y0_nao_finito():
+    """`json.loads` aceita os literais `NaN`/`Infinity` e o `float` do Pydantic também: sem
+    o guard de finitude um y0 NaN contaminaria a soma da linha em toda varredura, calado."""
+    assert has(parse_errors(_graph(_tfs(y0=[float("nan"), 0.0]))), "t1", "y0[0]")
+    assert has(parse_errors(_graph(_tfs(y0=[0.0, float("inf")]))), "t1", "y0[1]")
 
 
 # --------------------------------------------------------------------------------------

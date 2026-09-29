@@ -634,6 +634,100 @@ def test_cadeia_profunda_nao_estoura_a_pilha():
     assert result.warnings == []
 
 
+def test_aresta_de_realimentacao_fecha_ciclo_sem_erro_nem_aviso():
+    """ADR-040 D1/D2: `feedback_init` é a quebra explícita que o RF-302 já previa.
+
+    Mesmo grafo do `test_ciclo_de_tres_nos_e_erro`, com a aresta de retorno marcada: é o
+    PID↔TFS que o ADR-022/031 pressupõe e o editor recusava. O aviso de inversão também
+    tem de calar — nela o atraso de 1 varredura é o propósito, não um descuido.
+    """
+    edge = link("e3", "c", "a") | {"feedback_init": 12.5}
+    graph = {
+        "nodes": [script_node("a", 1), script_node("b", 2), script_node("c", 3)],
+        "edges": [link("e1", "a", "b"), link("e2", "b", "c"), edge],
+    }
+
+    result = validate_graph(parse_graph(graph), {}, TS)
+
+    assert result.errors == []
+    assert result.warnings == []
+
+
+def test_ciclo_por_aresta_nao_marcada_continua_erro():
+    """A quebra é por aresta: marcar UMA não libera as outras do mesmo grafo."""
+    graph = {
+        "nodes": [script_node("a", 1, n_outputs=2), script_node("b", 2, n_outputs=2)],
+        "edges": [
+            link("e1", "a", "b") | {"feedback_init": 0.0},
+            link("e2", "b", "a"),
+            {
+                "id": "e3",
+                "source": "a",
+                "target": "b",
+                "sourceHandle": "OUT2",
+                "targetHandle": "IN1",
+            },
+        ],
+    }
+    assert has(errors_of(graph), "ciclo")
+
+
+def test_feedback_init_precisa_ser_numero_finito():
+    graph = {
+        "nodes": [script_node("a", 1, n_inputs=0), script_node("b", 2)],
+        "edges": [link("e1", "a", "b") | {"feedback_init": "zero"}],
+    }
+    assert has(parse_errors(graph), "feedback_init", "e1")
+
+
+def test_feedback_init_em_aresta_que_nao_fecha_ciclo_e_erro():
+    """ADR-040 D2: sem esta regra a chave é backdoor de valor sintético.
+
+    `_seeded` entrega a semente com `ok=True` na partida, então um `feedback_init` numa
+    aresta comum a caminho de um `opc_write` mandaria ao PLC um número que planta nenhuma
+    produziu. O editor nunca gera isso; o import de projeto e o PUT de `graph_json` cru,
+    sim — é onde a barreira tem de estar.
+    """
+    graph = {
+        "nodes": [script_node("a", 1, n_inputs=0), script_node("b", 2)],
+        "edges": [link("e1", "a", "b") | {"feedback_init": 42.0}],
+    }
+    assert has(errors_of(graph), "feedback_init", "e1", "não fecha ciclo")
+
+
+def test_duas_arestas_marcadas_no_mesmo_laco_se_justificam():
+    """Cada marcada é aferida pelas OUTRAS arestas: num laço de duas, ambas são
+    realimentação de fato e nenhuma pode ser recusada por causa da outra."""
+    graph = {
+        "nodes": [script_node("a", 1), script_node("b", 2)],
+        "edges": [
+            link("e1", "a", "b") | {"feedback_init": 0.0},
+            link("e2", "b", "a") | {"feedback_init": 0.0},
+        ],
+    }
+
+    result = validate_graph(parse_graph(graph), {}, TS)
+
+    assert result.errors == []
+
+
+def test_auto_laco_marcado_e_realimentacao_valida():
+    """O menor laço possível: um bloco realimentando a própria entrada (acumulador `z⁻¹`).
+
+    Fica válido porque `edge.target == edge.source` — o destino alcança a origem por
+    definição. É escolha, não acidente da travessia: o espelho do editor também isenta o
+    auto-laço quando a realimentação é confirmada, e recusar aqui desalinharia os dois.
+    """
+    graph = {
+        "nodes": [script_node("a", 1)],
+        "edges": [link("e1", "a", "a") | {"feedback_init": 0.0}],
+    }
+
+    result = validate_graph(parse_graph(graph), {}, TS)
+
+    assert result.errors == []
+
+
 # regra 6 — entradas obrigatórias conectadas
 
 

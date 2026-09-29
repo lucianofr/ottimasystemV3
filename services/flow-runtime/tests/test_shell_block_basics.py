@@ -2,9 +2,9 @@
 
 from shell_harness import EPS, EventosFake, amostra, bloco, passo
 
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.shell.block import CarriedState
 from ottima_flow_runtime.blocks.shell.mode import Mode
-from ottima_flow_runtime.blocks.shell.signal import Signal
 
 
 async def test_partida_fria_nasce_man_com_out_startup() -> None:

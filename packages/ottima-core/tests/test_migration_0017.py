@@ -1,4 +1,4 @@
-"""0016: flows SISO gravados com `fuzzy_loop` sobrevivem ao redesenho multicanal.
+"""0017: flows SISO gravados com `fuzzy_loop` sobrevivem ao redesenho multicanal.
 
 Ida: portas `in`/`out` viram `pv_1`/`out_1`, modos remotos saem de permitted/normal, arestas
 em portas extintas (intertravamento `lo_in_d`) ficam — o flow é rejeitado alto, não mutilado.
@@ -79,7 +79,7 @@ def test_0016_migra_fuzzy_loop_siso_e_volta(migrated_database_url):
     cfg.set_main_option("sqlalchemy.url", url)
     flow_id: int | None = None
     try:
-        command.downgrade(cfg, "0015_loop_tables")
+        command.downgrade(cfg, "0016_historized_vars")
         [_, [(flow_id,)], _] = _sql(
             url,
             ("INSERT INTO projects (name) VALUES ('mig0016') RETURNING id", {}),
@@ -96,7 +96,7 @@ def test_0016_migra_fuzzy_loop_siso_e_volta(migrated_database_url):
             ),
         )
 
-        command.upgrade(cfg, "0016_loop_setpoints_channel")
+        command.upgrade(cfg, "0017_loop_setpoints_channel")
         g = _grafo(url, flow_id)
         data = next(n for n in g["nodes"] if n["id"] == "fm")["data"]
         assert data["permitted"] == ["oos", "man", "auto"] and data["normal"] == "auto"
@@ -126,7 +126,7 @@ def test_0016_migra_fuzzy_loop_siso_e_volta(migrated_database_url):
             ),
         )
         with pytest.raises(RuntimeError, match="n_loops > 1"):
-            command.downgrade(cfg, "0015_loop_tables")
+            command.downgrade(cfg, "0016_historized_vars")
 
         # De volta a 1 canal (n_loops explícito): downgrade limpa e reverte as portas.
         data_um = {**data, "n_loops": 1}
@@ -138,7 +138,7 @@ def test_0016_migra_fuzzy_loop_siso_e_volta(migrated_database_url):
                 {"g": json.dumps({**g, "nodes": nos}), "f": flow_id},
             ),
         )
-        command.downgrade(cfg, "0015_loop_tables")
+        command.downgrade(cfg, "0016_historized_vars")
         g = _grafo(url, flow_id)
         assert "n_loops" not in next(n for n in g["nodes"] if n["id"] == "fm")["data"]
         assert _handles(g)["e1"] == ("out", "in") and _handles(g)["e2"] == ("out", "in")

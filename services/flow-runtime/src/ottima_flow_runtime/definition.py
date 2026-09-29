@@ -52,20 +52,27 @@ from ottima_core.flowgraph import (
     TagRef,
     loop_structural,
 )
-from ottima_core.models import LoopSetpoint, MpcSetpoint
+from ottima_core.models import HistorizedVar, LoopSetpoint, MpcSetpoint
 from ottima_core.script_pool import ScriptPool
-from ottima_core.snapshot import ValueSnapshot
+from ottima_core.snapshot import ExchangeSnapshot, ValueSnapshot
 
 from .blocks.base import Block
+from .blocks.bus_publish import BusPublishBlock
+from .blocks.bus_subscribe import BusSubscribeBlock
+from .blocks.constant import ConstantBlock
+from .blocks.dead_time import DeadTimeBlock
 from .blocks.first_order import FirstOrderBlock
 from .blocks.fuzzy import FuzzyBlock
+from .blocks.integrator import IntegratorBlock
 from .blocks.kalman import KalmanBlock
 from .blocks.kernels.fuzzy import FuzzyKernelCfg, build_fuzzy_kernel
 from .blocks.kernels.pid import PidKernel, PidKernelCfg
+from .blocks.lead_lag import LeadLagBlock
 from .blocks.mpc import MpcBlock
 from .blocks.opc_read import OpcReadBlock
 from .blocks.opc_write import OpcWriteBlock
 from .blocks.pid import PidBlock
+from .blocks.scaler import ScalerBlock
 from .blocks.script import ScriptBlock
 from .blocks.shell.block import BlockShell
 from .blocks.shell.config import ShellCfg
@@ -74,7 +81,7 @@ from .blocks.shell.mode import Mode, mode_from_name
 from .blocks.tfs import TfsBlock
 from .mpc.host import MpcHost
 from .mpc.worker import worker_main
-from .scheduler import FlowDefinition
+from .scheduler import FlowDefinition, HistorizedPort
 
 LOOP_TYPES: frozenset[str] = frozenset({"pid_loop", "fuzzy_loop"})
 
@@ -123,11 +130,13 @@ def build_definition(
     redis_client: Redis,
     pool: ScriptPool,
     snapshot: ValueSnapshot,
+    exchange: ExchangeSnapshot,
     watchdog_enabled: bool = False,
     mpc_worker_target: Callable[[Connection, str, float], None] = worker_main,
     sp_seeds: Mapping[str, Mapping[str, float]] | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     loop_seeds: Mapping[str, LoopSeed | Sequence[LoopSeed]] | None = None,
+    historized_vars: Sequence[HistorizedVar] = (),
 ) -> StagedDefinition:
     """Instancia os blocos do grafo (reaproveitando os que não mudaram) e monta a fiação.
 
@@ -168,6 +177,7 @@ def build_definition(
                 redis_client=redis_client,
                 pool=pool,
                 snapshot=snapshot,
+                exchange=exchange,
                 write_opc=write_opc,
                 mpc_worker_target=mpc_worker_target,
                 watchdog_enabled=watchdog_enabled,
@@ -194,12 +204,16 @@ def build_definition(
         if isinstance(block, MpcBlock):
             hosts[node.id] = block.host
 
+    historized = _historized_ports(historized_vars, blocks)
+
     return StagedDefinition(
         definition=FlowDefinition(
             flow_id=flow_id,
             ts_seconds=ts_seconds,
             blocks=tuple(instances),
             wiring=_wiring(graph),
+            seeds=_seeds(graph),
+            historized=historized,
         ),
         ts_seconds=ts_seconds,
         conn_ids=_conn_ids(graph, tags),
@@ -207,6 +221,28 @@ def build_definition(
         hosts=hosts,
         mpc_write_opc=write_opc,
     )
+
+
+def _historized_ports(
+    historized_vars: Sequence[HistorizedVar],
+    blocks: Mapping[str, tuple[dict[str, Any], Block]],
+) -> tuple[HistorizedPort, ...]:
+    """Filtra o cadastro pelas portas que o grafo REALMENTE tem agora (ADR-041 D7/§1).
+
+    Bloco removido, `n_inputs` reduzido ou MV do `mpc` renomeada derrubam a porta do grafo
+    sem que `historized_vars` saiba — o build ignora silenciosamente em vez de confiar no
+    cadastro (que só é podado de volta pela rota DELETE/save do flow, fora do runtime).
+    """
+    result: list[HistorizedPort] = []
+    for row in historized_vars:
+        entry = blocks.get(row.block_id)
+        if entry is None:
+            continue
+        block = entry[1]
+        if row.port not in (*block.input_ports, *block.output_ports):
+            continue
+        result.append(HistorizedPort(block_id=row.block_id, port=row.port, tag_id=row.tag_id))
+    return tuple(result)
 
 
 def _mv_ids_de_functional(functional: dict[str, Any]) -> frozenset[str] | None:
@@ -255,6 +291,7 @@ def _instantiate(
     redis_client: Redis,
     pool: ScriptPool,
     snapshot: ValueSnapshot,
+    exchange: ExchangeSnapshot,
     write_opc: Callable[[OpcWrite], Awaitable[None]],
     mpc_worker_target: Callable[[Connection, str, float], None],
     watchdog_enabled: bool,
@@ -303,6 +340,37 @@ def _instantiate(
         )
     if node.type == "first_order":
         return FirstOrderBlock(node.id, tau=config.tau, ts_seconds=ts_seconds)
+    if node.type == "lead_lag":
+        return LeadLagBlock(
+            node.id,
+            gain=config.gain,
+            tau_lead=config.tau_lead,
+            tau_lag=config.tau_lag,
+            ts_seconds=ts_seconds,
+        )
+    if node.type == "dead_time":
+        return DeadTimeBlock(node.id, theta=config.theta, ts_seconds=ts_seconds)
+    if node.type == "scaler":
+        return ScalerBlock(
+            node.id,
+            in_min=config.in_min,
+            in_max=config.in_max,
+            out_min=config.out_min,
+            out_max=config.out_max,
+        )
+    if node.type == "integrator":
+        return IntegratorBlock(node.id, time_base=config.time_base, ts_seconds=ts_seconds)
+    if node.type == "constant":
+        return ConstantBlock(node.id, value=config.value)
+    if node.type == "bus_publish":
+        return BusPublishBlock(
+            node.id,
+            key=config.key,
+            ts_seconds=ts_seconds,
+            redis_client=redis_client,
+        )
+    if node.type == "bus_subscribe":
+        return BusSubscribeBlock(node.id, key=config.key, snapshot=exchange)
     if node.type == "kalman":
         return KalmanBlock(
             node.id,
@@ -336,7 +404,7 @@ def _instantiate(
             starting_output=config.starting_output,
             ts_seconds=ts_seconds,
         )
-    return TfsBlock(node.id, matrix=config.matrix, ts_seconds=ts_seconds)
+    return TfsBlock(node.id, matrix=config.matrix, ts_seconds=ts_seconds, y0=config.y0)
 
 
 def _instantiate_mpc(
@@ -421,6 +489,20 @@ def _wiring(graph: FlowGraph) -> dict[str, dict[str, tuple[str, str]]]:
     for edge in graph.edges:
         wiring.setdefault(edge.target, {})[edge.target_handle] = (edge.source, edge.source_handle)
     return wiring
+
+
+def _seeds(graph: FlowGraph) -> dict[tuple[str, str], float]:
+    """Condição inicial das arestas de realimentação, por porta de DESTINO (ADR-040 D4).
+
+    `_check_fan_in` garante no máximo uma aresta por porta de entrada, então a chave é única
+    e não há empate entre sementes — o que a chave de origem não garantiria (duas arestas de
+    realimentação podem sair da MESMA porta).
+    """
+    return {
+        (edge.target, edge.target_handle): edge.feedback_init
+        for edge in graph.edges
+        if edge.feedback_init is not None
+    }
 
 
 def _conn_ids(graph: FlowGraph, tags: Mapping[int, TagRef]) -> frozenset[int]:

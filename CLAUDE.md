@@ -4,7 +4,7 @@ Plataforma on-premise de APC industrial: estratégias de controle montadas em ca
 
 ## 🔒 Fonte da verdade (leia antes de qualquer coisa)
 
-1. **`docs/adr/ADR-001…028` são NORMATIVOS.** Nenhuma decisão registrada em ADR pode ser relitigada, "melhorada" ou contornada em código. Em conflito entre código, plano, PRD e ADR — **o ADR vence**.
+1. **`docs/adr/ADR-001…040` são NORMATIVOS.** Nenhuma decisão registrada em ADR pode ser relitigada, "melhorada" ou contornada em código. Em conflito entre código, plano, PRD e ADR — **o ADR vence**.
 2. **`docs/PRD.md`** é a fonte de requisitos (RF-xxx / RNF-xx) e dos contratos (§7: canais do barramento, JSON de projeto, grupos de API) e fases (§8).
 3. **`docs/GLOSSARY.md`** fixa o vocabulário. Use os termos de lá; não invente sinônimos.
 4. Encontrou contradição ou lacuna real? **PARE.** Não resolva silenciosamente no código: proponha a atualização do ADR/PRD ao usuário e aguarde a decisão.
@@ -56,9 +56,11 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 - **Banco único** Postgres/TimescaleDB. Sem SQLite, sem segundo banco. Retenção (1 mês) e downsampling via policies/continuous aggregates do Timescale — **nunca** código manual de limpeza. (ADR-003)
 - **Código Python do usuário** (bloco Script e tag calculada) roda SEMPRE via `ottima_core.script_pool`: escopo restrito a `math` + `numpy`, `state` dict persistente, timeout ≈70% da cadência (Ts do flow ou período da tag), processo morto e reposto no estouro. Cada serviço tem o SEU pool — tag calculada nunca disputa worker com varredura de flow. (ADR-018, ADR-033)
 - **Tag calculada é linha em `tags`** com `connection_id IS NULL` e `project_id` preenchido (`ck_tags_owner`): id compartilhado com as tags OPC é o que faz histórico, `/api/history` e `/ws` funcionarem sem alteração. Publica em `calc.values`; o `opc-worker` a ignora naturalmente porque carrega tags por `connection_id`. (ADR-033)
+- **Troca entre flows é SÓ por `flow.exchange`** (ADR-042): bloco `bus_publish` publica a entrada a cada varredura (canal fixo, `key` no payload, nunca nome de canal dinâmico) e `bus_subscribe` lê do `ExchangeSnapshot` do processo — nunca memória compartilhada (a partição por processo atravessa). Nada persiste (histórico é por composição com variável historiada). Validade é AUTOMÁTICA: idade > `3 × period_s` (Ts do publicador, que viaja no payload) ⇒ saída REBAIXADA por teto a UNCERTAIN (inválida para atuação, pois `ok ≡ quality is GOOD`) mantendo o último valor (ADR-043); chave nunca publicada ⇒ `(None, False)` (COLD). `key` é única **por projeto** — 422 no mesmo flow (`validate_graph`) e entre flows (save do `PUT /api/flows` e import de projeto).
 - **Frontend nunca executa lógica de flow** — o canvas só edita o grafo; execução é 100% no flow-runtime. (ADR-005)
 - **Hot-swap:** troca de definição de flow é atômica entre varreduras, preservando estado dos blocos não alterados. (ADR-011)
 - **Ordem de execução:** blocos executam estritamente em ordem crescente de `exec_order` (1..N, único por flow) — nunca por ordenação topológica; aresta com ordem invertida ⇒ valor da varredura anterior. (ADR-024)
+- **Ciclo no grafo:** proibido, EXCETO por quebra explícita — aresta com destino `bkcal_in` (ADR-039 D6) ou aresta de **realimentação**, marcada por `feedback_init` (ADR-040). As duas saem da detecção de ciclo e do aviso de inversão. `feedback_init` é a **condição inicial** do atraso unitário, entregue na LEITURA da porta de destino enquanto a origem nunca tiver produzido valor (senão `has_cold_input` trava a malha inválida para sempre) e desarmada na primeira amostra válida — é semente de partida, nunca fallback de invalidez.
 - Predições do MPC **não são persistidas** — só publicadas no barramento. (ADR-016)
 - **SSTO (camada de alvos):** roda no MESMO ciclo do MPC, dentro do processo worker, ANTES do `make_step` — nunca toca o cálculo do move plan. **MV é a única variável de decisão e o limite dela é duro em todo caminho de código; DV nunca é otimizada; CV/Restrição são soft (folga penalizada + desistência por `priority` crescente).** `G`/`Gd` saem do `PairSS` já discretizado do controlador — **nunca** um segundo modelo de ganho. SSTO desligado/inviável ⇒ SP do operador (fallback), nunca parada do controle. Auditoria imutável em `ssto_runs`, sem canal novo. (ADR-027)
 
@@ -72,7 +74,7 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 
 ## Testes
 
-- **TDD estrito (RED→GREEN→REFACTOR)** em lógica pura: motor de scan (execução por `exec_order`, hot-swap), discretização SOPDT/IOPDT, montagem do do-mpc, precedência Restrição>CV, bumpless, TFS.
+- **TDD estrito (RED→GREEN→REFACTOR)** em lógica pura: motor de scan (execução por `exec_order`, hot-swap), discretização SOPDT/IOPDT/IFOPDT, montagem do do-mpc, precedência Restrição>CV, bumpless, TFS.
 - **opc-worker:** testar contra **servidor OPC-UA de teste in-process do asyncua** (sem PLC real) — subscriptions, escrita, watchdog, reconexão.
 - **Malha fechada MPC↔TFS** é a suíte de aceitação do sistema (RNF-09): assume/devolve sem salto de MV, restrição vence CV, overrun mantém MV + alarme.
 - Infra (compose, schema): testes de integração; não faça teatro de TDD unitário aqui.
@@ -117,9 +119,11 @@ cd frontend && npm run generate:api                 # tipos do OpenAPI + contrat
 cd frontend && npm run generate:contracts           # só os contratos (portas por bloco + payloads do WS) de ottima_core.contracts_export
 uv run pytest -m slow services/flow-runtime/tests   # carga do MPC (RNF-02); o run default exclui `slow` além de `e2e`
 
-# Stack. A F2 acrescentou o opcsim e as portas de host do gate: use SEMPRE os dois arquivos.
-cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 9 serviços
-# Sem o override e2e sobem 8 (sem opcsim) e o opcsim/redis não ficam acessíveis do host.
+# Stack. O override e2e só expõe portas de host do gate: use SEMPRE os dois arquivos.
+cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 8 serviços
+# O opcsim NÃO é serviço do compose (docker-compose.e2e.yml §5-8): o opc-worker é só cliente e a
+# suíte e2e sobe o opcsim standalone no host (tests/e2e/conftest.py). Sem o override, o Redis
+# não fica acessível do host e a L2 não conecta.
 # deploy/.env é obrigatório e gitignored. Se a 6379 já estiver ocupada por outro projeto da
 # máquina, defina OTTIMA_E2E_REDIS_PORT (ex.: 6399) — senão a L2 fala com o Redis do vizinho.
 # Rebuild de um serviço só: use --no-deps, senão `--build frontend` arrasta o `api` junto.
@@ -183,65 +187,9 @@ cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -
 `npm run generate:contracts` + `git diff --exit-code` (contrato gerado em dia). Sem segredo, sem
 Docker, sem stack. **`uv run pytest` e o gate E2E de 3 camadas continuam MANUAIS** e são
 responsabilidade de quem abre o PR: o pytest precisaria de Docker no runner (~20 min, com o
-histórico de vermelho falso por contenção do TD-009) e o E2E precisaria da stack de 9 serviços
+histórico de vermelho falso por contenção do TD-009) e o E2E precisaria da stack de 8 serviços
 mais as credenciais de `deploy/.env`. Não confunda "CI verde" com "gate completo".
 
 ## Proibições rápidas para agentes
 
 Não editar `docs/` sem o processo do item 4 · Não usar Django, Next.js, Celery, SQLite, InfluxDB · Não criar canal de barramento novo · Não escrever em tag OPC fora do fluxo `opc.writes` · Não persistir predições · Não colocar lógica de backend no frontend · Não "simplificar" removendo watchdog/modos/bumpless em ambiente de teste — use o bloco TFS para simular.
-
-
-Respond terse like smart caveman. All technical substance stay. Only fluff die.
-
-Rules:
-- Drop: articles (a/an/the), filler (just/really/basically), pleasantries, hedging
-- Fragments OK. Short synonyms. Technical terms exact. Code unchanged.
-- Pattern: [thing] [action] [reason]. [next step].
-- Not: "Sure! I'd be happy to help you with that."
-- Yes: "Bug in auth middleware. Fix:"
-
-Switch level: /caveman lite|full|ultra|wenyan
-Stop: "stop caveman" or "normal mode"
-
-Auto-Clarity: drop caveman for security warnings, irreversible actions, user confused. Resume after.
-
-Boundaries: code/commits/PRs written normal.
-
-<!-- code-review-graph MCP tools -->
-## MCP Tools: code-review-graph
-
-**IMPORTANT: This project has a knowledge graph. ALWAYS use the
-code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
-the codebase.** The graph is faster, cheaper (fewer tokens), and gives
-you structural context (callers, dependents, test coverage) that file
-scanning cannot.
-
-### When to use graph tools FIRST
-
-- **Exploring code**: `semantic_search_nodes_tool` or `query_graph_tool` instead of Grep
-- **Understanding impact**: `get_impact_radius_tool` instead of manually tracing imports
-- **Code review**: `detect_changes_tool` + `get_review_context_tool` instead of reading entire files
-- **Finding relationships**: `query_graph_tool` with callers_of/callees_of/imports_of/tests_for
-- **Architecture questions**: `get_architecture_overview_tool` + `list_communities_tool`
-
-Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
-
-### Key Tools
-
-| Tool | Use when |
-| ------ | ---------- |
-| `detect_changes_tool` | Reviewing code changes — gives risk-scored analysis |
-| `get_review_context_tool` | Need source snippets for review — token-efficient |
-| `get_impact_radius_tool` | Understanding blast radius of a change |
-| `get_affected_flows_tool` | Finding which execution paths are impacted |
-| `query_graph_tool` | Tracing callers, callees, imports, tests, dependencies |
-| `semantic_search_nodes_tool` | Finding functions/classes by name or keyword |
-| `get_architecture_overview_tool` | Understanding high-level codebase structure |
-| `refactor_tool` | Planning renames, finding dead code |
-
-### Workflow
-
-1. The graph auto-updates on file changes (via hooks).
-2. Use `detect_changes_tool` for code review.
-3. Use `get_affected_flows_tool` to understand impact.
-4. Use `query_graph_tool` pattern="tests_for" to check coverage.

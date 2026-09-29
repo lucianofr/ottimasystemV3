@@ -13,7 +13,8 @@ import math
 
 import pytest
 
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.kalman import KalmanBlock
 
 
@@ -21,8 +22,10 @@ def bloco(*, measurement_noise: float = 1.0, process_noise: float = 0.1) -> Kalm
     return KalmanBlock("k1", measurement_noise=measurement_noise, process_noise=process_noise)
 
 
-async def alimenta(block: KalmanBlock, valor: float, *, ok: bool = True) -> PortSample:
-    return (await block.step({"in": PortSample(valor, ok)}))["out"]
+async def alimenta(block: KalmanBlock, valor: float, *, ok: bool = True) -> Signal:
+    return (await block.step({"in": Signal(valor, quality=Quality.GOOD if ok else Quality.BAD)}))[
+        "out"
+    ]
 
 
 async def valor(block: KalmanBlock, medida: float) -> float:
@@ -115,8 +118,8 @@ async def test_os_dois_campos_sao_desvio_padrao_e_nao_variancia():
 async def test_cold_start_nao_executa_nem_avanca_o_estado():
     filtro = bloco()
 
-    saida = (await filtro.step({"in": PortSample(None, False)}))["out"]
-    assert saida == PortSample(None, False)
+    saida = (await filtro.step({"in": Signal(None)}))["out"]
+    assert saida == Signal(None)
 
     assert await valor(filtro, 150.0) == 150.0
 

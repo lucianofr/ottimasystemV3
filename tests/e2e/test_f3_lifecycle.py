@@ -53,6 +53,7 @@ from .f3_support import (
     grafo_script_tfs,
     id_da_sentinela,
     montar_grafo,
+    porta_valida,
 )
 
 pytestmark = pytest.mark.e2e
@@ -307,7 +308,7 @@ def test_e2e_f3_09_websocket_entrega_ports_e_recusa_token_invalido(
     dados = quadro["data"]
     assert dados["state"] == "running"
     assert set(dados["ports"]) == {"calculo", "planta"}, dados["ports"]
-    assert dados["ports"]["planta"]["y1"]["ok"] is True
+    assert porta_valida(dados, "planta", "y1")
 
     with pytest.raises(ConnectionClosed) as recusa:
         with abrir_ws(f"{url}?token=token-invalido-{RUN_ID}") as ws:

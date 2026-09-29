@@ -16,6 +16,7 @@ from ottima_core.flowgraph.fll_defaults import FUZZY_LOOP_DEFAULT_FLL, MAX_FUZZY
 NodeType = Literal[
     "opc_read",
     "opc_write",
+    "constant",
     "script",
     "fuzzy",
     "tfs",
@@ -25,10 +26,17 @@ NodeType = Literal[
     "pid",
     "pid_loop",
     "fuzzy_loop",
+    "scaler",
+    "integrator",
+    "bus_publish",
+    "bus_subscribe",
+    "lead_lag",
+    "dead_time",
 ]
 NODE_TYPES: tuple[str, ...] = (
     "opc_read",
     "opc_write",
+    "constant",
     "script",
     "fuzzy",
     "tfs",
@@ -38,6 +46,12 @@ NODE_TYPES: tuple[str, ...] = (
     "pid",
     "pid_loop",
     "fuzzy_loop",
+    "scaler",
+    "integrator",
+    "bus_publish",
+    "bus_subscribe",
+    "lead_lag",
+    "dead_time",
 )
 
 MAX_SCRIPT_PORTS = 8  # spec §3.3
@@ -48,9 +62,10 @@ MAX_FUZZY_FLL_LENGTH = 200_000
 _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
     "opc_read": ("tag_id",),
     "opc_write": ("tag_id",),
+    "constant": ("value",),
     "script": ("n_inputs", "n_outputs", "code", "output_eu"),
     "fuzzy": ("fll", "n_inputs", "n_outputs", "output_eu"),
-    "tfs": ("matrix", "output_eu"),
+    "tfs": ("matrix", "output_eu", "y0"),
     # `economics` é opcional (ADR-027 §9): `_parse_mpc_config` só repassa as chaves
     # presentes, então config salva antes do SSTO continua parseando.
     "mpc": ("name", "multiplier", "variables", "models", "economics"),
@@ -142,6 +157,12 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
         "lut_enabled",
         "lut_resolution",
     ),
+    "scaler": ("in_min", "in_max", "out_min", "out_max"),
+    "integrator": ("time_base",),
+    "bus_publish": ("key",),
+    "bus_subscribe": ("key",),
+    "lead_lag": ("gain", "tau_lead", "tau_lag"),
+    "dead_time": ("theta",),
 }
 # Blocos de filtro (ADR-026): config é só um punhado de escalares, e o valor do dicionário
 # diz se o campo exige positivo estrito (divisor) ou apenas não-negativo.
@@ -253,13 +274,29 @@ class TfsElement(BaseModel):
     params: SopdtParams | IopdtParams
 
 
+TFS_DEFAULT_Y0 = 50.0
+"""Valor inicial de cada saída do TFS. A planta simulada raramente parte de zero, e 50 é o
+meio da faixa em que MV/PV costumam estar expressas (%)."""
+
+
 class TfsConfig(BaseModel):
-    """`matrix[J][K]` é a contribuição de `uK` para `yJ` (spec §3.4), sempre 2x2."""
+    """`matrix[J][K]` é a contribuição de `uK` para `yJ` (spec §3.4), sempre 2x2.
+
+    `y0` é a condição inicial de `[y1, y2]`: o estado dos elementos nasce no regime que
+    produz esse valor, nunca um somatório deslocado. Em linha auto-regulada (SOPDT) só o
+    transiente de partida muda e o ganho estático segue mandando no valor final; em linha
+    com IOPDT o integrador não tem ganho estático, então `y0` é o nível de onde ele passa a
+    integrar. Elemento sem memória (`K = 0`, ou `tau < Ts/10` com `theta = 0`) é um ganho
+    puro e não tem estado onde guardar `y0` — a parcela dele parte de `K*u`.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     matrix: list[list[TfsElement]]
     output_eu: dict[str, str] = Field(default_factory=dict)
+    y0: list[float] = Field(
+        default_factory=lambda: [TFS_DEFAULT_Y0, TFS_DEFAULT_Y0], min_length=2, max_length=2
+    )
 
     @field_validator("output_eu")
     @classmethod
@@ -292,6 +329,128 @@ class KalmanConfig(BaseModel):
 
     measurement_noise: float = Field(gt=0)
     process_noise: float = Field(ge=0)
+
+
+class ScalerConfig(BaseModel):
+    """Bloco Scaler: reescala linear de `in`∈[`in_min`,`in_max`] para [`out_min`,`out_max`].
+
+    `strict=True` reprova string/bool num campo de escala (mesma rejeição manual dos
+    filtros); `allow_inf_nan=False` protege o ganho `(out_max-out_min)/(in_max-in_min)`.
+    `in_max > in_min` porque a faixa de entrada é o divisor; a de saída pode inverter
+    (ação reversa, ex.: 4-20 mA → 100-0 %).
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    in_min: float = Field(allow_inf_nan=False)
+    in_max: float = Field(allow_inf_nan=False)
+    out_min: float = Field(allow_inf_nan=False)
+    out_max: float = Field(allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _faixa_de_entrada(self) -> "ScalerConfig":
+        if self.in_max <= self.in_min:
+            raise ValueError("in_max precisa ser maior que in_min")
+        # Ganho derivado também precisa ser finito: faixas patológicas (~1e308 de largura
+        # ou divisor denormal) transbordam a divisão e o bloco emitiria ±inf com ok=True.
+        ganho = (self.out_max - self.out_min) / (self.in_max - self.in_min)
+        if not math.isfinite(ganho):
+            raise ValueError("escala resulta em ganho não-finito")
+        return self
+
+
+class IntegratorConfig(BaseModel):
+    """Bloco Integrator (totalizador): acumula `in` no tempo do flow.
+
+    `time_base` é a EU de tempo da entrada: "s" (por segundo), "min" (por minuto) ou
+    "h" (por hora). O incremento por varredura é `in * Ts / fator`, com fator 1/60/3600 —
+    o Ts vem do scheduler, única autoridade de tempo do laço (ADR-031).
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    time_base: Literal["s", "min", "h"]
+
+
+MAX_LEAD_LAG_RATIO = 10.0
+"""Teto de `tau_lead/tau_lag`. A razão `r` é o REALCE de alta frequência relativo ao ganho DC:
+em regime (s→0) o ganho do bloco é `gain`; em alta frequência (s→∞) é `gain*r`. A saída do
+lead-lag tipicamente alimenta `bias_in`, somada DEPOIS do integrador (ADR-039 D10) — ruído no
+distúrbio medido chega à válvula multiplicado por `r`, sem atenuação integral. 10 é a ordem
+de grandeza que o DeltaV pratica; acima disso a saída é cascatear dois blocos, como o ADR-026
+já decidiu para filtro de ordem superior. `gain` fica FORA do teto porque ele limita o realce
+relativo, não o ganho absoluto: `gain` negativo e grande em módulo (ex. `gain = -3`) é
+legítimo e não diz nada sobre ruído."""
+
+
+class LeadLagConfig(BaseModel):
+    """Bloco Lead-Lag: `gain * (tau_lead*s + 1)/(tau_lag*s + 1)`, discretizado no Ts do flow.
+
+    `gain` aceita QUALQUER sinal: ganho de feedforward negativo é rotineiro (distúrbio que
+    empurra a CV para cima pede correção para baixo na válvula), e `gain = 0` desliga o
+    feedforward sem apagar o bloco do canvas.
+
+    `tau_lag > 0` porque é divisor tanto na razão quanto na discretização — `tau_lag = 0` com
+    `tau_lead > 0` é função de transferência imprópria (derivador puro), NÃO passagem direta:
+    a convenção `tau = 0` do ADR-026 não vale aqui. `tau_lead = 0` é lag puro, legítimo.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    gain: float = Field(allow_inf_nan=False)
+    tau_lead: float = Field(ge=0.0, allow_inf_nan=False)
+    tau_lag: float = Field(gt=0.0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _razao_lead_lag(self) -> "LeadLagConfig":
+        if self.tau_lead / self.tau_lag > MAX_LEAD_LAG_RATIO:
+            raise ValueError(
+                f"tau_lead/tau_lag precisa ser no máximo {MAX_LEAD_LAG_RATIO:g} — a razão é o "
+                "realce de alta frequência relativo ao ganho DC; para mais, cascateie dois blocos"
+            )
+        return self
+
+
+class DeadTimeConfig(BaseModel):
+    """Bloco Tempo morto: atrasa `in` em `theta` segundos.
+
+    `theta` é o mesmo termo dos modelos SOPDT/IOPDT (GLOSSARY) e vira `round(theta/Ts)`
+    amostras, com o mesmo arredondamento half-even do TFS. O teto da fila depende do Ts, que
+    o parse não conhece: mora em `validate.py`, ao lado do teto do TFS.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    theta: float = Field(ge=0.0, allow_inf_nan=False)
+
+
+class ConstantConfig(BaseModel):
+    """Bloco Constante: uma saída `out` com o valor fixo de `value`, sem entradas.
+
+    `strict=True` reprova string/bool (mesma rejeição dos demais utilitários — `True` é
+    `int` em Python e viraria 1.0 em silêncio); `allow_inf_nan=False` porque `inf`/`nan`
+    contaminariam todo bloco a jusante com `ok=True`.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    value: float = Field(allow_inf_nan=False)
+
+
+BUS_TYPES: frozenset[str] = frozenset({"bus_publish", "bus_subscribe"})
+"""Os dois blocos de barramento (ADR-042) — mesma config, sentidos opostos."""
+
+BUS_KEY_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+"""Charset da `key` de barramento (ADR-042 D8): sem ponto, sem glob, sem espaço — legível em
+log e em payload, e nunca ambígua com a sintaxe de canal/padrão do Redis."""
+
+
+class BusKeyConfig(BaseModel):
+    """Config dos blocos `bus_publish` e `bus_subscribe` (ADR-042): só a `key` da variável.
+
+    Um modelo para os dois tipos porque a config é a MESMA — quem discrimina o sentido é
+    `FlowNode.type` (mesma relação de `TagConfig` com `opc_read`/`opc_write`). O assinante
+    não tem campo de tempo de propósito: a validade vem do `period_s` que o publicador
+    carimba no payload (D4).
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    key: str = Field(pattern=BUS_KEY_PATTERN)
 
 
 class PidConfig(BaseModel):
@@ -453,6 +612,12 @@ NodeConfig = (
     | PidConfig
     | PidLoopConfig
     | FuzzyLoopConfig
+    | ScalerConfig
+    | IntegratorConfig
+    | ConstantConfig
+    | BusKeyConfig
+    | LeadLagConfig
+    | DeadTimeConfig
 )
 
 
@@ -485,6 +650,16 @@ class FlowEdge(BaseModel):
     target: str
     source_handle: str = Field(alias="sourceHandle")
     target_handle: str = Field(alias="targetHandle")
+    # ADR-040: não-nulo ⇒ ARESTA DE REALIMENTAÇÃO — a "quebra explícita" do RF-302. Um campo
+    # só, e não par `flag`+`valor`: aresta de realimentação sem condição inicial não é
+    # representável. Isenta da detecção de ciclo e do aviso de inversão (D2) e é a condição
+    # inicial do atraso unitário: a porta de ORIGEM nasce com este valor em vez de `COLD`
+    # (D4), senão `has_cold_input` trava o laço inválido para sempre.
+    feedback_init: float | None = None
+
+    @property
+    def is_feedback(self) -> bool:
+        return self.feedback_init is not None
 
 
 class FlowGraph(BaseModel):
@@ -640,6 +815,18 @@ def _parse_config(where: str, node_type: str, data: dict, errors: list[str]) -> 
         return _parse_loop_config(where, node_type, PidLoopConfig, data, errors)
     if node_type == "fuzzy_loop":
         return _parse_loop_config(where, node_type, FuzzyLoopConfig, data, errors)
+    if node_type == "scaler":
+        return _parse_loop_config(where, node_type, ScalerConfig, data, errors)
+    if node_type == "integrator":
+        return _parse_loop_config(where, node_type, IntegratorConfig, data, errors)
+    if node_type == "constant":
+        return _parse_loop_config(where, node_type, ConstantConfig, data, errors)
+    if node_type in BUS_TYPES:
+        return _parse_loop_config(where, node_type, BusKeyConfig, data, errors)
+    if node_type == "lead_lag":
+        return _parse_loop_config(where, node_type, LeadLagConfig, data, errors)
+    if node_type == "dead_time":
+        return _parse_loop_config(where, node_type, DeadTimeConfig, data, errors)
     if node_type in _FILTER_KEYS:
         return _parse_filter_config(where, node_type, data, errors)
     return _parse_tfs_config(where, data, errors)
@@ -773,14 +960,18 @@ def _parse_pid_config(where: str, data: dict, errors: list[str]) -> PidConfig | 
 def _parse_loop_config(
     where: str, node_type: str, modelo: type[BaseModel], data: dict, errors: list[str]
 ) -> NodeConfig | None:
-    """Config de bloco malha (ADR-039): modelo pydantic, um erro por problema."""
+    """Config via modelo pydantic (malhas ADR-039, scaler, integrator): um erro por problema."""
     payload = {key: data[key] for key in _CONFIG_KEYS[node_type] if key in data}
     try:
         return modelo.model_validate(payload)
     except ValidationError as exc:
         for erro in exc.errors():
             campo = ".".join(str(loc) for loc in erro["loc"])
-            errors.append(f"{where}: '{campo}': {erro['msg']}")
+            # Validador de modelo (loc vazio) não tem campo: a msg já nomeia o problema.
+            if campo == "":
+                errors.append(f"{where}: {erro['msg']}")
+            else:
+                errors.append(f"{where}: '{campo}': {erro['msg']}")
         return None
 
 
@@ -914,11 +1105,34 @@ def _parse_tfs_config(where: str, data: dict, errors: list[str]) -> TfsConfig | 
     output_eu = _parse_output_eu(where, data, errors)
     if output_eu is None:
         return None
+    y0 = _parse_tfs_y0(where, data, errors)
+    if y0 is None:
+        return None
     try:
-        return TfsConfig(matrix=rows, output_eu=output_eu)
+        return TfsConfig(matrix=rows, output_eu=output_eu, y0=y0)
     except ValidationError as erro:
         errors.append(f"{where}: {erro.errors()[0]['ctx']['error']}")
         return None
+
+
+def _parse_tfs_y0(where: str, data: dict, errors: list[str]) -> list[float] | None:
+    """Condição inicial de `[y1, y2]`. Ausente cai no default (compat. retroativa: flow
+    salvo antes do campo continua parseando, igual ao `output_eu`)."""
+    raw = data.get("y0")
+    if raw is None:
+        return [TFS_DEFAULT_Y0, TFS_DEFAULT_Y0]
+    if not isinstance(raw, list) or len(raw) != 2:
+        errors.append(
+            f"{where}: 'y0' deve ser uma lista [y1, y2] com o valor inicial de cada saída"
+        )
+        return None
+    values: list[float] = []
+    for index, value in enumerate(raw):
+        if not _is_number(value) or not math.isfinite(value):
+            errors.append(f"{where}: 'y0[{index}]' deve ser um número finito")
+        else:
+            values.append(float(value))
+    return values if len(values) == 2 else None
 
 
 def _parse_tfs_element(where: str, raw: object, errors: list[str]) -> TfsElement | None:
@@ -983,6 +1197,14 @@ def _parse_edges(raw_edges: list, errors: list[str]) -> list[FlowEdge]:
                 errors.append(f"aresta '{edge_id}': '{key}' deve ser uma string não-vazia")
             else:
                 fields[key] = value
+        seed = raw.get("feedback_init")
+        if seed is not None and (not _is_number(seed) or not math.isfinite(seed)):
+            errors.append(
+                f"aresta '{edge_id}': 'feedback_init' deve ser um número finito — é a"
+                " condição inicial da aresta de realimentação (ADR-040); omita a chave numa"
+                " aresta comum"
+            )
+            continue
         if len(fields) == 4:
             edges.append(
                 FlowEdge(
@@ -991,6 +1213,7 @@ def _parse_edges(raw_edges: list, errors: list[str]) -> list[FlowEdge]:
                     target=fields["target"],
                     source_handle=fields["sourceHandle"],
                     target_handle=fields["targetHandle"],
+                    feedback_init=None if seed is None else float(seed),
                 )
             )
     return edges

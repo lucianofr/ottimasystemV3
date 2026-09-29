@@ -20,6 +20,7 @@ from ottima_flow_runtime.mpc.discretize import (
     PairSS,
     discretize_iopdt,
     discretize_sopdt,
+    eu_gain_params,
 )
 
 
@@ -164,6 +165,51 @@ def test_iopdt_incremento_por_amostra_e_ki_ts_u():
     assert increments == pytest.approx([Ki * ts * u] * 4, rel=1e-12)
 
 
+def test_ifopdt_tau1_zero_e_identico_ao_integrador_puro():
+    """`tau1` ausente/zero tem de reproduzir o IOPDT puro bit a bit — todo config gravado
+    antes do campo continua valendo (1 estado, mesma série)."""
+    puro = discretize_iopdt(Ki=0.25, theta=0.0, ts=0.5)
+    com_campo = discretize_iopdt(Ki=0.25, theta=0.0, ts=0.5, tau1=0.0)
+
+    assert com_campo.a.shape == (1, 1)
+    assert propagate(com_campo, u=2.0, n=20) == pytest.approx(propagate(puro, u=2.0, n=20))
+
+
+def test_ifopdt_e_o_integrador_alimentado_pelo_lag_de_1a_ordem():
+    """IFOPDT `Ki·e^(-θs)/(s·(τ1·s+1))`: estágio de 1a ordem exato no ZOH em série com o
+    integrador retangular, mesma composição "atualiza-e-emite" do SOPDT (o acumulador
+    consome a saída JÁ atualizada do estágio). Série fechada: com `a1 = e^(-Ts/τ1)`,
+    `x1[k] = u·(1−a1^k)` e `y[k] = Ki·Ts·u·(k − a1·(1−a1^k)/(1−a1))`."""
+    Ki, tau1, ts, u = 0.4, 10.0, 1.0, 2.0
+    pair = discretize_iopdt(Ki=Ki, theta=0.0, ts=ts, tau1=tau1)
+
+    assert pair.a.shape == (2, 2)
+    a1 = math.exp(-ts / tau1)
+    got = propagate(pair, u=u, n=80)
+    for k, value in enumerate(got, start=1):
+        esperado = Ki * ts * u * (k - a1 * (1 - a1**k) / (1 - a1))
+        assert value == pytest.approx(esperado, rel=1e-12)
+
+
+def test_ifopdt_taxa_assintotica_e_a_do_integrador_puro():
+    """O lag atrasa a rampa, nunca muda a taxa de regime: o incremento por amostra converge
+    para `Ki·Ts·u` (= a taxa `Ki` por segundo, a base declarada do campo)."""
+    Ki, ts, u = 0.4, 1.0, 2.0
+    got = propagate(discretize_iopdt(Ki=Ki, theta=0.0, ts=ts, tau1=10.0), u=u, n=600)
+
+    assert got[-1] - got[-2] == pytest.approx(Ki * ts * u, rel=1e-12)
+    # ... e fica ATRÁS do integrador puro pelo transiente do lag (nunca à frente).
+    puro = propagate(discretize_iopdt(Ki=Ki, theta=0.0, ts=ts), u=u, n=600)
+    assert got[-1] < puro[-1]
+
+
+def test_ifopdt_polos_sao_o_integrador_e_o_lag():
+    ts, tau1 = 0.5, 20.0
+    poles = sorted(np.linalg.eigvals(discretize_iopdt(1.0, 0.0, ts, tau1=tau1).a).real)
+
+    assert poles == pytest.approx(sorted([1.0, math.exp(-ts / tau1)]), rel=1e-12)
+
+
 # --------------------------------------------------------------------------------------
 # Tempo morto: delay = round(theta/ts) amostras (banker's)
 # --------------------------------------------------------------------------------------
@@ -207,3 +253,43 @@ def test_round_banker_2_5_arredonda_para_2():
 def test_round_banker_3_5_arredonda_para_4():
     pair = discretize_iopdt(Ki=1.0, theta=3.5, ts=1.0)
     assert pair.delay == 4
+
+
+def test_ki_do_campo_e_taxa_por_1pct_da_coluna() -> None:
+    """Base do campo `Ki` é **%/%/s** (RF-602, reafirmada em 2026-09-12): 1% da coluna rampa
+    a linha a `Ki` %/s, sem ÷100 nenhum. Caso de campo (flow 987, linha de nível
+    `cv_ij93`×`mv_chns`, Ki=0,00379): 1 ponto de FV-201 move o nível a 0,00379 %/s, e a
+    coluna inteira (100%) a 0,379 %/s. Fixa a razão de spans PURA no caminho
+    config→discretização, junto do `·ts`."""
+    params = eu_gain_params(
+        {"Ki": 0.00379, "theta": 0.0}, kind="integrating", row_span=100.0, col_span=100.0
+    )
+    ts = 2.0
+    por_1pct = propagate(discretize_iopdt(params["Ki"], params["theta"], ts=ts), u=1.0, n=10)
+    assert por_1pct[-1] / (ts * len(por_1pct)) == pytest.approx(0.00379, rel=1e-12)
+
+    em_100pct = propagate(discretize_iopdt(params["Ki"], params["theta"], ts=ts), u=100.0, n=10)
+    assert em_100pct[-1] / (ts * len(em_100pct)) == pytest.approx(0.379, rel=1e-12)
+
+
+def test_ganho_integrador_e_invariante_de_base_de_tempo() -> None:
+    """Contrato de unidade do campo Ki (rótulo da UI: "Ki (%/%/s)", base: % do span da linha
+    por segundo por 1% do span da coluna): o caminho config→modelo trata Ki como taxa POR
+    SEGUNDO, então a rampa de saída por unidade de TEMPO não pode depender do Ts de
+    amostragem. Discretizar o MESMO Ki com ts=1 s e ts=2 s tem de dar a mesma taxa %/s
+    (y(t)/t igual nos dois); só o incremento POR AMOSTRA muda (Ki·ts). Se alguém trocar a
+    base de tempo (Ki por minuto, ou esquecer o `·ts`), as duas taxas divergem e este teste
+    falha."""
+    params = eu_gain_params(
+        {"Ki": 0.5, "theta": 0.0}, kind="integrating", row_span=100.0, col_span=100.0
+    )
+    u_degrau = 1.0  # 1% do span da coluna — a base declarada do campo (%/%/s)
+
+    taxa: dict[float, float] = {}
+    for ts in (1.0, 2.0):
+        got = propagate(discretize_iopdt(params["Ki"], params["theta"], ts=ts), u=u_degrau, n=6)
+        tempo_total = ts * len(got)
+        taxa[ts] = got[-1] / tempo_total  # % por segundo
+
+    assert taxa[1.0] == pytest.approx(0.5, rel=1e-12)
+    assert taxa[2.0] == pytest.approx(taxa[1.0], rel=1e-12)

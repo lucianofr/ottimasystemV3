@@ -67,6 +67,7 @@ def _build(graph: dict, reuse: dict | None = None) -> StagedDefinition:
         redis_client=none,
         pool=none,
         snapshot=none,
+        exchange=none,
     )
 
 
@@ -88,10 +89,11 @@ async def test_tau_chega_ao_bloco_com_o_ts_do_flow():
     staged = _build(_graph(tau=TS / 10 - 1e-9))
     bloco = cast(FirstOrderBlock, staged.blocks["f1"][1])
 
-    from ottima_flow_runtime.blocks.base import PortSample
+    from ottima_core.signal import Quality
+    from ottima_flow_runtime.blocks.base import Signal
 
-    await bloco.step({"in": PortSample(0.0, True)})
-    assert (await bloco.step({"in": PortSample(7.0, True)}))["out"].v == 7.0
+    await bloco.step({"in": Signal(0.0, quality=Quality.GOOD)})
+    assert (await bloco.step({"in": Signal(7.0, quality=Quality.GOOD)}))["out"].v == 7.0
 
 
 def test_rotulo_nao_reinstancia_o_bloco():

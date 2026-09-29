@@ -1,6 +1,16 @@
 """Fixtures compartilhadas (spec F1 §9): Timescale real via testcontainers,
 migrations Alembic e isolamento por SAVEPOINT."""
 
+import os
+
+# `get_container_host_ip()` do testcontainers devolve `localhost`, e o docker desta máquina
+# publica portas divergentes em IPv4 e IPv6 (ex.: postgres em `0.0.0.0:32922`/`[::]:32921`,
+# redis em `[::]:32922`): resolver `localhost` por `::1` primeiro faz o asyncpg discar na
+# porta do REDIS e pendurar 60 s no handshake, aparecendo como TimeoutError de FIXTURE em
+# toda a suíte da API. Forçar IPv4 elimina a ambiguidade; `setdefault` respeita override
+# externo de quem rodar em outro ambiente.
+os.environ.setdefault("TESTCONTAINERS_HOST_OVERRIDE", "127.0.0.1")
+
 import sys
 from pathlib import Path
 

@@ -247,6 +247,75 @@
       }
     },
     {
+      "esperado": 3,
+      "modelos": {
+        "cv_a": {
+          "mv_a": {
+            "enabled": true,
+            "params": {
+              "Ki": 1.0,
+              "tau1": 60.0,
+              "theta": 0.0
+            }
+          }
+        }
+      },
+      "nome": "ifopdt_com_lag_soma_dois_estados",
+      "ts_mpc": 1.0,
+      "variaveis": {
+        "constraints": [],
+        "cvs": [
+          {
+            "description": "",
+            "eu": "",
+            "fail_action": "no_action",
+            "fail_timeout_s": 60.0,
+            "id": "cv_a",
+            "kind": "integrating",
+            "name": "",
+            "objective": "none",
+            "priority": 1,
+            "remote_sp_tag_id": null,
+            "sp_limits": {
+              "max": 100.0,
+              "min": 0.0
+            },
+            "sp_range_pct": null,
+            "span": 100.0,
+            "track_sp": true,
+            "traj_tau_s": 0.0,
+            "tss": 30.0,
+            "weight": 1.0,
+            "zero": 0.0
+          }
+        ],
+        "dvs": [],
+        "mvs": [
+          {
+            "description": "",
+            "du_min": 0.0,
+            "eu": "",
+            "fail_action": "no_action",
+            "id": "mv_a",
+            "initial_value": 0.0,
+            "limits": {
+              "max": 100.0,
+              "min": 0.0
+            },
+            "local_shed_mode": null,
+            "max_rate": 1.0,
+            "move_weight": 1.0,
+            "name": "",
+            "objective": "none",
+            "pid": null,
+            "psv": null,
+            "span": 100.0,
+            "zero": 0.0
+          }
+        ]
+      }
+    },
+    {
       "esperado": 1,
       "modelos": {
         "cv_a": {
@@ -1138,6 +1207,82 @@
         "erros": 1
       },
       "regra": "matrix_par_habilitado_com_params_invalidos",
+      "ts_flow_segundos": 1.0
+    },
+    {
+      "config": {
+        "models": {
+          "cv_a": {
+            "mv_a": {
+              "enabled": true,
+              "params": {
+                "Ki": 1.0,
+                "tau1": 45.0,
+                "theta": 0.0
+              }
+            }
+          }
+        },
+        "multiplier": 1,
+        "name": "golden",
+        "variables": {
+          "constraints": [],
+          "cvs": [
+            {
+              "description": "",
+              "eu": "",
+              "fail_action": "no_action",
+              "fail_timeout_s": 60.0,
+              "id": "cv_a",
+              "kind": "integrating",
+              "name": "",
+              "objective": "none",
+              "priority": 1,
+              "remote_sp_tag_id": null,
+              "sp_limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "sp_range_pct": null,
+              "span": 100.0,
+              "track_sp": true,
+              "traj_tau_s": 0.0,
+              "tss": 30.0,
+              "weight": 1.0,
+              "zero": 0.0
+            }
+          ],
+          "dvs": [],
+          "mvs": [
+            {
+              "description": "",
+              "du_min": 0.0,
+              "eu": "",
+              "fail_action": "no_action",
+              "id": "mv_a",
+              "initial_value": 0.0,
+              "limits": {
+                "max": 100.0,
+                "min": 0.0
+              },
+              "local_shed_mode": null,
+              "max_rate": 1.0,
+              "move_weight": 1.0,
+              "name": "",
+              "objective": "none",
+              "pid": null,
+              "psv": null,
+              "span": 100.0,
+              "zero": 0.0
+            }
+          ]
+        }
+      },
+      "esperado": {
+        "avisos": 0,
+        "erros": 0
+      },
+      "regra": "matrix_integrating_com_lag_valido",
       "ts_flow_segundos": 1.0
     },
     {

@@ -26,7 +26,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ottima_core.bus import LoopState
-from ottima_flow_runtime.blocks.base import Block, PortSample
+from ottima_core.signal import Quality, Substatus
+from ottima_flow_runtime.blocks.base import Block, Signal
 from ottima_flow_runtime.blocks.shell.config import ShellCfg, clamp, scale_pct, unscale_pct
 from ottima_flow_runtime.blocks.shell.kernel import ControlKernel, MultiControlKernel
 from ottima_flow_runtime.blocks.shell.mode import (
@@ -35,12 +36,6 @@ from ottima_flow_runtime.blocks.shell.mode import (
     Mode,
     ModeBlock,
     mode_from_name,
-)
-from ottima_flow_runtime.blocks.shell.signal import (
-    Quality,
-    Substatus,
-    as_signal,
-    make_signal,
 )
 
 KIND_LOOP_MODE_CHANGED = "loop_mode_changed"
@@ -384,8 +379,8 @@ class BlockShell(Block):
 
     # -- ciclo ---------------------------------------------------------------
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         dt = self._measure_dt(ts)
         for i in range(self.n_channels):
             self._update_pv(i, inputs.get(self._porta_pv(i)), dt)
@@ -497,7 +492,7 @@ class BlockShell(Block):
             return None
         return (ts - prev).total_seconds()
 
-    def _update_pv(self, canal: int, sample: PortSample | None, dt: float | None) -> None:
+    def _update_pv(self, canal: int, sample: Signal | None, dt: float | None) -> None:
         c = self._canais[canal]
         if sample is None or sample.v is None:
             c.pv_ok = False
@@ -506,21 +501,21 @@ class BlockShell(Block):
         if not math.isfinite(v):
             c.pv_ok = False
             return
-        c.pv_ok = as_signal(sample).is_good
+        c.pv_ok = sample.ok
         if c.pv is None or self.cfg.pv_ftime <= 0.0 or dt is None or dt <= 0.0:
             c.pv = v
             return
         a = dt / (self.cfg.pv_ftime + dt)
         c.pv = c.pv + a * (v - c.pv)
 
-    def _resolve_mode(self, inputs: Mapping[str, PortSample], kernel_errors: list[str]) -> Mode:
+    def _resolve_mode(self, inputs: Mapping[str, Signal], kernel_errors: list[str]) -> Mode:
         cfg = self.cfg
         target = self.mode.target
         if kernel_errors or target is Mode.OOS:
             return Mode.OOS
         efetivo = target if (target & cfg.permitted) else self.mode.normal
         bk = inputs.get("bkcal_in")
-        if bk is not None and bk.v is not None and as_signal(bk).init_request:
+        if bk is not None and bk.v is not None and bk.init_request:
             return Mode.IMAN
         lo = inputs.get("lo_in_d")
         if lo is not None and bool(lo.v) and lo.ok:
@@ -532,8 +527,8 @@ class BlockShell(Block):
         for modo, porta in ((Mode.CAS, "cas_in"), (Mode.RCAS, "rcas_in"), (Mode.ROUT, "rout_in")):
             if efetivo is modo:
                 fonte = inputs.get(porta)
-                if fonte is None or fonte.v is None or not as_signal(fonte).is_good:
-                    return self._shed(modo)
+                if fonte is None or fonte.v is None or not fonte.ok:
+                    return self._shed(efetivo)
         return efetivo
 
     def _shed(self, alvo: Mode) -> Mode:
@@ -553,9 +548,7 @@ class BlockShell(Block):
         )
         return destino
 
-    def _resolve_sp(
-        self, canal: int, m: Mode, inputs: Mapping[str, PortSample], dt: float
-    ) -> float:
+    def _resolve_sp(self, canal: int, m: Mode, inputs: Mapping[str, Signal], dt: float) -> float:
         cfg = self.cfg
         c = self._canais[canal]
         remoto = {Mode.CAS: "cas_in", Mode.RCAS: "rcas_in"}.get(m)
@@ -583,7 +576,7 @@ class BlockShell(Block):
             for c in self._canais:
                 c.man_out = c.u  # transicao para MAN nunca salta (ADR-039 secao 4.4)
 
-    def _forced_outputs(self, m: Mode, inputs: Mapping[str, PortSample]) -> list[float | None]:
+    def _forced_outputs(self, m: Mode, inputs: Mapping[str, Signal]) -> list[float | None]:
         cfg = self.cfg
         trk = None if self._channel_ports else inputs.get("trk_in_d")
         rastreando = trk is not None and bool(trk.v) and trk.ok
@@ -611,15 +604,14 @@ class BlockShell(Block):
             return [cfg.trk_val] * self.n_channels
         return [None] * self.n_channels
 
-    def _resolve_bias(self, canal: int, sample: PortSample | None) -> float:
+    def _resolve_bias(self, canal: int, sample: Signal | None) -> float:
         cfg = self.cfg
         c = self._canais[canal]
         if not cfg.ff_enable or sample is None or sample.v is None:
             return c.bias
-        sinal = as_signal(sample)
-        if not sinal.is_good or not math.isfinite(float(sinal.v)):
+        if not sample.ok or not math.isfinite(float(sample.v)):
             return c.bias  # BAD: mantem o ultimo bom (ADR-039 D10)
-        pct = unscale_pct(float(sinal.v), cfg.ff_scale_lo, cfg.ff_scale_hi)
+        pct = unscale_pct(float(sample.v), cfg.ff_scale_lo, cfg.ff_scale_hi)
         c.bias = cfg.ff_gain * pct
         return c.bias
 
@@ -633,7 +625,7 @@ class BlockShell(Block):
         return u
 
     # -- emissao -------------------------------------------------------------
-    async def _finish(self, inputs: Mapping[str, PortSample]) -> dict[str, PortSample]:
+    async def _finish(self, inputs: Mapping[str, Signal]) -> dict[str, Signal]:
         m = self.mode.actual
         if m is not self._prev_actual:
             self._defer_event(
@@ -672,7 +664,7 @@ class BlockShell(Block):
             return
         self._defer_event(kind=kind, severity="warning", message=message, payload=payload)
 
-    def _emit(self) -> dict[str, PortSample]:
+    def _emit(self) -> dict[str, Signal]:
         cfg, m = self.cfg, self.mode.actual
         if self._channel_ports:
             return {f"out_{i + 1}": self._sinal_out(i) for i in range(self.n_channels)}
@@ -682,21 +674,21 @@ class BlockShell(Block):
         out = self._sinal_out(0)
         d = cfg.direct_acting
         valor_bkcal = c.pv if (cfg.use_pv_for_bkcal and c.pv is not None) else c.sp
-        bkcal = make_signal(
+        bkcal = Signal(
             valor_bkcal,
-            Quality.GOOD,
+            quality=Quality.GOOD,
             substatus=Substatus.NON_SPECIFIC if m is Mode.CAS else Substatus.INIT_REQUEST,
             hi_limited=lo if d else hi,
             lo_limited=hi if d else lo,
         )
         return {"out": out, "bkcal_out": bkcal}
 
-    def _sinal_out(self, canal: int) -> Any:
+    def _sinal_out(self, canal: int) -> Signal:
         cfg, m = self.cfg, self.mode.actual
         c = self._canais[canal]
-        return make_signal(
+        return Signal(
             scale_pct(c.u, cfg.out_scale_lo, cfg.out_scale_hi),
-            Quality.BAD if m is Mode.OOS else Quality.GOOD,
+            quality=Quality.BAD if m is Mode.OOS else Quality.GOOD,
             substatus=Substatus.LOCAL_OVERRIDE if m is Mode.LO else Substatus.NON_SPECIFIC,
             hi_limited=c.u >= cfg.out_hi_lim,
             lo_limited=c.u <= cfg.out_lo_lim,

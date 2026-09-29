@@ -48,9 +48,9 @@ from ottima_core.bus import (
     FlowCommand,
 )
 from ottima_core.flowgraph import FlowGraph, GraphParseError, TagRef, parse_graph, validate_graph
-from ottima_core.models import Flow, Project
+from ottima_core.models import Flow, HistorizedVar, Project
 from ottima_core.script_pool import ScriptPool
-from ottima_core.snapshot import ValueSnapshot
+from ottima_core.snapshot import ExchangeSnapshot, ValueSnapshot
 from ottima_core.tags import project_tags
 
 from .blocks.base import Block
@@ -171,6 +171,7 @@ class Supervisor:
         state: RuntimeState,
         *,
         snapshot: ValueSnapshot,
+        exchange: ExchangeSnapshot,
         pool: ScriptPool,
         poll_interval_s: float = POLL_INTERVAL_S,
         mpc_worker_target: Callable[[Connection, str, float], None] = worker_main,
@@ -180,6 +181,7 @@ class Supervisor:
         self._redis = redis_client
         self._state = state
         self._snapshot = snapshot
+        self._exchange = exchange
         self._pool = pool
         self._poll_interval_s = poll_interval_s
         self._mpc_worker_target = mpc_worker_target
@@ -550,6 +552,13 @@ class Supervisor:
         )
         for aviso in warnings:
             logger.info("Flow %s: %s", flow.id, aviso)
+        # ADR-041: mesmo ponto em que o `Flow` é lido do banco — cobre deploy inicial E
+        # hot-swap (`_stage`, único chamador de `_build` além do deploy). `definition.py`
+        # é quem filtra pelas portas que o grafo instanciado realmente tem (D7).
+        result = await session.execute(
+            select(HistorizedVar).where(HistorizedVar.flow_id == flow.id)
+        )
+        historized_vars = result.scalars().all()
 
         return build_definition(
             graph,
@@ -560,10 +569,12 @@ class Supervisor:
             redis_client=self._redis,
             pool=self._pool,
             snapshot=self._snapshot,
+            exchange=self._exchange,
             watchdog_enabled=flow.watchdog_enabled,
             mpc_worker_target=self._mpc_worker_target,
             sp_seeds=await carregar_sp_seeds(session, flow.id),
             loop_seeds=await carregar_loop_seeds(session, flow.id),
+            historized_vars=historized_vars,
             session_factory=self._session_factory,
         )
 

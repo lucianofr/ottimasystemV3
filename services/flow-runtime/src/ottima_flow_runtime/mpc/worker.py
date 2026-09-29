@@ -527,6 +527,12 @@ def _solve(runtime: _Runtime, request: SolveRequest) -> SolveResult:
     t0 = time.perf_counter()
     built.mpc.make_step(runtime.x_current)
     wall_ms = (time.perf_counter() - t0) * 1000.0
+    # `store_full_solution` (warm start, ver builder) faz o do-mpc acumular CADA solve em
+    # `mpc.data` via `np.append` (O(n²) e sem teto num worker longevo). Ninguém lê esse
+    # histórico — predição/custo saem de `opt_x_num`/`opt_p_num` — e o warm start vive nesses
+    # atributos, não em `data`: zerar o storage a cada ciclo limita a memória sem tocar a
+    # convergência.
+    built.mpc.data.init_storage()
 
     success = bool(built.mpc.solver_stats.get("success", False))
     status = "ok" if success else "no_convergence"
@@ -561,11 +567,54 @@ def _handle(runtime: _Runtime, request: SolveRequest) -> SolveResult:
         return empty_result(status="error", detail=detail, wall_ms=0.0)
 
 
+def _prime(runtime: _Runtime) -> SolveResult:
+    """Solve NEUTRO dentro do boot, antes do handshake `_READY`: o PRIMEIRO `make_step` do
+    IPOPT (frio) é o mais caro da vida do worker — se ele estourar o orçamento de 0,7×Ts_mpc,
+    o kill+respawn da spec §4.2 reinicia o worker antes do primeiro solve real concluir e a
+    espiral de `building` nunca termina (caso de campo 2026-09-11, flow 987: 76 respawns,
+    zero solves). O prime paga esse custo frio dentro do orçamento de boot
+    (`_BOOT_TIMEOUT_S`, 30 s) e entrega o solver com o chute primal quente.
+
+    Neutro por construção: `reinit=True` com medidas zero, MVs no meio do curso e SP no meio
+    de `sp_limits` (`_effective_sp`/`_apply_tvp` indexam `request.sp` por CV — dict vazio
+    levantaria KeyError). O `init_bumpless` deriva estado/bias disso, e o primeiro pedido
+    REAL sempre chega com `reinit=True` (o host força no primeiro dispatch pós-boot),
+    sobrescrevendo todo traço do prime no modelo. O resultado é descartado: nada cruza o
+    pipe. Falha do prime não mata o boot (`_handle` isola a exceção como em qualquer pedido).
+
+    O prime não deixa história falsa: `_run_ssto` grava `ssto_dv_prev`/`ssto_delta_prev`
+    (âncoras de ΔDV/ΔMV, ADR-027 §2/§8) a partir do pedido neutro — zeradas, virariam degrau
+    fantasma no primeiro ciclo real; e a linha do prime sai do histórico do do-mpc via
+    `data.init_storage()` (o warm start primal vive em `opt_x_num`, não em `data`)."""
+    request = SolveRequest(
+        y={row_id: 0.0 for row_id in runtime.built.prediction_rows},
+        u_applied={mv_id: (lo + hi) / 2.0 for mv_id, (lo, hi) in runtime.limits.items()},
+        d={},
+        sp={cv.id: (cv.sp_limits.min + cv.sp_limits.max) / 2.0 for cv in runtime.cvs},
+        reinit=True,
+    )
+    resultado = _handle(runtime, request)
+    if resultado.status != "ok":
+        # Prime falho = a proteção contra a espiral morre em silêncio: o boot segue (o solve
+        # real ainda pode caber no orçamento), mas o log do worker precisa contar — sem isto
+        # um prime quebrado vira no-op invisível e a starvation volta sem rastro nenhum.
+        logger.warning(
+            "Prime do worker MPC falhou (status=%s, detail=%s); boot segue sem solver quente",
+            resultado.status,
+            resultado.detail,
+        )
+    runtime.ssto_dv_prev = None
+    runtime.ssto_delta_prev = None
+    runtime.built.mpc.data.init_storage()
+    return resultado
+
+
 def worker_main(conn: Connection, config_json: str, ts_flow: float) -> None:
     """Alvo do `spawn` (nível de módulo: `spawn` precisa importá-lo, mesmo padrão de
     `script_pool._worker_main`). Nada aqui assume `asyncio` (ADR-004)."""
     config = MpcConfig.model_validate_json(config_json)
     runtime = _build_runtime(config, ts_flow)
+    _prime(runtime)  # solve frio pago no boot — ver docstring de `_prime`
     conn.send((_READY, runtime.built.mpc.model.n_x))
     try:
         while True:

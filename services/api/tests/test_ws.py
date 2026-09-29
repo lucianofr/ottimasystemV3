@@ -9,12 +9,13 @@ import asyncio
 import json
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
 
-from ottima_api.ws import QUEUE_MAX, FlowStatusHub
+from ottima_api import ws as ws_module
+from ottima_api.ws import PING_TEXT, QUEUE_MAX, FlowStatusHub, Subscriber
 from ottima_core.bus import (
     CHANNEL_CALC_VALUES,
     FlowStatus,
@@ -23,6 +24,7 @@ from ottima_core.bus import (
     channel_flow_status,
 )
 from ottima_core.security import create_access_token
+from ottima_core.signal import Quality
 
 RECEIVE_TIMEOUT_S = 5.0
 """Teto de espera por mensagem: cobre o trânsito pelo Redis real."""
@@ -178,7 +180,12 @@ def status_json(scan_ms: float = 3.2, v: float | bool | None = 42.5) -> str:
         scan_ms=scan_ms,
         overruns=0,
         ts=datetime.now(UTC),
-        ports={"b1": {"out": PortValue(v=v, ok=True), "in": PortValue(v=None, ok=False)}},
+        ports={
+            "b1": {
+                "out": PortValue(v=v, quality=Quality.GOOD),
+                "in": PortValue(v=None, quality=Quality.BAD),
+            }
+        },
     ).model_dump_json()
 
 
@@ -253,8 +260,20 @@ async def test_operador_recebe_status_do_flow_inscrito(connect, operator_token, 
         assert message["channel"] == "flow.status.1"
         assert message["data"]["state"] == "running"
         # O contrato do canvas é o conteúdo de `ports`, não a presença da chave
-        assert message["data"]["ports"]["b1"]["out"] == {"v": 42.5, "ok": True}
-        assert message["data"]["ports"]["b1"]["in"] == {"v": None, "ok": False}
+        assert message["data"]["ports"]["b1"]["out"] == {
+            "v": 42.5,
+            "quality": 2,
+            "substatus": 0,
+            "hi_limited": False,
+            "lo_limited": False,
+        }
+        assert message["data"]["ports"]["b1"]["in"] == {
+            "v": None,
+            "quality": 0,
+            "substatus": 0,
+            "hi_limited": False,
+            "lo_limited": False,
+        }
 
 
 async def test_admin_tambem_e_aceito(connect, make_user, make_token, redis_client):
@@ -319,6 +338,73 @@ async def test_sem_subscribe_nao_ha_fanout(connect, operator_token, redis_client
         await ws.subscribe(1)
         await redis_client.publish(channel_flow_status(1), status_json())
         assert (await ws.receive_json())["channel"] == "flow.status.1"
+
+
+async def test_heartbeat_avisa_socket_sem_assinatura(
+    app, redis_client, ws_session_cycles, operator_token, monkeypatch
+):
+    """Sinal de vida na camada de aplicação: sem ele, um socket meio-aberto (proxy recriado,
+    host suspenso, NAT que esquece a conexão — nenhum FIN, nenhum RST) é indistinguível de
+    canal parado, e o cliente fica `OPEN` para sempre sem religar. Hub próprio porque a
+    cadência é lida no `start()`."""
+    monkeypatch.setattr(ws_module, "HEARTBEAT_S", 0.05)
+    hub = FlowStatusHub(redis_client)
+    await hub.start()
+    app.state.flow_status_hub = hub
+    try:
+        async with WSClient(app, operator_token) as ws:
+            await ws.ready()  # nada assinado: só o heartbeat pode falar
+
+            assert await ws.receive_json() == {"channel": "ping", "data": {}}
+    finally:
+        await hub.stop()
+
+
+def test_offer_idle_nao_desloca_quadro_em_espera():
+    """Razão de existir de `offer_idle`: com quadro real em espera o canal JÁ está provado
+    vivo, e um `offer` normal descartaria a varredura mais antiga (drop-oldest de QUEUE_MAX)
+    para dar lugar a um `ping`.
+
+    Asserção direta na fila do `Subscriber`, sem `start()`: ninguém desenfileira, então não há
+    corrida com o `_send_loop` nem dependência da cadência real do heartbeat.
+    """
+    sub = Subscriber(cast(Any, object()))  # o socket não é tocado por `offer`/`offer_idle`
+    varredura = status_json()
+
+    sub.offer(varredura)
+    sub.offer_idle(PING_TEXT)
+
+    assert sub._queue.qsize() == 1
+    assert sub._queue.get_nowait() == varredura
+
+    # Fila vazia é o único caso em que o sinal de vida precisa entrar.
+    sub.offer_idle(PING_TEXT)
+
+    assert sub._queue.get_nowait() == PING_TEXT
+
+
+def test_heartbeat_tick_usa_offer_idle():
+    """Fiação do batimento, não só o contrato do método: um unit de `offer_idle` segue verde se
+    alguém trocar a chamada por `offer` dentro do tique — e é essa troca que volta a descartar
+    varredura por drop-oldest.
+
+    Hub com Redis dublê e sem `start()` (os listeners só guardam o cliente no `__init__`),
+    `Subscriber` sem `start()` e o tique chamado direto: nada desenfileira, nenhum relógio
+    envolvido, então a fila mostra exatamente o que o batimento colocou lá.
+    """
+    hub = FlowStatusHub(cast(Any, object()))
+    sub = Subscriber(cast(Any, object()))
+    sub.offer("x")  # quadro real em espera
+    hub._subs.add(sub)
+
+    hub._heartbeat_tick()
+
+    assert sub._queue.qsize() == 1
+    assert sub._queue.get_nowait() == "x"  # e a fila fica vazia
+
+    hub._heartbeat_tick()  # socket ocioso: agora o sinal de vida tem que entrar
+
+    assert sub._queue.get_nowait() == PING_TEXT
 
 
 async def test_unsubscribe_para_o_fanout_e_subscribe_retoma(connect, operator_token, redis_client):

@@ -19,6 +19,7 @@ import httpx
 import redis
 
 from ottima_core.bus import channel_flow_status
+from ottima_core.signal import Quality
 
 from .conftest import (
     NODE_WD_FROM_SYSTEM,
@@ -99,11 +100,15 @@ def matriz_integrador(ki: float = KI) -> list[list[dict]]:
 
 
 def grafo_script_tfs(constante: float) -> dict:
-    """Script (constante) → TFS integrador: o par do aceite da fase (PRD §8-F3)."""
+    """Script (constante) → TFS integrador: o par do aceite da fase (PRD §8-F3).
+
+    `y0` explícito em zero (e não o default 50 da config): o cenário lê o acumulador do
+    integrador desde o repouso.
+    """
     return montar_grafo(
         [
             bloco("calculo", "script", 1, n_inputs=0, n_outputs=1, code=f"OUT1 = {constante!r}"),
-            bloco("planta", "tfs", 2, matrix=matriz_integrador()),
+            bloco("planta", "tfs", 2, matrix=matriz_integrador(), y0=[0.0, 0.0]),
         ],
         [aresta("calculo", "OUT1", "planta", "u1")],
     )
@@ -330,6 +335,11 @@ def porta(status: dict[str, Any], block_id: str, handle: str) -> dict[str, Any]:
 
 def valor(status: dict[str, Any], block_id: str, handle: str) -> float | bool | None:
     return porta(status, block_id, handle)["v"]
+
+
+def porta_valida(status: dict[str, Any], block_id: str, handle: str) -> bool:
+    """Sucede `ok` no payload de `flow.status.ports`: válida ≡ `quality == GOOD` (ADR-043 §4)."""
+    return porta(status, block_id, handle)["quality"] == Quality.GOOD
 
 
 def de_varredura(status: dict[str, Any]) -> bool:

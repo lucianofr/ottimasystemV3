@@ -46,9 +46,12 @@ RowFailAction = Literal[
 # `_compute_outputs`) importam daqui — nunca literais duplicados.
 #
 # Valor sempre numérico (decisão A-5: toda porta do MPC é numérica, nunca bool): 1.0/0.0.
-# `MPC_PORT_LOCAL`: 1.0 em LOCAL, 0.0 em REMOTO. `MPC_PORT_AUTO`: 1.0 em AUTO (dentro de
-# REMOTO), 0.0 em MAN. Saem nulas junto com as demais saídas sob cold start das entradas
-# (padrão F3 §3.0) — mesma regra de invalidez de toda porta do bloco numa varredura ruim.
+# ESTADO REAL, não pedido do operador (emenda 2026-09-11 à nota da spec F4 §2.1-5):
+# `MPC_PORT_LOCAL`: 1.0 com o bloco de fato em LOCAL, 0.0 em REMOTO. `MPC_PORT_AUTO`: 1.0 só
+# quando o bloco ESTÁ controlando — REMOTO + AUTO + host pronto (armed); 0.0 em MAN, em LOCAL
+# e enquanto o solver está em `building`/worker indisponível. Saem nulas junto com as demais
+# saídas sob cold start das entradas (padrão F3 §3.0) — mesma regra de invalidez de toda porta
+# do bloco numa varredura ruim.
 MPC_PORT_LOCAL = "local"
 MPC_PORT_AUTO = "auto"
 MPC_FIXED_OUTPUT_PORTS: tuple[str, str] = (MPC_PORT_LOCAL, MPC_PORT_AUTO)
@@ -342,7 +345,25 @@ class MpcVariables(BaseModel):
 
 
 class PairModel(BaseModel):
-    """Par `models[linha][coluna]` (spec §2.1-2); `params` genérico — completude é da 1.2."""
+    """Par `models[linha][coluna]` (spec §2.1-2); `params` genérico — completude é da 1.2.
+
+    UNIDADES do contrato de engenharia (espelhadas nos rótulos/tooltips da UI); ganhos
+    NORMALIZADOS pelas faixas 0..span (RF-609):
+
+    - selfreg (SOPDT) `{K, tau1, tau2, theta}`: `K` adimensional %/% = `ΔCV%/ΔMV%`.
+    - integrating (IOPDT/IFOPDT) `{Ki, theta}` + `tau1` OPCIONAL: `Ki` em **%/(%·s)** = taxa
+      da linha em % do span dela por SEGUNDO, por **1% do span da coluna**. Com `tau1 > 0` o
+      par é `Ki·e^(-θs)/(s·(τ1·s+1))` — integrador alimentado por um lag de 1a ordem (2
+      estados); `tau1` ausente ou 0 é o integrador puro de sempre.
+    - `tau1`/`tau2`/`theta` sempre em SEGUNDOS.
+
+    O runtime converte pra EU em `eu_gain_params` ANTES do worker — `K_EU = K ×
+    span_linha/span_coluna` e `Ki_EU = Ki × span_linha/span_coluna`, a MESMA razão de spans
+    nas duas formas — e discretiza contra `Ts_mpc` em segundos (`mpc/discretize.py`); nenhuma
+    conversão de base de tempo em lugar nenhum. Base do `Ki` reafirmada pelo dono do produto
+    em 2026-09-12, alinhada ao texto de RF-602/RF-609. O ÷100 extra que vigorou por um dia
+    (2026-09-11 → 09-12) foi removido: config novo não converte nada, e só o `Ki` escolhido
+    naquela janela precisa ser DIVIDIDO por 100 ao migrar (0,2191 ⇒ 0,002191)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -510,9 +531,10 @@ def mpc_state_dimension(config: MpcConfig, ts_mpc: float) -> int:
     """Dimensão do estado agregado do modelo do-mpc (spec §2.2-7).
 
     Soma, por par HABILITADO da matriz `models`: 2 estados se a linha é `selfreg` (SOPDT), 1
-    se `integrating` (IOPDT); mais `round(theta/Ts_mpc)` amostras de atraso — arredondamento
-    banker's do `round()` do Python, a mesma convenção do TFS (spec §3.1, fecha débito m2);
-    mais uma por MV (estado aumentado `u_prev`, §3.5 — o bias é `_tvp` e não conta).
+    se `integrating` (IOPDT) — 2 quando o integrador tem lag (`tau1 > 0`, IFOPDT); mais
+    `round(theta/Ts_mpc)` amostras de atraso — arredondamento banker's do `round()` do
+    Python, a mesma convenção do TFS (spec §3.1, fecha débito m2); mais uma por MV (estado
+    aumentado `u_prev`, §3.5 — o bias é `_tvp` e não conta).
     """
     row_kind: dict[str, RowKind] = {
         var.id: var.kind for var in (*config.variables.cvs, *config.variables.constraints)
@@ -523,6 +545,9 @@ def mpc_state_dimension(config: MpcConfig, ts_mpc: float) -> int:
         for pair in cols.values():
             if not pair.enabled:
                 continue
-            dimension += 2 if kind == "selfreg" else 1
+            if kind == "selfreg":
+                dimension += 2
+            else:
+                dimension += 2 if pair.params.get("tau1", 0.0) > 0 else 1
             dimension += round(pair.params["theta"] / ts_mpc)
     return dimension

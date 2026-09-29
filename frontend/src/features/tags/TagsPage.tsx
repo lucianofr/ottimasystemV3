@@ -11,6 +11,8 @@ import { ApiError, type TagOut } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { useCanMutate } from "../auth/useAuth";
 import { useConnections } from "../connections/useConnections";
+import { useFlows } from "../flows/useFlows";
+import { useHistorizedVarIdsDoProjeto } from "../flows/useHistorizedVars";
 import { useActiveProject } from "../projects/useProjects";
 import { TagCalculadaForm } from "./TagCalculadaForm";
 import { TagForm } from "./TagForm";
@@ -106,6 +108,10 @@ export function TagsPage() {
   const conexoes = useConnections(projetoAtivoId);
   const tags = useTags(filtros);
   const calcTags = useCalculatedTags(projetoAtivoId);
+  // `GET /api/historized-vars` não aceita `project_id` (só `flow_id`, ADR-041): uma consulta
+  // por flow do projeto ativo, agregada em `useHistorizedVarIdsDoProjeto` (useQueries).
+  const flows = useFlows(projetoAtivoId);
+  const idsHistoriados = useHistorizedVarIdsDoProjeto((flows.data ?? []).map((flow) => flow.id));
   const excluir = useDeleteTag();
   const excluirCalc = useDeleteCalculatedTag();
   const [formAberto, setFormAberto] = useState(false);
@@ -124,7 +130,14 @@ export function TagsPage() {
   // devolve toda tag, inclusive calculada de outro projeto — o discriminador (`eCalculada`,
   // ADR-033 D1) decide a regra: OPC entra pela conexão do projeto, calculada entra pelo próprio
   // `project_id` (ela não tem conexão nenhuma).
+  // Variável historiada (ADR-041 D1) também é linha de `tags` sem conexão — cairia no mesmo
+  // ramo de tag calculada (`eCalculada`) com botão de editar que dá 404. Ela se gerencia no
+  // editor de flow (seção "Historiar portas"), então sai da tabela desta tela. `pronto` falso
+  // = conjunto INCOMPLETO (carregando, ou uma consulta por flow em erro): sem o gate a
+  // historiada passaria pelo filtro e apareceria como Calculada com ação quebrada.
+  const historiadasConhecidas = flows.isSuccess && idsHistoriados.pronto;
   const linhas = (tags.data ?? []).filter((tag) => {
+    if (idsHistoriados.ids.has(tag.id)) return false;
     if (eCalculada(tag)) return tag.project_id === projetoAtivoId;
     return tag.connection_id !== null && idsConexoesDoProjeto.has(tag.connection_id);
   });
@@ -336,21 +349,24 @@ export function TagsPage() {
             </tr>
           </thead>
           <tbody>
-            {tags.isPending && (
+            {(tags.isPending ||
+              (tags.isSuccess && !historiadasConhecidas && !idsHistoriados.erro && !flows.isError)) && (
               <tr>
                 <td colSpan={totalColunas} className="px-3 py-4 text-fg-muted">
                   Carregando…
                 </td>
               </tr>
             )}
-            {tags.isError && (
+            {(tags.isError || idsHistoriados.erro || flows.isError) && (
               <tr>
                 <td colSpan={totalColunas} className="px-3 py-4 text-alarm" role="alert">
-                  Falha ao consultar tags
+                  {tags.isError
+                    ? "Falha ao consultar tags"
+                    : "Falha ao consultar variáveis historiadas: a lista pode estar incompleta"}
                 </td>
               </tr>
             )}
-            {tags.isSuccess && linhas.length === 0 && (
+            {tags.isSuccess && historiadasConhecidas && linhas.length === 0 && (
               <tr>
                 <td
                   colSpan={totalColunas}
@@ -361,7 +377,8 @@ export function TagsPage() {
                 </td>
               </tr>
             )}
-            {linhas.map((tag) => {
+            {historiadasConhecidas &&
+              linhas.map((tag) => {
               const periodo = periodoPorId.get(tag.id);
               return (
                 <tr key={tag.id} data-testid="tag-row" className="border-b border-border transition-colors duration-[var(--duration-fast)] hover:bg-surface-2">

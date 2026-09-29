@@ -97,15 +97,16 @@ export function limiteOperacional(props: FaceplateVariavelProps): Faixa | null {
   return null;
 }
 
-/** Barra vertical de instrumento (DESIGN §Shapes): escala com 10% de folga além da faixa
- *  publicada dos dois lados, para um PV fora dos limites ainda aparecer deslocado na barra em
- *  vez de grudado na borda — não é vocabulário do MPC, é só o mapeamento valor→posição desta
- *  barra específica. */
-function percentualNaBarra(valor: number, faixa: Faixa): number {
+/** Barra vertical de instrumento (DESIGN §Shapes): mapeamento LINEAR da faixa publicada nas
+ *  bordas da barra — `faixa.min` = 0%, `faixa.max` = 100%. Sem folga: os rótulos desenhados no
+ *  topo/base são `faixa.max`/`faixa.min`, então qualquer margem faria o marcador de um limite
+ *  igual ao fim de escala (MV 0-100 em faixa 0-100) aparecer DENTRO da barra, mentindo sobre
+ *  "chegou no limite?". PV fora da faixa fica grudado na borda (clamp) — é o comportamento
+ *  honesto para um instrumento de fim de escala. */
+export function percentualNaBarra(valor: number, faixa: Faixa): number {
   const largura = faixa.max - faixa.min;
-  const margem = largura > 0 ? largura * 0.1 : 1;
-  const fracao = (valor - (faixa.min - margem)) / (largura + 2 * margem);
-  return Math.min(100, Math.max(0, fracao * 100));
+  if (largura <= 0) return 0;
+  return Math.min(100, Math.max(0, ((valor - faixa.min) / largura) * 100));
 }
 
 /** Triângulo marcador de limite operacional: ponta encostada na borda da barra, na altura
@@ -154,7 +155,7 @@ function BarraVertical({
       </span>
       <div className="relative h-32 w-4">
         <div
-          className="absolute inset-0 overflow-hidden rounded-pill border border-border bg-well"
+          className="absolute inset-0 overflow-hidden border border-border bg-well"
           data-testid={testId}
         >
           {pvPercentual !== null && (
@@ -163,21 +164,25 @@ function BarraVertical({
               style={{ height: `${String(pvPercentual)}%` }}
             />
           )}
-          {pvPercentual !== null && (
-            <div
-              className="absolute inset-x-0 h-px bg-fg"
-              style={{ bottom: `${String(pvPercentual)}%` }}
-              data-testid={`${testId}-pv`}
-            />
-          )}
-          {spPercentual !== null && (
-            <div
-              className="absolute inset-x-0 h-0.5 bg-accent"
-              style={{ bottom: `${String(spPercentual)}%` }}
-              data-testid={`${testId}-sp`}
-            />
-          )}
         </div>
+        {/* PV/SP ficam FORA do track: dentro dele o `overflow-hidden` clipa a linha inteira em
+         *  fim de escala (`bottom:100%` = acima do padding box) e o PV desaparece justamente no
+         *  caso "chegou no limite?". Mesma convenção do marcador: `translateY(50%)` centra a
+         *  linha na altura do valor. O fill continua dentro, clipado. */}
+        {pvPercentual !== null && (
+          <div
+            className="absolute inset-x-0 h-px bg-fg"
+            style={{ bottom: `${String(pvPercentual)}%`, transform: "translateY(50%)" }}
+            data-testid={`${testId}-pv`}
+          />
+        )}
+        {spPercentual !== null && (
+          <div
+            className="absolute inset-x-0 h-0.5 bg-accent"
+            style={{ bottom: `${String(spPercentual)}%`, transform: "translateY(50%)" }}
+            data-testid={`${testId}-sp`}
+          />
+        )}
         {limiteMinPercentual !== null && (
           <MarcadorLimite percentual={limiteMinPercentual} testId={`${testId}-limite-min`} />
         )}

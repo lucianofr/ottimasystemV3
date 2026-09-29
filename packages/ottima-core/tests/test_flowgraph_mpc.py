@@ -375,6 +375,44 @@ def test_par_habilitado_integrating_com_ki_zero_e_erro():
     assert has(errors_of(graph, tags), "cv_a", "mv_a", "params inválidos ou incompletos")
 
 
+def test_par_integrating_aceita_tau1_opcional():
+    """IFOPDT: `tau1 ≥ 0` é chave OPCIONAL do integrador (ordem do dono do produto,
+    2026-09-13) — com ela o par continua íntegro."""
+    m, c = mv("a"), cv("a", kind="integrating")
+    models = {c["id"]: {m["id"]: pair("integrating", tau1=45.0)}}
+    node = mpc_node(mvs=[m], cvs=[c], models=models)
+
+    assert not has(errors_of(mpc_graph(node), mpc_tags(node)), "params inválidos ou incompletos")
+
+
+def test_par_integrating_com_tau1_negativo_e_erro():
+    m, c = mv("a"), cv("a", kind="integrating")
+    models = {c["id"]: {m["id"]: pair("integrating", tau1=-1.0)}}
+    node = mpc_node(mvs=[m], cvs=[c], models=models)
+
+    assert has(
+        errors_of(mpc_graph(node), mpc_tags(node)),
+        "cv_a",
+        "mv_a",
+        "params inválidos ou incompletos",
+    )
+
+
+def test_par_integrating_com_chave_desconhecida_e_erro():
+    """`tau2` não existe no integrador: a forma continua fechada, só ganhou UMA chave
+    opcional — aceitar qualquer extra abriria a porta pra param silenciosamente ignorado."""
+    m, c = mv("a"), cv("a", kind="integrating")
+    models = {c["id"]: {m["id"]: pair("integrating", tau2=5.0)}}
+    node = mpc_node(mvs=[m], cvs=[c], models=models)
+
+    assert has(
+        errors_of(mpc_graph(node), mpc_tags(node)),
+        "cv_a",
+        "mv_a",
+        "params inválidos ou incompletos",
+    )
+
+
 def test_par_selfreg_com_k_zero_e_erro():
     m, c = mv("a"), cv("a", kind="selfreg")
     models = {c["id"]: {m["id"]: pair("selfreg", K=0.0)}}
