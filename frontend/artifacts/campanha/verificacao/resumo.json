@@ -1,0 +1,37 @@
+{
+  "etapa": "verificacao",
+  "capturado_em": "2026-08-10T20:07:34.246Z",
+  "plaqueta": "MPC Debutanizadora · Controle-MPC-Debutanizadora",
+  "ts_mpc": "Ts MPC 120 s",
+  "horizontes": "Np 60 (120 min) · Nc 15",
+  "modos": {
+    "local_remote": "LOCAL",
+    "man_auto": null
+  },
+  "overruns": "—",
+  "last_solve_ms": "—",
+  "lampadas": {
+    "flow": "Parado",
+    "solver": "Ocioso",
+    "input_valido": "Entradas inválidas"
+  },
+  "janela_selecionada": "8 h",
+  "legenda_ids": [
+    "cv_tt101",
+    "cv_tt102",
+    "cv_lt101",
+    "cv_lt102",
+    "mv_xv101",
+    "mv_xv102",
+    "mv_xv103",
+    "mv_sc102",
+    "dv_ft100",
+    "dv_at100"
+  ],
+  "secao_futura_visivel": true,
+  "sem_predicao_visivel": true,
+  "relogio": {
+    "inicial": "10/08/2026 17:07:32",
+    "final": "10/08/2026 17:07:33"
+  }
+}

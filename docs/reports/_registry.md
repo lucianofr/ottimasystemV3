@@ -30,6 +30,14 @@
 
 - arch-review-20260815 | Completed | Auditoria de arquitetura @e38f528, 7 fatias em paralelo: 22 candidatos de aprofundamento (12 Strong, 10 Worth exploring), 0 contradizendo ADR. Registra também a saúde confirmada (contrato de Bloco deep, Canal ao vivo sem repasse puro, seam com asyncua contido, RBAC num lugar só). ARCH-07 foi aprofundado no mesmo dia e o grilling **corrigiu a severidade para baixo**: a alegação de que um regresso em `max_rate` passaria verde era falsa (três camadas enforçam a regra, incluindo a trava golden). Sobrou fixture stale + asserção ausente, corrigidos; metade do aprofundamento descartada por falhar no deletion test. Gerou TD-015 (já resolvido) a TD-024
 
+## 2026-08-16
+
+- advisor/README.md (rodada 1) | Completed | Auditoria advisor @`8f9fe76`, 9 planos (001-009) — **todos FEITOS e mesclados na `main`**. Índice e registro de execução em `docs/reports/advisor/README.md`, seção "Rodada de 2026-08-16". Gerou TD-026. *(Entrada registrada retroativamente em 2026-09-19: a rodada não se registrou aqui na época, e por isso o índice de 680 linhas só era descoberto por listagem de diretório.)*
+
+## 2026-09-19
+
+- advisor/README.md (rodada 2) | Completed | Auditoria advisor profunda @`37b0caa`, 9 auditores em paralelo (corretude runtime/API/workers+MCP, segurança, desempenho, cobertura, dívida+docs, deps+DX, corretude React) + direção. 10 artefatos novos: planos **010-018** (executáveis) e **019** (proposta de emendas documentais, exige aval do dono — `docs/` é normativo). Achado de maior severidade: **013** — telas de operação exibem PV/SP/MV congelados como se fossem ao vivo durante queda de WS, sem indicador, enquanto a regra contrária já está implementada para a tela de Tags (`tagsOnline.ts:39-43`). Nada executado contra o stack (8 serviços do dono no ar com planta viva). Três achados de subagente **caíram na conferência** e estão registrados como rejeitados com motivo. TD-027 reconferido: é defeito do teste, não do produto.
+
 ---
 
 ## Archive

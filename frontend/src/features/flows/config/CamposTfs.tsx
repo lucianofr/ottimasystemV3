@@ -12,16 +12,19 @@ import {
 import { Campo } from "./CamposComuns";
 import { nomeParam } from "./campos";
 
-/** Rótulos dos params por modelo (spec F3 §3.4). */
+/** Rótulos dos params por modelo (spec F3 §3.4). Unidades explícitas: o TFS trabalha em EU
+ *  direto (sem conversão por span, ao contrário do MPC — RF-602/609): K é EU de saída por EU
+ *  de entrada; Ki é EU de saída por segundo por EU de entrada (`acc += Ki*Ts*u` em
+ *  `blocks/tfs.py`). Tempos sempre em segundos, mesma convenção do MPC. */
 const PARAMS: Record<TipoElemento, { chave: string; rotulo: string }[]> = {
   sopdt: [
-    { chave: "K", rotulo: "K (ganho)" },
+    { chave: "K", rotulo: "K (ganho, EU/EU)" },
     { chave: "tau1", rotulo: "tau1 (s)" },
     { chave: "tau2", rotulo: "tau2 (s)" },
     { chave: "theta", rotulo: "theta (s)" },
   ],
   iopdt: [
-    { chave: "Ki", rotulo: "Ki (ganho integral)" },
+    { chave: "Ki", rotulo: "Ki (EU/s por EU)" },
     { chave: "theta", rotulo: "theta (s)" },
   ],
 };
@@ -56,7 +59,8 @@ interface Props {
 
 /**
  * Matriz 2x2 (spec F3 §3.4): `matrix[J][K]` é a contribuição de `uK` para `yJ`. Acima da
- * matriz, dois campos de EU (spec F6 §4.1), um por porta de saída fixa (`y1`/`y2`).
+ * matriz, dois campos de EU (spec F6 §4.1) e o valor inicial de cada saída (`y0`), um par
+ * por porta de saída fixa (`y1`/`y2`).
  *
  * `enabled` e `kind` são estado do modal; os params (e o EU) são campos não-controlados
  * lidos no envio (`matrizDoFormulario`/`outputEuDoFormulario`). Trocar o modelo remonta os
@@ -78,6 +82,18 @@ export function CamposTfs({ dados, aoMudar }: Props) {
               placeholder="ex.: C"
             />
           </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {(["y1", "y2"] as const).map((porta, indice) => (
+          <Campo
+            key={porta}
+            id={`y0_${porta}`}
+            rotulo={`${porta} · valor inicial`}
+            valor={dados.y0[indice]}
+            ajuda="Saída na primeira varredura; a resposta parte deste ponto de operação."
+          />
         ))}
       </div>
 

@@ -140,3 +140,132 @@ def test_carga_make_step_2x2_np60_sob_70pct_ts_mpc(capsys: pytest.CaptureFixture
 
     assert mean_s < BUDGET_S, f"media {mean_s:.4f}s >= orcamento {BUDGET_S:.1f}s"
     assert p95_s < BUDGET_S, f"p95 {p95_s:.4f}s >= orcamento {BUDGET_S:.1f}s"
+
+
+@pytest.mark.slow
+def test_primeiro_solve_frio_de_bloco_com_atraso_longo_cabe_no_orcamento() -> None:
+    """A classe de falha do campo (2026-09-11, flow 987): θ=91 s contra Ts_mpc=2 s dá ~46
+    estados de atraso por par (n_x=83), e o PRIMEIRO `make_step` da vida do worker (frio, sem
+    warm start) é o mais caro — se ele estourar 0,7×Ts_mpc, o kill+respawn da spec §4.2
+    reinicia o worker antes do primeiro solve concluir e a espiral de `building` nunca
+    termina (76 respawns, zero solves, na planta).
+
+    O gate RNF-02 acima NÃO pega isso: descarta `N_WARMUP=3` execuções (nunca mede o solve
+    frio), usa orçamento de Ts_mpc=5 s e matriz sem cadeia de atraso. Este teste mede o
+    solve FRIO, na forma que falhou: Ts_mpc=2 s (multiplier=1), Np=60, θ até 91 s — o mesmo
+    orçamento que `MpcHost._deadline_s` aplica ao vivo.
+    """
+    from ottima_flow_runtime.mpc.worker import SolveRequest, _build_runtime, _solve
+
+    config = MpcConfig.model_validate(
+        {
+            "name": "campo_flow_987",
+            "multiplier": 1,
+            "variables": {
+                "mvs": [
+                    {
+                        "id": "mv_chns",
+                        "name": "FV-201",
+                        "eu": "%",
+                        "span": 100,
+                        "limits": {"min": 10, "max": 100},
+                        "max_rate": 10,
+                        "du_min": 0,
+                        "initial_value": 50,
+                    },
+                    {
+                        "id": "mv_fdou",
+                        "name": "FV-202",
+                        "eu": "%",
+                        "span": 100,
+                        "limits": {"min": 10, "max": 100},
+                        "max_rate": 10,
+                        "du_min": 0,
+                        "initial_value": 50,
+                    },
+                ],
+                "cvs": [
+                    {
+                        "id": "cv_nivel",
+                        "name": "LT-201",
+                        "eu": "%",
+                        "kind": "integrating",
+                        "tss": 120,
+                        "weight": 2,
+                        "span": 100,
+                        "sp_limits": {"min": 45, "max": 65},
+                    },
+                    {
+                        "id": "cv_refluxo",
+                        "name": "Refluxo",
+                        "eu": "%",
+                        "kind": "selfreg",
+                        "tss": 120,
+                        "weight": 1,
+                        "span": 100,
+                        "sp_limits": {"min": 0, "max": 100},
+                    },
+                ],
+                "constraints": [
+                    {
+                        "id": "co_vazao",
+                        "name": "FT-204",
+                        "eu": "m3/h",
+                        "kind": "selfreg",
+                        "tss": 120,
+                        "span": 20,
+                        "range": {"low": 0, "high": 20},
+                        "priority": 1,
+                    }
+                ],
+                "dvs": [],
+            },
+            "models": {
+                "co_vazao": {
+                    "mv_chns": {
+                        "enabled": True,
+                        "params": {"K": 0.061, "tau1": 16, "tau2": 0, "theta": 4},
+                    },
+                    "mv_fdou": {
+                        "enabled": True,
+                        "params": {"K": 1.023, "tau1": 13.5, "tau2": 0, "theta": 3.5},
+                    },
+                },
+                "cv_refluxo": {
+                    "mv_chns": {
+                        "enabled": True,
+                        "params": {"K": -1.491, "tau1": 1.6, "tau2": 0.6, "theta": 6},
+                    },
+                    "mv_fdou": {
+                        "enabled": True,
+                        "params": {"K": -2.058, "tau1": 1.6, "tau2": 0.6, "theta": 2.6},
+                    },
+                },
+                "cv_nivel": {
+                    "mv_chns": {"enabled": True, "params": {"Ki": 0.2275, "theta": 91}},
+                    "mv_fdou": {"enabled": True, "params": {"Ki": -0.1796, "theta": 38}},
+                },
+            },
+        }
+    )
+    runtime = _build_runtime(config, ts_flow=2.0)
+    assert runtime.built.horizons.np == 60
+    assert runtime.built.horizons.ts_mpc == pytest.approx(2.0)
+
+    request = SolveRequest(
+        y={"cv_nivel": 13.2, "cv_refluxo": 52.4, "co_vazao": 2.4},
+        u_applied={"mv_chns": 50.0, "mv_fdou": 50.0},
+        d={},
+        sp={"cv_nivel": 55.0, "cv_refluxo": 55.0},
+        reinit=True,
+    )
+    t0 = time.perf_counter()
+    result = _solve(runtime, request)
+    cold_s = time.perf_counter() - t0
+    budget_s = 0.7 * runtime.built.horizons.ts_mpc
+
+    assert result.status == "ok"
+    assert cold_s < budget_s, (
+        f"primeiro solve FRIO levou {cold_s:.3f}s >= orçamento {budget_s:.1f}s — o worker "
+        f"morreria no primeiro ciclo e entraria na espiral de respawn (caso flow 987)"
+    )

@@ -29,6 +29,7 @@ from ottima_core.certs import (
     APPLICATION_URI,
     app_cert_paths,
     generate_app_certificate,
+    received_cert_path,
     store_server_certificate,
 )
 from ottima_core.security import encrypt_secret
@@ -37,6 +38,7 @@ from ottima_opc_worker.security import (
     CertMismatchError,
     CertMissingError,
     configure_client,
+    fetch_server_certificate,
     map_connect_exception,
 )
 from ottima_opc_worker.state import ConnectionConfig, ConnectionSnapshot, ConnectionState
@@ -145,6 +147,7 @@ async def running(
     snapshot: ConnectionSnapshot,
     *,
     certs_dir: Path,
+    received_certs_dir: Path | None = None,
     fernet_key: str = "",
 ) -> AsyncIterator[ConnectionRuntime]:
     runtime = ConnectionRuntime(
@@ -152,6 +155,7 @@ async def running(
         redis_client,
         snapshot,
         certs_dir=certs_dir,
+        received_certs_dir=received_certs_dir or Path("/certs-received"),
         fernet_key=fernet_key,
         backoff_initial_s=TEST_BACKOFF_INITIAL_S,
         backoff_max_s=TEST_BACKOFF_MAX_S,
@@ -430,3 +434,95 @@ def test_map_connect_exception_classifica_sem_tocar_a_rede() -> None:
         "connect_failed",
         "TimeoutError",
     )
+
+
+# --- Certificado RECEBIDO do servidor: captura na falha de pin (staging do trust) ---
+
+
+async def test_fetch_server_certificate_devolve_o_der_anunciado(
+    secure_sim: OpcSimServer,
+) -> None:
+    """Descoberta via canal plain devolve o certificado que o servidor anuncia no endpoint."""
+    der = await fetch_server_certificate(secure_sim.endpoint, timeout_s=10.0)
+    assert der is not None
+    assert secure_sim.cert_der_path is not None
+    assert der == secure_sim.cert_der_path.read_bytes()
+
+
+async def test_fetch_server_certificate_servidor_mudo_devolve_none(endpoint_mudo: str) -> None:
+    """Best-effort: servidor inacessível devolve None, nunca levanta."""
+    assert await fetch_server_certificate(endpoint_mudo, timeout_s=0.5) is None
+
+
+async def test_falha_de_pin_captura_certificado_recebido(
+    secure_sim: OpcSimServer, certs_dir: Path, redis_client: Redis, tmp_path: Path
+) -> None:
+    """Falha `cert_missing` deixa em `received/` o certificado que o servidor enviou.
+
+    A captura acontece ANTES do `fail()`: quando o estado chega a FAILED, o arquivo já
+    está no disco para a UI oferecer "Visualizar"/"Confiar certificado".
+    """
+    recebidos = tmp_path / "certs-received"
+    config = make_config(
+        secure_sim.endpoint, security_policy="basic256sha256", security_mode="sign"
+    )
+    snapshot = ConnectionSnapshot(name=config.name)
+    async with running(
+        config, redis_client, snapshot, certs_dir=certs_dir, received_certs_dir=recebidos
+    ) as runtime:
+        await await_until(lambda: runtime.state is ConnectionState.FAILED)
+    assert secure_sim.cert_der_path is not None
+    caminho = received_cert_path(recebidos, CONN_ID)
+    assert caminho.exists()
+    assert caminho.read_bytes() == secure_sim.cert_der_path.read_bytes()
+
+
+async def test_rotacao_do_certificado_atualiza_o_recebido(
+    secure_sim: OpcSimServer, certs_dir: Path, redis_client: Redis, tmp_path: Path
+) -> None:
+    """`cert_mismatch` (pin rotacionado) atualiza `received/` com o certificado vigente."""
+    recebidos = tmp_path / "certs-received"
+    outro = tmp_path / "outro-cert"
+    generate_app_certificate(outro)
+    velho = store_server_certificate(certs_dir, CONN_ID, app_cert_paths(outro).der.read_bytes())
+    config = make_config(
+        secure_sim.endpoint,
+        security_policy="basic256sha256",
+        security_mode="sign",
+        server_cert_file=velho,
+    )
+    snapshot = ConnectionSnapshot(name=config.name)
+    async with running(
+        config, redis_client, snapshot, certs_dir=certs_dir, received_certs_dir=recebidos
+    ) as runtime:
+        await await_until(lambda: runtime.state is ConnectionState.FAILED)
+        await await_until(lambda: received_cert_path(recebidos, CONN_ID).exists())
+    assert secure_sim.cert_der_path is not None
+    assert (
+        received_cert_path(recebidos, CONN_ID).read_bytes() == secure_sim.cert_der_path.read_bytes()
+    )
+
+
+async def test_captura_que_levanta_nao_impede_o_alarme(
+    secure_sim: OpcSimServer,
+    certs_dir: Path,
+    redis_client: Redis,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Best-effort de verdade: descoberta explodindo não segura `fail()` nem o alarme."""
+
+    def explode(*_args: object, **_kwargs: object) -> object:
+        raise OSError("descoberta explodiu")
+
+    monkeypatch.setattr("ottima_opc_worker.connection.fetch_server_certificate", explode)
+    recebidos = tmp_path / "certs-received"
+    config = make_config(
+        secure_sim.endpoint, security_policy="basic256sha256", security_mode="sign"
+    )
+    snapshot = ConnectionSnapshot(name=config.name)
+    async with running(
+        config, redis_client, snapshot, certs_dir=certs_dir, received_certs_dir=recebidos
+    ) as runtime:
+        await await_until(lambda: runtime.state is ConnectionState.FAILED)
+    assert not received_cert_path(recebidos, CONN_ID).exists()

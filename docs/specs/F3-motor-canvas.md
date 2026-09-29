@@ -92,7 +92,7 @@ services/flow-runtime/src/ottima_flow_runtime/
 
 | Aspecto | Definição |
 |---|---|
-| Config | `tag_id` (obrigatória, direção `r`, do projeto do flow) |
+| Config | `tag_id` (obrigatória, direção `r` **ou** `w`, do projeto do flow — tag `w` legível = readback do último valor escrito **[EMENDA — PRD Changelog 3.2]**; write-only fica sem série e a saída permanece COLD) |
 | Portas | 1 saída; tipo = numérico (`float`/`int`) ou booleano (`bool`), herdado da tag |
 | Semântica | lê o snapshot do barramento (último `{value, quality, ts}` da tag); **inválida ⇔ `quality ≠ 0`** ou sem valor. **[NOVA — implementação]**: uncertain também invalida — conservador, fail-safe |
 
@@ -213,7 +213,7 @@ Reprovações (**422** pt-BR):
 - **`exec_order`:** badge visível no nó; edição manual no modal de config; compactação automática ao excluir; **aviso de inversão não-bloqueante** no editor + `warnings[]` do save (§5.2) (ADR-024).
 - **Validação de conexão no arraste** (RF-302): tipos (decisão #5), ciclo, e **no máx. 1 aresta por porta de entrada** **[NOVA — implementação]** (regra FBD padrão). Espelho leve client-side para feedback imediato; a fonte da verdade é a validação do servidor (§5.2).
 - **Config por duplo-clique** (RF-301), modal por tipo:
-  - Read/Write: seletor de tag filtrado por direção e projeto ativo (reusa `useTags` da F2);
+  - Read/Write: seletor de tag filtrado por direção e projeto ativo (reusa `useTags` da F2) — o do Read também oferece tags de escrita, com sufixo "· Escrita" (readback, PRD Changelog 3.2) **[NOVA — implementação]**;
   - Script: `n_inputs`/`n_outputs` (0..8) + código em `<textarea>` mono com tratamento de Tab — **sem editor de código de terceiros na v1** **[NOVA — implementação]** (zero dependência extra);
   - TFS: matriz 2×2, habilitação + params por elemento, validações §3.4.
 - **Modo visualização ao vivo (RF-305):** com o flow rodando, o editor assina `flow_status` do flow aberto via WS e mostra: valores nas portas (mono tabular — Regra do Número Tabular; inválido dessaturado + rótulo — Regra do Canal Redundante), lâmpada de estado, `scan_ms`/`overruns` no cabeçalho da chapa. Admin **e** operador; para operador o canvas é somente-leitura (sem paleta, sem arraste, sem save — PRD §2).

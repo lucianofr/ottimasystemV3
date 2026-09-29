@@ -20,12 +20,23 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     secret_key: str = INSECURE_SECRET_KEY_DEFAULT
     fernet_key: str = ""  # OTTIMA_FERNET_KEY obrigatória para cifrar/decifrar segredos OPC
-    token_ttl_hours: int = 12
+    # HMI de planta não tem timeout de inatividade: a tela de operação fica aberta por semanas
+    # sem interação, e mandar o operador para o /login no meio de um distúrbio é inaceitável
+    # (mesma razão do rate-limit por IP em `frontend/nginx.conf`). O `exp` continua existindo
+    # (RNF-04) e a revogação real não depende dele: `get_current_user` recarrega o usuário do
+    # banco a cada requisição e recusa `is_active=False`. 1 ano ⇒ na prática a estação reinicia
+    # antes. Se um re-login anual atrapalhar, o caminho é token deslizante (endpoint de refresh
+    # + renovação periódica no frontend), não um TTL ainda maior.
+    token_ttl_hours: int = 8760
     admin_username: str | None = None
     admin_password: str | None = None
     admin_name: str = "Administrador"
     log_level: str = "INFO"
     certs_dir: Path = Path("/certs")  # volume `certs` do compose (spec F2 §5.4)
+    # Volume separado do `certs` (spec F2 §5.4 estendida): o opc-worker grava aqui o
+    # certificado que o servidor enviou (captura na falha de pin) e a API só lê — montar
+    # `certs` rw no worker permitiria sobrescrever um pin já estabelecido (ADR-021).
+    received_certs_dir: Path = Path("/certs-received")
     mpc_queue_max: int = 100_000  # teto do buffer de mpc_samples no recorder (spec F5 §2.3-3)
     # URLs do /health de cada worker, para o agregador GET /api/health/workers (spec F5 §4.2,
     # decisão A-8); defaults batem com os nomes de serviço e portas do compose (F5R-09).

@@ -11,7 +11,8 @@ import math
 import pytest
 
 from ottima_core.flowgraph import IopdtParams, SopdtParams, TfsElement
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.tfs import TfsBlock
 
 TS = 0.5  # Ts do critério de aceite da fase (PRD §8-F3)
@@ -41,10 +42,15 @@ def tfs(
     y1: tuple[TfsElement, TfsElement] | None = None,
     y2: tuple[TfsElement, TfsElement] | None = None,
     ts: float = TS,
+    y0: tuple[float, float] = (0.0, 0.0),
 ) -> TfsBlock:
-    """`matrix[J][K]` = contribuição de `uK` para `yJ` (spec §3.4)."""
+    """`matrix[J][K]` = contribuição de `uK` para `yJ` (spec §3.4).
+
+    `y0` default zero (e não o 50 da config) para os casos de resposta ao degrau lerem a
+    solução analítica direto, sem subtrair a condição inicial.
+    """
     rows = [list(y1 or (off(), off())), list(y2 or (off(), off()))]
-    return TfsBlock("t1", matrix=rows, ts_seconds=ts)
+    return TfsBlock("t1", matrix=rows, ts_seconds=ts, y0=y0)
 
 
 async def series(
@@ -63,9 +69,9 @@ async def series(
     for _ in range(n):
         inputs = {}
         if u1 is not None:
-            inputs["u1"] = PortSample(u1, True)
+            inputs["u1"] = Signal(u1, quality=Quality.GOOD)
         if u2 is not None:
-            inputs["u2"] = PortSample(u2, True)
+            inputs["u2"] = Signal(u2, quality=Quality.GOOD)
         values.append((await block.step(inputs))[port].v)
     return values
 
@@ -123,9 +129,9 @@ async def test_degrau_ainda_nao_aplicado_da_saida_zero():
     """Sem excitação não há resposta: entrada 0.0 é valor legítimo, não invalidez."""
     block = tfs(y1=(sopdt(K=2.0, tau1=20.0, tau2=5.0), off()))
 
-    out = await block.step({"u1": PortSample(0.0, True)})
+    out = await block.step({"u1": Signal(0.0, quality=Quality.GOOD)})
 
-    assert out["y1"] == PortSample(0.0, True)
+    assert out["y1"] == Signal(0.0, quality=Quality.GOOD)
 
 
 async def test_polo_duplo_nao_divide_por_zero():
@@ -225,37 +231,51 @@ async def test_linha_toda_desabilitada_e_ganho_zero_valido():
     block = tfs(y1=(sopdt(K=2.0, tau1=20.0, tau2=5.0), off()))
 
     for _ in range(3):
-        out = await block.step({"u1": PortSample(1.0, True)})
-        assert out["y2"] == PortSample(0.0, True)
+        out = await block.step({"u1": Signal(1.0, quality=Quality.GOOD)})
+        assert out["y2"] == Signal(0.0, quality=Quality.GOOD)
 
 
 async def test_coluna_sem_elemento_habilitado_pode_faltar_em_inputs():
     """`u2` é obrigatória só se a coluna 2 tem elemento habilitado (spec §3.4)."""
     block = tfs(y1=(iopdt(Ki=1.0), off()), y2=(iopdt(Ki=2.0), off()))
 
-    out = await block.step({"u1": PortSample(1.0, True)})
+    out = await block.step({"u1": Signal(1.0, quality=Quality.GOOD)})
 
-    assert out["y1"] == PortSample(TS, True)
-    assert out["y2"] == PortSample(2.0 * TS, True)
+    assert out["y1"] == Signal(TS, quality=Quality.GOOD)
+    assert out["y2"] == Signal(2.0 * TS, quality=Quality.GOOD)
 
 
 async def test_ok_reflete_apenas_as_entradas_consumidas_pela_linha():
     """Linha que não consome nada não pode herdar a invalidez de outra coluna."""
     block = tfs(y1=(iopdt(Ki=1.0), off()), y2=(off(), iopdt(Ki=1.0)))
 
-    out = await block.step({"u1": PortSample(1.0, False), "u2": PortSample(1.0, True)})
+    out = await block.step(
+        {"u1": Signal(1.0, quality=Quality.BAD), "u2": Signal(1.0, quality=Quality.GOOD)}
+    )
 
     assert out["y1"].ok is False
     assert out["y2"].ok is True
+
+
+async def test_uncertain_propaga_sem_elevar_nem_rebaixar():
+    """D6 (ADR-043 §4): entrada genuinamente UNCERTAIN (não retida) atravessa a linha e sai
+    UNCERTAIN — nem elevada a GOOD nem rebaixada a BAD."""
+    block = tfs(y1=(iopdt(Ki=1.0), off()))
+
+    out = await block.step({"u1": Signal(1.0, quality=Quality.UNCERTAIN)})
+
+    assert out["y1"].v == pytest.approx(TS)
+    assert out["y1"].quality is Quality.UNCERTAIN
+    assert out["y1"].ok is False
 
 
 async def test_invalidez_de_entrada_nao_impede_a_integracao():
     """Decisão A-6: com valor conhecido o TFS continua integrando e só propaga a flag."""
     block = tfs(y1=(iopdt(Ki=1.0), off()))
 
-    out = await block.step({"u1": PortSample(2.0, False)})
+    out = await block.step({"u1": Signal(2.0)})
 
-    assert out["y1"] == PortSample(1.0, False)
+    assert out["y1"] == Signal(1.0)
 
 
 # --------------------------------------------------------------------------------------
@@ -267,11 +287,13 @@ async def test_cold_start_nao_executa_nem_avanca_o_estado():
     """Spec §3.0: entrada sem valor não faz o integrador andar."""
     block = tfs(y1=(iopdt(Ki=1.0), off()))
 
-    out = await block.step({"u1": PortSample(None, False)})
-    assert out == {"y1": PortSample(None, False), "y2": PortSample(None, False)}
+    out = await block.step({"u1": Signal(None)})
+    assert out == {"y1": Signal(None), "y2": Signal(None)}
 
     # Se o estado tivesse avançado, a varredura seguinte devolveria 2*Ts.
-    assert (await block.step({"u1": PortSample(1.0, True)}))["y1"].v == pytest.approx(TS)
+    assert (await block.step({"u1": Signal(1.0, quality=Quality.GOOD)}))["y1"].v == pytest.approx(
+        TS
+    )
 
 
 async def test_reset_zera_estado_fila_de_atraso_e_acumulador():
@@ -284,7 +306,7 @@ async def test_reset_zera_estado_fila_de_atraso_e_acumulador():
     async def sweep(n: int) -> list[tuple[float, float]]:
         collected: list[tuple[float, float]] = []
         for _ in range(n):
-            out = await block.step({"u1": PortSample(1.0, True)})
+            out = await block.step({"u1": Signal(1.0, quality=Quality.GOOD)})
             collected.append((out["y1"].v, out["y2"].v))
         return collected
 
@@ -303,9 +325,101 @@ async def test_estado_nao_e_compartilhado_entre_instancias():
     second = tfs(y1=(element, off()))
 
     await series(first, 10)
-    out = await second.step({"u1": PortSample(1.0, True)})
+    out = await second.step({"u1": Signal(1.0, quality=Quality.GOOD)})
 
     assert out["y1"].v == pytest.approx(TS)
+
+
+# --------------------------------------------------------------------------------------
+# Condição inicial (`y0`)
+# --------------------------------------------------------------------------------------
+
+
+async def test_y0_no_ponto_de_operacao_mantem_a_saida_parada():
+    """Caso de uso do campo: a planta simulada parte no ponto em que a MV já a segura
+    (`K*u == y0`), então a primeira varredura não dá salto nenhum."""
+    block = tfs(y1=(sopdt(K=1.0, tau1=20.0, theta=3 * TS), off()), y0=(50.0, 0.0))
+
+    got = await series(block, 50, u1=50.0)
+
+    assert all(value == pytest.approx(50.0) for value in got)
+
+
+async def test_y0_e_condicao_inicial_e_nao_deslocamento_do_ganho():
+    """O estado parte de `y0` e a dinâmica leva a saída até `K*u` — o ganho estático
+    continua mandando no valor final, exatamente como antes do campo existir.
+
+    Com `tau2` em passagem direta sobra um 1a ordem, cuja trajetória a partir de uma
+    condição inicial é exata no ZOH: `y[n] = y0*a^n + K*u*(1 - a^n)`.
+    """
+    block = tfs(y1=(sopdt(K=2.0, tau1=5.0, tau2=0.0), off()), y0=(30.0, 0.0))
+
+    got = await series(block, 400, u1=1.0)
+
+    a = math.exp(-TS / 5.0)
+    for n, value in enumerate(got, start=1):
+        esperado = 30.0 * a**n + 2.0 * (1.0 - a**n)
+        assert value == pytest.approx(esperado, rel=1e-12)
+    assert got[-1] == pytest.approx(2.0, abs=1e-6)
+
+
+async def test_y0_divide_a_condicao_inicial_entre_os_elementos_da_linha():
+    """Dois elementos habilitados: a SOMA da linha é que precisa começar em `y0`."""
+    block = tfs(y1=(iopdt(Ki=1.0), iopdt(Ki=1.0)), y0=(40.0, 0.0))
+
+    out = await block.step(
+        {"u1": Signal(0.0, quality=Quality.GOOD), "u2": Signal(0.0, quality=Quality.GOOD)}
+    )
+
+    assert out["y1"].v == pytest.approx(40.0)
+
+
+async def test_y0_sobrevive_ao_tempo_morto_do_elemento():
+    """A fila de atraso nasce cheia da entrada equivalente: sem isso o atraso injetaria
+    zeros e a saída despencaria nas primeiras `theta/Ts` varreduras."""
+    block = tfs(y1=(sopdt(K=2.0, tau1=5.0, theta=4 * TS), off()), y0=(30.0, 0.0))
+
+    got = await series(block, 6, u1=0.0)
+
+    assert got[:4] == pytest.approx([30.0] * 4)  # fila cheia de u_eq: nada se move
+    assert got[4] < 30.0  # e só depois do atraso a entrada real (0) começa a agir
+
+
+async def test_y0_em_linha_integradora_e_o_nivel_de_partida_e_permanece_somado():
+    """IOPDT não tem ganho estático: `y = y0 + Ki*∫u`, e é isso que o campo significa numa
+    linha integradora — o nível de onde o acumulador passa a integrar."""
+    block = tfs(y1=(iopdt(Ki=1.0), off()), y0=(20.0, 0.0))
+
+    got = await series(block, 4, u1=2.0)
+
+    assert got == pytest.approx([20.0 + 2.0 * TS * n for n in (1, 2, 3, 4)])
+
+
+async def test_elemento_sem_memoria_nao_guarda_y0():
+    """Teto conhecido: `tau < Ts/10` com `theta = 0` é passagem direta e `K = 0` é mudo —
+    ganho puro não tem estado onde segurar a condição inicial, então a parcela parte de
+    `K*u`. Travado para que ninguém "conserte" o caso virando `y0` em offset permanente,
+    que deslocaria o regime de toda planta já configurada."""
+    direto = tfs(y1=(sopdt(K=2.0, tau1=0.0, tau2=0.0), off()), y0=(30.0, 0.0))
+    mudo = tfs(y1=(sopdt(K=0.0, tau1=5.0), off()), y0=(30.0, 0.0))
+
+    assert (await direto.step({"u1": Signal(1.0, quality=Quality.GOOD)}))["y1"].v == pytest.approx(
+        2.0
+    )
+    assert (await mudo.step({"u1": Signal(1.0, quality=Quality.GOOD)}))["y1"].v == pytest.approx(
+        0.0
+    )
+
+
+async def test_reset_volta_para_y0_e_nao_para_zero():
+    block = tfs(y1=(iopdt(Ki=1.0), off()), y0=(25.0, 0.0))
+
+    await series(block, 10, u1=1.0)
+    block.reset()
+
+    assert (await block.step({"u1": Signal(0.0, quality=Quality.GOOD)}))["y1"].v == pytest.approx(
+        25.0
+    )
 
 
 async def test_portas_declaradas_sao_fixas():

@@ -8,17 +8,25 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal
 
+from ottima_core.signal import OpcQuality, Quality
 from ottima_core.snapshot import ValueSnapshot
 
-from .base import Block, PortSample
+from .base import Block, Signal
+
+_QUALITY_FROM_OPC = {
+    OpcQuality.GOOD: Quality.GOOD,
+    OpcQuality.UNCERTAIN: Quality.UNCERTAIN,
+    OpcQuality.BAD: Quality.BAD,
+}
+"""Única tradução OpcValue.quality -> Quality (ADR-043 §4) — polaridades INVERSAS."""
 
 
 class OpcReadBlock(Block):
     """Sem entradas; saída `out`.
 
-    Invalidez (§3.1) é conservadora: `quality != 0` invalida a porta (uncertain inclusive),
-    mas o valor lido continua propagado — quem decide o que fazer com ele é o bloco a
-    jusante (decisão A-6). Tag ausente do espelho é cold start: `(None, False)`.
+    Invalidez (§3.1) é conservadora: `quality != OpcQuality.GOOD` invalida a porta (uncertain
+    inclusive), mas o valor lido continua propagado — quem decide o que fazer com ele é o
+    bloco a jusante (decisão A-6). Tag ausente do espelho é cold start: `(None, False)`.
     """
 
     def __init__(
@@ -39,12 +47,12 @@ class OpcReadBlock(Block):
         return ("out",)
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         tag_value = self._snapshot.get(self._tag_id)
         if tag_value is None:
-            return {"out": PortSample(None, False)}
+            return {"out": Signal(None)}
         # A tipagem da porta é a da tag (decisão A-5): tag booleana entrega `bool` do
         # Python, e não 1.0, para o Script e o canvas não terem de adivinhar.
         value = tag_value.value != 0 if self._is_bool else float(tag_value.value)
-        return {"out": PortSample(value, tag_value.quality == 0)}
+        return {"out": Signal(value, quality=_QUALITY_FROM_OPC.get(tag_value.quality, Quality.BAD))}

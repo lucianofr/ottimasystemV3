@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -48,9 +49,9 @@ from ottima_core.bus import (
     FlowCommand,
 )
 from ottima_core.flowgraph import FlowGraph, GraphParseError, TagRef, parse_graph, validate_graph
-from ottima_core.models import Flow, Project
+from ottima_core.models import Flow, HistorizedVar, Project
 from ottima_core.script_pool import ScriptPool
-from ottima_core.snapshot import ValueSnapshot
+from ottima_core.snapshot import ExchangeSnapshot, ValueSnapshot
 from ottima_core.tags import project_tags
 
 from .blocks.base import Block
@@ -171,6 +172,7 @@ class Supervisor:
         state: RuntimeState,
         *,
         snapshot: ValueSnapshot,
+        exchange: ExchangeSnapshot,
         pool: ScriptPool,
         poll_interval_s: float = POLL_INTERVAL_S,
         mpc_worker_target: Callable[[Connection, str, float], None] = worker_main,
@@ -180,6 +182,7 @@ class Supervisor:
         self._redis = redis_client
         self._state = state
         self._snapshot = snapshot
+        self._exchange = exchange
         self._pool = pool
         self._poll_interval_s = poll_interval_s
         self._mpc_worker_target = mpc_worker_target
@@ -298,6 +301,7 @@ class Supervisor:
             "loop_mode": self._loop_command,
             "loop_sp": self._loop_command,
             "loop_out": self._loop_command,
+            "fuzzy_sp": self._fuzzy_command,
         }
         handler = handlers.get(command.cmd)
         if handler is None:
@@ -319,6 +323,31 @@ class Supervisor:
         from .supervisor_loop import loop_command_dispatch
 
         await loop_command_dispatch(self._runtimes, command)
+
+    async def _fuzzy_command(self, command: FlowCommand) -> None:
+        """`fuzzy_sp`: SP do operador no bloco `fuzzy` (RF-541 revisado).
+
+        Só o SP é mutável em runtime — o resto da config do bloco é do grafo (ADR-029), então
+        o comando não toca a definição nem re-instancia nada. Valor não-finito é ignorado: o
+        canal é fire-and-forget e um NaN aqui envenenaria o motor em toda varredura.
+        """
+        from .blocks.fuzzy import FuzzyBlock
+
+        runtime = self._runtimes.get(command.flow_id)
+        if runtime is None or runtime.task.state != "running":
+            return
+        block_id = command.args.get("block_id")
+        entry = runtime.blocks.get(block_id) if isinstance(block_id, str) else None
+        bloco = entry[1] if entry is not None else None
+        if not isinstance(bloco, FuzzyBlock):
+            return
+        if bloco.sp_da_entrada:
+            # SP deste bloco vem do fio (porta `sp`): comando do operador não tem efeito — a
+            # rota já recusa com 422; aqui é a segunda linha de defesa do runtime.
+            return
+        valor = command.args.get("value")
+        if isinstance(valor, (int, float)) and math.isfinite(float(valor)):
+            bloco.setpoint = float(valor)
 
     async def _deploy(self, command: FlowCommand) -> None:
         flow_id = command.flow_id
@@ -550,6 +579,13 @@ class Supervisor:
         )
         for aviso in warnings:
             logger.info("Flow %s: %s", flow.id, aviso)
+        # ADR-041: mesmo ponto em que o `Flow` é lido do banco — cobre deploy inicial E
+        # hot-swap (`_stage`, único chamador de `_build` além do deploy). `definition.py`
+        # é quem filtra pelas portas que o grafo instanciado realmente tem (D7).
+        result = await session.execute(
+            select(HistorizedVar).where(HistorizedVar.flow_id == flow.id)
+        )
+        historized_vars = result.scalars().all()
 
         return build_definition(
             graph,
@@ -560,10 +596,12 @@ class Supervisor:
             redis_client=self._redis,
             pool=self._pool,
             snapshot=self._snapshot,
+            exchange=self._exchange,
             watchdog_enabled=flow.watchdog_enabled,
             mpc_worker_target=self._mpc_worker_target,
             sp_seeds=await carregar_sp_seeds(session, flow.id),
             loop_seeds=await carregar_loop_seeds(session, flow.id),
+            historized_vars=historized_vars,
             session_factory=self._session_factory,
         )
 

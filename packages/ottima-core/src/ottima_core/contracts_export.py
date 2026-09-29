@@ -44,16 +44,22 @@ from ottima_core.bus import FlowStatus, FuzzyState, LoopState, MpcState, PortVal
 from ottima_core.flowgraph import (
     MAX_SCRIPT_PORTS,
     MPC_FIXED_OUTPUT_PORTS,
+    BusKeyConfig,
+    ConstantConfig,
     ConstraintVar,
     CvVar,
+    DeadTimeConfig,
     DvVar,
     FuzzyConfig,
     FuzzyLoopConfig,
+    IntegratorConfig,
     IopdtParams,
+    LeadLagConfig,
     MpcConfig,
     MvVar,
     PidConfig,
     PidLoopConfig,
+    ScalerConfig,
     ScriptConfig,
     SopdtParams,
 )
@@ -139,6 +145,11 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
         "dynamic": False,
         "ports": [{"name": "in", "direction": "input", "type": "tag"}],
     },
+    # Bloco Constante: fonte sem entradas — só a saída fixa `out`, numérica.
+    "constant": {
+        "dynamic": False,
+        "ports": [{"name": "out", "direction": "output", "type": "num"}],
+    },
     "script": {
         "dynamic": True,
         "source": "config.n_inputs / config.n_outputs (spec F3 §3.3)",
@@ -197,6 +208,50 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
             {"name": "in", "direction": "input", "type": "num"},
             {"name": "out", "direction": "output", "type": "num"},
         ],
+    },
+    # Blocos utilitários: Scaler (reescala linear) e Integrator (totalizador com reset
+    # opcional). Portas fixas e numéricas; a config não muda porta nenhuma.
+    "scaler": {
+        "dynamic": False,
+        "ports": [
+            {"name": "in", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+        ],
+    },
+    "integrator": {
+        "dynamic": False,
+        "ports": [
+            {"name": "in", "direction": "input", "type": "num"},
+            {"name": "reset", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+        ],
+    },
+    # Blocos de compensação dinâmica: Lead-Lag e Tempo morto. Uma entrada, uma saída,
+    # numéricas; a config (gain/tau_lead/tau_lag, theta) não muda porta nenhuma.
+    "lead_lag": {
+        "dynamic": False,
+        "ports": [
+            {"name": "in", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+        ],
+    },
+    "dead_time": {
+        "dynamic": False,
+        "ports": [
+            {"name": "in", "direction": "input", "type": "num"},
+            {"name": "out", "direction": "output", "type": "num"},
+        ],
+    },
+    # Blocos de barramento (ADR-042): uma porta só cada, BIVALENTE (o barramento transporta
+    # `float | bool` sem reinterpretar, D7). `bus_publish` não tem saída e `bus_subscribe`
+    # não tem entrada — o outro lado é o canal `flow.exchange`.
+    "bus_publish": {
+        "dynamic": False,
+        "ports": [{"name": "in", "direction": "input", "type": "bivalent"}],
+    },
+    "bus_subscribe": {
+        "dynamic": False,
+        "ports": [{"name": "out", "direction": "output", "type": "bivalent"}],
     },
     # Bloco PID (RF-551, ADR-031): portas fixas — `pv` e `sp` de entrada (`sp` é opcional;
     # ausente, `config.setpoint` supre, RF-552), `out` de saída, todas numéricas.
@@ -299,6 +354,12 @@ _NODE_CONFIG_MODELS = (
     FuzzyLoopConfig,
     SopdtParams,
     IopdtParams,
+    ScalerConfig,
+    IntegratorConfig,
+    ConstantConfig,
+    BusKeyConfig,
+    LeadLagConfig,
+    DeadTimeConfig,
 )
 
 

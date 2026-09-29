@@ -35,6 +35,7 @@ from ottima_core.bus import (
     OpcValue,
 )
 from ottima_core.script_pool import ScriptPool, ScriptResult
+from ottima_core.signal import OpcQuality
 from ottima_core.snapshot import ValueSnapshot
 
 from .state import RunnerHealth
@@ -196,19 +197,20 @@ class CalcTagRunner:
             if entregue:
                 self._reported_kind = None
 
-    def _collect_inputs(self) -> tuple[dict[str, float], int] | None:
+    def _collect_inputs(self) -> tuple[dict[str, float], OpcQuality] | None:
         """IN1..INn na ordem de `input_tag_ids`; `None` se alguma entrada nunca publicou.
 
         Qualidade publicada é a PIOR entre as entradas (0 quando não há nenhuma): uma tag
         calculada que depende de uma leitura incerta nunca pode ser anunciada como boa.
         """
         values: dict[str, float] = {}
-        quality = 0
+        quality = OpcQuality.GOOD
         for position, source_tag_id in enumerate(self._input_tag_ids, start=1):
             tag_value = self._snapshot.get(source_tag_id)
             if tag_value is None:
                 return None
             values[f"IN{position}"] = tag_value.value
+            # `max()` é o "pior de" na polaridade OPC (GOOD=0 < BAD=2) — nunca `min()`.
             quality = max(quality, tag_value.quality)
         return values, quality
 

@@ -548,9 +548,10 @@ def test_linha_integradora_entra_como_taxa_nula():
 def test_linha_integradora_com_faixa_do_sp_usa_epsilon_por_linha():
     """`sp_range_pct` numa CV integradora (emenda ADR-027 §4) vira ε de taxa por linha —
     `pct/100 × span/tss` — em vez do `integrating_tolerance` do bloco. `span=100`,
-    `tss=100`, `sp_range_pct=10` ⇒ ε = 0.1 EU/s; com `Ki=0.4` e preço maximizando a MV,
-    o LP para exatamente em `ΔMV = ε/Ki = 0.25`. `integrating_tolerance=1e6` no bloco
-    prova que é o ε por-linha (não o global) que trava — senão a MV iria ao limite duro.
+    `tss=100`, `sp_range_pct=10` ⇒ ε = 0.1 EU/s; o `Ki=0.4` do config está na base %/%/s
+    (razão de spans 1 aqui), então `Ki_EU = 0.4` e o LP para exatamente em
+    `ΔMV = ε/Ki_EU = 0.25`. `integrating_tolerance=1e6` no bloco prova que é o ε por-linha
+    (não o global) que trava — senão a MV iria ao limite duro (±1000).
     """
     config = _config(
         mvs=[_mv("mv_a", lo=-1000.0, hi=1000.0)],

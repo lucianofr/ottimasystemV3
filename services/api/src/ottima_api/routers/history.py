@@ -141,10 +141,12 @@ ERRO_VAR_IDS_MALFORMADO = "var_ids deve conter valores não vazios separados por
 
 ERRO_FUZZY_VAR_IDS_VAZIO = "var_ids não pode ser vazio"
 ERRO_FUZZY_VAR_IDS_MALFORMADO = (
-    "var_ids deve conter portas IN1..IN8/OUT1..OUT8 separadas por vírgula"
+    "var_ids deve conter portas IN1..IN8/OUT1..OUT8 (ou SP) separadas por vírgula"
 )
 
-_FUZZY_VAR_ID_RE = re.compile(r"^(IN|OUT)[1-8]$")
+#: `SP` entra porque, com `setpoint` configurado no bloco, o recorder grava o SP do operador
+#: como mais uma variável do bloco (var_id sintético, mesma tabela `fuzzy_samples`).
+_FUZZY_VAR_ID_RE = re.compile(r"^(IN|OUT)[1-8]$|^SP$")
 
 ERRO_LOOP_VAR_IDS_VAZIO = "var_ids não pode ser vazio"
 ERRO_LOOP_VAR_IDS_MALFORMADO = (

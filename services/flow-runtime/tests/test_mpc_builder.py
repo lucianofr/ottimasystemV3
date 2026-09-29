@@ -86,8 +86,11 @@ def _par(K: float, tau1: float, tau2: float, theta: float) -> dict:
     return {"enabled": True, "params": {"K": K, "tau1": tau1, "tau2": tau2, "theta": theta}}
 
 
-def _par_integrating(Ki: float, theta: float) -> dict:
-    return {"enabled": True, "params": {"Ki": Ki, "theta": theta}}
+def _par_integrating(Ki: float, theta: float, tau1: float = 0.0) -> dict:
+    params = {"Ki": Ki, "theta": theta}
+    if tau1:
+        params["tau1"] = tau1
+    return {"enabled": True, "params": params}
 
 
 def _solve(built: BuiltMpc, *, sp: dict[str, float] | None = None) -> None:
@@ -161,6 +164,36 @@ def test_dimensao_do_modelo_bate_com_mpc_state_dimension_com_dv():
     built = _assemble_model(config, ts_flow=1.0)
 
     assert built.mpc.model.n_x == mpc_state_dimension(config, ts_mpc=built.horizons.ts_mpc)
+
+
+def test_dimensao_do_modelo_com_integrador_com_lag():
+    """Pino do repasse de `tau1` no builder (`discretize_iopdt(..., tau1=...)`): sem ele o par
+    integrador é montado como integrador PURO (1 estado) e a igualdade com
+    `mpc_state_dimension` (2 estados com lag) quebra."""
+    config = _config_integradora(tau1=60.0)
+    built = build_mpc(config, ts_flow=1.0)
+
+    assert built.mpc.model.n_x == mpc_state_dimension(config, ts_mpc=built.horizons.ts_mpc) == 3
+
+
+def test_integrador_com_lag_rampa_menos_que_o_integrador_puro_no_transiente():
+    """IFOPDT no modelo agregado: com o estágio de 1a ordem ainda carregando (3×Ts_mpc = 15 s
+    contra τ1 = 60 s), a linha tem de estar ATRÁS do integrador puro de mesmo `Ki` — e
+    alcançá-lo em regime (o lag atrasa a rampa, não muda a taxa). Falha se `tau1` não chegar
+    ao `discretize_iopdt` (as duas séries ficariam idênticas)."""
+    u = {"mv_1": 10.0}
+    puro = build_mpc(_config_integradora(), ts_flow=1.0)
+    com_lag = build_mpc(_config_integradora(tau1=60.0), ts_flow=1.0)
+
+    y_puro = _y_em(puro, "cv_1", _propaga(puro, u=u, d={}, passos=3), d={})
+    y_lag = _y_em(com_lag, "cv_1", _propaga(com_lag, u=u, d={}, passos=3), d={})
+    assert 0.0 < y_lag < y_puro
+
+    # Em regime a TAXA converge para a do integrador puro (mesma inclinação por ciclo).
+    x_200 = _propaga(com_lag, u=u, d={}, passos=200)
+    x_201 = _propaga(com_lag, u=u, d={}, passos=201)
+    taxa_lag = _y_em(com_lag, "cv_1", x_201, d={}) - _y_em(com_lag, "cv_1", x_200, d={})
+    assert taxa_lag == pytest.approx(0.01 * com_lag.horizons.ts_mpc * u["mv_1"], rel=1e-6)
 
 
 # --------------------------------------------------------------------------------------
@@ -372,9 +405,11 @@ def _y_em(built: BuiltMpc, row_id: str, x: ca.DM, d: dict[str, float]) -> float:
     return float(f(x, model.u(0.0), model.z(0.0), tvp, model.p(0.0)))
 
 
-def _config_integradora(*, mv_op: float = 0.0, dv_op: float | None = None) -> MpcConfig:
+def _config_integradora(
+    *, mv_op: float = 0.0, dv_op: float | None = None, tau1: float = 0.0
+) -> MpcConfig:
     dvs = [] if dv_op is None else [_dv("dv_1", operating_point=dv_op)]
-    pares = {"mv_1": _par_integrating(0.01, 0.0)}
+    pares = {"mv_1": _par_integrating(0.01, 0.0, tau1)}
     if dv_op is not None:
         pares["dv_1"] = _par_integrating(0.02, 0.0)
     return MpcConfig.model_validate(

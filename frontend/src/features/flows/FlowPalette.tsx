@@ -37,16 +37,16 @@ function ItemPaleta({ tipo, onAdicionar }: { tipo: TipoBloco; onAdicionar: Props
   );
 }
 
-/** Paleta de 9 blocos (RF-301, RF-551): o MPC entra em operação na F4 (decisão A-1) igual aos
+/** Paleta de 14 blocos (RF-301, RF-551): o MPC entra em operação na F4 (decisão A-1) igual aos
  *  demais — arrastável, sem badge de fase pendente (spec F4 §7.1). */
 export function FlowPalette({ onAdicionar }: Props) {
   return (
-    <Card className="w-56 shrink-0 space-y-2 p-3">
+    <Card data-testid="paleta" className="flex w-56 shrink-0 flex-col gap-2 p-3">
       <h2 className="plaqueta text-[11px] text-fg-muted">Paleta</h2>
       <p className="text-[10px] leading-tight text-fg-muted">
         Arraste para o canvas ou clique para inserir no centro.
       </p>
-      <div className="space-y-2">
+      <div data-testid="paleta-lista" className="min-h-0 flex-1 space-y-2 overflow-y-auto px-0.5">
         {TIPOS_BLOCO.map((tipo) => (
           <ItemPaleta key={tipo} tipo={tipo} onAdicionar={onAdicionar} />
         ))}

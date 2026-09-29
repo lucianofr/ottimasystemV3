@@ -2,9 +2,10 @@ import { Handle, Position } from "@xyflow/react";
 import type { ReactNode } from "react";
 
 import { cn } from "../../../lib/cn";
+import { portaValida } from "../canalPrimitivos";
 import { ROTULO_BLOCO, type TipoBloco } from "../graph";
 import { formatarValorPorta, type PortValue } from "../useFlowStatus";
-import { useValoresDoBloco, type PortasDoBloco } from "./contexto";
+import { useEuHerdada, useValoresDoBloco, type PortasDoBloco } from "./contexto";
 
 /**
  * Equipamento de painel (DESIGN.md §Shapes): chapa, plaqueta de título com o badge de
@@ -35,10 +36,33 @@ interface Props {
   children: ReactNode;
 }
 
+/** Rótulos pt-BR de `quality` (polaridade Fieldbus BAD=0/UNCERTAIN=1/GOOD=2, ADR-043) —
+ *  só no tooltip (spec §7: sem terceiro estado visual nesta entrega; o rótulo VISÍVEL é
+ *  sempre "inválido" quando `!portaValida`). */
+const QUALITY_ROTULO: Record<number, string> = {
+  0: "inválido",
+  1: "incerto",
+  2: "válido",
+};
+
+/** Rótulos pt-BR dos 7 substatus do ADR-039 §Substatus; `0` (NON_SPECIFIC) nunca entra no
+ *  tooltip — só os demais complementam a qualidade no hover. */
+const SUBSTATUS_ROTULO: Record<number, string> = {
+  0: "não especificado",
+  1: "pedido de inicialização",
+  2: "não convidado",
+  3: "override local",
+  4: "falha de sensor",
+  5: "erro de configuração",
+  6: "falha de dispositivo",
+};
+
 /**
  * Valor ao vivo da porta. Inválido é dessaturado **e** rotulado, nunca só descolorido
  * (Regra do Canal Redundante); o número sai em mono tabular para não dançar de largura a
- * cada varredura (Regra do Número Tabular).
+ * cada varredura (Regra do Número Tabular). Quality/substatus detalhados só no `title`
+ * (spec §7: tooltip mostra GOOD/UNCERTAIN/BAD e substatus quando ≠ NON_SPECIFIC; sem
+ * terceiro estado visual no rótulo desta entrega).
  */
 function ValorPorta({ valor, eu }: { valor: PortValue | undefined; eu?: string | null }) {
   if (valor === undefined) {
@@ -49,13 +73,22 @@ function ValorPorta({ valor, eu }: { valor: PortValue | undefined; eu?: string |
     );
   }
   const numerico = typeof valor.v === "number";
+  const valida = portaValida(valor);
+  const titulo = `${QUALITY_ROTULO[valor.quality] ?? "inválido"}${
+    valor.substatus !== 0 ? ` · ${SUBSTATUS_ROTULO[valor.substatus]}` : ""
+  }`;
   return (
-    <span data-testid="porta-valor" className="flex items-baseline gap-1 leading-none">
-      <span className={cn("process-value text-[11px]", valor.ok ? "text-fg" : "text-fg-muted")}>
+    <span data-testid="porta-valor" className="flex items-baseline gap-1 leading-none" title={titulo}>
+      <span
+        className={cn(
+          "process-value text-[11px] font-bold",
+          valida ? "text-fg" : "text-fg-muted",
+        )}
+      >
         {formatarValorPorta(valor)}
       </span>
-      {numerico && eu ? <span className="text-[9px] text-fg-muted">{eu}</span> : null}
-      {!valor.ok && <span className="text-[9px] text-fg-muted">inválido</span>}
+      {numerico && eu ? <span className="text-[9px] font-bold text-fg-muted">{eu}</span> : null}
+      {!valida && <span className="text-[9px] text-fg-muted">inválido</span>}
     </span>
   );
 }
@@ -65,13 +98,16 @@ function LinhaPorta({
   lado,
   valores,
   eu,
+  noId,
 }: {
   porta: Porta;
   lado: "entrada" | "saida";
   valores: PortasDoBloco | null;
   eu?: string | null;
+  noId: string;
 }) {
   const entrada = lado === "entrada";
+  const euHerdada = useEuHerdada(noId, porta.id);
   return (
     <div
       className={cn(
@@ -85,7 +121,9 @@ function LinhaPorta({
         id={porta.id}
       />
       <span className="plaqueta text-[10px] leading-none text-fg-muted">{porta.rotulo}</span>
-      {valores !== null && <ValorPorta valor={valores[porta.id]} eu={porta.eu ?? eu} />}
+      {valores !== null && (
+        <ValorPorta valor={valores[porta.id]} eu={porta.eu ?? euHerdada ?? eu} />
+      )}
     </div>
   );
 }
@@ -127,12 +165,12 @@ export function BlocoChapa({
         <div className="flex border-t border-border py-1">
           <div className="flex-1">
             {entradas.map((porta) => (
-              <LinhaPorta key={porta.id} porta={porta} lado="entrada" valores={valores} eu={eu} />
+              <LinhaPorta key={porta.id} porta={porta} lado="entrada" valores={valores} eu={eu} noId={blockId} />
             ))}
           </div>
           <div className="flex-1">
             {saidas.map((porta) => (
-              <LinhaPorta key={porta.id} porta={porta} lado="saida" valores={valores} eu={eu} />
+              <LinhaPorta key={porta.id} porta={porta} lado="saida" valores={valores} eu={eu} noId={blockId} />
             ))}
           </div>
         </div>

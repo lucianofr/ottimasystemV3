@@ -5,6 +5,7 @@ O worker não usa trust store de sistema: o certificado do servidor é pinado po
 com `cert_missing` em vez de aceitar qualquer interlocutor.
 """
 
+import logging
 from pathlib import Path
 from typing import Literal
 
@@ -15,6 +16,7 @@ from asyncua.ua.uaerrors import UaStatusCodeError
 
 from ottima_core.certs import (
     APPLICATION_URI,
+    MAX_SERVER_CERT_BYTES,
     AppCertPaths,
     app_cert_paths,
     read_app_certificate,
@@ -23,6 +25,8 @@ from ottima_core.certs import (
 from ottima_core.security import decrypt_secret
 
 from .state import ConnectionConfig
+
+logger = logging.getLogger(__name__)
 
 SECURITY_POLICY_NONE = "none"
 SECURITY_POLICY_BASIC256SHA256 = "basic256sha256"
@@ -219,3 +223,34 @@ def _is_certificate_status(exc: BaseException) -> bool:
     O opcsim não chega a este caminho (derruba o canal sem responder), mas PLCs reais sim.
     """
     return isinstance(exc, UaStatusCodeError) and exc.code in _CERT_STATUS_CODES
+
+
+async def fetch_server_certificate(endpoint_url: str, *, timeout_s: float = 5.0) -> bytes | None:
+    """Busca o certificado anunciado pelo servidor via GetEndpoints, sem canal seguro.
+
+    A descoberta usa um SecureChannel plain temporário (`connect_and_get_server_endpoints`
+    do asyncua): não exige o par de aplicação nem pin — é assim que se obtém o certificado
+    de um servidor cujo pin ainda não existe (cert_missing) ou divergiu (cert_mismatch).
+    Devolve os bytes DER do primeiro endpoint que anuncia certificado, ou None se o
+    servidor não anuncia nenhum / está inalcançável (best-effort: nunca levanta).
+    """
+    # ponytail: o primeiro certificado não-vazio dentro do teto vence; servidor
+    # multi-aplicação com certificados distintos por endpoint exigiria casar com a policy
+    # configurada. O teto é o mesmo do upload (64 KiB): anúncio hostil não vira memória
+    # nem disco arbitrários.
+    client = Client(endpoint_url, timeout=timeout_s)
+    try:
+        endpoints = await client.connect_and_get_server_endpoints()
+    except Exception as exc:
+        logger.warning(
+            "Descoberta de endpoints falhou para %s: %s; certificado não capturado",
+            endpoint_url,
+            describe_exception(exc),
+        )
+        logger.debug("Detalhe da descoberta de %s", endpoint_url, exc_info=True)
+        return None
+    for endpoint in endpoints:
+        cert = endpoint.ServerCertificate
+        if cert and len(cert) <= MAX_SERVER_CERT_BYTES:
+            return bytes(cert)
+    return None

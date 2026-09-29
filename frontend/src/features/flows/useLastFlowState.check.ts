@@ -78,19 +78,33 @@ test("auditoria de CRUD e eventos de outros domínios não entram", () => {
   expect(mapa.size).toBe(0);
 });
 
-test("janela só com ruído do próprio flow não inventa estado", () => {
-  // A consulta é escopada por `origin=flow:5`, mas dentro do próprio origin ainda cabem
-  // `flow_overrun` e `reload_rejected`. Sem evento de estado, o flow fica FORA do mapa: a
-  // coluna mostra "—", não um "parado" inventado.
+test("recusas do supervisor publicam estado próprio — o flow nunca fica com o último estado bom", () => {
+  // Regressão do achado de 2026-09-28: `deploy_rejected` (grafo inválido) e `reload_rejected`
+  // (hot-swap recusado) eram tratados como ruído, e a linha continuava mostrando "Rodando" do
+  // último deploy que deu certo. `flow_overrun` continua fora: é telemetria, não estado.
   const mapa = derivarUltimoEstado(
     desc([
       evento(0, "flow:5", "flow_overrun"),
-      evento(10, "flow:5", "reload_rejected"),
+      evento(10, "flow:5", "deploy_rejected", "invalid_graph"),
+      evento(20, "flow:6", "reload_rejected", "invalid_graph"),
+      evento(30, "flow:7", "deploy_rejected", "project_inactive"),
     ]),
   );
 
-  expect(mapa.has(5)).toBe(false);
-  expect(mapa.size).toBe(0);
+  expect(mapa.get(5)).toEqual({
+    estado: "recusado",
+    rotulo: "Recusado: grafo salvo inválido",
+    falha: true,
+    ts: carimbo(10),
+  });
+  expect(mapa.get(6)?.estado).toBe("recusado");
+  expect(mapa.get(7)?.rotulo).toBe("Recusado: o projeto do flow não é o ativo");
+});
+
+test("recusa não é espera: o comando desmentido não fica 'aguardando confirmação'", () => {
+  const mapa = derivarUltimoEstado(desc([evento(0, "flow:9", "deploy_rejected", "invalid_graph")]));
+
+  expect(aguardandoConfirmacao("running", mapa.get(9))).toBe(false);
 });
 
 test("flow_failed vira estado de falha com motivo em pt-BR; motivo ausente não vira vazio", () => {

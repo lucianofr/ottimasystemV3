@@ -1,6 +1,12 @@
 import { expect, test } from "@playwright/test";
 
-import { criarAmbiente, entrarNoShell, NODES, type AmbienteE2E } from "./fixtures";
+import {
+  criarAmbiente,
+  entrarNoShell,
+  escalaXDoGrafico,
+  NODES,
+  type AmbienteE2E,
+} from "./fixtures";
 
 /**
  * PW-FZ-01..03 — página FUZZY OPERATE (ADR-030): combobox de blocos fuzzy do projeto ativo,
@@ -24,6 +30,9 @@ let flowId: number;
 
 const BLOCK_A = "fz-a";
 const BLOCK_B = "fz-b";
+
+/** Janela default do trend fuzzy (`JANELA_DEFAULT_SEGUNDOS`, `TrendFuzzy.tsx`). */
+const JANELA_30M_S = 1800;
 
 const FLL = `Engine: minimo
 InputVariable: Nivel
@@ -210,5 +219,58 @@ test.describe("Página FUZZY OPERATE", () => {
     await expect(page.getByTestId("fuzzy-trend-escala-auto").first()).toBeChecked();
     await expect(page.getByTestId("fuzzy-trend-escala-min").first()).toBeDisabled();
     await expect.poll(lerChave).toBeNull();
+  });
+
+  test("PW-FZ-03: zoom por arrasto no trend fuzzy volta pelo botão Reset da própria tela", async ({
+    page,
+  }) => {
+    // Regressão: o `TrendChart` é compartilhado pelas três telas de trend e rastreia o recorte
+    // do arrasto num ref próprio; o aviso manda usar "Reset layout", e aqui o botão é "Reset".
+    // Sem o `resetZoom` no handler desta tela, o recorte ficava preso para sempre.
+    //
+    // Histórico interceptado: este flow nunca é deployado, então `fuzzy_samples` está vazio e
+    // sem dado o uPlot não tem o que recortar.
+    await page.route("**/api/history/fuzzy?*", async (rota) => {
+      const url = new URL(rota.request().url());
+      const ids = (url.searchParams.get("var_ids") ?? "")
+        .split(",")
+        .filter((texto) => texto !== "");
+      const fim = Date.now() - 3 * 60_000;
+      const carimbos = Array.from({ length: 85 }, (_, i) =>
+        new Date(fim - (84 - i) * 5000).toISOString(),
+      );
+      await rota.fulfill({
+        json: {
+          mode: "raw",
+          start: url.searchParams.get("start"),
+          end: url.searchParams.get("end"),
+          series: ids.map((varId, indice) => ({
+            t: carimbos,
+            v: carimbos.map(() => 10 * (indice + 1)),
+            var_id: varId,
+          })),
+        },
+      });
+    });
+    await page.reload();
+
+    const tela = page.getByTestId("trend-chart").locator(".u-over");
+    await expect(tela).toBeVisible();
+    const caixa = await tela.boundingBox();
+    if (caixa === null) throw new Error("área de interação do trend fuzzy sem caixa");
+    const meioY = caixa.y + caixa.height / 2;
+
+    await page.mouse.move(caixa.x + caixa.width * 0.3, meioY);
+    await page.mouse.down();
+    await page.mouse.move(caixa.x + caixa.width * 0.6, meioY, { steps: 10 });
+    await page.mouse.up();
+    await expect(page.getByTestId("trend-zoom")).toBeVisible();
+    const recorte = await escalaXDoGrafico(page, "trend-chart");
+    expect(recorte.max - recorte.min).toBeLessThan(JANELA_30M_S / 2);
+
+    await page.getByTestId("fuzzy-trend-janela-reset").click();
+    await expect(page.getByTestId("trend-zoom")).toHaveCount(0);
+    const solto = await escalaXDoGrafico(page, "trend-chart");
+    expect(Math.round(solto.max - solto.min)).toBe(JANELA_30M_S);
   });
 });

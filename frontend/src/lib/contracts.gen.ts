@@ -52,7 +52,7 @@ export type ContratoPorta =
   | ContratoPortaDinamica
   | ContratoPortaDinamicaComDefault;
 
-export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy" | "first_order" | "kalman" | "pid" | "tfs" | "mpc" | "pid_loop" | "fuzzy_loop", ContratoPorta> = {
+export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "constant" | "script" | "fuzzy" | "first_order" | "kalman" | "scaler" | "integrator" | "lead_lag" | "dead_time" | "bus_publish" | "bus_subscribe" | "pid" | "tfs" | "mpc" | "pid_loop" | "fuzzy_loop", ContratoPorta> = {
   "opc_read": {
     "dynamic": false,
     "ports": [
@@ -70,6 +70,16 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy
         "name": "in",
         "direction": "input",
         "type": "tag"
+      }
+    ]
+  },
+  "constant": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
       }
     ]
   },
@@ -146,6 +156,91 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy
         "name": "out",
         "direction": "output",
         "type": "num"
+      }
+    ]
+  },
+  "scaler": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
+  },
+  "integrator": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "reset",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
+  },
+  "lead_lag": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
+  },
+  "dead_time": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "num"
+      },
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ]
+  },
+  "bus_publish": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "in",
+        "direction": "input",
+        "type": "bivalent"
+      }
+    ]
+  },
+  "bus_subscribe": {
+    "dynamic": false,
+    "ports": [
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "bivalent"
       }
     ]
   },
@@ -335,8 +430,15 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy
 
 export interface PortValue {
   v: number | boolean | null;
-  ok: boolean;
+  quality: Quality;
+  substatus: Substatus;
+  hi_limited: boolean;
+  lo_limited: boolean;
 }
+
+export type Quality = 0 | 1 | 2;
+
+export type Substatus = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface FlowStatus {
   state: "running" | "stopped" | "failed";
@@ -418,6 +520,7 @@ export interface FuzzyVarState {
 export interface FuzzyState {
   ts: string;
   ok: boolean;
+  sp: number | null;
   inputs: FuzzyVarState[];
   rules: number[];
   outputs: FuzzyVarState[];
@@ -580,6 +683,8 @@ export interface FuzzyConfig {
   n_inputs: number;
   n_outputs: number;
   output_eu: Record<string, string>;
+  setpoint: number | null;
+  sp_source: "operador" | "entrada" | null;
 }
 
 export interface PidConfig {
@@ -679,5 +784,34 @@ export interface SopdtParams {
 
 export interface IopdtParams {
   Ki: number;
+  theta: number;
+}
+
+export interface ScalerConfig {
+  in_min: number;
+  in_max: number;
+  out_min: number;
+  out_max: number;
+}
+
+export interface IntegratorConfig {
+  time_base: "s" | "min" | "h";
+}
+
+export interface ConstantConfig {
+  value: number;
+}
+
+export interface BusKeyConfig {
+  key: string;
+}
+
+export interface LeadLagConfig {
+  gain: number;
+  tau_lead: number;
+  tau_lag: number;
+}
+
+export interface DeadTimeConfig {
   theta: number;
 }

@@ -83,3 +83,22 @@ nenhuma camada — SVG puro desenha as funções de pertinência.
 - Reordenar variáveis no FLL continua mudando o mapeamento de portas (risco aceito na
   ADR-029) — a página exibe o NOME da variável ao lado da porta justamente para tornar isso
   visível ao operador.
+
+## Emenda 2026-09-29 — SP do operador na página (PRD Changelog 3.1)
+
+A página deixou de ser somente leitura para o bloco **com SP habilitado**
+(RF-541 revisado). A fonte do SP é `sp_source`: `operador` (semente em `setpoint`,
+comando `fuzzy_sp`, barra com escrita) ou `entrada` (porta dedicada `sp` alimentada por
+fio do flow — a barra vira somente leitura e a rota `/sp` responde 422 nomeando a fonte): uma barra mostra o **SP publicado** pelo runtime (campo `sp` do payload
+`FuzzyState`, nunca eco de comando — Regra do Estado Publicado), a medida da porta `IN1` e o
+desvio `sp − pv`, e escreve o SP por `POST /api/operate/{flow_id}/{block_id}/sp`, que publica
+`fuzzy_sp` em `flow.commands` (mesmo desenho dos comandos do §4.8: a API não audita nem
+emite evento; o runtime materializa). O SP chega ao motor como a **última `InputVariable`**
+do FLL — a introspecção a rotula `SP`, e é esse rótulo que pendura o painel e a série
+histórica (`fuzzy_samples` com `var_id='SP'`). Bloco **sem** `setpoint` continua exatamente
+como antes: nenhuma rota de comando responde por ele (422) e a página não mostra a barra.
+
+O SP é **estado de runtime** (semente = `setpoint` do grafo): re-instanciar o bloco (deploy,
+resume pós-`comm_failure`) volta à semente, como o `sp_op` do shell volta ao carry/seed.
+Persistir o SP do operador em tabela (paridade com `mpc_setpoints`) fica registrado como
+lacuna conhecida, não como comportamento prometido.

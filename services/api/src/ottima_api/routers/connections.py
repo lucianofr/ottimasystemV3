@@ -1,6 +1,9 @@
 """CRUD de conexões OPC-UA (RF-201, ADR-009/021): leitura para operador, escrita para admin."""
 
 import hashlib
+import logging
+from dataclasses import asdict
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from redis.asyncio import Redis
@@ -18,15 +21,25 @@ from ottima_core.bus import (
     publish_event,
 )
 from ottima_core.certs import (
+    MAX_SERVER_CERT_BYTES,
+    read_server_certificate_info,
+    received_cert_path,
     remove_server_certificate,
     store_server_certificate,
     trusted_cert_path,
 )
 from ottima_core.config import Settings
 from ottima_core.models import OpcConnection, Project, User
-from ottima_core.schemas.certificates import ServerCertificateOut
+from ottima_core.schemas.certificates import (
+    ServerCertificateInfoOut,
+    ServerCertificateOut,
+    ServerCertificatesOut,
+    ServerCertificateTrustIn,
+)
 from ottima_core.schemas.connections import ConnectionCreate, ConnectionOut, ConnectionUpdate
 from ottima_core.security import encrypt_secret
+
+logger = logging.getLogger(__name__)
 
 # Sem dependência no router: os papéis variam por rota (ADR-015)
 router = APIRouter()
@@ -38,11 +51,20 @@ _MSG_POLICY_MODE = (
     "SecurityPolicy None exige modo None; Basic256Sha256 exige Sign ou SignAndEncrypt"
 )
 
-# Um certificado X.509 não chega perto disso; sem teto, qualquer corpo enviado viraria
-# gravação em disco.
-MAX_SERVER_CERT_BYTES = 64 * 1024
+# O teto de 64 KiB vive em `ottima_core.certs`: o upload e a captura do worker compartilham
+# a mesma barreira; sem teto, qualquer corpo enviado viraria gravação em disco.
 _MAX_DIGITOS_TETO = len(str(MAX_SERVER_CERT_BYTES))
 _MSG_CERT_GRANDE = "Certificado enviado excede o limite de 64 KiB."
+_MSG_SEM_RECEBIDO = (
+    "Nenhum certificado recebido deste servidor ainda: a captura acontece quando o "
+    "opc-worker tenta conectar — confira se o servidor está acessível e aguarde a próxima "
+    "tentativa."
+)
+_MSG_FINGERPRINT_DIVERGE = (
+    "O certificado recebido mudou desde a visualização (rotação ou captura nova): "
+    "recarregue a visualização e confirme o fingerprint antes de confiar."
+)
+_MSG_CERT_ILEGIVEL = "Certificado gravado em disco está ilegível; recapture-o ou reenvie-o."
 
 
 def _to_out(conn: OpcConnection) -> ConnectionOut:
@@ -72,16 +94,29 @@ async def _carregar(db: AsyncSession, connection_id: int) -> OpcConnection:
 
 
 async def _publicar(
-    redis_client: Redis, user: User, conn: OpcConnection, kind: str, acao: str
+    redis_client: Redis,
+    user: User,
+    conn: OpcConnection,
+    kind: str,
+    acao: str,
+    *,
+    fingerprint: str | None = None,
 ) -> None:
-    """Auditoria da mutação (ADR-020) — sempre depois do commit, nunca antes."""
+    """Auditoria da mutação (ADR-020) — sempre depois do commit, nunca antes.
+
+    `fingerprint` viaja no payload só nas rotas que pinam certificado: QUAL certificado
+    foi confiado é parte da decisão auditada (ADR-021).
+    """
+    payload = {"conn_id": conn.id, "project_id": conn.project_id, "name": conn.name}
+    if fingerprint is not None:
+        payload["fingerprint_sha256"] = fingerprint
     await publish_event(
         redis_client,
         severity="info",
         origin=f"user:{user.id}",
         message=f"Conexão '{conn.name}' {acao}",
         kind=kind,
-        payload={"conn_id": conn.id, "project_id": conn.project_id, "name": conn.name},
+        payload=payload,
     )
 
 
@@ -313,4 +348,113 @@ async def clear_server_certificate(
     await db.commit()
     await _publicar(
         redis_client, user, conn, KIND_CONNECTION_UPDATED, "sem o certificado do servidor"
+    )
+
+
+def _cert_info(path: Path) -> ServerCertificateInfoOut | None:
+    """Info de um certificado em disco (None = ausente); ValueError vira 500 mapeado."""
+    try:
+        info = read_server_certificate_info(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=_MSG_CERT_ILEGIVEL) from exc
+    return None if info is None else ServerCertificateInfoOut(**asdict(info))
+
+
+def _cert_info_degradavel(path: Path) -> ServerCertificateInfoOut | None:
+    """`received` ilegível não derruba o GET inteiro: degrada para None com warning.
+
+    Diferente do `trusted` (falha de infra real: 500), o staging é reescrito pelo worker a
+    qualquer momento — esconder o lado confiado por causa dele seria perder a informação
+    que importa por um arquivo transitório.
+    """
+    try:
+        return _cert_info(path)
+    except HTTPException:
+        logger.warning("Certificado recebido em %s ilegível; omitido da resposta", path.name)
+        return None
+
+
+@router.get(
+    "/{connection_id}/server-certificate",
+    response_model=ServerCertificatesOut,
+    dependencies=[Depends(require_operator)],
+)
+async def get_server_certificate(
+    connection_id: int,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+) -> ServerCertificatesOut:
+    """O certificado confiado e o certificado que o servidor enviou (staging da captura).
+
+    `trusted` só aparece quando a coluna `server_cert_file` está preenchida: um arquivo
+    órfão em `trusted/` (ex.: trust desfeito por outra rota) não é certificado confiado.
+    `received` vem do volume gravado pelo opc-worker na falha de pin — a UI o usa para
+    "Visualizar" e para habilitar o aceite sem upload.
+    """
+    conn = await _carregar(db, connection_id)
+    trusted = (
+        _cert_info(trusted_cert_path(settings.certs_dir, connection_id))
+        if conn.server_cert_file
+        else None
+    )
+    received = _cert_info_degradavel(received_cert_path(settings.received_certs_dir, connection_id))
+    return ServerCertificatesOut(conn_id=connection_id, trusted=trusted, received=received)
+
+
+@router.post("/{connection_id}/server-certificate/trust", response_model=ServerCertificateOut)
+async def trust_received_server_certificate(
+    connection_id: int,
+    body: ServerCertificateTrustIn,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+    user: User = Depends(require_admin),
+    redis_client: Redis = Depends(get_redis),
+) -> ServerCertificateOut:
+    """Confia no certificado que o servidor enviou (captura do opc-worker), sem upload.
+
+    É o "aceite" da UI: promove o arquivo do staging para `trusted/` com a mesma validação
+    X.509 do upload. O `fingerprint_sha256` do corpo é o do certificado que o admin
+    inspecionou (ADR-021): se o worker recapturou desde a visualização (rotação, captura
+    nova), 409 — o aceite é do certificado EXIBIDO, não do que estiver no staging. Aceite
+    repetido dos mesmos bytes é no-op: sem watermark, sem evento, sem reconcile inútil de
+    uma sessão saudável.
+    """
+    conn = await _carregar(db, connection_id)
+    origem = received_cert_path(settings.received_certs_dir, connection_id)
+    if not origem.exists():
+        raise HTTPException(status_code=409, detail=_MSG_SEM_RECEBIDO)
+    data = origem.read_bytes()
+    if hashlib.sha256(data).hexdigest() != body.fingerprint_sha256:
+        raise HTTPException(status_code=409, detail=_MSG_FINGERPRINT_DIVERGE)
+    confiado = trusted_cert_path(settings.certs_dir, connection_id)
+    substituindo = conn.server_cert_file is not None
+    if substituindo and confiado.exists() and confiado.read_bytes() == data:
+        return ServerCertificateOut(
+            conn_id=connection_id,
+            server_cert_file=conn.server_cert_file,
+            fingerprint_sha256=body.fingerprint_sha256,
+        )
+    # Síncrono e de poucos KB, como todo o ottima_core.certs (spec §5.3, decisão 0.4).
+    try:
+        nome = store_server_certificate(settings.certs_dir, connection_id, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    conn.server_cert_file = nome
+    # Bump do watermark: o nome é sempre `conn-<id>.der`, então re-confiar depois de uma
+    # rotação não suja o atributo — ver o comentário em `set_server_certificate`.
+    flag_modified(conn, "server_cert_file")
+    await db.commit()
+    await _publicar(
+        redis_client,
+        user,
+        conn,
+        KIND_CONNECTION_UPDATED,
+        "com o certificado recebido do servidor confirmado"
+        + (" (substituindo o pin anterior)" if substituindo else ""),
+        fingerprint=body.fingerprint_sha256,
+    )
+    return ServerCertificateOut(
+        conn_id=connection_id,
+        server_cert_file=nome,
+        fingerprint_sha256=body.fingerprint_sha256,
     )

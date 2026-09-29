@@ -86,6 +86,7 @@ async def lifespan(app: FastAPI):
         client,
         worker_state,
         certs_dir=settings.certs_dir,
+        received_certs_dir=settings.received_certs_dir,
         fernet_key=settings.fernet_key,
     )
     app.state.supervisor = supervisor

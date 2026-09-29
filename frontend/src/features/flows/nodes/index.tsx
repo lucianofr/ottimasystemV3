@@ -8,11 +8,18 @@ import {
   passagemDireta,
   portasFixas,
   portasScript,
+  type NoConstant,
+  type NoDeadTime as NoDeadTimeData,
+  type NoLeadLag as NoLeadLagData,
+  type NoBusPublish as NoBusPublishData,
+  type NoBusSubscribe as NoBusSubscribeData,
   type NoEscrita,
   type NoFirstOrder,
+  type NoIntegrator as NoIntegratorData,
   type NoFuzzy as NoFuzzyData,
   type NoKalman,
   type NoLeitura,
+  type NoScaler as NoScalerData,
   type NoMpc as NoMpcData,
   type NoPid as NoPidData,
   type NoFuzzyLoop as NoFuzzyLoopData,
@@ -27,7 +34,7 @@ import {
 } from "../graph";
 import { rotuloVariavel } from "../mpc/mpcLogic";
 import { BlocoChapa, LinhaResumo, type Porta } from "./BlocoChapa";
-import { useTagsDoEditor, useTsFlowDoEditor } from "./contexto";
+import { useTagsDoEditor, useTsFlowDoEditor, useValoresDoBloco } from "./contexto";
 
 /** Portas rotuladas com o próprio nome do handle: é o que o engenheiro vê no 422 do save. */
 function portas(ids: readonly string[]): Porta[] {
@@ -42,14 +49,23 @@ function portasComEu(ids: readonly string[], output_eu: Record<string, string>):
   return ids.map((id) => ({ id, rotulo: id, eu: output_eu[id] }));
 }
 
-/** Portas do MPC rotulam `nome (EU)` — ao contrário do resto do canvas, que rotula pelo
- *  handle id (decisão A-10, spec F4 §7.2). Nome vazio cai no id (variável ainda sem nome). */
+/** Portas do MPC rotulam pelo nome da variável (decisão A-10, spec F4 §7.2); nome vazio cai
+ *  no id. No modo ONLINE a EU vai para o campo `eu` e herda o negrito do valor ao lado do
+ *  número; no EDIT não há valor ao vivo, então a EU volta embutida no rótulo
+ *  (`nome (EU)`) — era assim que o card a mostrava antes dos valores ao vivo existirem, e
+ *  tirá-la dali sem repor em lugar nenhum deixaria o engenheiro sem unidade no modo de
+ *  edição. */
 function portasMpc(
   variaveis: readonly (VariavelMv | VariavelCv | VariavelRestricao | VariavelDv)[],
+  euNoRotulo: boolean,
 ): Porta[] {
   return variaveis.map((variavel) => {
     const nome = rotuloVariavel(variavel);
-    return { id: variavel.id, rotulo: variavel.eu ? `${nome} (${variavel.eu})` : nome };
+    return {
+      id: variavel.id,
+      rotulo: euNoRotulo && variavel.eu ? `${nome} (${variavel.eu})` : nome,
+      eu: variavel.eu || undefined,
+    };
   });
 }
 
@@ -106,6 +122,24 @@ export function NoEscritaOpc({ id, data, selected }: NodeProps<NoEscrita>) {
       eu={tag?.eu}
     >
       <CorpoTag tagId={data.tag_id} tag={tag} />
+    </BlocoChapa>
+  );
+}
+
+/** Barramento-Publicar (ADR-042): publica o valor da entrada no barramento Redis, para
+ *  outro flow consumir — bloco-sumidouro, mesmo chassis do Escrita OPC. */
+export function NoBusPublish({ id, data, selected }: NodeProps<NoBusPublishData>) {
+  return (
+    <BlocoChapa
+      tipo="bus_publish"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("bus_publish", "input"))}
+      saidas={[]}
+      blockId={id}
+    >
+      <LinhaResumo rotulo="Chave" valor={data.key || "—"} />
     </BlocoChapa>
   );
 }
@@ -233,15 +267,145 @@ export function NoFiltroKalman({ id, data, selected }: NodeProps<NoKalman>) {
   );
 }
 
+/** Scaler: os dois extremos de cada faixa no resumo — o engenheiro confere a conversão sem
+ *  abrir o modal. */
+export function NoScaler({ id, data, selected }: NodeProps<NoScalerData>) {
+  return (
+    <BlocoChapa
+      tipo="scaler"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("scaler", "input"))}
+      saidas={portas(portasFixas("scaler", "output"))}
+      blockId={id}
+    >
+      <div className="space-y-0.5">
+        <LinhaResumo
+          rotulo="Entrada"
+          valor={`${FORMATO_PARAM.format(data.in_min)} – ${FORMATO_PARAM.format(data.in_max)}`}
+        />
+        <LinhaResumo
+          rotulo="Saída"
+          valor={`${FORMATO_PARAM.format(data.out_min)} – ${FORMATO_PARAM.format(data.out_max)}`}
+        />
+      </div>
+    </BlocoChapa>
+  );
+}
+
+const ROTULO_BASE_TEMPO: Record<NoIntegratorData["data"]["time_base"], string> = {
+  s: "segundo",
+  min: "minuto",
+  h: "hora",
+};
+
+/** Integrator (totalizador): a base de tempo da entrada no resumo — é ela que define a
+ *  escala do acumulado. */
+export function NoIntegrator({ id, data, selected }: NodeProps<NoIntegratorData>) {
+  return (
+    <BlocoChapa
+      tipo="integrator"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("integrator", "input"))}
+      saidas={portas(portasFixas("integrator", "output"))}
+      blockId={id}
+    >
+      <LinhaResumo rotulo="Base de tempo" valor={ROTULO_BASE_TEMPO[data.time_base]} />
+    </BlocoChapa>
+  );
+}
+
+/** Lead-Lag: ganho e as duas constantes no resumo — o engenheiro lê a compensação inteira
+ *  sem abrir o modal. */
+export function NoLeadLag({ id, data, selected }: NodeProps<NoLeadLagData>) {
+  return (
+    <BlocoChapa
+      tipo="lead_lag"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("lead_lag", "input"))}
+      saidas={portas(portasFixas("lead_lag", "output"))}
+      blockId={id}
+    >
+      <div className="space-y-0.5">
+        <LinhaResumo rotulo="Ganho" valor={FORMATO_PARAM.format(data.gain)} />
+        <LinhaResumo
+          rotulo="τ avanço / atraso"
+          valor={`${FORMATO_PARAM.format(data.tau_lead)} / ${FORMATO_PARAM.format(data.tau_lag)} s`}
+        />
+      </div>
+    </BlocoChapa>
+  );
+}
+
+/** Tempo morto: o θ configurado no resumo. */
+export function NoDeadTime({ id, data, selected }: NodeProps<NoDeadTimeData>) {
+  return (
+    <BlocoChapa
+      tipo="dead_time"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("dead_time", "input"))}
+      saidas={portas(portasFixas("dead_time", "output"))}
+      blockId={id}
+    >
+      <LinhaResumo rotulo="θ" valor={`${FORMATO_PARAM.format(data.theta)} s`} />
+    </BlocoChapa>
+  );
+}
+
+/** Constante: bloco-fonte sem entrada — `value` fixo no resumo. */
+export function NoConstante({ id, data, selected }: NodeProps<NoConstant>) {
+  return (
+    <BlocoChapa
+      tipo="constant"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasFixas("constant", "input"))}
+      saidas={portas(portasFixas("constant", "output"))}
+      blockId={id}
+    >
+      <LinhaResumo rotulo="Valor" valor={FORMATO_PARAM.format(data.value)} />
+    </BlocoChapa>
+  );
+}
+
+/** Barramento-Assinar (ADR-042): consome do barramento um valor publicado por outro flow —
+ *  bloco-fonte, mesmo chassis da Constante. */
+export function NoBusSubscribe({ id, data, selected }: NodeProps<NoBusSubscribeData>) {
+  return (
+    <BlocoChapa
+      tipo="bus_subscribe"
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={[]}
+      saidas={portas(portasFixas("bus_subscribe", "output"))}
+      blockId={id}
+    >
+      <LinhaResumo rotulo="Chave" valor={data.key || "—"} />
+    </BlocoChapa>
+  );
+}
+
 /** Portas dinâmicas do config (spec F4 §7.2, decisão A-10): entradas = CVs+Restrições+DVs à
  *  esquerda, saída = MVs à direita, na ordem do config; sem variáveis ⇒ sem entradas, mas
  *  as 2 portas fixas de modo (`local`/`auto`, decisão A-10 revista) continuam saindo — não
  *  dependem de nenhuma variável (B-F4-01 passo 5). */
 export function NoMpc({ id, data, selected }: NodeProps<NoMpcData>) {
   const { mvs, cvs, constraints, dvs } = data.variables;
-  const entradas = portasMpc([...cvs, ...constraints, ...dvs]);
+  // EDIT (sem valores ao vivo) ⇒ EU embutida no rótulo; ONLINE ⇒ EU no campo `eu`, em
+  // negrito ao lado do número (ver `portasMpc`).
+  const euNoRotulo = useValoresDoBloco(id) === null;
+  const entradas = portasMpc([...cvs, ...constraints, ...dvs], euNoRotulo);
   const saidas = [
-    ...portasMpc(mvs),
+    ...portasMpc(mvs, euNoRotulo),
     { id: PORTA_MPC_LOCAL, rotulo: "LOCAL" },
     { id: PORTA_MPC_AUTO, rotulo: "AUTO" },
   ];
@@ -394,6 +558,7 @@ type ComponenteNo = NodeTypes[string];
 export const TIPOS_DE_NO: Record<TipoBloco, ComponenteNo> = {
   opc_read: NoLeituraOpc,
   opc_write: NoEscritaOpc,
+  constant: NoConstante,
   script: NoScriptPython,
   first_order: NoFiltroPrimeiraOrdem,
   kalman: NoFiltroKalman,
@@ -403,4 +568,10 @@ export const TIPOS_DE_NO: Record<TipoBloco, ComponenteNo> = {
   pid: NoPid,
   pid_loop: NoPidLoop,
   fuzzy_loop: NoFuzzyLoop,
+  scaler: NoScaler,
+  integrator: NoIntegrator,
+  lead_lag: NoLeadLag,
+  dead_time: NoDeadTime,
+  bus_publish: NoBusPublish,
+  bus_subscribe: NoBusSubscribe,
 };

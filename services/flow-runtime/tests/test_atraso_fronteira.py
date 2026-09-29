@@ -23,7 +23,7 @@ import pytest
 from redis.asyncio import Redis
 
 from ottima_core.bus import CHANNEL_EVENTS, KIND_FLOW_OVERRUN, EventMessage
-from ottima_flow_runtime.blocks.base import Block, PortSample
+from ottima_flow_runtime.blocks.base import Block, Signal
 from ottima_flow_runtime.scheduler import FlowDefinition, FlowTask
 
 EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
@@ -45,8 +45,8 @@ class BlocoSemCusto(Block):
         self.varreduras = 0
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         self.varreduras += 1
         return {}
 
@@ -170,8 +170,8 @@ async def test_flow_lento_de_verdade_continua_com_a_mensagem_de_sempre(redis_cli
             self._relogio = relogio
 
         async def step(
-            self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-        ) -> dict[str, PortSample]:
+            self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+        ) -> dict[str, Signal]:
             self._relogio.gastar(TS_S * 3)  # a varredura em si estoura o ciclo
             return {}
 

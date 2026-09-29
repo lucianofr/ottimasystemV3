@@ -1,6 +1,6 @@
 import type { MpcVarState } from "../../lib/contracts.gen";
 import { EditorEscala } from "../trend/EditorEscala";
-import { ESCALA_AUTO, type EscalaVar } from "../trend/escalas";
+import { ESCALA_AUTO, foraDaFaixa, type EscalaVar } from "../trend/escalas";
 import {
   type BadgeLegenda,
   type LinhaLegenda,
@@ -8,7 +8,7 @@ import {
 } from "../trend/PainelLegendaTrend";
 import {
   faixaPontilhadaSp,
-  valorDaPena,
+  valoresDaLinha,
   type CategoriaVarOperacao,
   type PenaLegenda,
 } from "./trendOperacao";
@@ -46,6 +46,10 @@ export interface LegendaOperacaoProps {
   /** Último quadro publicado do bloco (`mpc.state.vars`): a origem do valor corrente de cada
    *  linha. Vazio antes do primeiro quadro — a legenda mostra travessão, não zero. */
   readonly vars: Readonly<Record<string, MpcVarState>>;
+  /** Valor de cada pena no carimbo sob o ponteiro do mouse (`valoresNoCursor`). `null` = o
+   *  ponteiro está fora do gráfico e a linha mostra o valor VIVO; presente, a linha mostra o
+   *  valor apontado — e travessão para pena sem valor ali (desligada, ou silêncio). */
+  readonly valoresCursor: Readonly<Record<string, number>> | null;
   /** Variável focada (dona do único eixo Y visível); `null` quando nenhuma pena está ligada. */
   readonly foco: string | null;
   /** Escala Y de cada variável, chaveada pelo id; ausente = `ESCALA_AUTO`. */
@@ -62,6 +66,7 @@ export function LegendaOperacao({
   porIdDefinicao,
   cores,
   vars,
+  valoresCursor,
   foco,
   escalas,
   onAlternarPena,
@@ -74,7 +79,11 @@ export function LegendaOperacao({
     const ligada = ligadas.has(pena.id);
     const ehSp = pena.categoria === "sp";
     const cor = cores.get(pena.varId) ?? "transparent";
-    const valor = valorDaPena(pena, vars);
+    // Duas colunas, nunca substituição — a regra mora em `valoresDaLinha` (pura, pinada em
+    // `trendOperacao.check.ts`): `atual` é sempre o último valor publicado e `cursor` é a
+    // leitura no carimbo sob o ponteiro, vazia fora do hover e nas penas que o gráfico não
+    // desenha.
+    const { atual, cursor: valorCursor } = valoresDaLinha(pena, vars, valoresCursor, ligada);
     // O eixo Y é da VARIÁVEL: a marca fica na linha da CV, e cai para a linha do SP quando
     // ele é a única pena daquela variável desenhada (senão o operador vê um eixo colorido
     // sem nenhuma linha da legenda dizendo de quem ele é).
@@ -88,6 +97,16 @@ export function LegendaOperacao({
       badges.push({
         testId: "operate-trend-legend-teto",
         texto: "Acima do teto",
+        className: "plaqueta rounded-pill bg-warn-soft px-2 py-0.5 text-xs text-warn-fg",
+      });
+    }
+    // A pena está ligada mas a moldura não a alcança: sem aviso o operador lê o gráfico
+    // vazio como variável morta. Vale também para a pena de SP, que desenha na escala da
+    // CV (`pena.varId`) sem ter editor próprio.
+    if (ligada && foraDaFaixa(escalas[pena.varId] ?? ESCALA_AUTO, atual)) {
+      badges.push({
+        testId: "operate-trend-legend-fora-escala",
+        texto: "Fora da escala",
         className: "plaqueta rounded-pill bg-warn-soft px-2 py-0.5 text-xs text-warn-fg",
       });
     }
@@ -144,11 +163,13 @@ export function LegendaOperacao({
       ),
       badges,
       valorEu: {
-        valor,
+        valor: atual,
         eu: definicao?.eu ?? "",
-        muted: valor === null,
+        muted: atual === null,
         testIdValor: "operate-trend-legend-valor",
         testIdEu: "operate-trend-legend-eu",
+        valorCursor,
+        testIdValorCursor: "operate-trend-legend-valor-cursor",
       },
       // A pena de SP desenha na escala da própria CV (mesma grandeza): editor de faixa só
       // na linha da variável, senão a tela ofereceria dois controles para a mesma escala e

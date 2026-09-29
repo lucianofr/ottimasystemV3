@@ -14,7 +14,8 @@ import pytest
 
 from ottima_core.bus import KIND_SSTO_INFEASIBLE, MpcState, OpcWrite, SstoRun
 from ottima_core.flowgraph import MpcConfig
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.mpc import MpcBlock
 from ottima_flow_runtime.mpc.worker import SolveRequest, SolveResult
 
@@ -185,8 +186,8 @@ async def _remoto_auto(block: MpcBlock) -> None:
     await block.command("mpc_mode", {"axis": "man_auto", "value": "auto"}, OPERADOR)
 
 
-def _entradas(v: float) -> dict[str, PortSample]:
-    return {"cv_a": PortSample(v, True)}
+def _entradas(v: float) -> dict[str, Signal]:
+    return {"cv_a": Signal(v, quality=Quality.GOOD)}
 
 
 async def test_registro_do_ssto_sobe_no_quadro_em_que_o_resultado_foi_aplicado(bloco):

@@ -23,6 +23,8 @@ import {
   tracoPenaSp,
   ultimoCarimboHistorico,
   valorDaPena,
+  valoresNoCursor,
+  valoresDaLinha,
   type AmostraViva,
   type CategoriaVarOperacao,
   type PenaLegenda,
@@ -569,4 +571,112 @@ test("silêncio simultâneo de todas as penas: eixo com marcas de silêncio abre
   expect(eixo).toContain(T0 + 29);
   const cv = mescladas.find((serie) => serie.id === "cv_1")!;
   expect(alinharNoEixo(eixo, cv.t, cv.v, teto)[eixo.indexOf(T0 + 29)]).toBeNull();
+});
+
+// ----------------------------------------------------------------------------------------
+// Leitura no cursor (hover no gráfico): valor de cada pena no carimbo sob o ponteiro
+// ----------------------------------------------------------------------------------------
+
+/** Colunas do uPlot como `montarColunas` (TrendOperacao.tsx) as monta para uma CV com predição
+ *  (medido + previsto) e uma MV só medida: x, cv medido, cv previsto, mv medido. O carimbo 2 é
+ *  a fronteira do passado — dali em diante só a predição tem valor. O previsto vale 12,5 na
+ *  emenda DE PROPÓSITO: com o mesmo 12 do medido, o teste de precedência abaixo passaria com a
+ *  ordem invertida e não pinaria nada. */
+const DADOS_CURSOR = [
+  [T0, T0 + 1, T0 + 2, T0 + 3],
+  [10, 11, 12, null],
+  [null, null, 12.5, 13],
+  [70, 71, 72, null],
+];
+const COLUNAS_POR_PENA: Readonly<Record<string, readonly number[]>> = {
+  cv_1: [1, 2],
+  mv_1: [3],
+  dv_1: [],
+};
+
+test("valoresNoCursor: ponteiro fora da área do gráfico (idx nulo) devolve null — a legenda volta ao valor vivo", () => {
+  expect(valoresNoCursor(DADOS_CURSOR, COLUNAS_POR_PENA, null)).toBeNull();
+});
+
+test("valoresNoCursor: no histórico lê o medido de cada pena; na seção futura cai na predição", () => {
+  const noPassado = valoresNoCursor(DADOS_CURSOR, COLUNAS_POR_PENA, 1);
+  expect(noPassado?.cv_1).toBe(11);
+  expect(noPassado?.mv_1).toBe(71);
+
+  // Fronteira: medido e previsto coexistem no carimbo da emenda — o MEDIDO manda, senão o
+  // operador leria um número calculado na linha sólida que ele está apontando.
+  expect(valoresNoCursor(DADOS_CURSOR, COLUNAS_POR_PENA, 2)?.cv_1).toBe(12);
+  // Além da fronteira só a predição tem valor.
+  expect(valoresNoCursor(DADOS_CURSOR, COLUNAS_POR_PENA, 3)?.cv_1).toBe(13);
+});
+
+test("valoresNoCursor: pena ligada em silêncio fica FORA do resultado (legenda escreve travessão); pena sem coluna também — e aí a legenda mantém o valor vivo", () => {
+  const futuro = valoresNoCursor(DADOS_CURSOR, COLUNAS_POR_PENA, 3);
+  // MV ligada, em silêncio no carimbo: tem coluna, com `null` — travessão, nunca zero.
+  expect(futuro?.mv_1).toBeUndefined();
+  // Pena desligada não tem coluna nenhuma. Quem decide o que mostrar é a legenda
+  // (`LegendaOperacao`): linha fora do gráfico continua no valor vivo.
+  expect(futuro?.dv_1).toBeUndefined();
+});
+
+/** Estado publicado mínimo para as duas colunas: a CV tem PV e SP. */
+const VARS_LINHA: Readonly<Record<string, MpcVarState>> = {
+  cv_1: { v: 48.5, sp: 50, status: null },
+  mv_1: { v: 61.2, sp: null, status: "rcas_ok" },
+};
+const PENA_CV: PenaLegenda = {
+  id: "cv_1",
+  varId: "cv_1",
+  categoria: "cv",
+  ligada: true,
+  excedente: false,
+};
+const PENA_MV: PenaLegenda = {
+  id: "mv_1",
+  varId: "mv_1",
+  categoria: "mv",
+  ligada: false,
+  excedente: false,
+};
+
+test("valoresDaLinha: hover NUNCA substitui o valor corrente — as duas colunas convivem", () => {
+  // A regra que o dono do produto teve de corrigir: a leitura no cursor tomava o lugar do
+  // último valor publicado, e a tela deixava de mostrar o número que o operador usa para
+  // decidir. `atual` é do `mpc.state`, `cursor` é do carimbo apontado — nunca o mesmo campo.
+  const linha = valoresDaLinha(PENA_CV, VARS_LINHA, { cv_1: 47.1 }, true);
+  expect(linha.atual).toBe(48.5);
+  expect(linha.cursor).toBe(47.1);
+});
+
+test("valoresDaLinha: fora do hover a coluna do cursor fica vazia e o corrente continua na tela", () => {
+  const linha = valoresDaLinha(PENA_CV, VARS_LINHA, null, true);
+  expect(linha.atual).toBe(48.5);
+  expect(linha.cursor).toBeNull();
+});
+
+test("valoresDaLinha: pena que o gráfico não desenha não lê no cursor, mas mantém o valor vivo", () => {
+  // MV nasce desligada (opt-in): não há linha no gráfico sob o ponteiro para ler. O valor
+  // corrente segue, senão o hover apagaria o PV da maioria das linhas da legenda.
+  const linha = valoresDaLinha(PENA_MV, VARS_LINHA, { cv_1: 47.1, mv_1: 60.4 }, false);
+  expect(linha.atual).toBe(61.2);
+  expect(linha.cursor).toBeNull();
+});
+
+test("valoresDaLinha: pena ligada em silêncio no carimbo devolve coluna vazia, nunca zero", () => {
+  const linha = valoresDaLinha(PENA_CV, VARS_LINHA, {}, true);
+  expect(linha.atual).toBe(48.5);
+  expect(linha.cursor).toBeNull();
+});
+
+test("valoresDaLinha: a linha de SP lê o ALVO no corrente e o traço do SP no cursor", () => {
+  const penaSp: PenaLegenda = {
+    id: idPenaSp("cv_1"),
+    varId: "cv_1",
+    categoria: "sp",
+    ligada: true,
+    excedente: false,
+  };
+  const linha = valoresDaLinha(penaSp, VARS_LINHA, { [idPenaSp("cv_1")]: 49.5 }, true);
+  expect(linha.atual).toBe(50);
+  expect(linha.cursor).toBe(49.5);
 });

@@ -267,7 +267,9 @@ export function TrendFuzzy({
               ids={ids}
               rotulos={rotulos}
               janelaSegundos={janelaSegundos}
+              fimEpochS={deslizante.fimEpochS}
               escalas={escalasPorId(selecionadas, idPorPorta, escalas)}
+              foco={null}
             />
           )}
 

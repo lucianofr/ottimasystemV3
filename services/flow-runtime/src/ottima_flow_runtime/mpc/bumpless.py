@@ -53,8 +53,9 @@ def init_bumpless(
     """Arma/re-arma o `BuiltMpc` sem salto (spec F4 §3.6).
 
     1. Pares autorreguláveis: estado em `x_ss(u_vigente, d_vigente)`.
-    2. Pares integradores: estado de saída = CV medida (`y_now` da linha) — o integrador não
-       tem estado estacionário, a medida é a verdade.
+    2. Pares integradores: ACUMULADOR (último estado) = CV medida (`y_now` da linha) — o
+       integrador não tem estado estacionário, a medida é a verdade. Com lag (IFOPDT) o
+       estágio de 1a ordem assenta em `x_ss(u_vigente)` como um par autorregulável.
     3. Estados de atraso preenchidos com a entrada vigente do par.
     4. `u_prev := u_vigente` por MV.
     5. `bias := y_medido − C·x` por linha, escrito no `_tvp` de bias em TODO o horizonte
@@ -80,8 +81,18 @@ def init_bumpless(
             continue
 
         if pair_init.kind == "integrating":
-            # Sem estado estacionário (integrador puro) — a medida é a verdade (spec §3.6-2).
-            state_values = np.full(len(pair_init.state_names), y_now[pair_init.row_id])
+            # Sem estado estacionário — a medida é a verdade (spec §3.6-2), mas só no
+            # ACUMULADOR (último estado, `discretize_iopdt`). Com lag (IFOPDT) o estágio de
+            # 1a ordem TEM regime: plantar a medida nele partiria de um ponto que a planta
+            # nunca ocupou e a rampa inicial nasceria errada.
+            n = len(pair_init.state_names)
+            state_values = np.empty(n)
+            state_values[-1] = y_now[pair_init.row_id]
+            if n > 1:
+                state_values[:-1] = np.linalg.solve(
+                    np.eye(n - 1) - pair_init.pair.a[:-1, :-1],
+                    pair_init.pair.b[:-1, 0] * u_eff,
+                )
         else:
             state_values = _steady_state(pair_init, u_eff)
 
@@ -95,6 +106,15 @@ def init_bumpless(
         x0[state_name] = u_now[mv_id]
 
     built.mpc.x0 = x0
+    # Chute inicial de `u` na MV VIGENTE (não na do ciclo anterior): `set_initial_guess`
+    # semeia o horizonte inteiro a partir de `mpc.u0`, e `make_step` reescreve `_u0` com o
+    # resultado de cada solve — sem isto, todo re-arme (MAN→AUTO, respawn, transplante,
+    # prime de boot) parte de um horizonte semeado na MV errada e o IPOPT para longe do
+    # ótimo do QP convexo (medido: Δu 2,7× o natural no primeiro ciclo pós-prime).
+    u0 = model.u(0.0)
+    for mv_id in built.u_prev_state_name:
+        u0[mv_id] = u_now[mv_id]
+    built.mpc.u0 = u0
 
     for row_id, bias_name in built.bias_tvp_name.items():
         bias_value = y_now[row_id] - row_contribution[row_id]

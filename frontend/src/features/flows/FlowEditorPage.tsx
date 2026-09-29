@@ -42,6 +42,9 @@ import {
   criarBloco,
   deGraphJson,
   definirExecOrder,
+  euDaPortaDeEntrada,
+  euDeSaidaPorNo,
+  handlesEntrada,
   ID_MARCADOR_X,
   motivoRecusa,
   paraGraphJson,
@@ -58,7 +61,13 @@ import {
 import { impactoDoSave, type ImpactoMpc } from "./impactoSave";
 import { MpcModal } from "./mpc/MpcModal";
 import { TIPOS_DE_NO } from "./nodes";
-import { ContextoTags, ContextoTsFlow, ContextoValores, type ValoresAoVivo } from "./nodes/contexto";
+import {
+  ContextoEuHerdada,
+  ContextoTags,
+  ContextoTsFlow,
+  ContextoValores,
+  type ValoresAoVivo,
+} from "./nodes/contexto";
 import { formatarTs, useComandarFlow, useFlow, useSaveFlow } from "./useFlows";
 import {
   formatarNumero,
@@ -85,18 +94,24 @@ import "./flow-canvas.css";
  */
 function novoId(tipo: TipoBloco): string {
   const bytes = crypto.getRandomValues(new Uint8Array(4));
-  const sufixo = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const sufixo = Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
   return `${tipo}_${sufixo}`;
 }
 
 function erroLegivel(err: unknown): string {
-  return err instanceof ApiError ? err.message : "Erro de comunicação com o servidor";
+  return err instanceof ApiError
+    ? err.message
+    : "Erro de comunicação com o servidor";
 }
 
 function Aviso({ texto, tom }: { texto: string; tom: "warn" | "alarm" }) {
   return (
     <li className={tom === "alarm" ? "text-alarm" : "text-warn-fg"}>
-      <span className="plaqueta mr-2 text-[10px]">{tom === "alarm" ? "Erro" : "Aviso"}</span>
+      <span className="plaqueta mr-2 text-[10px]">
+        {tom === "alarm" ? "Erro" : "Aviso"}
+      </span>
       {texto}
     </li>
   );
@@ -119,10 +134,23 @@ function LampadaEstado({ estado }: { estado: EstadoFlow }) {
       data-testid="canvas-estado"
       className={cn("inline-flex items-center gap-1.5", COR_LAMPADA[estado])}
     >
-      <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+      <svg
+        aria-hidden="true"
+        width="10"
+        height="10"
+        viewBox="0 0 10 10"
+        fill="currentColor"
+      >
         {estado === "running" && <circle cx="5" cy="5" r="4" />}
         {estado === "stopped" && (
-          <rect x="1" y="1" width="8" height="8" fill="none" stroke="currentColor" />
+          <rect
+            x="1"
+            y="1"
+            width="8"
+            height="8"
+            fill="none"
+            stroke="currentColor"
+          />
         )}
         {estado === "failed" && <path d="M5 0 10 9H0L5 0Z" />}
       </svg>
@@ -131,20 +159,33 @@ function LampadaEstado({ estado }: { estado: EstadoFlow }) {
   );
 }
 
-
 /** Lâmpada do watchdog (ADR-009 revisado): mesma convenção da lâmpada de estado — cor, forma
  *  e rótulo. `undefined` = flow sem watchdog configurado; `true` = bit alternando; `false` =
  *  bit parado (alarme). */
 function LampadaWatchdog({ vivo }: { vivo: boolean | undefined }) {
-  const cor = vivo === undefined ? "text-fg-muted" : vivo ? "text-success" : "text-alarm";
-  const rotulo = vivo === undefined ? "Sem watchdog" : vivo ? "Watchdog vivo" : "Watchdog falha";
+  const cor =
+    vivo === undefined ? "text-fg-muted" : vivo ? "text-success" : "text-alarm";
+  const rotulo =
+    vivo === undefined
+      ? "Sem watchdog"
+      : vivo
+        ? "Watchdog vivo"
+        : "Watchdog falha";
   return (
     <span
       data-testid="canvas-watchdog"
       className={cn("inline-flex items-center gap-1.5", cor)}
     >
-      <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
-        {vivo === undefined && <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" />}
+      <svg
+        aria-hidden="true"
+        width="10"
+        height="10"
+        viewBox="0 0 10 10"
+        fill="currentColor"
+      >
+        {vivo === undefined && (
+          <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" />
+        )}
         {vivo === true && <circle cx="5" cy="5" r="4" />}
         {vivo === false && <path d="M5 0 10 9H0L5 0Z" />}
       </svg>
@@ -172,22 +213,32 @@ function CabecalhoAoVivo({
   }
   if (aoVivo.status === null) {
     return (
-      <div data-testid="canvas-vivo" className="flex items-center gap-3 text-xs text-fg-muted">
+      <div
+        data-testid="canvas-vivo"
+        className="flex items-center gap-3 text-xs text-fg-muted"
+      >
         <LampadaWatchdog vivo={watchdogVivo} />
         <span>{rotuloDeEspera(aoVivo.conexao, desejado)}</span>
       </div>
     );
   }
   return (
-    <div data-testid="canvas-vivo" className="flex items-center gap-3 text-xs text-fg-muted">
+    <div
+      data-testid="canvas-vivo"
+      className="flex items-center gap-3 text-xs text-fg-muted"
+    >
       <LampadaEstado estado={aoVivo.status.state} />
       <LampadaWatchdog vivo={watchdogVivo} />
       <span>
         Duração de execução{" "}
-        <span className="process-value text-fg">{formatarNumero(aoVivo.status.scan_ms)}</span> ms
+        <span className="process-value text-fg">
+          {formatarNumero(aoVivo.status.scan_ms)}
+        </span>{" "}
+        ms
       </span>
       <span>
-        Overruns <span className="process-value text-fg">{aoVivo.status.overruns}</span>
+        Overruns{" "}
+        <span className="process-value text-fg">{aoVivo.status.overruns}</span>
       </span>
       {aoVivo.conexao !== "aberta" && (
         <span className="text-warn-fg">{ROTULO_CONEXAO[aoVivo.conexao]}</span>
@@ -204,17 +255,23 @@ function ContextosDoEditor({
   tags,
   valores,
   tsFlowSegundos,
+  euHerdada,
   children,
 }: {
   tags: ReadonlyMap<number, TagOut>;
   valores: ValoresAoVivo;
   tsFlowSegundos: number;
+  euHerdada: Readonly<Record<string, string>>;
   children: ReactNode;
 }) {
   return (
     <ContextoTags.Provider value={tags}>
       <ContextoValores.Provider value={valores}>
-        <ContextoTsFlow.Provider value={tsFlowSegundos}>{children}</ContextoTsFlow.Provider>
+        <ContextoEuHerdada.Provider value={euHerdada}>
+          <ContextoTsFlow.Provider value={tsFlowSegundos}>
+            {children}
+          </ContextoTsFlow.Provider>
+        </ContextoEuHerdada.Provider>
       </ContextoValores.Provider>
     </ContextoTags.Provider>
   );
@@ -235,7 +292,11 @@ function BotaoModo({
   onMudar: (modo: "edit" | "online") => void;
 }) {
   return (
-    <div className="flex items-center gap-1.5" role="group" aria-label="Modo do editor">
+    <div
+      className="flex items-center gap-1.5"
+      role="group"
+      aria-label="Modo do editor"
+    >
       <Button
         variant={modo === "edit" ? "outline" : "primary"}
         size="sm"
@@ -311,17 +372,106 @@ function DialogoImpacto({
           {impacto.map((item) => (
             <li key={item.blockId}>
               <span className="plaqueta text-fg">{item.label}</span>
-              <p className={TOM_EFEITO[item.efeito]}>{ROTULO_EFEITO[item.efeito]}</p>
+              <p className={TOM_EFEITO[item.efeito]}>
+                {ROTULO_EFEITO[item.efeito]}
+              </p>
             </li>
           ))}
         </ul>
       </div>
       <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">
-        <Button variant="outline" data-testid="flow-impacto-cancelar" onClick={onCancelar}>
+        <Button
+          variant="outline"
+          data-testid="flow-impacto-cancelar"
+          onClick={onCancelar}
+        >
           Cancelar
         </Button>
         <Button data-testid="flow-impacto-confirmar" onClick={onConfirmar}>
           Confirmar
+        </Button>
+      </footer>
+    </dialog>
+  );
+}
+
+/**
+ * Diálogo da aresta de realimentação (ADR-040 D5): abre quando a ligação arrastada fecharia
+ * um ciclo e o ciclo é o ÚNICO impedimento. O usuário assume a quebra explícita e informa a
+ * condição inicial — sem ela a malha nasceria inválida e continuaria inválida para sempre
+ * (`has_cold_input` propaga invalidez e num ciclo ela se auto-alimenta).
+ */
+function DialogoRealimentacao({
+  conexao,
+  onConfirmar,
+  onCancelar,
+}: {
+  conexao: Connection;
+  onConfirmar: (valorInicial: number) => void;
+  onCancelar: () => void;
+}) {
+  const dialogo = useRef<HTMLDialogElement>(null);
+  const [valor, setValor] = useState("0");
+
+  useEffect(() => {
+    const elemento = dialogo.current;
+    if (elemento !== null && !elemento.open) elemento.showModal();
+  }, []);
+
+  const numero = Number(valor);
+  const valido = valor.trim() !== "" && Number.isFinite(numero);
+
+  return (
+    <dialog
+      ref={dialogo}
+      onClose={onCancelar}
+      data-testid="flow-realimentacao-dialog"
+      className="modal-bloco w-[min(520px,92vw)] overflow-auto rounded-sm border border-border bg-surface p-0 text-fg"
+    >
+      <header className="flex items-center justify-between border-b border-border bg-well px-4 py-3">
+        <h2 className="plaqueta text-sm text-fg">Ligação de realimentação</h2>
+      </header>
+      <div className="space-y-3 p-4 text-xs">
+        <p>
+          Esta ligação fecha uma malha:{" "}
+          <span className="plaqueta">{conexao.target}</span> passa a alimentar{" "}
+          <span className="plaqueta">{conexao.source}</span>. O valor
+          realimentado é o da <strong>varredura anterior</strong> (atraso de um
+          Ts).
+        </p>
+        <label className="block space-y-1">
+          <span className="plaqueta text-muted-fg">
+            Valor inicial da realimentação
+          </span>
+          <input
+            autoFocus
+            type="number"
+            step="any"
+            value={valor}
+            onChange={(evento) => setValor(evento.target.value)}
+            data-testid="flow-realimentacao-valor"
+            className="w-40 rounded-sm border border-border bg-well px-2 py-1 font-mono text-fg"
+          />
+        </label>
+        <p className="text-muted-fg">
+          Usado na partida do flow, até o bloco de origem produzir o primeiro
+          valor. Depois disso a malha roda só com dado real.
+        </p>
+      </div>
+      <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">
+        <Button
+          variant="outline"
+          data-testid="flow-realimentacao-cancelar"
+          onClick={onCancelar}
+        >
+          Cancelar
+        </Button>
+        <Button
+          disabled={!valido}
+          data-testid="flow-realimentacao-confirmar"
+          onClick={() => onConfirmar(numero)}
+        >
+          Criar realimentação
         </Button>
       </footer>
     </dialog>
@@ -363,7 +513,9 @@ function Editor({ flowId }: { flowId: number }) {
   const conexoes = useConnections(projectId);
   const tags = useTags({ connectionId: null, direction: null });
   const tagsDoProjeto = useMemo<TagOut[]>(() => {
-    const doProjeto = new Set((conexoes.data ?? []).map((conexao) => conexao.id));
+    const doProjeto = new Set(
+      (conexoes.data ?? []).map((conexao) => conexao.id),
+    );
     // Tag calculada NÃO é entrada válida de bloco OPC-Read (ADR-033 v1): o backend
     // (`project_tags`) faz INNER JOIN com `opc_connections`, então `connection_id` nulo nunca
     // passaria na validação do grafo — fora do canvas de propósito, não por esquecimento.
@@ -382,6 +534,33 @@ function Editor({ flowId }: { flowId: number }) {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<BlocoNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<BlocoEdge>([]);
+  // EU declarada nas portas de SAÍDA de cada bloco — tabela única, consumida pela herança
+  // das entradas (abaixo) e pelo cadastro de variável historiada (ADR-041).
+  const euDeSaida = useMemo(
+    () =>
+      euDeSaidaPorNo(
+        nodes,
+        new Map([...porId].map(([id, tag]) => [id, tag.eu])),
+      ),
+    [nodes, porId],
+  );
+  // EU herdada por porta de ENTRADA (spec §4.1-5): `euDaPortaDeEntrada` resolve UM nível
+  // pela aresta que chega; aqui vira lookup `${noId}:${handle}` para o canvas mostrar
+  // unidade nas entradas de Script/TFS/Fuzzy/PID sem reimplementar a herança em cada nó.
+  const euHerdada = useMemo<Readonly<Record<string, string>>>(() => {
+    const mapa: Record<string, string> = {};
+    for (const no of nodes) {
+      for (const handle of handlesEntrada(no)) {
+        const eu = euDaPortaDeEntrada(edges, euDeSaida, no.id, handle);
+        if (eu !== null) mapa[`${no.id}:${handle}`] = eu;
+      }
+    }
+    return mapa;
+  }, [nodes, edges, euDeSaida]);
+  // A unidade gravada no cadastro da variável historiada sai DAQUI, não de uma segunda
+  // inferência: o nome da série congela no cadastro (ADR-041 D6) e a EU vai com ele.
+  const euDaPorta = (noId: string, porta: string): string =>
+    euDeSaida.get(noId)?.[porta] ?? euHerdada[`${noId}:${porta}`] ?? "";
   const [emConfig, setEmConfig] = useState<string | null>(null);
   const [recusa, setRecusa] = useState<string | null>(null);
   const [erroSave, setErroSave] = useState<string | null>(null);
@@ -390,6 +569,9 @@ function Editor({ flowId }: { flowId: number }) {
   // `null` = diálogo fechado; lista completa dos blocos MPC do grafo atual quando aberto
   // (tarefa 3.3) — inclui os `preservado` também, para o operador ver que nada muda neles.
   const [impacto, setImpacto] = useState<ImpactoMpc[] | null>(null);
+  // `null` = nenhuma realimentação pendente. Não-nulo: a ligação fecharia ciclo e só o
+  // ciclo a impede (ADR-040 D5) — o usuário confirma a quebra e a condição inicial dela.
+  const [realimentacao, setRealimentacao] = useState<Connection | null>(null);
 
   const areaRef = useRef<HTMLDivElement>(null);
   const carregado = useRef<number | null>(null);
@@ -435,7 +617,10 @@ function Editor({ flowId }: { flowId: number }) {
     (tipo: TipoBloco) => {
       const caixa = areaRef.current?.getBoundingClientRect();
       if (caixa === undefined) return;
-      const ancora = screenToFlowPosition({ x: caixa.left + 48, y: caixa.top + 48 });
+      const ancora = screenToFlowPosition({
+        x: caixa.left + 48,
+        y: caixa.top + 48,
+      });
       adicionar(tipo, proximaPosicaoNaGrade(nodes, ancora));
     },
     [adicionar, nodes, screenToFlowPosition],
@@ -446,7 +631,10 @@ function Editor({ flowId }: { flowId: number }) {
     const tipo = TIPOS_BLOCO.find((candidato) => candidato === bruto);
     if (tipo === undefined) return;
     evento.preventDefault();
-    adicionar(tipo, screenToFlowPosition({ x: evento.clientX, y: evento.clientY }));
+    adicionar(
+      tipo,
+      screenToFlowPosition({ x: evento.clientX, y: evento.clientY }),
+    );
   }
 
   /**
@@ -458,7 +646,12 @@ function Editor({ flowId }: { flowId: number }) {
     (mudancas: NodeChange<BlocoNode>[]) => {
       onNodesChange(mudancas);
       // Mexeu no conteúdo do grafo: o resultado do último save deixou de descrever a tela.
-      if (mudancas.some((mudanca) => mudanca.type !== "select" && mudanca.type !== "dimensions")) {
+      if (
+        mudancas.some(
+          (mudanca) =>
+            mudanca.type !== "select" && mudanca.type !== "dimensions",
+        )
+      ) {
         setAvisosServidor(null);
       }
       const removidos = mudancas
@@ -467,7 +660,9 @@ function Editor({ flowId }: { flowId: number }) {
       if (removidos.length === 0) return;
       setEdges((atuais) =>
         atuais.filter(
-          (aresta) => !removidos.includes(aresta.source) && !removidos.includes(aresta.target),
+          (aresta) =>
+            !removidos.includes(aresta.source) &&
+            !removidos.includes(aresta.target),
         ),
       );
       // Forma funcional: a compactação enxerga a lista já sem os removidos, nunca a do closure.
@@ -476,15 +671,19 @@ function Editor({ flowId }: { flowId: number }) {
     [onNodesChange, setEdges, setNodes],
   );
 
+  // `isValidConnection` precisa DEIXAR PASSAR a ligação que só o ciclo impede: sem isso o
+  // React Flow nem chama `onConnect` e o diálogo de realimentação nunca abriria. A recusa
+  // real (tipo de porta, entrada ocupada, handle inexistente) continua barrando no arraste.
   const validarConexao = useCallback(
     (candidata: Connection | Edge) => {
+      const pretendida = {
+        source: candidata.source,
+        target: candidata.target,
+        sourceHandle: candidata.sourceHandle ?? null,
+        targetHandle: candidata.targetHandle ?? null,
+      };
       const motivo = motivoRecusa(
-        {
-          source: candidata.source,
-          target: candidata.target,
-          sourceHandle: candidata.sourceHandle ?? null,
-          targetHandle: candidata.targetHandle ?? null,
-        },
+        { ...pretendida, feedback: true },
         nodes,
         edges,
         tiposDeTag,
@@ -498,12 +697,14 @@ function Editor({ flowId }: { flowId: number }) {
   const aoMudarArestas = useCallback(
     (mudancas: EdgeChange<BlocoEdge>[]) => {
       onEdgesChange(mudancas);
-      if (mudancas.some((mudanca) => mudanca.type !== "select")) setAvisosServidor(null);
+      if (mudancas.some((mudanca) => mudanca.type !== "select"))
+        setAvisosServidor(null);
     },
     [onEdgesChange],
   );
 
-  function aoConectar({ source, target, sourceHandle, targetHandle }: Connection): void {
+  function criarAresta(conexao: Connection, feedbackInit?: number): void {
+    const { source, target, sourceHandle, targetHandle } = conexao;
     if (sourceHandle === null || targetHandle === null) return;
     setRecusa(null);
     setAvisosServidor(null);
@@ -516,13 +717,31 @@ function Editor({ flowId }: { flowId: number }) {
         sourceHandle,
         targetHandle,
         type: "smoothstep",
+        ...(feedbackInit === undefined ? {} : { feedback_init: feedbackInit }),
       },
     ]);
   }
 
+  function aoConectar(conexao: Connection): void {
+    if (conexao.sourceHandle === null || conexao.targetHandle === null) return;
+    // Fecha ciclo? A ligação só nasce depois de o usuário assumir a quebra explícita e dar
+    // a condição inicial dela (ADR-040 D5). `validarConexao` já garantiu que o ciclo é o
+    // único impedimento.
+    if (motivoRecusa(conexao, nodes, edges, tiposDeTag) !== null) {
+      setRecusa(null);
+      setRealimentacao(conexao);
+      return;
+    }
+    criarAresta(conexao);
+  }
+
   /** Soltar sobre uma porta sem que a ligação nasça = recusa; o motivo vira texto. */
-  function aoTerminarConexao(_evento: MouseEvent | TouchEvent, estado: FinalConnectionState): void {
-    if (estado.toHandle !== null && motivoRef.current !== null) setRecusa(motivoRef.current);
+  function aoTerminarConexao(
+    _evento: MouseEvent | TouchEvent,
+    estado: FinalConnectionState,
+  ): void {
+    if (estado.toHandle !== null && motivoRef.current !== null)
+      setRecusa(motivoRef.current);
     motivoRef.current = null;
   }
 
@@ -566,7 +785,11 @@ function Editor({ flowId }: { flowId: number }) {
     acaoPendente.current = acao;
     const impactos =
       grafoOriginal.current !== null && flow.data?.desired_state === "running"
-        ? impactoDoSave(grafoOriginal.current, paraGraphJson(nodes, edges), false)
+        ? impactoDoSave(
+            grafoOriginal.current,
+            paraGraphJson(nodes, edges),
+            false,
+          )
         : [];
     if (impactos.some((item) => item.efeito !== "preservado")) {
       setImpacto(impactos);
@@ -605,6 +828,11 @@ function Editor({ flowId }: { flowId: number }) {
 
   const inversoes = avisosInversao(nodes, edges);
   const noEmConfig = nodes.find((no) => no.id === emConfig) ?? null;
+  // Bloco existe no grafo do último save (ou do load): cadastro de variável historiada é 422
+  // para um `block_id` que o servidor ainda não conhece (ADR-041 D1) — a seção some até salvar.
+  const blocosSalvos = new Set(
+    (grafoOriginal.current?.nodes ?? []).map((no) => no.id),
+  );
 
   if (flow.isPending) {
     return <p className="text-sm text-fg-muted">Carregando flow…</p>;
@@ -612,27 +840,40 @@ function Editor({ flowId }: { flowId: number }) {
   if (flow.isError || flow.data === undefined) {
     return (
       <p role="alert" className="text-sm text-alarm">
-        {flow.error instanceof ApiError ? flow.error.message : "Falha ao consultar o flow"}
+        {flow.error instanceof ApiError
+          ? flow.error.message
+          : "Falha ao consultar o flow"}
       </p>
     );
   }
 
   return (
-    <ContextosDoEditor tags={porId} valores={valores} tsFlowSegundos={flow.data.ts_seconds}>
+    <ContextosDoEditor
+      tags={porId}
+      valores={valores}
+      tsFlowSegundos={flow.data.ts_seconds}
+      euHerdada={euHerdada}
+    >
       <section className="flex h-[calc(100vh-9rem)] flex-col gap-3">
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-baseline gap-3">
-            <Link to="/engenharia/flows" className="plaqueta text-xs text-accent hover:underline">
+            <Link
+              to="/engenharia/flows"
+              className="plaqueta text-xs text-accent hover:underline"
+            >
               Flows
             </Link>
             <h1 className="plaqueta text-sm text-fg">{flow.data.name}</h1>
             <span className="text-xs text-fg-muted">
               Ts{" "}
-              <span data-testid="flow-header-ts" className="process-value text-fg">
+              <span
+                data-testid="flow-header-ts"
+                className="process-value text-fg"
+              >
                 {formatarTs(flow.data.ts_seconds)}
               </span>{" "}
-              s
-              · <span className="process-value text-fg">{nodes.length}</span> bloco(s)
+              s · <span className="process-value text-fg">{nodes.length}</span>{" "}
+              bloco(s)
             </span>
             {podeMutar && (
               <Button
@@ -674,28 +915,47 @@ function Editor({ flowId }: { flowId: number }) {
           </div>
         </header>
 
-        {(recusa !== null || erroSave !== null || inversoes.length > 0 || avisosServidor !== null) && (
+        {(recusa !== null ||
+          erroSave !== null ||
+          inversoes.length > 0 ||
+          avisosServidor !== null) && (
           <Card className="px-3 py-2">
-            <ul className="space-y-1 text-xs" role="alert" data-testid="editor-mensagens">
+            <ul
+              className="space-y-1 text-xs"
+              role="alert"
+              data-testid="editor-mensagens"
+            >
               {erroSave !== null && <Aviso texto={erroSave} tom="alarm" />}
               {recusa !== null && <Aviso texto={recusa} tom="alarm" />}
               {/* Listas recriadas inteiras a cada render: índice é chave estável o bastante,
                   e dois blocos sem rótulo produzem textos iguais. */}
               {inversoes.map((aviso, indice) => (
-                <Aviso key={`local-${String(indice)}`} texto={aviso} tom="warn" />
+                <Aviso
+                  key={`local-${String(indice)}`}
+                  texto={aviso}
+                  tom="warn"
+                />
               ))}
-              {avisosServidor !== null && avisosServidor.length === 0 && erroSave === null && (
-                <li className="text-fg-muted">Grafo salvo sem avisos.</li>
-              )}
+              {avisosServidor !== null &&
+                avisosServidor.length === 0 &&
+                erroSave === null && (
+                  <li className="text-fg-muted">Grafo salvo sem avisos.</li>
+                )}
               {(avisosServidor ?? []).map((aviso, indice) => (
-                <Aviso key={`servidor-${String(indice)}`} texto={aviso} tom="warn" />
+                <Aviso
+                  key={`servidor-${String(indice)}`}
+                  texto={aviso}
+                  tom="warn"
+                />
               ))}
             </ul>
           </Card>
         )}
 
         <div className="flex min-h-0 flex-1 gap-3">
-          {podeMutar && modoEfetivo === "edit" && <FlowPalette onAdicionar={adicionarNoCentro} />}
+          {podeMutar && modoEfetivo === "edit" && (
+            <FlowPalette onAdicionar={adicionarNoCentro} />
+          )}
           <div
             ref={areaRef}
             className="min-h-0 flex-1 overflow-hidden rounded-sm border border-border"
@@ -725,7 +985,11 @@ function Editor({ flowId }: { flowId: number }) {
               nodesDraggable={podeMutar && modoEfetivo === "edit"}
               nodesConnectable={podeMutar && modoEfetivo === "edit"}
               edgesReconnectable={false}
-              deleteKeyCode={podeMutar && modoEfetivo === "edit" ? ["Backspace", "Delete"] : null}
+              deleteKeyCode={
+                podeMutar && modoEfetivo === "edit"
+                  ? ["Backspace", "Delete"]
+                  : null
+              }
               fitView
               fitViewOptions={
                 // Sem teto, o `fitView` de um grafo vazio abre o canvas no zoom máximo: a
@@ -788,6 +1052,10 @@ function Editor({ flowId }: { flowId: number }) {
             totalBlocos={nodes.length}
             tags={tagsDoProjeto}
             podeMutar={podeMutar}
+            flowId={flowId}
+            edges={edges}
+            euDaPorta={euDaPorta}
+            blocosSalvos={blocosSalvos}
             onAplicar={aplicarConfig}
             onFechar={() => {
               setEmConfig(null);
@@ -795,7 +1063,10 @@ function Editor({ flowId }: { flowId: number }) {
           />
         )}
         {propsAbertas && (
-          <FlowPropsModal flow={flow.data} onFechar={() => setPropsAbertas(false)} />
+          <FlowPropsModal
+            flow={flow.data}
+            onFechar={() => setPropsAbertas(false)}
+          />
         )}
         {impacto !== null && (
           <DialogoImpacto
@@ -805,6 +1076,16 @@ function Editor({ flowId }: { flowId: number }) {
               acaoPendente.current = null;
               setImpacto(null);
             }}
+          />
+        )}
+        {realimentacao !== null && (
+          <DialogoRealimentacao
+            conexao={realimentacao}
+            onConfirmar={(valorInicial) => {
+              criarAresta(realimentacao, valorInicial);
+              setRealimentacao(null);
+            }}
+            onCancelar={() => setRealimentacao(null)}
           />
         )}
       </section>

@@ -19,7 +19,10 @@ from ottima_core.certs import (
     app_cert_paths,
     generate_app_certificate,
     read_app_certificate,
+    read_server_certificate_info,
+    received_cert_path,
     remove_server_certificate,
+    store_received_server_certificate,
     store_server_certificate,
     trusted_cert_path,
 )
@@ -258,6 +261,62 @@ def test_store_server_certificate_rejeita_pem_com_varios_certificados(tmp_path):
     assert not trusted_cert_path(destino, 5).exists()
 
 
+# --- Certificado RECEBIDO do servidor (captura pelo opc-worker, staging para o trust) ---
+
+
+def test_received_cert_path_layout_e_validacao(tmp_path):
+    assert received_cert_path(tmp_path, 7) == tmp_path / "conn-7.der"
+    with pytest.raises(ValueError, match="Identificador de conexão inválido"):
+        received_cert_path(tmp_path, -1)
+
+
+def test_store_received_normaliza_pem_para_der(tmp_path):
+    origem = tmp_path / "origem"
+    generate_app_certificate(origem)
+    pem_bytes = app_cert_paths(origem).pem.read_bytes()
+    der_bytes = app_cert_paths(origem).der.read_bytes()
+
+    received = tmp_path / "received"
+    assert store_received_server_certificate(received, 7, pem_bytes) == "conn-7.der"
+    assert received_cert_path(received, 7).read_bytes() == der_bytes
+
+
+def test_store_received_rejeita_conteudo_invalido(tmp_path):
+    with pytest.raises(ValueError, match="certificado"):
+        store_received_server_certificate(tmp_path / "received", 1, b"isto nao e um certificado")
+
+
+def test_read_server_certificate_info_devolve_metadados_e_pem(tmp_path):
+    generate_app_certificate(tmp_path)
+    info = read_server_certificate_info(app_cert_paths(tmp_path).der)
+    assert info is not None
+    assert info.subject == f"CN={APP_CERT_COMMON_NAME}"
+    assert info.issuer == f"CN={APP_CERT_COMMON_NAME}"
+    der = app_cert_paths(tmp_path).der.read_bytes()
+    assert info.fingerprint_sha256 == hashlib.sha256(der).hexdigest()
+    assert info.not_before is not None and info.not_after is not None
+    assert info.not_after > info.not_before
+    assert x509.load_pem_x509_certificate(info.pem.encode()) is not None
+
+
+def test_read_server_certificate_info_ausente_devolve_none(tmp_path):
+    assert read_server_certificate_info(tmp_path / "nao-existe.der") is None
+
+
+def test_read_server_certificate_info_ilegivel_levanta_value_error(tmp_path):
+    caminho = tmp_path / "corrompido.der"
+    caminho.write_bytes(b" bytes que nao sao um certificado ")
+    with pytest.raises(ValueError, match="certificado"):
+        read_server_certificate_info(caminho)
+
+
+def test_settings_received_certs_dir_default_e_override(monkeypatch):
+    monkeypatch.delenv("OTTIMA_RECEIVED_CERTS_DIR", raising=False)
+    assert Settings(_env_file=None).received_certs_dir == Path("/certs-received")
+    monkeypatch.setenv("OTTIMA_RECEIVED_CERTS_DIR", "/tmp/ottima-received")
+    assert Settings(_env_file=None).received_certs_dir == Path("/tmp/ottima-received")
+
+
 def test_escrita_parcial_nao_deixa_temporario_orfao(tmp_path, monkeypatch):
     # ENOSPC real: o arquivo temporário chega a ser criado e fica pela metade.
     def cria_e_falha(path, data, mode):
@@ -321,3 +380,20 @@ def test_falha_na_promocao_registra_critico_com_remediacao(tmp_path, monkeypatch
         "ottima.key",
         "ottima.pem",
     ]
+
+
+def test_store_received_nao_regrava_bytes_identicos(tmp_path):
+    """Recaptura do mesmo conteúdo não reescreve: a API lê o arquivo de outro container.
+
+    O discriminador é o inode: regravação atômica (tmp + rename) trocaria o inode mesmo
+    com conteúdo igual; o skip deixa o arquivo intocado.
+    """
+    origem = tmp_path / "origem"
+    generate_app_certificate(origem)
+    der = app_cert_paths(origem).der.read_bytes()
+    received = tmp_path / "received"
+    store_received_server_certificate(received, 4, der)
+    antes = received_cert_path(received, 4).stat()
+    store_received_server_certificate(received, 4, der)
+    depois = received_cert_path(received, 4).stat()
+    assert (antes.st_mtime_ns, antes.st_ino) == (depois.st_mtime_ns, depois.st_ino)

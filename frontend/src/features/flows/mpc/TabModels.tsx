@@ -2,19 +2,26 @@ import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
 import { Tooltip } from "../../../components/ui/tooltip";
 import type { ParModeloMpc, TipoLinhaMpc, VariaveisMpc } from "../graph";
+import { formatarNumero } from "../useFlowStatus";
 import { AJUDA_MODELOS } from "./ajudaMpc";
 import { nomeCampoModelo, parModeloDoFormulario, paramsPadraoLinha } from "./mpcLogic";
 
+// Unidades explícitas no rótulo (não só no tooltip), com a BASE percentual: depois de
+// `eu_gain_params` (× span_linha/span_coluna, RF-609) o número digitado só é interpretável
+// junto dos spans vigentes — que a tabela mostra nos cabeçalhos de linha/coluna. K é %/% e
+// Ki é %/(%·s) (RF-602); todo tempo do par (τ1/τ2/θ) é SEGUNDO — mesma convenção do TFS
+// (CamposTfs.tsx, que usa EU direto) e do backend (`discretize_*` com ts em segundos). No
+// integrador o τ1 é o lag opcional do IFOPDT (0 = integrador puro).
 const ROTULO_PARAM: Record<string, string> = {
-  K: "K (ganho)",
-  tau1: "τ1",
-  tau2: "τ2",
-  theta: "θ (tempo morto)",
-  Ki: "Ki (ganho integrador)",
+  K: "K (%/%)",
+  tau1: "τ1 (s)",
+  tau2: "τ2 (s)",
+  theta: "θ tempo morto (s)",
+  Ki: "Ki (%/(%·s))",
 };
 
-type LinhaModelo = { id: string; nome: string; kind: TipoLinhaMpc };
-type ColunaModelo = { id: string; nome: string };
+type LinhaModelo = { id: string; nome: string; kind: TipoLinhaMpc; span: number };
+type ColunaModelo = { id: string; nome: string; span: number };
 
 function parAtual(
   modelos: Record<string, Record<string, ParModeloMpc>>,
@@ -37,12 +44,22 @@ interface Props {
  *  Aplicar (`parModeloDoFormulario`). */
 export function TabModels({ variaveis, modelos, aoMudar }: Props) {
   const linhas: LinhaModelo[] = [
-    ...variaveis.cvs.map((cv) => ({ id: cv.id, nome: cv.name || cv.id, kind: cv.kind })),
-    ...variaveis.constraints.map((co) => ({ id: co.id, nome: co.name || co.id, kind: co.kind })),
+    ...variaveis.cvs.map((cv) => ({
+      id: cv.id,
+      nome: cv.name || cv.id,
+      kind: cv.kind,
+      span: cv.span,
+    })),
+    ...variaveis.constraints.map((co) => ({
+      id: co.id,
+      nome: co.name || co.id,
+      kind: co.kind,
+      span: co.span,
+    })),
   ];
   const colunas: ColunaModelo[] = [
-    ...variaveis.mvs.map((mv) => ({ id: mv.id, nome: mv.name || mv.id })),
-    ...variaveis.dvs.map((dv) => ({ id: dv.id, nome: dv.name || dv.id })),
+    ...variaveis.mvs.map((mv) => ({ id: mv.id, nome: mv.name || mv.id, span: mv.span })),
+    ...variaveis.dvs.map((dv) => ({ id: dv.id, nome: dv.name || dv.id, span: dv.span })),
   ];
 
   if (linhas.length === 0 || colunas.length === 0) {
@@ -74,6 +91,9 @@ export function TabModels({ variaveis, modelos, aoMudar }: Props) {
             {colunas.map((coluna) => (
               <th key={coluna.id} className="plaqueta px-2 py-1 text-left text-fg-muted">
                 {coluna.nome}
+                <span className="ml-1 text-[10px] normal-case text-fg-muted">
+                  span {formatarNumero(coluna.span)}
+                </span>
               </th>
             ))}
           </tr>
@@ -84,7 +104,8 @@ export function TabModels({ variaveis, modelos, aoMudar }: Props) {
               <th className="plaqueta px-2 py-2 text-left text-fg-muted">
                 {linha.nome}
                 <span className="ml-1 text-[10px] normal-case text-fg-muted">
-                  ({linha.kind === "integrating" ? "IOPDT" : "SOPDT"})
+                  ({linha.kind === "integrating" ? "IOPDT/IFOPDT" : "SOPDT"}) · span{" "}
+                  {formatarNumero(linha.span)}
                 </span>
               </th>
               {colunas.map((coluna) => {

@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
 
+from ottima_core.signal import OpcQuality
+
 
 class ConnectionState(StrEnum):
     """Estados da máquina de conexão (spec §2.2-2)."""
@@ -88,7 +90,7 @@ class TagSnapshot:
 
     ts: datetime
     value: float
-    quality: int
+    quality: OpcQuality
     # Relógio de parede da publicação, distinto de `ts` (timestamp da fonte): existe para
     # exibição e diagnóstico, nunca para medir decurso.
     published_at: datetime

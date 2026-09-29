@@ -1,15 +1,20 @@
 import type { Edge, Node, XYPosition } from "@xyflow/react";
 import {
   PORT_CONTRACTS,
+  type BusKeyConfig,
+  type ConstantConfig,
   type ConstraintVar,
   type ContratoPortaDinamica,
   type ContratoPortaFixaComDefault,
   type CvVar,
+  type DeadTimeConfig,
   type DirecaoPorta,
   type DvVar,
   type FuzzyConfig,
   type FuzzyLoopConfig,
+  type IntegratorConfig,
   type IopdtParams,
+  type LeadLagConfig,
   type Limits,
   type ModeValues,
   type MpcConfig,
@@ -21,12 +26,13 @@ import {
   type PidLoopConfig,
   type Range,
   type RegraPortaDinamica,
+  type ScalerConfig,
   type ScriptConfig,
   type SopdtParams,
 } from "../../lib/contracts.gen";
 import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
-import type { PortsPorBloco } from "./canalPrimitivos";
-import { PADRAO_FIRST_ORDER, PADRAO_KALMAN, PADRAO_PID, PADRAO_PID_LOOP, PADRAO_FUZZY_LOOP, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
+import { portaValida, type PortsPorBloco } from "./canalPrimitivos";
+import { BASES_TEMPO, PADRAO_CONSTANT, PADRAO_DEAD_TIME, PADRAO_FIRST_ORDER, PADRAO_INTEGRATOR, PADRAO_KALMAN, PADRAO_LEAD_LAG, PADRAO_PID, PADRAO_PID_LOOP, PADRAO_FUZZY_LOOP, PADRAO_SCALER, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
 
 /**
  * Modelo do grafo do editor + as regras que o editor espelha do servidor.
@@ -44,6 +50,7 @@ import { PADRAO_FIRST_ORDER, PADRAO_KALMAN, PADRAO_PID, PADRAO_PID_LOOP, PADRAO_
 export const TIPOS_BLOCO = [
   "opc_read",
   "opc_write",
+  "constant",
   "script",
   "first_order",
   "kalman",
@@ -53,6 +60,12 @@ export const TIPOS_BLOCO = [
   "pid",
   "pid_loop",
   "fuzzy_loop",
+  "scaler",
+  "integrator",
+  "lead_lag",
+  "dead_time",
+  "bus_publish",
+  "bus_subscribe",
 ] as const;
 export type TipoBloco = (typeof TIPOS_BLOCO)[number];
 
@@ -140,7 +153,14 @@ export type ElementoTfs =
 export type LinhaTfs = [ElementoTfs, ElementoTfs];
 export type MatrizTfs = [LinhaTfs, LinhaTfs];
 
-export type DadosTfs = DadosBase & { matrix: MatrizTfs; output_eu: Record<string, string> };
+/** `y0` é a condição inicial de `[y1, y2]` (`parse.py::TfsConfig.y0`): a planta simulada
+ *  raramente parte de zero. Só o transiente de partida depende dele — o valor final
+ *  continua sendo o ganho estático vezes a entrada. */
+export type DadosTfs = DadosBase & {
+  matrix: MatrizTfs;
+  output_eu: Record<string, string>;
+  y0: [number, number];
+};
 
 /** `tau` em segundos (RF-532); `0` é passagem direta. */
 export type DadosFirstOrder = DadosBase & { tau: number };
@@ -159,6 +179,31 @@ export function passagemDireta(tau: number, tsFlowSegundos: number): boolean {
 /** Os dois campos são **desvio padrão na EU do sinal** (RF-533), nunca variância: o bloco
  *  eleva ao quadrado no runtime. `process_noise` é por varredura, não por segundo. */
 export type DadosKalman = DadosBase & { measurement_noise: number; process_noise: number };
+
+/** Lead-Lag: compensação dinâmica `gain*(tau_lead*s+1)/(tau_lag*s+1)`. `gain` aceita
+ *  qualquer sinal; `tau_lag > 0`; a razão `tau_lead/tau_lag` é limitada a 10 no save. */
+export type DadosLeadLag = DadosBase & Pick<LeadLagConfig, keyof LeadLagConfig>;
+
+/** Tempo morto: atrasa o sinal em `theta` segundos (`round(theta/Ts)` amostras). */
+export type DadosDeadTime = DadosBase & Pick<DeadTimeConfig, keyof DeadTimeConfig>;
+
+/** Scaler: reescala linear de [`in_min`,`in_max`] para [`out_min`,`out_max`] (a faixa de
+ *  saída pode inverter — ação reversa). */
+export type DadosScaler = DadosBase & Pick<ScalerConfig, keyof ScalerConfig>;
+
+/** Integrator (totalizador): acumula `in` no tempo do flow; `time_base` é a EU de tempo da
+ *  entrada ("s"/"min"/"h"). Porta `reset` opcional zera o total. */
+export type DadosIntegrator = DadosBase & Pick<IntegratorConfig, keyof IntegratorConfig>;
+
+/** Constante: bloco-fonte sem entrada; a saída `out` emite `value` fixo a cada varredura. */
+export type DadosConstant = DadosBase & Pick<ConstantConfig, keyof ConstantConfig>;
+
+/** Barramento (ADR-042): troca uma variável entre FLOWS diferentes pelo Redis. Config é só
+ *  `key` — sem campo de tempo: a validade do assinante é derivada no servidor (3 × Ts do
+ *  publicador, D4). `bus_publish` é bloco-sumidouro (sem saída, espelho de `opc_write`);
+ *  `bus_subscribe` é bloco-fonte (sem entrada, espelho de `constant`). */
+export type DadosBusPublish = DadosBase & Pick<BusKeyConfig, keyof BusKeyConfig>;
+export type DadosBusSubscribe = DadosBase & Pick<BusKeyConfig, keyof BusKeyConfig>;
 
 /** ISA (Kc/Ti/Td), não paralelo (Kp/Ki/Kd) — `criarBloco`/runtime convertem uma vez na
  *  construção (ADR-031, RF-551..554). `ti_seconds === 0` desliga a ação integral (evita
@@ -307,11 +352,17 @@ export type DadosBloco =
   | DadosMpc
   | DadosFirstOrder
   | DadosKalman
+  | DadosLeadLag
+  | DadosDeadTime
   | DadosFuzzy
   | DadosPid
   | DadosPidLoop
-  | DadosFuzzyLoop;
-
+  | DadosFuzzyLoop
+  | DadosScaler
+  | DadosIntegrator
+  | DadosConstant
+  | DadosBusPublish
+  | DadosBusSubscribe;
 /** `type` é opcional em `Node`; aqui ele é o discriminante e nunca falta. */
 type Bloco<D extends Record<string, unknown>, T extends TipoBloco> = Node<D, T> & { type: T };
 
@@ -322,11 +373,18 @@ export type NoTfs = Bloco<DadosTfs, "tfs">;
 export type NoMpc = Bloco<DadosMpc, "mpc">;
 export type NoFirstOrder = Bloco<DadosFirstOrder, "first_order">;
 export type NoKalman = Bloco<DadosKalman, "kalman">;
+export type NoLeadLag = Bloco<DadosLeadLag, "lead_lag">;
+export type NoDeadTime = Bloco<DadosDeadTime, "dead_time">;
 export type NoFuzzy = Bloco<DadosFuzzy, "fuzzy">;
 export type NoPid = Bloco<DadosPid, "pid">;
 export type NoPidLoop = Bloco<DadosPidLoop, "pid_loop">;
 export type NoFuzzyLoop = Bloco<DadosFuzzyLoop, "fuzzy_loop">;
 
+export type NoScaler = Bloco<DadosScaler, "scaler">;
+export type NoIntegrator = Bloco<DadosIntegrator, "integrator">;
+export type NoConstant = Bloco<DadosConstant, "constant">;
+export type NoBusPublish = Bloco<DadosBusPublish, "bus_publish">;
+export type NoBusSubscribe = Bloco<DadosBusSubscribe, "bus_subscribe">;
 export type BlocoNode =
   | NoLeitura
   | NoEscrita
@@ -335,15 +393,24 @@ export type BlocoNode =
   | NoMpc
   | NoFirstOrder
   | NoKalman
+  | NoLeadLag
+  | NoDeadTime
   | NoFuzzy
   | NoPid
   | NoPidLoop
-  | NoFuzzyLoop;
-
+  | NoFuzzyLoop
+  | NoScaler
+  | NoIntegrator
+  | NoConstant
+  | NoBusPublish
+  | NoBusSubscribe;
 /** Toda aresta do editor nasce de um par de handles resolvidos; `null` nunca chega ao save. */
 export type BlocoEdge = Omit<Edge, "sourceHandle" | "targetHandle"> & {
   sourceHandle: string;
   targetHandle: string;
+  /** ADR-040: presente ⇒ aresta de REALIMENTAÇÃO (quebra explícita do ciclo) e condição
+   *  inicial do atraso de 1 varredura. Ausente ⇒ aresta comum, ciclo proibido. */
+  feedback_init?: number;
 };
 
 export type GrafoEditor = { nodes: BlocoNode[]; edges: BlocoEdge[] };
@@ -380,18 +447,23 @@ export function estadoDaAresta(
 ): EstadoAresta {
   const porta = ports[aresta.source]?.[aresta.sourceHandle];
   if (porta === undefined) return "edicao";
-  return porta.ok ? "good" : "bad";
+  return portaValida(porta) ? "good" : "bad";
 }
 
-/** Aresta com a vestimenta da qualidade (imutável). `edicao` devolve a mesma referência;
- *  `good`/`bad` ganham `className` para o CSS e `bad` carrega o marcador X na saída. As
- *  chaves de desenho nunca vão ao save: `paraGraphJson` só emite as de contrato. */
+/** Aresta com a vestimenta da qualidade (imutável). `edicao` devolve a mesma referência,
+ *  salvo em aresta de retorno/realimentação — nela o tracejado é estrutural, não vem do
+ *  dado ao vivo, e o engenheiro precisa vê-lo enquanto desenha. `good`/`bad` ganham
+ *  `className` para o CSS e `bad` carrega o marcador X na saída. As chaves de desenho nunca
+ *  vão ao save: `paraGraphJson` só emite as de contrato. */
 export function arestaComQualidade(aresta: BlocoEdge, ports: PortsPorBloco): BlocoEdge {
+  const retorno = aresta.targetHandle === "bkcal_in" || aresta.feedback_init !== undefined;
   const estado = estadoDaAresta(aresta, ports);
-  if (estado === "edicao") return aresta;
+  if (estado === "edicao") {
+    return retorno ? { ...aresta, className: "aresta-retorno" } : aresta;
+  }
   const classes = [
     estado === "good" ? "aresta-boa" : "aresta-ruim",
-    ...(aresta.targetHandle === "bkcal_in" ? ["aresta-retorno"] : []),
+    ...(retorno ? ["aresta-retorno"] : []),
   ].join(" ");
   return {
     ...aresta,
@@ -424,7 +496,10 @@ export function portasFixas(tipo: TipoBloco, direcao: DirecaoPorta): string[] {
  *  esquerda, saída = MVs à direita, na ordem do config; handle = id estável da variável. */
 export function handlesEntrada(no: BlocoNode): string[] {
   if (no.type === "script") return portasScript("IN", no.data.n_inputs);
-  if (no.type === "fuzzy") return portasScript("IN", no.data.n_inputs);
+  if (no.type === "fuzzy")
+    return no.data.sp_source === "entrada"
+      ? [...portasScript("IN", no.data.n_inputs), "sp"]
+      : portasScript("IN", no.data.n_inputs);
   if (no.type === "mpc") {
     const { cvs, constraints, dvs } = no.data.variables;
     return [...cvs, ...constraints, ...dvs].map((variavel) => variavel.id);
@@ -436,7 +511,7 @@ export function handlesEntrada(no: BlocoNode): string[] {
  *  de modo do próprio bloco (RF-621), não uma variável do usuário — ao contrário das
  *  demais portas do MPC (uma por variável), estas 2 SEMPRE existem, mesmo no nó recém-
  *  criado sem nenhuma MV/CV. `PORTA_MPC_LOCAL`: 1 em LOCAL, 0 em REMOTO. `PORTA_MPC_AUTO`:
- *  1 em AUTO (dentro de REMOTO), 0 em MAN. Único ponto de definição da string no frontend —
+ *  1 só com o bloco DE FATO controlando (REMOTO+AUTO+host pronto), 0 em MAN/LOCAL/building.
  *  `NoMpc` (nodes/index.tsx) importa daqui. Espelha `MPC_PORT_LOCAL`/`MPC_PORT_AUTO`
  *  (`ottima_core.flowgraph.mpc_config`), hand-mirrado (mesmo padrão de `DIRECT_PASS_RATIO`
  *  acima): sem geração cruzada de linguagem para 2 literais. */
@@ -468,9 +543,21 @@ const ROTULO_PORTA: Record<Exclude<TipoPorta, "desconhecido">, string> = {
  */
 export function tipoPorta(no: BlocoNode, tags: MapaTags): TipoPorta {
   if (no.type === "script") return "bivalente";
+  // ADR-042 D7: o barramento transporta float|bool sem reinterpretar — mesmo tratamento
+  // bivalente que o Script.
+  if (no.type === "bus_publish" || no.type === "bus_subscribe") return "bivalente";
   if (no.type === "tfs") return "num";
   if (no.type === "mpc") return "num";
-  if (no.type === "first_order" || no.type === "kalman") return "num";
+  if (
+    no.type === "first_order" ||
+    no.type === "kalman" ||
+    no.type === "scaler" ||
+    no.type === "integrator" ||
+    no.type === "constant" ||
+    no.type === "lead_lag" ||
+    no.type === "dead_time"
+  )
+    return "num";
   if (no.type === "fuzzy") return "num";
   if (no.type === "pid" || no.type === "pid_loop" || no.type === "fuzzy_loop") return "num";
   if (no.data.tag_id === null) return "desconhecido";
@@ -492,6 +579,8 @@ export type ConexaoPretendida = {
   target: string;
   sourceHandle: string | null;
   targetHandle: string | null;
+  /** ADR-040 D5: o usuário assumiu a quebra explícita do ciclo neste gesto. */
+  feedback?: boolean;
 };
 
 /** Existe caminho `de` -> `ate` seguindo as arestas? Serve à detecção de ciclo. */
@@ -533,17 +622,20 @@ export function motivoRecusa(
   if (origem === undefined || destino === undefined) {
     return "Bloco de origem ou de destino não está mais no canvas.";
   }
-  if (source === target) {
+  // Três quebras de ciclo, uma regra: aresta de retorno `bkcal_in` (ADR-039 D6) e aresta de
+  // realimentação assumida no gesto (ADR-040 D5) não entram na checagem de ciclo nem no
+  // aviso de inversão — o espelho do save é o de `validate.py`. Auto-laço entra na mesma
+  // isenção: um bloco realimentando a própria entrada é o menor atraso unitário possível,
+  // e recusá-lo aqui e aceitá-lo no servidor desalinharia o espelho.
+  const quebraExplicita = targetHandle === "bkcal_in" || conexao.feedback === true;
+  if (!quebraExplicita && source === target) {
     return "Um bloco não pode alimentar a si mesmo: o fluxo de dados precisa ser acíclico.";
   }
-  // Aresta de retorno `bkcal_in` fecha o ciclo da cascata de proposito (ADR-039 D6):
-  // não entra na checagem de ciclo nem no aviso de inversão — o espelho do save é o de
-  // `validate.py`.
-  const arestaRetorno = targetHandle === "bkcal_in";
-  if (!arestaRetorno && alcanca(target, source, edges)) {
+  if (!quebraExplicita && alcanca(target, source, edges)) {
     return (
       `Ligação recusada: fecharia um ciclo — '${rotuloDe(destino)}' já alimenta ` +
-      `'${rotuloDe(origem)}'. O fluxo de dados precisa ser acíclico.`
+      `'${rotuloDe(origem)}'. Confirme a realimentação para criar a ligação com atraso ` +
+      "de uma varredura."
     );
   }
   if (edges.some((aresta) => aresta.target === target && aresta.targetHandle === targetHandle)) {
@@ -558,7 +650,8 @@ export function motivoRecusa(
   if (saida === "bivalente" || entrada === "bivalente" || saida === entrada) return null;
   return (
     `A saída '${sourceHandle}' é ${ROTULO_PORTA[saida]} e a entrada '${targetHandle}' é ` +
-    `${ROTULO_PORTA[entrada]}; só as portas do bloco Script são bivalentes.`
+    `${ROTULO_PORTA[entrada]}; só as portas do bloco Script e as dos blocos de barramento ` +
+    "são bivalentes."
   );
 }
 
@@ -570,7 +663,8 @@ export function avisosInversao(nodes: readonly BlocoNode[], edges: readonly Bloc
   const porId = new Map(nodes.map((no) => [no.id, no]));
   const avisos: string[] = [];
   for (const aresta of edges) {
-    if (aresta.targetHandle === "bkcal_in") continue;
+    // Aresta de retorno e de realimentação: nelas o atraso é o propósito (ADR-039/040).
+    if (aresta.targetHandle === "bkcal_in" || aresta.feedback_init !== undefined) continue;
     const origem = porId.get(aresta.source);
     const destino = porId.get(aresta.target);
     if (origem === undefined || destino === undefined) continue;
@@ -681,6 +775,43 @@ export function euDaPortaDeEntrada(
   return eu !== undefined && eu !== "" ? eu : null;
 }
 
+/** EU declarada nas portas de SAÍDA de cada nó, por tipo de bloco: Script/TFS/Fuzzy
+ *  declaram `output_eu` por porta; OPC-Read/Write herdam a EU da tag para todas as portas
+ *  de saída (o contrato dá os handles, nunca hardcoded); MPC declara por variável
+ *  (`variavel.id`, o handle da porta). Blocos sem EU declarada (PID, filtros, Scaler, ou
+ *  tag/variável com `eu` vazia) ficam FORA do mapa — chave ausente, não registro vazio.
+ *  É a tabela de origem que `euDaPortaDeEntrada` consulta: lógica pura, testada em
+ *  `graph.check.ts`, para entrar bloco novo sem quebrar calado. */
+export function euDeSaidaPorNo(
+  nodes: readonly BlocoNode[],
+  eusPorTag: ReadonlyMap<number, string>,
+): ReadonlyMap<string, Record<string, string>> {
+  const porNo = new Map<string, Record<string, string>>();
+  for (const no of nodes) {
+    if (no.type === "script" || no.type === "tfs" || no.type === "fuzzy") {
+      if (Object.keys(no.data.output_eu).length > 0) porNo.set(no.id, no.data.output_eu);
+    } else if (no.type === "mpc") {
+      const eus: Record<string, string> = {};
+      for (const variavel of [
+        ...no.data.variables.mvs,
+        ...no.data.variables.cvs,
+        ...no.data.variables.constraints,
+        ...no.data.variables.dvs,
+      ]) {
+        if (variavel.eu !== "") eus[variavel.id] = variavel.eu;
+      }
+      if (Object.keys(eus).length > 0) porNo.set(no.id, eus);
+    } else if (no.type === "opc_read" || no.type === "opc_write") {
+      const eu = no.data.tag_id === null ? "" : (eusPorTag.get(no.data.tag_id) ?? "");
+      const portas = handlesSaida(no); // opc_write não tem porta de saída: fica fora
+      if (eu !== "" && portas.length > 0) {
+        porNo.set(no.id, Object.fromEntries(portas.map((porta) => [porta, eu])));
+      }
+    }
+  }
+  return porNo;
+}
+
 /** Compactação automática ao excluir (ADR-024): o conjunto volta a ser contíguo 1..N. */
 export function compactarExecOrder(nodes: readonly BlocoNode[]): BlocoNode[] {
   return renumerar(nodes, ordemVigente(nodes));
@@ -760,6 +891,14 @@ export function matrizPadrao(): MatrizTfs {
   ];
 }
 
+/** Espelho manual de `TFS_DEFAULT_Y0` (`parse.py`) — o servidor aplica o mesmo valor quando
+ *  o `graph_json` vem sem `y0` (flow salvo antes do campo). */
+export const Y0_PADRAO = 50;
+
+export function y0Padrao(): [number, number] {
+  return [Y0_PADRAO, Y0_PADRAO];
+}
+
 /** ARCH-18/TD-021: `REGISTRO_BLOCO[tipo].defaults()` sempre bate com o shape de
  *  `Dados<Tipo>` — a completude vem de `Record<TipoBloco, DefinicaoBloco>` (erro de build
  *  se um tipo faltar no registro), não de union discriminada; o TS não prova essa
@@ -796,6 +935,9 @@ export type ArestaSerializada = {
   target: string;
   sourceHandle: string;
   targetHandle: string;
+  /** ADR-040: só sai no JSON quando a aresta é de realimentação — `extra="forbid"` do
+   *  servidor aceita a chave ausente, e aresta comum não carrega ruído no `graph_json`. */
+  feedback_init?: number;
 };
 
 export type GraphJson = { nodes: NoSerializado[]; edges: ArestaSerializada[] };
@@ -819,6 +961,7 @@ export function paraGraphJson(nodes: readonly BlocoNode[], edges: readonly Bloco
       target: aresta.target,
       sourceHandle: aresta.sourceHandle,
       targetHandle: aresta.targetHandle,
+      ...(aresta.feedback_init === undefined ? {} : { feedback_init: aresta.feedback_init }),
     })),
   };
 }
@@ -891,6 +1034,12 @@ function lerMatriz(bruto: unknown): MatrizTfs {
   return [linha(0), linha(1)];
 }
 
+/** `y0` ausente (flow salvo antes do campo) cai no mesmo default do servidor. */
+function lerY0(bruto: unknown): [number, number] {
+  const valores: unknown[] = Array.isArray(bruto) ? bruto : [];
+  return [numero(valores[0], Y0_PADRAO), numero(valores[1], Y0_PADRAO)];
+}
+
 function lerNo(bruto: unknown, indice: number): BlocoNode | null {
   const cru = objeto(bruto);
   if (cru === null) return null;
@@ -930,7 +1079,13 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
         id,
         type: tipo,
         position,
-        data: { exec_order, label, matrix: lerMatriz(dados.matrix), output_eu: lerOutputEu(dados.output_eu) },
+        data: {
+          exec_order,
+          label,
+          matrix: lerMatriz(dados.matrix),
+          output_eu: lerOutputEu(dados.output_eu),
+          y0: lerY0(dados.y0),
+        },
       };
     case "mpc":
       return {
@@ -965,6 +1120,66 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           process_noise: numero(dados.process_noise, PADRAO_KALMAN.process_noise),
         },
       };
+    case "scaler":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          in_min: numero(dados.in_min, PADRAO_SCALER.in_min),
+          in_max: numero(dados.in_max, PADRAO_SCALER.in_max),
+          out_min: numero(dados.out_min, PADRAO_SCALER.out_min),
+          out_max: numero(dados.out_max, PADRAO_SCALER.out_max),
+        },
+      };
+    case "integrator":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          time_base: BASES_TEMPO.find((base) => base === dados.time_base) ?? PADRAO_INTEGRATOR.time_base,
+        },
+      };
+    case "lead_lag":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          gain: numero(dados.gain, PADRAO_LEAD_LAG.gain),
+          tau_lead: numero(dados.tau_lead, PADRAO_LEAD_LAG.tau_lead),
+          tau_lag: numero(dados.tau_lag, PADRAO_LEAD_LAG.tau_lag),
+        },
+      };
+    case "dead_time":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          theta: numero(dados.theta, PADRAO_DEAD_TIME.theta),
+        },
+      };
+    case "constant":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: { exec_order, label, value: numero(dados.value, PADRAO_CONSTANT.value) },
+      };
+    case "bus_publish":
+      return { id, type: tipo, position, data: { exec_order, label, key: texto(dados.key, "") } };
+    case "bus_subscribe":
+      return { id, type: tipo, position, data: { exec_order, label, key: texto(dados.key, "") } };
     case "fuzzy":
       return {
         id,
@@ -977,6 +1192,18 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           n_outputs: inteiro(dados.n_outputs, 0, 0, MAX_PORTAS_FUZZY),
           fll: texto(dados.fll, contratoFuzzy.default_fll),
           output_eu: lerOutputEu(dados.output_eu),
+          // Ausente em grafos salvos antes do SP do operador (RF-541 revisado): vira `null`,
+          // o bloco de sempre. `null` explícito também é "sem SP".
+          setpoint:
+            dados.setpoint === null || dados.setpoint === undefined
+              ? null
+              : numero(dados.setpoint, 0),
+          // Fonte do SP (RF-541 revisado, PRD 3.1): valores fora do vocabulário viram `null`
+          // (sem SP), mesma postura de tolerância do resto da normalização.
+          sp_source:
+            dados.sp_source === "entrada" || dados.sp_source === "operador"
+              ? dados.sp_source
+              : null,
         },
       };
     case "pid":
@@ -1069,7 +1296,19 @@ function lerAresta(bruto: unknown): BlocoEdge | null {
   if (id === "" || source === "" || target === "" || sourceHandle === "" || targetHandle === "") {
     return null;
   }
-  return { id, source, target, sourceHandle, targetHandle };
+  const semente = cru.feedback_init;
+  return {
+    id,
+    source,
+    target,
+    sourceHandle,
+    targetHandle,
+    // Número não-finito é ignorado, não vira aresta de realimentação inválida: quem recusa
+    // com mensagem é `_parse_edges` no save (o editor só desenha o que conseguiu ler).
+    ...(typeof semente === "number" && Number.isFinite(semente)
+      ? { feedback_init: semente }
+      : {}),
+  };
 }
 
 /**

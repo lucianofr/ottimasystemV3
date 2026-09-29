@@ -2,7 +2,7 @@
 
 Dumb pipe: o que chega no barramento é gravado verbatim. Não interpreta `kind`, não filtra
 severidade e não valida `tag_id` contra `tags` (amostra órfã grava — spec F1 §3.4-2). Única
-exceção: `samples.value` de uma amostra com `quality == QUALITY_BAD` grava NULL no lugar do
+exceção: `samples.value` de uma amostra com `quality == OpcQuality.BAD` grava NULL no lugar do
 valor bruto (ADR-037) — a linha, o `ts` e a cadência de gravação continuam inalterados, e a
 decisão usa só o próprio campo `quality` do registro, sem validação cruzada nova. NULL (e não
 NaN) porque `avg`/`sum`/`max` do SQL ignoram NULL nativamente — NaN se propagaria por eles e
@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ottima_core.bus import (
     CHANNEL_CALC_VALUES,
     CHANNEL_EVENTS,
+    CHANNEL_FLOW_VALUES,
     KIND_RECORDER_BACKPRESSURE,
     EventMessage,
     FuzzyState,
@@ -42,10 +43,9 @@ from ottima_core.models import (
     ssto_runs_table,
 )
 from ottima_core.pubsub import ChannelListener, PatternListener
+from ottima_core.signal import OpcQuality
 
 logger = logging.getLogger(__name__)
-
-QUALITY_BAD = 2  # tri-state de OpcValue.quality (spec F1 §3.2): 0=good, 1=uncertain, 2=bad
 
 VALUES_PATTERN = "opc.values.*"
 MPC_STATE_PATTERN = "mpc.state.*"
@@ -112,11 +112,11 @@ class RecorderPipeline:
     """Barramento → hypertables. Único escritor de `samples`/`events`/`mpc_samples`/
     `fuzzy_samples` (spec F2 §6, F5 §2.3, ADR-030).
 
-    Seis assinaturas independentes (`opc.values.*`, `calc.values`, `events`, `mpc.state.*`,
-    `fuzzy.state.*` e `loop.state.*`), cada uma no seu próprio `PatternListener`/`ChannelListener`
-    do laço resiliente compartilhado — os seis tipos de dado têm buffers, tetos e contadores de
-    descarte próprios (spec §6.4), então nada aqui depende de ordem entre canal e padrão:
-    uma conexão a menos era só economia, não contrato.
+    Sete assinaturas independentes (`opc.values.*`, `calc.values`, `flow.values`, `events`,
+    `mpc.state.*`, `fuzzy.state.*` e `loop.state.*`), cada uma no seu próprio
+    `PatternListener`/`ChannelListener` do laço resiliente compartilhado — os sete tipos de
+    dado têm buffers, tetos e contadores de descarte próprios (spec §6.4), então nada aqui
+    depende de ordem entre canal e padrão: uma conexão a menos era só economia, não contrato.
     """
 
     def __init__(
@@ -164,6 +164,14 @@ class RecorderPipeline:
         # `_on_sample` e `_samples` — mesma hypertable, sem buffer/tabela novos.
         self._calc_listener = ChannelListener(
             redis_client, CHANNEL_CALC_VALUES, self._on_calc_sample, name="recorder-calc-values"
+        )
+        # Porta de bloco historiada publica no mesmo formato `OpcValue`, canal próprio
+        # `flow.values` (ADR-041 D2): canal separado de `calc.values` porque o produtor é o
+        # flow-runtime, não o calc-worker, mas o recorder continua escritor cego — reusa
+        # `ingest_sample` verbatim, sem resolver `historized_vars` nem decimar nada aqui; o
+        # throttle por Ts_flow já vem aplicado na origem (ADR-041 D3).
+        self._flow_listener = ChannelListener(
+            redis_client, CHANNEL_FLOW_VALUES, self._on_flow_value, name="recorder-flow-values"
         )
         self._mpc_listener = PatternListener(
             redis_client, MPC_STATE_PATTERN, self._on_mpc_state, name="recorder-mpc"
@@ -237,6 +245,7 @@ class RecorderPipeline:
             await self._events_listener.start()
             await self._samples_listener.start()
             await self._calc_listener.start()
+            await self._flow_listener.start()
             await self._mpc_listener.start()
             await self._fuzzy_listener.start()
             await self._loop_listener.start()
@@ -247,6 +256,7 @@ class RecorderPipeline:
             await self._events_listener.stop()
             await self._samples_listener.stop()
             await self._calc_listener.stop()
+            await self._flow_listener.stop()
             await self._mpc_listener.stop()
             await self._fuzzy_listener.stop()
             await self._loop_listener.stop()
@@ -272,6 +282,7 @@ class RecorderPipeline:
         await self._events_listener.stop()
         await self._samples_listener.stop()
         await self._calc_listener.stop()
+        await self._flow_listener.stop()
         await self._mpc_listener.stop()
         await self._fuzzy_listener.stop()
         await self._loop_listener.stop()
@@ -318,7 +329,7 @@ class RecorderPipeline:
     def ingest_sample(self, raw: str) -> None:
         """Parse e enfileira uma amostra; payload inválido é descartado com log.
 
-        `quality == QUALITY_BAD` grava NULL em `value` (ADR-037): a linha, o `ts` e a
+        `quality == OpcQuality.BAD` grava NULL em `value` (ADR-037): a linha, o `ts` e a
         cadência seguem intactos — só o campo numérico deixa de carregar um dado ruim
         indistinguível de um dado real em `/api/history` e em `avg`/`max` sem filtro de
         `quality`. NULL, não NaN: `avg`/`sum`/`max` do SQL ignoram NULL nativamente, sem
@@ -332,8 +343,8 @@ class RecorderPipeline:
             {
                 "ts": value.ts,
                 "tag_id": value.tag_id,
-                "value": None if value.quality == QUALITY_BAD else value.value,
-                "quality": value.quality,
+                "value": None if value.quality == OpcQuality.BAD else value.value,
+                "quality": int(value.quality),
             }
         )
         if overflow:
@@ -488,6 +499,13 @@ class RecorderPipeline:
     async def _on_calc_sample(self, raw: str) -> None:
         """`ChannelListener` entrega só `data` (canal fixo, sem sufixo) — `ingest_sample` já
         ignora o canal, então é o mesmo parse de `_on_sample`."""
+        self.ingest_sample(raw)
+
+    async def _on_flow_value(self, raw: str) -> None:
+        """Porta de bloco historiada (ADR-041 D2): mesmo payload `OpcValue`, canal próprio
+        porque o produtor é o flow-runtime e não o calc-worker — o resto é idêntico a
+        `_on_calc_sample`, `ingest_sample` já resolve tudo (inclusive `quality == OpcQuality.BAD`
+        virando NULL, ADR-037)."""
         self.ingest_sample(raw)
 
     async def _on_event(self, raw: str) -> None:

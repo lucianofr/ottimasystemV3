@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  faixaJanelaX,
   fimAoAvancar,
   fimAoVoltar,
   passoDeslocamento,
@@ -70,4 +71,28 @@ test("voltar e avançar o mesmo número de cliques devolve ao modo ao vivo", () 
 test("janela maior desloca mais por clique", () => {
   const janela8h = 28800;
   expect(fimAoVoltar(null, AGORA, janela8h, RETENCAO_PADRAO_S)).toBe(AGORA - 14400);
+});
+
+test("faixaJanelaX ao vivo termina em agora e abre a janela inteira para trás", () => {
+  expect(faixaJanelaX(null, JANELA_30M, AGORA)).toEqual([AGORA - JANELA_30M, AGORA]);
+});
+
+test("faixaJanelaX ao vivo anda com o relógio: o tique de 1 s move as duas bordas", () => {
+  const [a0, b0] = faixaJanelaX(null, JANELA_30M, AGORA);
+  const [a1, b1] = faixaJanelaX(null, JANELA_30M, AGORA + 1);
+  expect([a1 - a0, b1 - b0]).toEqual([1, 1]);
+});
+
+test("faixaJanelaX deslizado termina no fim escolhido, sem seguir o relógio", () => {
+  const fim = AGORA - 3600;
+  expect(faixaJanelaX(fim, JANELA_30M, AGORA)).toEqual([fim - JANELA_30M, fim]);
+  expect(faixaJanelaX(fim, JANELA_30M, AGORA + 600)).toEqual([fim - JANELA_30M, fim]);
+});
+
+test("faixaJanelaX reserva a janela pedida, não a extensão do dado: largura é sempre a janela", () => {
+  // O defeito que a política corrige: `range` automático desenhava só o pedaço com amostra.
+  for (const janela of [90, JANELA_30M, 28800]) {
+    const [inicio, fim] = faixaJanelaX(null, janela, AGORA);
+    expect(fim - inicio).toBe(janela);
+  }
 });

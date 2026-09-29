@@ -48,7 +48,7 @@ from datetime import datetime
 import pytest
 from redis.asyncio import Redis
 
-from ottima_flow_runtime.blocks.base import Block, PortSample
+from ottima_flow_runtime.blocks.base import Block, Signal
 from ottima_flow_runtime.scheduler import FlowDefinition, FlowTask
 
 FLOW_LENTO = 101
@@ -82,8 +82,8 @@ class BlocoBloqueante(Block):
         self.execucoes: int = 0
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         self.execucoes += 1
         if self.execucoes == 1:
             # `time.sleep` num `async def` é exatamente o que o ADR-004 proíbe e o que o
@@ -101,8 +101,8 @@ class BlocoContador(Block):
         self.varreduras: int = 0
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         self.varreduras += 1
         return {}
 

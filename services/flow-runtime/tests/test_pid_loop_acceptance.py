@@ -10,13 +10,13 @@ import random
 
 from shell_harness import EPS, amostra, passo
 
-from ottima_flow_runtime.blocks.base import PortSample
+from ottima_core.signal import Quality
+from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.kernels.pid import PidKernel, PidKernelCfg
 from ottima_flow_runtime.blocks.pid import PidBlock
 from ottima_flow_runtime.blocks.shell.block import BlockShell
 from ottima_flow_runtime.blocks.shell.config import ShellCfg
 from ottima_flow_runtime.blocks.shell.mode import Mode
-from ottima_flow_runtime.blocks.shell.signal import Quality, make_signal
 
 
 def _malha(kc: float = 2.0, ti: float = 20.0, td: float = 0.0, **shell_over) -> BlockShell:
@@ -61,7 +61,7 @@ async def _trajetorias(sp_final: float, disturbio: float = 0.0) -> tuple[list[fl
         t += 1.0
         d = disturbio if i >= 150 else 0.0
         saida_a = await legado.step(
-            {"pv": PortSample(pv_a, True), "sp": PortSample(sp_final, True)}
+            {"pv": Signal(pv_a, quality=Quality.GOOD), "sp": Signal(sp_final, quality=Quality.GOOD)}
         )
         await passo(malha, t, **{"in": amostra(pv_b)})
         u_a = saida_a["out"].v or 0.0
@@ -169,7 +169,7 @@ async def test_p6_p7_sem_pico_derivativo() -> None:
 async def test_p9_p10_p13_feedforward() -> None:
     m = _malha(ff_enable=True, ff_gain=1.0, out_startup=20.0)
     t = 0.0
-    ff = make_signal(30.0, Quality.GOOD)
+    ff = Signal(30.0, quality=Quality.GOOD)
     m.write_sp(50.0)
     await passo(m, t, **{"in": amostra(50.0), "bias_in": ff})
     m.write_target(Mode.AUTO)
@@ -178,7 +178,7 @@ async def test_p9_p10_p13_feedforward() -> None:
     u_ok = m.u
     # P9: FF degrada para BAD -> bias mantem ultimo bom, sem degrau
     t += 1.0
-    await passo(m, t, **{"in": amostra(50.0), "bias_in": make_signal(999.0, Quality.BAD)})
+    await passo(m, t, **{"in": amostra(50.0), "bias_in": Signal(999.0, quality=Quality.BAD)})
     assert abs(m.u - u_ok) <= EPS
     # P10: MAN -> AUTO com FF != 0, sem degrau
     m.write_target(Mode.MAN)

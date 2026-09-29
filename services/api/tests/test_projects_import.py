@@ -106,8 +106,9 @@ def _bundle(
     connections: list[dict] | None = None,
     tags: list[dict] | None = None,
     flows: list[dict] | None = None,
+    historized_vars: list[dict] | None = None,
 ) -> dict:
-    return {
+    corpo = {
         "schema_version": schema_version,
         "exported_at": "2026-08-07T21:40:00Z",
         "project": {"name": project_name, "description": ""},
@@ -115,6 +116,11 @@ def _bundle(
         "tags": tags or [],
         "flows": flows or [],
     }
+    # Chave omitida quando não há variável historiada: o formato antigo (sem a chave) tem de
+    # continuar importando, e é isso que a maioria dos testes deste arquivo exercita.
+    if historized_vars is not None:
+        corpo["historized_vars"] = historized_vars
+    return corpo
 
 
 def _conexao_bundle(name: str, **campos) -> dict:
@@ -434,6 +440,74 @@ async def test_tag_ref_referencia_conexao_ausente_422_camada3(client, admin_head
     assert await _contagens(db_session) == antes
 
 
+async def test_variavel_historiada_com_porta_inexistente_422(client, admin_headers, db_session):
+    """Fronteira de confiança do ADR-041 D7: a coerência do bundle vê o grafo cru e sabe
+    checar id de bloco, mas porta é dinâmica (mpc/script) e entrada precisa de aresta — o
+    import reaplica a MESMA regra do cadastro interativo, senão nasce variável historiada
+    morta, visível no seletor do Trend e sem nunca receber dado."""
+    antes = await _contagens(db_session)
+    bundle = _bundle(
+        connections=[_conexao_bundle("gw1")],
+        tags=[_tag_bundle("gw1", "TT-101")],
+        flows=[_flow_bundle("Malha", _grafo_bundle_um_no("gw1", "TT-101"))],
+        historized_vars=[
+            {
+                "tag": "Malha.r1.nao_existe",
+                "eu": "",
+                "flow": "Malha",
+                "block_id": "r1",
+                "port": "nao_existe",
+            }
+        ],
+    )
+    r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
+    assert r.status_code == 422, r.text
+    assert "Porta não existe neste bloco" in r.json()["detail"]
+    assert await _contagens(db_session) == antes
+
+
+async def test_import_materializa_variavel_historiada(client, admin_headers):
+    """Round-trip do caminho FELIZ: o bundle não traz a linha de `tags` da historiada (ela
+    cai fora do XOR de `BundleTag`), então o import tem de criá-la e ligar o registro ao
+    `flow_id` resolvido por NOME — com os dois `flush` na ordem certa."""
+    bundle = _bundle(
+        project_name="ComHistoriada",
+        connections=[_conexao_bundle("gw1")],
+        tags=[_tag_bundle("gw1", "TT-101")],
+        flows=[_flow_bundle("Malha", _grafo_bundle_um_no("gw1", "TT-101"))],
+        historized_vars=[
+            {"tag": "Malha.r1.out", "eu": "°C", "flow": "Malha", "block_id": "r1", "port": "out"}
+        ],
+    )
+    r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
+    assert r.status_code == 201, r.text
+    projeto_id = r.json()["project"]["id"]
+
+    flows = (await client.get(f"/api/flows?project_id={projeto_id}", headers=admin_headers)).json()
+    flow_id = next(f["id"] for f in flows if f["name"] == "Malha")
+    lista = (
+        await client.get(f"/api/historized-vars?flow_id={flow_id}", headers=admin_headers)
+    ).json()
+    assert lista == [
+        {
+            "tag_id": lista[0]["tag_id"],
+            "flow_id": flow_id,
+            "block_id": "r1",
+            "port": "out",
+            "name": "Malha.r1.out",
+            "eu": "°C",
+        }
+    ]
+
+    tag = (await client.get(f"/api/tags/{lista[0]['tag_id']}", headers=admin_headers)).json()
+    assert (tag["project_id"], tag["connection_id"], tag["direction"], tag["data_type"]) == (
+        projeto_id,
+        None,
+        "r",
+        "float",
+    )
+
+
 async def test_nome_duplicado_no_bundle_422_camada3_sem_integrity_error(
     client, admin_headers, db_session
 ):
@@ -631,4 +705,7 @@ async def test_evento_project_imported_publicado(client, admin_headers, eventos)
         "connections": 1,
         "tags": 2,
         "flows": 1,
+        # Contagem nova do ADR-041: o import também materializa as variáveis historiadas do
+        # bundle, e o número entra na auditoria junto das outras contagens.
+        "historized_vars": 0,
     }

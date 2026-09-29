@@ -8,8 +8,10 @@ Duas leituras de "ganho", uma por `kind` de linha (ADR-013):
 
 - **`selfreg` (SOPDT)** — ganho DC `c·(I − a)⁻¹·b`, que para a forma do `discretize_sopdt`
   vale exatamente `K`. A linha entra no LP como nível: `ΔCVˢˢ = G·ΔMV + Gd·ΔDV`.
-- **`integrating` (IOPDT)** — não tem ganho estático finito (`a = 1`, `(I − a)` singular):
-  o que existe é a **taxa de rampa** `Ki` [EU/(EU·s)], recuperada como `(c·b)/Ts`. A linha
+- **`integrating` (IOPDT/IFOPDT)** — não tem ganho estático finito (`a = 1`, `(I − a)`
+  singular): o que existe é a **taxa de rampa** `Ki` [EU/(EU·s)]. Sem lag é `(c·b)/Ts`; com
+  lag (`tau1 > 0`) é o incremento do acumulador com o estágio de 1a ordem JÁ assentado — a
+  leitura crua `(c·b)/Ts` mediria só o primeiro passo (`Ki·(1−a₁)`). A linha
   entra no LP como condição de **taxa nula em regime** (ADR-027 §4), nunca como nível.
 
 O tempo morto não participa: ele é shift register na entrada do par (fora de `(a, b, c)`) e
@@ -43,8 +45,18 @@ def pair_steady_state_gain(
         return float(direct_gain or 0.0)
     if kind == "integrating":
         # `a = 1` torna `(I − a)` singular: o integrador não converge. A taxa de rampa por
-        # amostra é `c·b`; por segundo, `(c·b)/Ts` — que devolve o `Ki` do config.
-        return float((pair.c @ pair.b)[0, 0]) / ts
+        # amostra é o incremento do ACUMULADOR (último estado, `discretize_iopdt`) em regime;
+        # por segundo, dividido por `Ts` — que devolve o `Ki_EU` já convertido por
+        # `eu_gain_params` (= Ki do config × span_linha/span_coluna), não o número cru do
+        # config quando os spans diferem.
+        n = pair.a.shape[0]
+        if n == 1:
+            return float((pair.c @ pair.b)[0, 0]) / ts
+        # IFOPDT: o estágio de 1a ordem assenta (ganho DC 1) e só então o acumulador rampa na
+        # taxa plena — resolver o estágio é o que mantém `Ki` invariante ao `tau1`.
+        x_lag = np.linalg.solve(np.eye(n - 1) - pair.a[:-1, :-1], pair.b[:-1, 0])
+        incremento = float(pair.a[-1, :-1] @ x_lag + pair.b[-1, 0])
+        return float(pair.c[0, -1]) * incremento / ts
     identity = np.eye(pair.a.shape[0])
     return float((pair.c @ np.linalg.solve(identity - pair.a, pair.b))[0, 0])
 
@@ -138,7 +150,14 @@ def build_steady_state_model(config: MpcConfig, ts_mpc: float) -> SteadyStateMod
                 )
                 direct_gain = params["K"]
             else:
-                pair = discretize_iopdt(params["Ki"], params["theta"], ts_mpc)
+                # `tau1` repassado de propósito mesmo sendo INVISÍVEL no resultado (o lag tem
+                # ganho DC 1, então a taxa é `Ki` com ou sem ele): o LP tem de discretizar o
+                # MESMO `PairSS` do controlador (ADR-027 §3, "não existe segundo modelo de
+                # ganho") — se um dia a forma do integrador mudar o ganho, o LP acompanha por
+                # construção. Não há teste que distinga: é invariante estrutural, não valor.
+                pair = discretize_iopdt(
+                    params["Ki"], params["theta"], ts_mpc, tau1=params.get("tau1", 0.0)
+                )
                 direct_gain = None
             gain = pair_steady_state_gain(pair, direct_gain=direct_gain, kind=kind, ts=ts_mpc)
             if col_id in mv_index:

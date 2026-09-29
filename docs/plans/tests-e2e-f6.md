@@ -277,20 +277,21 @@ Motivo da ordem: B-F6-09..12 exercitam a tela de operação e o editor do flow `
 
 ---
 
-### B-F6-04 — Confiar no certificado do servidor (upload), conferir fingerprint; conexão sobe; deixar de confiar
+### B-F6-04 — Confiar no certificado do servidor (aceite do capturado), visualizar na chapa; conexão sobe; deixar de confiar
 
-**Objetivo:** confirmar o upload de um `.der` do servidor via `<input type="file">` oculto, a exibição do `fingerprint_sha256` devolvido para conferência, que a conexão efetivamente sobe depois de confiada, e que "Deixar de confiar" reverte (idempotente).
-**Rastreabilidade:** RF-202 · ADR-021 · spec F6 §6.2-2/3 · plano F6b tarefa 3.2 (`useServerCertificate.ts`).
-**Pré-condições:** continuação de B-F6-03 (certificado de aplicação já existe — necessário: `needs_app_certificate` precisa estar `false` para a conexão segura poder subir de verdade, §3.2-8, "requisito deste roteiro" no §1 item 7); senha já reinformada nesta conexão em B-F6-07 passo 4; `deploy/e2e-certs/opcsim.der` disponível em disco (§1 item 8) — o certificado **real** do opcsim, servindo `basic256sha256` no mesmo endpoint de `opcsim-l3` (§1 item 7, requisito de endpoint).
+**Objetivo:** confirmar que o certificado **enviado** pelo servidor é capturado pelo opc-worker na falha de pin e aparece na UI sem upload nenhum: "Confiar certificado" habilita quando a captura chega, "Visualizar" abre a chapa com metadados + PEM, o aceite promove o staging a `trusted` (fingerprint conferível na linha), a conexão sobe de verdade e "Deixar de confiar" reverte (idempotente). O upload binário (`POST …/server-certificate` com corpo) permanece como rota de fallback para servidor inalcançável — não tem mais entrada na UI.
+**Rastreabilidade:** RF-202 · ADR-021 · spec F2 §5 itens 4-6 (emenda 2026-09) · spec F6 §6.2-2/3 · `useServerCertificate.ts`, `ChapaCertificadoServidor.tsx`.
+**Pré-condições:** continuação de B-F6-03 (certificado de aplicação já existe — necessário: `needs_app_certificate` precisa estar `false` para a conexão segura poder subir de verdade, §3.2-8, "requisito deste roteiro" no §1 item 7); senha já reinformada nesta conexão em B-F6-07 passo 4; opcsim servindo `basic256sha256` no endpoint da conexão segura (§1 item 7) — a captura acontece sozinha nas tentativas de reconexão do worker (backoff ≤ 30 s).
 
 | # | Ação / estratégia | Assert |
 |---|---|---|
-| 1 | `tab.screenshot()` da linha da conexão segura antes de confiar. | Coluna "Último estado" mostra falha de comunicação (`cert_missing` ou equivalente — servidor ainda não confiado); Pendências mostra só "certificado do servidor" restante (senha já resolvida em B-F6-07, app já existe desde B-F6-03). |
-| 2 | `tab.click('[data-testid="cert-servidor-confiar"]')` (provável) na linha; `tab.uploadFile('[data-testid="cert-servidor-upload-input"]', 'deploy/e2e-certs/opcsim.der')` (regra 11 do §2, arquivo já materializado pelo compose, §1 item 8). `tab.screenshot()`. | Upload aceito; `fingerprint_sha256` devolvido pela API (`connections.py:292-298`) exibido em mono tabular na linha, para conferência contra o servidor. |
-| 3 | `wait(15000)` (a próxima tentativa de sessão do `opc-worker` para esta conexão — mesma margem de boot usada em `B-F5-02`). `tab.evaluate('location.reload()')`. `tab.screenshot()` da coluna "Último estado". | Conexão **sobe**: estado deixa de ser falha de certificado — a sessão OPC-UA se estabelece de verdade contra o opcsim (endpoint real, `security_policy: basic256sha256`, §1 item 7). Pendências desta linha ficam vazias (as três resolvidas: senha em B-F6-07, aplicação em B-F6-03, servidor aqui). |
-| 4 | `tab.click('[data-testid="cert-servidor-descartar"]')` (provável, `DELETE`, idempotente). `tab.screenshot()`. | Trust removido; Pendências volta a mostrar "certificado do servidor"; `wait(15000)` + reload confirmaria a conexão cair de novo (não necessário reexecutar o reload — a queda é responsabilidade do `opc-worker`, já provada indiretamente pelo passo 3 no sentido inverso). |
+| 1 | `tab.screenshot()` da linha da conexão segura antes de confiar. | Coluna "Último estado" mostra falha de comunicação (`cert_missing`); Pendências mostra só "certificado do servidor" restante. Botão `cert-servidor-confiar` **desabilitado** enquanto nada foi capturado (title explica a espera) e `cert-servidor-visualizar` desabilitado. |
+| 2 | Aguardar a captura (poll de 5 s da célula; margem do backoff): `cert-servidor-confiar` habilita. `tab.click('[data-testid="cert-servidor-visualizar"]')`. `tab.screenshot()` da chapa. | Chapa page-level "Certificado do servidor — <nome>" (padrão `ConnectionForm`, sem modal): seção "Enviado pelo servidor" (`cert-chapa-recebido`) com sujeito, emissor, `fingerprint_sha256` em mono tabular, validade e o PEM em `<pre>` rolável; sem seção "Confiado" ainda. |
+| 3 | Fechar a chapa (`cert-chapa-fechar`); `tab.click('[data-testid="cert-servidor-confiar"]')`. `tab.screenshot()`. | Aceite sem janela de arquivo: a linha passa a mostrar `cert-servidor-descartar` e o `fingerprint_sha256` do GET em mono tabular, idêntico ao visto na chapa; Pendências desta linha esvazia. |
+| 4 | `wait(15000)` (reconciliação do `opc-worker` pelo evento de trust). `tab.evaluate('location.reload()')`. `tab.screenshot()` da coluna "Último estado". | Conexão **sobe**: estado "Conectado" — a sessão OPC-UA se estabelece de verdade contra o opcsim com o pin recém-confiado. |
+| 5 | `tab.click('[data-testid="cert-servidor-descartar"]')` (`DELETE`, idempotente). `tab.screenshot()`. | Trust removido; Pendências volta a mostrar "certificado do servidor"; `wait(15000)` + reload confirmaria a conexão cair de novo (não necessário reexecutar — a queda é responsabilidade do `opc-worker`, já provada indiretamente no passo 4 no sentido inverso). |
 
-**Evidência:** `B-F6-04-passo01.png` a `B-F6-04-passo04.png`.
+**Evidência:** `B-F6-04-passo01.png` a `B-F6-04-passo05.png`.
 
 ---
 

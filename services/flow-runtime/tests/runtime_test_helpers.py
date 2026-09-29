@@ -35,8 +35,8 @@ from ottima_core.bus import (
 )
 from ottima_core.models import Flow, OpcConnection, Project, Tag
 from ottima_core.script_pool import ScriptResult
-from ottima_core.snapshot import ValueSnapshot
-from ottima_flow_runtime.blocks.base import Block, PortSample
+from ottima_core.snapshot import ExchangeSnapshot, ValueSnapshot
+from ottima_flow_runtime.blocks.base import Block, Signal
 from ottima_flow_runtime.events import ChannelListener
 from ottima_flow_runtime.mpc.worker import SolveResult
 from ottima_flow_runtime.scheduler import FlowDefinition, FlowTask
@@ -247,10 +247,14 @@ def disabled_element() -> dict:
 
 
 def tfs_node(node_id: str, exec_order: int, *, y1_u1: dict | None = None, **kwargs: Any) -> dict:
-    """TFS 2x2 com um único elemento possivelmente habilitado em y1/u1."""
+    """TFS 2x2 com um único elemento possivelmente habilitado em y1/u1.
+
+    `y0` explícito em zero (e não o default 50 da config): estes cenários leem a resposta ao
+    degrau a partir do repouso, não a partida de uma planta num ponto de operação.
+    """
     element = disabled_element() if y1_u1 is None else y1_u1
     matrix = [[element, disabled_element()], [disabled_element(), disabled_element()]]
-    return node(node_id, "tfs", exec_order, {"matrix": matrix}, **kwargs)
+    return node(node_id, "tfs", exec_order, {"matrix": matrix, "y0": [0.0, 0.0]}, **kwargs)
 
 
 def edge(source: str, source_handle: str, target: str, target_handle: str) -> dict:
@@ -416,6 +420,7 @@ class Harness:
     state: RuntimeState
     pool: StubPool
     snapshot: ValueSnapshot
+    exchange: ExchangeSnapshot
     redis: Redis
     events: ChannelListener
 
@@ -652,8 +657,8 @@ class BlocoContado(Block):
         self.varreduras: int = 0
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         self.varreduras += 1
         if self._custo_s and self.varreduras == 1:
             time.sleep(self._custo_s)  # noqa: ASYNC251 — é o sujeito do teste

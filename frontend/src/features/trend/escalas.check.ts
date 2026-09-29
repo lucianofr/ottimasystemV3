@@ -4,6 +4,7 @@ import {
   chaveEscala,
   construirEscalasUplot,
   ESCALA_AUTO,
+  foraDaFaixa,
   gravarEscalas,
   lerEscalas,
   type EscalaVar,
@@ -127,4 +128,27 @@ test("lerEscalas: entrada fora de forma é descartada sem derrubar as vizinhas",
 test("lerEscalas: NaN e Infinity não passam por número válido", () => {
   navegadorFalso.localStorage.setItem(CHAVE, '{"cv_1": {"auto": false, "min": null, "max": 1e999}}');
   expect(lerEscalas(CHAVE)).toEqual({});
+});
+
+test("foraDaFaixa: valor corrente abaixo ou acima da faixa fixada", () => {
+  expect(foraDaFaixa(MANUAL, -1)).toBe(true);
+  expect(foraDaFaixa(MANUAL, 101)).toBe(true);
+  expect(foraDaFaixa(MANUAL, 0)).toBe(false);
+  expect(foraDaFaixa(MANUAL, 100)).toBe(false);
+});
+
+test("foraDaFaixa: autoscale nunca esconde pena", () => {
+  expect(foraDaFaixa(ESCALA_AUTO, 1e9)).toBe(false);
+  expect(foraDaFaixa({ auto: true, min: 0, max: 100 }, 1e9)).toBe(false);
+});
+
+test("foraDaFaixa: faixa que o uPlot ignora não gera aviso", () => {
+  // Mesma regra de `construirEscalasUplot`: meio preenchida ou invertida cai para
+  // autoscale, então nada é cortado e avisar seria mentira.
+  expect(foraDaFaixa({ auto: false, min: 40, max: null }, 30)).toBe(false);
+  expect(foraDaFaixa({ auto: false, min: 60, max: 40 }, 30)).toBe(false);
+});
+
+test("foraDaFaixa: sem valor corrente não há o que avisar", () => {
+  expect(foraDaFaixa(MANUAL, null)).toBe(false);
 });

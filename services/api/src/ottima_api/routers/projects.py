@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_api.deps import get_app_settings, get_db, get_redis, require_admin, require_operator
+from ottima_api.historized import problema_de_porta
 from ottima_api.messages import MSG_PROJETO_NAO_ENCONTRADO, MSG_PROJETO_NOME_EM_USO
 from ottima_api.validacao import formatar_problemas, problemas_de_validacao
 from ottima_core.bus import (
@@ -25,9 +26,13 @@ from ottima_core.bus import (
 from ottima_core.certs import read_app_certificate
 from ottima_core.config import Settings
 from ottima_core.flowgraph import (
+    FlowGraph,
     GraphParseError,
+    NodePorts,
     TagRef,
     ValidationResult,
+    bus_publish_keys,
+    graph_ports,
     parse_graph,
     validate_graph,
 )
@@ -35,6 +40,7 @@ from ottima_core.models import (
     CalculatedTag,
     CalculatedTagInput,
     Flow,
+    HistorizedVar,
     OpcConnection,
     Project,
     Tag,
@@ -42,6 +48,7 @@ from ottima_core.models import (
 )
 from ottima_core.portability import (
     SCHEMA_VERSION,
+    BundleHistorizedVar,
     ProjectBundle,
     ReferenciaTagInvalida,
     grafo_para_banco,
@@ -80,12 +87,16 @@ async def _carregar(db: AsyncSession, project_id: int) -> Project:
 
 def _parse_e_validar(
     graph_banco: dict, tags: Mapping[int, TagRef], ts_seconds: float
-) -> ValidationResult:
+) -> tuple[FlowGraph, ValidationResult]:
     """Parse + validação num passo só (mesmo padrão de `routers.flows._validar_grafo`), para
     rodar inteiro dentro de um `asyncio.to_thread` sem reentrar no event loop no meio do
     parse (TD-002).
+
+    Devolve o grafo parseado junto: a unicidade de chave de barramento entre os flows do
+    bundle (ADR-042 D5) precisa dele, e reparsear o mesmo JSON seria trabalho em dobro.
     """
-    return validate_graph(parse_graph(graph_banco), tags, ts_seconds)
+    grafo = parse_graph(graph_banco)
+    return grafo, validate_graph(grafo, tags, ts_seconds)
 
 
 @router.get("", response_model=list[ProjectOut], dependencies=[Depends(require_operator)])
@@ -227,9 +238,19 @@ async def export_project(
     )
     # Tag calculada não corre o mesmo risco (revisão da 1.3, comentário acima): sua dona é o
     # próprio projeto (`project_id`, `ck_tags_owner`), não uma conexão — filtrar direto por
-    # `Tag.project_id` já é o mesmo isolamento que o join acima dá às OPC. Quatro consultas
-    # fixas (tags calculadas, `calculated_tags`, `calculated_tag_inputs`), nunca uma por tag.
-    tags_calculadas = list(await db.scalars(select(Tag).where(Tag.project_id == project_id)))
+    # `Tag.project_id` já é o mesmo isolamento que o join acima dá às OPC. A variável
+    # historiada (RF-308, ADR-041 D1) tem a MESMA forma de dono (`project_id`, sem
+    # `connection_id`) mas NÃO é tag calculada — sem o `notin_`, ela entraria nesta lista e
+    # `montar_bundle` quebraria ao procurar o `CalculatedTag` dela, que não existe; exportada
+    # à parte, abaixo, como `historized_vars`. Cinco consultas fixas (tags calculadas,
+    # `calculated_tags`, `calculated_tag_inputs`, variáveis historiadas), nunca uma por tag.
+    tags_calculadas = list(
+        await db.scalars(
+            select(Tag)
+            .where(Tag.project_id == project_id)
+            .where(Tag.id.notin_(select(HistorizedVar.tag_id)))
+        )
+    )
     calculated_tags = list(
         await db.scalars(
             select(CalculatedTag)
@@ -244,6 +265,15 @@ async def export_project(
             .where(Tag.project_id == project_id)
         )
     )
+    # Variável historiada (RF-308, ADR-041): dona é o flow (`historized_vars.flow_id`), não o
+    # projeto direto — join com `Tag` por `project_id`, mesmo isolamento das consultas acima.
+    historized_vars = list(
+        await db.scalars(
+            select(HistorizedVar)
+            .join(Tag, HistorizedVar.tag_id == Tag.id)
+            .where(Tag.project_id == project_id)
+        )
+    )
     flows = list(await db.scalars(select(Flow).where(Flow.project_id == project_id)))
     try:
         bundle = montar_bundle(
@@ -252,6 +282,7 @@ async def export_project(
             tags=[*tags_opc, *tags_calculadas],
             calculated_tags=calculated_tags,
             calculated_tag_inputs=calculated_tag_inputs,
+            historized_vars=historized_vars,
             flows=flows,
             exported_at=datetime.now(UTC),
         )
@@ -501,10 +532,16 @@ async def import_project(
     # inteira durante o import (TD-002).
     problemas_grafo: list[str] = []
     flows_novos: list[Flow] = []
+    # ADR-042 D5: `key` publicada é única no projeto. O bundle vem de fora (fronteira de
+    # confiança), então a checagem entre flows roda aqui também, não só no save do editor.
+    publicadores: dict[str, str] = {}
+    # Grafo TIPADO por nome de flow: o import precisa dele depois do laço para reaplicar o
+    # D7 das variáveis historiadas (ADR-041) sem parsear de novo.
+    grafos_por_nome: dict[str, FlowGraph] = {}
     for bf in bundle.flows:
         graph_banco = grafo_para_banco(bf.graph, id_por_ref)
         try:
-            resultado = await asyncio.to_thread(
+            grafo, resultado = await asyncio.to_thread(
                 _parse_e_validar, graph_banco, tags_para_validacao, float(bf.ts_seconds)
             )
         except GraphParseError as exc:
@@ -513,6 +550,17 @@ async def import_project(
         if resultado.errors:
             problemas_grafo.extend(f"fluxo '{bf.name}': {p}" for p in resultado.errors)
             continue
+        colisoes = [
+            (key, publicadores[key]) for key in bus_publish_keys(grafo) if key in publicadores
+        ]
+        problemas_grafo.extend(
+            f"fluxo '{bf.name}': a chave de barramento '{key}' já é publicada pelo fluxo '{dono}'"
+            for key, dono in colisoes
+        )
+        if colisoes:
+            continue
+        publicadores.update(dict.fromkeys(bus_publish_keys(grafo), bf.name))
+        grafos_por_nome[bf.name] = grafo
         flow = Flow(
             project_id=project.id,
             name=bf.name,
@@ -531,11 +579,69 @@ async def import_project(
         db.add(flow)
         flows_novos.append(flow)
 
+    # D7 do ADR-041 reaplicado aqui, não só na coerência do bundle (camada 3): aquela
+    # camada vê o grafo CRU e sabe checar id de bloco, mas porta de `mpc`/`script`/`fuzzy`
+    # é dinâmica (depende do config tipado), e porta de entrada precisa das arestas. O
+    # bundle vem de fora — sem esta checagem, um arquivo editado à mão (ou exportado antes
+    # de a aresta sair) cria variável historiada morta: aparece no seletor do Trend e nunca
+    # recebe dado. Mesma regra do cadastro interativo, via `problema_de_porta`.
+    portas_por_flow: dict[str, Mapping[str, NodePorts]] = {}
+    for bhv in bundle.historized_vars:
+        grafo_do_flow = grafos_por_nome.get(bhv.flow)
+        if grafo_do_flow is None:
+            continue  # flow já recusado acima; a camada 3 cobre nome de flow inexistente
+        portas = portas_por_flow.get(bhv.flow)
+        if portas is None:
+            # `setdefault(k, graph_ports(...))` avaliaria o default a CADA iteração — o
+            # cache não cachearia nada.
+            portas = graph_ports(grafo_do_flow)
+            portas_por_flow[bhv.flow] = portas
+        problema = problema_de_porta(grafo_do_flow, bhv.block_id, bhv.port, portas)
+        if problema is not None:
+            problemas_grafo.append(
+                f"variável historiada '{bhv.tag}' (fluxo '{bhv.flow}',"
+                f" bloco '{bhv.block_id}', porta '{bhv.port}'): {problema}"
+            )
+
     if problemas_grafo:
         await db.rollback()
         raise HTTPException(
             status_code=422,
             detail=formatar_problemas(problemas_grafo, cabecalho="Import recusado"),
+        )
+
+    # Variáveis historiadas (RF-308, ADR-041 D1/D5/D6): a linha de `tags` nasce aqui — nunca
+    # veio em `bundle.tags` (D1) — com a MESMA forma fixa da tag calculada (`ck_tags_owner`):
+    # `direction='r'`, `data_type='float'`, sem `node_id`. Mesma ordem "Tag antes do registro
+    # dependente" do bloco de tags calculadas acima: toda `Tag` primeiro, um `flush()`, só
+    # então `HistorizedVar` (FK em `tag.id`, já conhecido nesse ponto). Sem `problemas_grafo`
+    # acima (já teria abortado), `bundle.historized_vars[].flow` sempre resolve em
+    # `flows_novos` — a camada 3 já confirmou o nome contra `bundle.flows`.
+    if bundle.historized_vars:
+        await db.flush()  # ids dos flows novos, para o `flow_id` das variáveis historiadas
+    flows_por_nome = {f.name: f for f in flows_novos}
+    tags_historiadas: list[tuple[BundleHistorizedVar, Tag]] = []
+    for bhv in bundle.historized_vars:
+        tag = Tag(
+            project_id=project.id,
+            name=bhv.tag,
+            direction="r",
+            data_type="float",
+            eu=bhv.eu,
+        )
+        db.add(tag)
+        tags_historiadas.append((bhv, tag))
+    if tags_historiadas:
+        await db.flush()  # ids das tags historiadas, para o `tag_id` de HistorizedVar abaixo
+
+    for bhv, tag in tags_historiadas:
+        db.add(
+            HistorizedVar(
+                tag_id=tag.id,
+                flow_id=flows_por_nome[bhv.flow].id,
+                block_id=bhv.block_id,
+                port=bhv.port,
+            )
         )
 
     await db.commit()
@@ -575,6 +681,7 @@ async def import_project(
             "connections": len(bundle.connections),
             "tags": len(bundle.tags),
             "flows": len(flows_novos),
+            "historized_vars": len(bundle.historized_vars),
         },
     )
 

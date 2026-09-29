@@ -19,11 +19,11 @@ from worker_test_helpers import await_until, collecting
 
 from opcsim import NODE_SINE, NODE_STATIC, NODE_W_FLOAT, OpcSimServer, free_port
 from ottima_core.bus import channel_opc_values
+from ottima_core.signal import OpcQuality
 from ottima_opc_worker import heartbeat as heartbeat_module
 from ottima_opc_worker import polling
 from ottima_opc_worker.connection import ConnectionRuntime
 from ottima_opc_worker.heartbeat import ValueHeartbeat
-from ottima_opc_worker.polling import QUALITY_BAD, QUALITY_GOOD
 from ottima_opc_worker.state import (
     ConnectionConfig,
     ConnectionSnapshot,
@@ -146,13 +146,13 @@ async def test_tag_estatica_e_republicada_com_ts_novo(
         async with running(runtime):
             # Antes da sessão subir a tag não tem valor conhecido e a batida publica bad
             # (§2.2-6); a prova da republicação começa na primeira publicação boa.
-            await await_until(lambda: any(item["quality"] == QUALITY_GOOD for item in values))
-            inicio = next(i for i, item in enumerate(values) if item["quality"] == QUALITY_GOOD)
+            await await_until(lambda: any(item["quality"] == OpcQuality.GOOD for item in values))
+            inicio = next(i for i, item in enumerate(values) if item["quality"] == OpcQuality.GOOD)
             await await_until(lambda: len(of_tag(values[inicio:], TAG_STATIC.id)) >= 3)
 
     publicacoes = of_tag(values[inicio:], TAG_STATIC.id)
     assert [item["value"] for item in publicacoes] == [42.0] * len(publicacoes)
-    assert {item["quality"] for item in publicacoes} == {QUALITY_GOOD}
+    assert {item["quality"] for item in publicacoes} == {OpcQuality.GOOD}
     timestamps = [item["ts"] for item in publicacoes]
     assert timestamps == sorted(timestamps)
     assert len(set(timestamps)) == len(timestamps)
@@ -205,7 +205,7 @@ async def test_burst_bad_publica_na_hora_fora_da_janela(
 
     rajada = values[antes:]
     assert len(rajada) == 2
-    assert {item["quality"] for item in rajada} == {QUALITY_BAD}
+    assert {item["quality"] for item in rajada} == {OpcQuality.BAD}
     assert {item["tag_id"]: item["value"] for item in rajada} == ultimos
 
 
@@ -245,7 +245,7 @@ async def test_tag_de_escrita_ja_lida_entra_no_heartbeat_e_na_rajada(
     snapshot.last_values[TAG_WRITE.id] = TagSnapshot(
         ts=RELOGIO_PARA_TRAS,
         value=52.0,
-        quality=QUALITY_GOOD,
+        quality=OpcQuality.GOOD,
         published_at=RELOGIO_PARA_TRAS,
         published_monotonic=time.monotonic() - IDLE_INTERVAL_S,
     )
@@ -255,7 +255,7 @@ async def test_tag_de_escrita_ja_lida_entra_no_heartbeat_e_na_rajada(
         await await_until(lambda: bool(of_tag(values, TAG_WRITE.id)))
 
     rajada = of_tag(values, TAG_WRITE.id)
-    assert rajada[0]["quality"] == QUALITY_BAD
+    assert rajada[0]["quality"] == OpcQuality.BAD
     assert rajada[0]["value"] == 52.0
 
 
@@ -282,7 +282,7 @@ async def test_falha_republica_todas_as_tags_com_quality_bad(
             )
 
     depois = values[antes:]
-    assert {item["quality"] for item in depois} == {QUALITY_BAD}
+    assert {item["quality"] for item in depois} == {OpcQuality.BAD}
     assert {item["value"] for item in of_tag(depois, TAG_STATIC.id)} == {conhecidos[TAG_STATIC.id]}
     assert {item["value"] for item in of_tag(depois, TAG_SINE.id)} == {conhecidos[TAG_SINE.id]}
     assert conhecidos[TAG_STATIC.id] == 42.0
@@ -300,7 +300,7 @@ async def test_conexao_que_nunca_subiu_publica_zero_com_quality_bad(redis_client
             await await_until(lambda: all(of_tag(values, tag.id) for tag in (TAG_STATIC, TAG_SINE)))
 
     assert {item["value"] for item in values} == {0.0}
-    assert {item["quality"] for item in values} == {QUALITY_BAD}
+    assert {item["quality"] for item in values} == {OpcQuality.BAD}
     assert runtime.state is ConnectionState.FAILED
 
 

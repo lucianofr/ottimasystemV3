@@ -27,8 +27,9 @@ from ottima_core.bus import (
     publish_event,
 )
 from ottima_core.script_pool import ScriptPool, ScriptResult
+from ottima_core.signal import Quality
 
-from .base import Block, PortSample, has_cold_input, null_outputs
+from .base import Block, Signal, has_cold_input, null_outputs
 
 
 class ScriptBlock(Block):
@@ -76,8 +77,8 @@ class ScriptBlock(Block):
         return self._output_ports
 
     async def step(
-        self, inputs: Mapping[str, PortSample], *, ts: datetime | None = None
-    ) -> dict[str, PortSample]:
+        self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
+    ) -> dict[str, Signal]:
         if has_cold_input(inputs):
             return null_outputs(self._output_ports)
 
@@ -95,10 +96,10 @@ class ScriptBlock(Block):
             await self._report_failure(result)
             return dict(self._last_outputs)
 
-        ok = all(sample.ok for sample in inputs.values())  # decisão A-6
+        q = min((s.quality for s in inputs.values()), default=Quality.GOOD)  # decisão A-6
         self._state = result.state
         self._last_outputs = {
-            port: PortSample(result.outputs[port], ok) for port in self._output_ports
+            port: Signal(result.outputs[port], quality=q) for port in self._output_ports
         }
         houve_falha_latchada = self._reported_kind is not None
         self._reported_kind = None
