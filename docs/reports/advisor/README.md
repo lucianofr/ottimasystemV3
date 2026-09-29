@@ -10,6 +10,22 @@ coisa. Estes são planos de conserto pontual, não de fase.
 
 ---
 
+# Rodada de 2026-09-28 — incidente com o stack no ar
+
+Um plano, derivado de um **incidente real** (não de auditoria): o dono desenhou um bloco `fuzzy` no
+flow `ctrl-fuzzy-prime` e o `PUT /api/flows/{id}` foi recusado por 422 — as contagens de
+entrada/saída do modal divergiam das variáveis declaradas no FLL. O canvas continuou mostrando o
+bloco, o banco ficou com o grafo antigo (`fuzzy_loop`) e a página FUZZY não listava nada. Todo o
+`file:line` do plano foi conferido no código vivo e a evidência (nó ausente em todos os flows do
+banco, 422 do save) veio do stack do dono, com autorização dele. O [012](012-operacao-loop-na-navegacao.md)
+desta rodada anterior foi implementado no mesmo dia (Passos 1-3; Passo 4 pendente do revisor).
+
+| Plano | Título | Prioridade | Esforço | Depende de | Status |
+|---|---|---|---|---|---|
+| [020](020-contagens-fuzzy-vs-fll.md) | Contagens de porta do bloco Fuzzy param de divergir do FLL em silêncio | **P1** | S (opção B) / M (opção A) | decisão do dono (opção A/B) | TODO (Gate: opção A exige emenda de RF-541/ADR-029) |
+
+---
+
 # Rodada de 2026-09-19 — commit `37b0caa`, branch `main`
 
 179 commits e +43k linhas depois da rodada anterior. Nove auditores paralelos (corretude do
