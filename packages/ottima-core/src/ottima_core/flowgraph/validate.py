@@ -285,10 +285,11 @@ def _check_tags(nodes: list[FlowNode], tags: Mapping[int, TagRef], errors: list[
                 f"nó '{node.id}' ({node.type}): a tag {node.config.tag_id} não existe ou não "
                 "pertence ao projeto do flow"
             )
-        elif tag.direction != expected:
+        elif tag.direction not in expected:
+            esperadas = " ou ".join(f"'{d}'" for d in expected)
             errors.append(
                 f"nó '{node.id}' ({node.type}): a tag {tag.id} tem direção '{tag.direction}'; "
-                f"este bloco exige direção '{expected}'"
+                f"este bloco exige direção {esperadas}"
             )
 
 

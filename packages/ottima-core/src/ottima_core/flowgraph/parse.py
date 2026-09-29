@@ -174,7 +174,9 @@ _PARAM_KEYS: dict[str, tuple[str, ...]] = {
     "iopdt": ("Ki", "theta"),
 }
 _GAIN_KEYS = frozenset({"K", "Ki"})  # únicos params que podem ser negativos
-_TAG_DIRECTION: dict[str, str] = {"opc_read": "r", "opc_write": "w"}
+# `opc_read` aceita tag `w` (readback: o último valor escrito, ex.: lógica de incremento
+# sobre a MV) — o opc-worker já publica a série das tags `w` legíveis (CurrentRead).
+_TAG_DIRECTION: dict[str, tuple[str, ...]] = {"opc_read": ("r", "w"), "opc_write": ("w",)}
 
 
 # --------------------------------------------------------------------------------------

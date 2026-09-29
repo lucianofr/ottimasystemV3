@@ -36,6 +36,7 @@ import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
 import { CamposHistoriar } from "./CamposHistoriar";
 import { CamposBusKey, CamposConstant, CamposIntegrator, CamposScaler } from "./CamposUtilitarios";
 import { CamposTfs } from "./CamposTfs";
+import { sufixoDirecao, tagsDoSeletor } from "./tagsDoSeletor";
 
 const OPCOES_PORTAS = Array.from({ length: MAX_PORTAS_SCRIPT + 1 }, (_, i) => i);
 const OPCOES_PORTAS_FUZZY = Array.from({ length: MAX_PORTAS_FUZZY }, (_, i) => i + 1);
@@ -49,8 +50,9 @@ function CamposTag({
   direcao: "r" | "w";
   tags: readonly TagOut[];
 }) {
-  // Seletor filtrado por direção e pelo projeto ativo (a lista já chega recortada por projeto).
-  const disponiveis = tags.filter((tag) => tag.direction === direcao);
+  // Seletor por direção e pelo projeto ativo (a lista já chega recortada por projeto);
+  // leitura também oferece tags de escrita (readback — `tagsDoSeletor`).
+  const disponiveis = tagsDoSeletor(tags, direcao);
   return (
     <div className="space-y-1">
       <Label htmlFor="tag_id">Tag</Label>
@@ -60,12 +62,15 @@ function CamposTag({
           <option key={tag.id} value={tag.id}>
             {tag.name} · {ROTULO_TIPO[tag.data_type]}
             {tag.eu ? ` · ${tag.eu}` : ""}
+            {sufixoDirecao(tag, direcao)}
           </option>
         ))}
       </Select>
       {disponiveis.length === 0 && (
         <p className="text-xs text-warn-fg">
-          Nenhuma tag de {direcao === "r" ? "leitura" : "escrita"} cadastrada no projeto ativo.
+          {direcao === "r"
+            ? "Nenhuma tag cadastrada no projeto ativo."
+            : "Nenhuma tag de escrita cadastrada no projeto ativo."}
         </p>
       )}
     </div>
