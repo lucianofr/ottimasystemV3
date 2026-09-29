@@ -128,3 +128,78 @@ def test_introspecao_rotula_a_ultima_entrada_como_sp():
 def test_setpoint_nao_finito_e_recusado_na_config():
     with pytest.raises(ValidationError):
         FuzzyConfig(fll=UM_IN_FLL, n_inputs=1, n_outputs=1, setpoint=float("nan"))
+
+
+# --------------------------------------------------------- fonte do SP: operador x entrada
+
+
+def _grafo_fonte(fll: str, *, setpoint=None, sp_source=None, fio_sp: bool = False) -> dict:
+    dados: dict = {"exec_order": 2, "fll": fll, "n_inputs": 1, "n_outputs": 1}
+    if setpoint is not None:
+        dados["setpoint"] = setpoint
+    if sp_source is not None:
+        dados["sp_source"] = sp_source
+    nos = [
+        {"id": "r1", "type": "opc_read", "position": {"x": 0, "y": 0},
+         "data": {"exec_order": 1, "tag_id": 1}},
+        {"id": "fz1", "type": "fuzzy", "position": {"x": 0, "y": 0}, "data": dados},
+    ]
+    arestas = [
+        {"id": "e1", "source": "r1", "sourceHandle": "out", "target": "fz1",
+         "targetHandle": "IN1"}
+    ]
+    if fio_sp:
+        nos.append(
+            {"id": "r2", "type": "opc_read", "position": {"x": 0, "y": 0},
+             "data": {"exec_order": 3, "tag_id": 2}}
+        )
+        arestas.append(
+            {"id": "e2", "source": "r2", "sourceHandle": "out", "target": "fz1",
+             "targetHandle": "sp"}
+        )
+    return {"nodes": nos, "edges": arestas}
+
+
+TAGS_COM_SP = {
+    1: TagRef(id=1, conn_id=1, direction="r", data_type="float"),
+    2: TagRef(id=2, conn_id=1, direction="r", data_type="float"),
+}
+
+
+def erros_fonte(graf: dict) -> list[str]:
+    return validate_graph(parse_graph(graf), TAGS_COM_SP, 1.0).errors
+
+
+def test_sp_pela_entrada_exige_o_fio_e_casa_a_contagem():
+    assert erros_fonte(_grafo_fonte(SP_FLL, sp_source="entrada", fio_sp=True)) == []
+
+
+def test_sp_pela_entrada_sem_o_fio_e_erro_de_entrada_obrigatoria():
+    mensagens = erros_fonte(_grafo_fonte(SP_FLL, sp_source="entrada"))
+    assert any("entrada 'sp' é obrigatória" in m for m in mensagens)
+
+
+def test_fio_sp_sem_a_fonte_entrada_e_porta_inexistente():
+    mensagens = erros_fonte(_grafo_fonte(SP_FLL, setpoint=50.0, fio_sp=True))
+    assert any("'sp' não é uma entrada" in m for m in mensagens)
+
+
+def test_fonte_entrada_com_setpoint_e_recusada_no_parse():
+    from ottima_core.flowgraph import GraphParseError
+
+    with pytest.raises(GraphParseError, match="setpoint"):
+        parse_graph(_grafo_fonte(SP_FLL, setpoint=50.0, sp_source="entrada", fio_sp=True))
+
+
+def test_fonte_operador_sem_setpoint_e_recusada_no_parse():
+    from ottima_core.flowgraph import GraphParseError
+
+    with pytest.raises(GraphParseError, match="setpoint"):
+        parse_graph(_grafo_fonte(SP_FLL, sp_source="operador", fio_sp=True))
+
+
+def test_sp_source_fora_do_vocabulario_e_recusado():
+    from ottima_core.flowgraph import GraphParseError
+
+    with pytest.raises(GraphParseError):
+        parse_graph(_grafo_fonte(SP_FLL, sp_source="wifi", fio_sp=True))

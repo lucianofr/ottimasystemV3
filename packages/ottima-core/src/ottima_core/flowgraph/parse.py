@@ -64,7 +64,7 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
     "opc_write": ("tag_id",),
     "constant": ("value",),
     "script": ("n_inputs", "n_outputs", "code", "output_eu"),
-    "fuzzy": ("fll", "n_inputs", "n_outputs", "output_eu", "setpoint"),
+    "fuzzy": ("fll", "n_inputs", "n_outputs", "output_eu", "setpoint", "sp_source"),
     "tfs": ("matrix", "output_eu", "y0"),
     # `economics` é opcional (ADR-027 §9): `_parse_mpc_config` só repassa as chaves
     # presentes, então config salva antes do SSTO continua parseando.
@@ -233,12 +233,23 @@ class FuzzyConfig(BaseModel):
     n_inputs: int = Field(ge=1, le=MAX_SCRIPT_PORTS)
     n_outputs: int = Field(ge=1, le=MAX_SCRIPT_PORTS)
     output_eu: dict[str, str] = Field(default_factory=dict)
-    #: SP do operador (opcional). Definido, habilita a rota de SP do bloco e o FLL passa a
-    #: declarar UMA variável de entrada a mais, a última, que recebe este valor — é o que
-    #: permite uma lei de controle com erro nulo sem ação integral (modelo inverso como
-    #: feedforward + trim do erro). Ausente (`None`) é o bloco de sempre: portas mapeadas
-    #: verbatim às variáveis do FLL.
+    #: SP do bloco (RF-541 revisado, PRD 3.1): habilitado, o FLL declara UMA variável de
+    #: entrada a mais, a última, que recebe o SP — e é ela que fecha a lei de controle com
+    #: erro nulo sem ação integral (modelo inverso + trim). A FONTE do SP é `sp_source`:
+    #: `"operador"` (comando `fuzzy_sp` da página FUZZY, semente neste `setpoint`) ou
+    #: `"entrada"` (porta `sp` do bloco, fio vindo ex.: de um `opc_read`). Sem SP (`None`
+    #: nos dois), é o bloco de sempre: portas mapeadas verbatim às variáveis do FLL.
     setpoint: float | None = None
+    sp_source: Literal["operador", "entrada"] | None = None
+
+    @property
+    def sp_ativo(self) -> bool:
+        """SP habilitado por qualquer das duas fontes (a contagem do FLL depende disso)."""
+        return self.sp_source == "entrada" or self.setpoint is not None
+
+    @property
+    def sp_da_entrada(self) -> bool:
+        return self.sp_source == "entrada"
 
     @model_validator(mode="after")
     def _valida_output_eu(self) -> "FuzzyConfig":
@@ -251,6 +262,20 @@ class FuzzyConfig(BaseModel):
             raise ValueError(
                 f"'output_eu' referencia porta(s) inexistente(s) para n_outputs="
                 f"{self.n_outputs}: {', '.join(invalidas)}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _valida_fonte_do_sp(self) -> "FuzzyConfig":
+        """Fonte e semente coerentes: `entrada` não carrega semente do operador; `operador`
+        exige a semente (é ela que arma a barra da página e o primeiro scan)."""
+        if self.sp_source == "entrada" and self.setpoint is not None:
+            raise ValueError(
+                "com sp_source='entrada' o setpoint deve ficar vazio: o SP vem da porta 'sp'"
+            )
+        if self.sp_source == "operador" and self.setpoint is None:
+            raise ValueError(
+                "sp_source='operador' exige o setpoint inicial (é a semente do SP do operador)"
             )
         return self
 
@@ -1053,6 +1078,15 @@ def _parse_fuzzy_config(where: str, data: dict, errors: list[str]) -> FuzzyConfi
     ):
         errors.append(f"{where}: 'setpoint' deve ser um número finito ou ausente/null")
         return None
+    # `sp_source` ausente/null = sem SP ou legado (setpoint cheio implica operador). Valor
+    # fora do vocabulário é erro nomeado aqui; a coerência fonte×semente é do model_validator.
+    sp_source = data.get("sp_source")
+    if sp_source is not None and sp_source not in ("operador", "entrada"):
+        errors.append(
+            f"{where}: 'sp_source' deve ser 'operador', 'entrada' ou ausente/null "
+            f"(recebeu {sp_source!r})"
+        )
+        return None
     if len(counts) != 2 or output_eu is None:
         return None
     try:
@@ -1062,6 +1096,7 @@ def _parse_fuzzy_config(where: str, data: dict, errors: list[str]) -> FuzzyConfi
             n_outputs=counts["n_outputs"],
             output_eu=output_eu,
             setpoint=None if setpoint is None else float(setpoint),
+            sp_source=sp_source,
         )
     except ValidationError as erro:
         errors.append(f"{where}: {erro.errors()[0]['ctx']['error']}")
