@@ -161,6 +161,12 @@ E2E_ADMIN_USERNAME=$(grep -m1 '^OTTIMA_ADMIN_USERNAME=' deploy/.env|cut -d= -f2-
 # data-testid: operate-*, faceplate-*, fuzzy-*, eventos-*, home-* (o roteiro L3 depende deles).
 # Ambiente do L3: `uv run python scripts/setup-l3.py` (idempotente) cria projeto ativo,
 # conexão opcsim-l3, flow MPC↔TFS deployado e o usuário operador_e2e.
+# Demo MIMO da malha fuzzy (v2 multicanal): `E2E_BASE_URL=... uv run python scripts/setup-malha-fuzzy.py`
+# (idempotente) cria o projeto "Fuzzy MIMO (malha)", sobe o opcsim standalone se preciso e
+# deploya o flow `malha-fuzzy-mimo`: TFS 2x2 acoplada (ganho cruzado 0.4) controlada por UM
+# `fuzzy_loop` de `n_loops=2` com o FLL autoral `scripts/fll/malha-mimo-2x2.fll` (regras de
+# desacoplamento); a malha fecha pelo OPC (par w/espelho float2 do opcsim), nunca por aresta
+# de volta no grafo (RF-302). Página MALHA: /operacao/loop?flow=<id>&bloco=fm.
 cd frontend && npm run e2e                          # regressão Playwright da F1 (specs novas não)
 # A L2 e o Playwright NÃO podem rodar juntos: o E2E-16 publica project_activated duas vezes e
 # derruba os cenários E2E-F3-03/04/08. Serialize.

@@ -1,0 +1,83 @@
+Engine: malha_mimo_2x2
+InputVariable: e1
+  enabled: true
+  range: -1.000 1.000
+  lock-range: true
+  term: NG Triangle -1.000 -1.000 -0.500
+  term: NP Triangle -1.000 -0.500 0.000
+  term: ZE Triangle -0.500 0.000 0.500
+  term: PP Triangle 0.000 0.500 1.000
+  term: PG Triangle 0.500 1.000 1.000
+InputVariable: de1
+  enabled: true
+  range: -1.000 1.000
+  lock-range: true
+  term: N Triangle -1.000 -1.000 0.000
+  term: ZE Triangle -1.000 0.000 1.000
+  term: P Triangle 0.000 1.000 1.000
+InputVariable: e2
+  enabled: true
+  range: -1.000 1.000
+  lock-range: true
+  term: NG Triangle -1.000 -1.000 -0.500
+  term: NP Triangle -1.000 -0.500 0.000
+  term: ZE Triangle -0.500 0.000 0.500
+  term: PP Triangle 0.000 0.500 1.000
+  term: PG Triangle 0.500 1.000 1.000
+InputVariable: de2
+  enabled: true
+  range: -1.000 1.000
+  lock-range: true
+  term: N Triangle -1.000 -1.000 0.000
+  term: ZE Triangle -1.000 0.000 1.000
+  term: P Triangle 0.000 1.000 1.000
+OutputVariable: du1
+  enabled: true
+  range: -1.000 1.000
+  lock-range: true
+  aggregation: none
+  defuzzifier: WeightedAverage
+  default: nan
+  lock-previous: false
+  term: NG Constant -1.000
+  term: NP Constant -0.500
+  term: ZE Constant 0.000
+  term: PP Constant 0.500
+  term: PG Constant 1.000
+OutputVariable: du2
+  enabled: true
+  range: -1.000 1.000
+  lock-range: true
+  aggregation: none
+  defuzzifier: WeightedAverage
+  default: nan
+  lock-previous: false
+  term: NG Constant -1.000
+  term: NP Constant -0.500
+  term: ZE Constant 0.000
+  term: PP Constant 0.500
+  term: PG Constant 1.000
+RuleBlock: regras
+  enabled: true
+  conjunction: AlgebraicProduct
+  disjunction: Maximum
+  implication: AlgebraicProduct
+  activation: General
+  rule: if e1 is NG then du1 is NG
+  rule: if e1 is NP then du1 is NP
+  rule: if e1 is ZE and de1 is N then du1 is NP
+  rule: if e1 is ZE and de1 is ZE then du1 is ZE
+  rule: if e1 is ZE and de1 is P then du1 is PP
+  rule: if e1 is PP then du1 is PP
+  rule: if e1 is PG then du1 is PG
+  rule: if e2 is PG and de2 is P then du1 is NP
+  rule: if e2 is NG and de2 is N then du1 is PP
+  rule: if e2 is NG then du2 is NG
+  rule: if e2 is NP then du2 is NP
+  rule: if e2 is ZE and de2 is N then du2 is NP
+  rule: if e2 is ZE and de2 is ZE then du2 is ZE
+  rule: if e2 is ZE and de2 is P then du2 is PP
+  rule: if e2 is PP then du2 is PP
+  rule: if e2 is PG then du2 is PG
+  rule: if e1 is PG and de1 is P then du2 is NP
+  rule: if e1 is NG and de1 is N then du2 is PP
