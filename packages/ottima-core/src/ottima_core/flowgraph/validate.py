@@ -125,8 +125,11 @@ def _output_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[
         return mv_ids + MPC_FIXED_OUTPUT_PORTS
     if node.type == "pid":
         return ("out",)
-    if node.type in LOOP_TYPES:
+    if node.type == "pid_loop":
         return ("out", "bkcal_out")
+    if node.type == "fuzzy_loop":
+        # v2 multicanal: uma saida por canal de controle (SPEC_FUZZY §3.2 v2).
+        return tuple(f"out_{i}" for i in range(1, node.config.n_loops + 1))
     if node.type in _FILTER_TYPES:
         return ("out",)
     return ()
@@ -156,7 +159,7 @@ def _input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[s
         )
     if node.type == "pid":
         return ("pv", "sp")
-    if node.type in LOOP_TYPES:
+    if node.type == "pid_loop":
         return (
             "in",
             "cas_in",
@@ -167,6 +170,10 @@ def _input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[s
             "trk_in_d",
             "lo_in_d",
         )
+    if node.type == "fuzzy_loop":
+        # v2 multicanal: um PV por canal; sem portas remotas/cascata (config restringe
+        # permitted a oos/man/auto).
+        return tuple(f"pv_{i}" for i in range(1, node.config.n_loops + 1))
     if node.type in _FILTER_TYPES:
         return ("in",)
     return ()
@@ -429,7 +436,7 @@ def _valida_fuzzy_loop(node: FlowNode, errors: list[str]) -> None:
         errors.append(f"{where}: FLL inválido — {erro}")
         return
 
-    violacoes = validate_fll_contract(engine)
+    violacoes = validate_fll_contract(engine, n_loops=node.config.n_loops)
     for codigo in violacoes:
         errors.append(f"{where}: contrato FLL violado — {codigo}")
 
@@ -441,14 +448,23 @@ def _valida_fuzzy_loop(node: FlowNode, errors: list[str]) -> None:
 
     # Portões de superfície (SPEC_FUZZY §5.3): só fazem sentido sobre um FLL que já satisfaz
     # o contrato e monta pronto — fora disso `sample_surface` levantaria, e o erro útil (o
-    # código do contrato) já está na lista acima.
+    # código do contrato) já está na lista acima. Um canal por vez, com os demais no ponto
+    # de operação zero (fatia 2D inspectável).
     if not violacoes and pronto:
         from ottima_core.flowgraph.fuzzy_surface import sample_surface
         from ottima_core.flowgraph.lut_gates import run_lut_gates
 
-        grade = sample_surface(node.config.fll, resolution=node.config.lut_resolution)
-        for codigo in run_lut_gates(grade, direct_acting=node.config.direct_acting):
-            errors.append(f"{where}: portão de superfície reprovado — {codigo}")
+        for canal in range(node.config.n_loops):
+            grade = sample_surface(
+                node.config.fll,
+                resolution=node.config.lut_resolution,
+                n_loops=node.config.n_loops,
+                channel=canal,
+            )
+            for codigo in run_lut_gates(grade, direct_acting=node.config.direct_acting):
+                errors.append(
+                    f"{where}: portão de superfície reprovado no canal {canal + 1} — {codigo}"
+                )
 
     # Mesmo teto FUZZY-SEC-01 do bloco `fuzzy`: defuzzificador integral sem limite de
     # resolução trava o event loop do flow-runtime a cada varredura.
@@ -467,6 +483,7 @@ def _valida_fuzzy_loop(node: FlowNode, errors: list[str]) -> None:
 
 LOOP_TYPES: frozenset[str] = frozenset({"pid_loop", "fuzzy_loop"})
 _LOOP_REMOTE_PORT = {"cas": "cas_in", "rcas": "rcas_in", "rout": "rout_in"}
+_LOOP_REMOTE_TYPES: frozenset[str] = frozenset({"pid_loop"})
 
 
 def _check_loop_nodes(nodes: list[FlowNode], edges: list[FlowEdge], errors: list[str]) -> None:
@@ -475,7 +492,7 @@ def _check_loop_nodes(nodes: list[FlowNode], edges: list[FlowEdge], errors: list
     for edge in edges:
         ligadas.setdefault(edge.target, set()).add(edge.target_handle)
     for node in nodes:
-        if node.type not in LOOP_TYPES:
+        if node.type not in _LOOP_REMOTE_TYPES:
             continue
         conectadas = ligadas.get(node.id, set())
         for modo, porta in _LOOP_REMOTE_PORT.items():
@@ -602,9 +619,12 @@ def _required_input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -
     if node.type == "pid":
         # RF-552: só `pv` é obrigatória — `sp` é opcional (ausente, `config.setpoint` supre).
         return ("pv",)
-    if node.type in LOOP_TYPES:
+    if node.type == "pid_loop":
         # Malha (ADR-039): so a PV e obrigatoria; o resto e por modo/opcao.
         return ("in",)
+    if node.type == "fuzzy_loop":
+        # v2 multicanal: todo canal precisa do seu PV — canal sem PV nao tem o que controlar.
+        return tuple(f"pv_{i}" for i in range(1, node.config.n_loops + 1))
     # 'in' do Write, IN1..INn do Script e uma por CV/Restrição/DV do MPC (decisão A-10) são
     # sempre obrigatórias (RF-302).
     return _input_handles(node, mpc_configs)

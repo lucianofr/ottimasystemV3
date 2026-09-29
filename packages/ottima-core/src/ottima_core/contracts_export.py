@@ -57,7 +57,11 @@ from ottima_core.flowgraph import (
     ScriptConfig,
     SopdtParams,
 )
-from ottima_core.flowgraph.fll_defaults import FUZZY_LOOP_DEFAULT_FLL
+from ottima_core.flowgraph.fll_defaults import (
+    FUZZY_LOOP_DEFAULT_FLL,
+    MAX_FUZZY_LOOPS,
+    fuzzy_loop_default_fll,
+)
 from ottima_core.flowgraph.parse import MAX_FUZZY_FLL_LENGTH
 
 __all__ = ["FUZZY_LOOP_DEFAULT_FLL"]  # reexport do modulo folha (SPEC_FUZZY secao 3.2)
@@ -253,23 +257,34 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
             {"name": "bkcal_out", "direction": "output", "type": "num"},
         ],
     },
-    # Mesmo shell do `pid_loop` (ADR-039): as portas sao identicas por construcao — o
-    # teste `test_contrato_de_portas_espelha_o_pid_loop` trava a igualdade.
+    # Fuzzy Malha v2 (redesenho MIMO): portas DINAMICAS por canal — `pv_1..pv_n` (entrada)
+    # e `out_1..out_n` (saida), n = `config.n_loops`; sem portas remotas/cascata (a config
+    # restringe permitted a oos/man/auto). `default_fll_mimo` da ao editor a base padrao
+    # gerada para cada contagem — fonte unica, o frontend nunca compoe texto FLL.
     "fuzzy_loop": {
-        "dynamic": False,
-        "ports": [
-            {"name": "in", "direction": "input", "type": "num"},
-            {"name": "cas_in", "direction": "input", "type": "num"},
-            {"name": "rcas_in", "direction": "input", "type": "num"},
-            {"name": "rout_in", "direction": "input", "type": "num"},
-            {"name": "bkcal_in", "direction": "input", "type": "num"},
-            {"name": "bias_in", "direction": "input", "type": "num"},
-            {"name": "trk_in_d", "direction": "input", "type": "num"},
-            {"name": "lo_in_d", "direction": "input", "type": "num"},
-            {"name": "out", "direction": "output", "type": "num"},
-            {"name": "bkcal_out", "direction": "output", "type": "num"},
+        "dynamic": True,
+        "source": "config.n_loops (SPEC_FUZZY v2): entradas pv_1..pv_n / saidas out_1..out_n",
+        "rules": [
+            {
+                "direction": "input",
+                "prefix": "pv_",
+                "count_field": "n_loops",
+                "max": MAX_FUZZY_LOOPS,
+                "type": "num",
+            },
+            {
+                "direction": "output",
+                "prefix": "out_",
+                "count_field": "n_loops",
+                "max": MAX_FUZZY_LOOPS,
+                "type": "num",
+            },
         ],
         "default_fll": FUZZY_LOOP_DEFAULT_FLL,
+        "default_fll_mimo": {
+            str(n): fuzzy_loop_default_fll(n) for n in range(2, MAX_FUZZY_LOOPS + 1)
+        },
+        "default_counts": {"n_loops": 1},
         "max_fll_length": MAX_FUZZY_FLL_LENGTH,
     },
 }

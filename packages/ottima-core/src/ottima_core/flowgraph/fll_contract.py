@@ -1,8 +1,15 @@
-"""Contrato do .fll de um bloco fuzzy_loop (SPEC_FUZZY secao 3.2).
+"""Contrato do .fll de um bloco fuzzy_loop (SPEC_FUZZY secao 3.2, v2 multicanal).
 
 Compartilhado entre a validacao de save (`validate.py`, com import lazy de fuzzylite) e o
 kernel em runtime — a MESMA funcao nas duas camadas do ADR-029, para que um FLL aceito no
 save nunca surpreenda no deploy.
+
+v2 (redesenho MIMO): o bloco tem `n_loops` canais de controle; o FLL declara exatamente
+`2*n_loops` entradas e `n_loops` saidas, MAPEADAS POSICIONALMENTE (mesma filosofia do
+bloco `fuzzy`, ADR-029): a entrada `2i` e o erro normalizado `e_n` do canal `i+1`, a
+entrada `2i+1` e a derivada filtrada `de_n` do mesmo canal, e a saida `i` e a taxa `du_n`
+do canal. Os NOMES das variaveis sao livres — o contrato trava contagem, faixa e forma,
+porque o kernel escala tudo para o universo normalizado [-1,1] e le as saidas em ordem.
 
 `engine` e tipado como `Any` de proposito: este modulo nao importa fuzzylite. Quem chama ja
 pagou o import (o validador, dentro da funcao; o kernel, no topo do proprio modulo), e
@@ -18,8 +25,8 @@ import math
 from typing import Any
 
 CODIGOS = (
-    "FLL_INPUTS_MUST_BE_E_DE",
-    "FLL_OUTPUT_MUST_BE_DU",
+    "FLL_INPUT_COUNT_MUST_BE_2N_LOOPS",
+    "FLL_OUTPUT_COUNT_MUST_BE_N_LOOPS",
     "FLL_RANGE_MUST_BE_UNIT",
     "FLL_LOCK_RANGE_REQUIRED",
     "FLL_LOCK_PREVIOUS_FORBIDDEN",
@@ -29,7 +36,7 @@ CODIGOS = (
 """Vocabulario fechado de violacoes — a API formata cada codigo em pt-BR (SPEC secao 3.2)."""
 
 
-def validate_fll_contract(engine: Any) -> list[str]:
+def validate_fll_contract(engine: Any, n_loops: int = 1) -> list[str]:
     """Lista de codigos de violacao do contrato; vazia significa FLL aceito.
 
     Acumula TODAS as violacoes em vez de parar na primeira: quem cola um .fll do bloco
@@ -40,10 +47,10 @@ def validate_fll_contract(engine: Any) -> list[str]:
     entradas = list(engine.input_variables)
     saidas = list(engine.output_variables)
 
-    if [var.name for var in entradas] != ["e", "de"]:
-        erros.append("FLL_INPUTS_MUST_BE_E_DE")
-    if [var.name for var in saidas] != ["du"]:
-        erros.append("FLL_OUTPUT_MUST_BE_DU")
+    if len(entradas) != 2 * n_loops:
+        erros.append("FLL_INPUT_COUNT_MUST_BE_2N_LOOPS")
+    if len(saidas) != n_loops:
+        erros.append("FLL_OUTPUT_COUNT_MUST_BE_N_LOOPS")
 
     variaveis = [*entradas, *saidas]
     if any(

@@ -214,7 +214,12 @@ class FuzzyState(BaseModel):
 class LoopState(BaseModel):
     """Publicado em `loop.state.<flow_id>.<block_id>` apos cada varredura do shell
     (ADR-039 §4.10), com throttle na origem — anima o faceplate da malha e alimenta o
-    recorder. `out` ja sai escalado por OUT_SCALE (EU); `u_pct` e o % interno."""
+    recorder. `out` ja sai escalado por OUT_SCALE (EU); `u_pct` e o % interno.
+
+    `channel`: indice do canal de controle (0-based). Blocos SISO (`pid_loop`,
+    `fuzzy_loop` com n_loops=1) publicam sempre channel=0; um `fuzzy_loop` multicanal
+    publica UMA mensagem por canal no mesmo canal Redis — o consumidor demultiplexa por
+    este campo. Default 0 mantém o payload retrocompatível."""
 
     ts: datetime
     target: str  # nomes de MODE_NAMES: "oos"|"iman"|"lo"|"man"|"auto"|"cas"|"rcas"|"rout"
@@ -229,6 +234,7 @@ class LoopState(BaseModel):
     hi_limited: bool
     lo_limited: bool
     diag: dict[str, float] = {}
+    channel: int = 0
 
 
 class EventMessage(BaseModel):

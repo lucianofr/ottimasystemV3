@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from ottima_core.flowgraph.fll_defaults import FUZZY_LOOP_DEFAULT_FLL
+from ottima_core.flowgraph.fll_defaults import FUZZY_LOOP_DEFAULT_FLL, MAX_FUZZY_LOOPS
 
 NodeType = Literal[
     "opc_read",
@@ -133,6 +133,7 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
         "ff_scale_hi",
         "ff_gain",
         "ff_enable",
+        "n_loops",
         "ke",
         "kde",
         "ku",
@@ -378,13 +379,20 @@ class PidLoopConfig(LoopBaseConfig):
 
 
 class FuzzyLoopConfig(LoopBaseConfig):
-    """Fuzzy Malha (SPEC_FUZZY secao 6.2): ganhos do kernel + base de regras em texto.
+    """Fuzzy Malha multicanal (SPEC_FUZZY secao 6.2, v2 MIMO): `n_loops` canais de controle
+    compartilham UMA base de regras FLL e os ganhos do kernel; cada canal tem seu PV
+    (porta `pv_i`), seu SP (faceplate) e sua saida (porta `out_i`).
 
-    `ke`/`kde`/`ku`/`tf_de` sao classe de SINTONIA (hot-swap in-place, F10); `fll` esta em
-    `LOOP_STRUCTURAL_KEYS` e portanto re-instancia o bloco (F11). `lut_resolution` tem teto
-    de servidor (FUZZY-SEC): 257 pontos por eixo sao 66k avaliacoes por save.
+    `ke`/`kde`/`ku`/`tf_de` sao classe de SINTONIA (hot-swap in-place, F10); `fll` e
+    `n_loops` estao em `LOOP_STRUCTURAL_KEYS` e portanto re-instanciam o bloco (F11).
+    `lut_resolution` tem teto de servidor (FUZZY-SEC): 257 pontos por eixo sao 66k
+    avaliacoes por save — POR CANAL.
+
+    Modos remotos/cascata (cas/rcas/rout/iman/lo) nao existem no v2: as portas do bloco
+    sao `pv_1..pv_n`/`out_1..out_n` e o modo e resolvido por bloco, nao por canal.
     """
 
+    n_loops: int = Field(default=1, ge=1, le=MAX_FUZZY_LOOPS)
     ke: float = Field(gt=0)  # 1/EU; 1/ke e a faixa de erro coberta sem saturar
     kde: float = Field(default=0.0, ge=0)  # s/EU; 0 desliga a acao derivativa
     ku: float = Field(gt=0)  # %span/s; sentido SO via direct_acting
@@ -393,8 +401,25 @@ class FuzzyLoopConfig(LoopBaseConfig):
     lut_enabled: bool = False
     lut_resolution: int = Field(default=65, ge=33, le=257)
 
+    @model_validator(mode="after")
+    def _modos_sem_cascata(self) -> "FuzzyLoopConfig":
+        """`permitted` restrito a {oos, man, auto}: sem portas cas_in/rcas_in/rout_in/
+        bkcal_in/lo_in_d no v2, um modo remoto em permitted seria inalcançavel na melhor
+        hipotese e um erro de save confuso na pior (`_check_loop_nodes` exige a porta)."""
+        invalidos = sorted(set(self.permitted) - {"oos", "man", "auto"})
+        if invalidos:
+            raise ValueError(
+                "fuzzy_loop aceita apenas os modos oos/man/auto em permitted "
+                f"(sem cascata no v2): {', '.join(invalidos)}"
+            )
+        if self.normal not in {"man", "auto"}:
+            raise ValueError("normal precisa ser man ou auto no fuzzy_loop")
+        return self
 
-LOOP_STRUCTURAL_KEYS: frozenset[str] = frozenset({"type", "fll", "out_scale_lo", "out_scale_hi"})
+
+LOOP_STRUCTURAL_KEYS: frozenset[str] = frozenset(
+    {"type", "fll", "n_loops", "out_scale_lo", "out_scale_hi"}
+)
 
 
 def loop_structural(functional: dict[str, Any]) -> dict[str, Any]:
