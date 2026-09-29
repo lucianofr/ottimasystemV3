@@ -323,9 +323,7 @@ async def test_setpoint_exige_a_variavel_extra_do_sp_no_fll(client, admin_header
         ],
         "edges": [_aresta("r1", "out", "fz1", "IN1", "e1")],
     }
-    r = await client.put(
-        f"/api/flows/{flow_id}", json={"graph_json": graph}, headers=admin_headers
-    )
+    r = await client.put(f"/api/flows/{flow_id}", json={"graph_json": graph}, headers=admin_headers)
     assert r.status_code == 422
     assert "SP do operador" in r.json()["detail"]
 
@@ -339,9 +337,7 @@ async def test_setpoint_projeta_porta_sp_e_rota_sp_publica_comando(
 
     flow_id, _tag_id, r = await _cenario_sp(client, admin_headers, "FuzzySpProj", 50.0)
     assert r.status_code == 200, r.text
-    pid = (await client.get(f"/api/flows/{flow_id}", headers=admin_headers)).json()[
-        "project_id"
-    ]
+    pid = (await client.get(f"/api/flows/{flow_id}", headers=admin_headers)).json()["project_id"]
     await client.post(f"/api/projects/{pid}/activate", headers=admin_headers)
 
     r = await client.get("/api/operate/fuzzy", headers=operator_headers)
@@ -421,9 +417,7 @@ async def test_sp_pela_entrada_projeta_a_fonte_e_recusa_a_rota_do_operador(
 ):
     flow_id, r = await _cenario_entrada(client, admin_headers, "FuzzySpEntrada")
     assert r.status_code == 200, r.text
-    pid = (await client.get(f"/api/flows/{flow_id}", headers=admin_headers)).json()[
-        "project_id"
-    ]
+    pid = (await client.get(f"/api/flows/{flow_id}", headers=admin_headers)).json()["project_id"]
     await client.post(f"/api/projects/{pid}/activate", headers=admin_headers)
 
     r = await client.get("/api/operate/fuzzy", headers=operator_headers)
@@ -455,9 +449,14 @@ async def test_sp_source_entrada_com_setpoint_e_422_no_save(client, admin_header
         "nodes": [
             _no("r1", "opc_read", 1, tag_id=tag),
             _no(
-                "fz1", "fuzzy", 2,
-                fll=SP_FLL, n_inputs=1, n_outputs=1,
-                sp_source="entrada", setpoint=50.0,
+                "fz1",
+                "fuzzy",
+                2,
+                fll=SP_FLL,
+                n_inputs=1,
+                n_outputs=1,
+                sp_source="entrada",
+                setpoint=50.0,
             ),
         ],
         "edges": [_aresta("r1", "out", "fz1", "IN1", "e1")],

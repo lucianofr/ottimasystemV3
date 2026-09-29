@@ -82,13 +82,22 @@ def _grafo(fll: str, setpoint) -> dict:
         dados["setpoint"] = setpoint
     return {
         "nodes": [
-            {"id": "r1", "type": "opc_read", "position": {"x": 0, "y": 0},
-             "data": {"exec_order": 1, "tag_id": 1}},
+            {
+                "id": "r1",
+                "type": "opc_read",
+                "position": {"x": 0, "y": 0},
+                "data": {"exec_order": 1, "tag_id": 1},
+            },
             {"id": "fz1", "type": "fuzzy", "position": {"x": 0, "y": 0}, "data": dados},
         ],
         "edges": [
-            {"id": "e1", "source": "r1", "sourceHandle": "out",
-             "target": "fz1", "targetHandle": "IN1"}
+            {
+                "id": "e1",
+                "source": "r1",
+                "sourceHandle": "out",
+                "target": "fz1",
+                "targetHandle": "IN1",
+            }
         ],
     }
 
@@ -140,22 +149,34 @@ def _grafo_fonte(fll: str, *, setpoint=None, sp_source=None, fio_sp: bool = Fals
     if sp_source is not None:
         dados["sp_source"] = sp_source
     nos = [
-        {"id": "r1", "type": "opc_read", "position": {"x": 0, "y": 0},
-         "data": {"exec_order": 1, "tag_id": 1}},
+        {
+            "id": "r1",
+            "type": "opc_read",
+            "position": {"x": 0, "y": 0},
+            "data": {"exec_order": 1, "tag_id": 1},
+        },
         {"id": "fz1", "type": "fuzzy", "position": {"x": 0, "y": 0}, "data": dados},
     ]
     arestas = [
-        {"id": "e1", "source": "r1", "sourceHandle": "out", "target": "fz1",
-         "targetHandle": "IN1"}
+        {"id": "e1", "source": "r1", "sourceHandle": "out", "target": "fz1", "targetHandle": "IN1"}
     ]
     if fio_sp:
         nos.append(
-            {"id": "r2", "type": "opc_read", "position": {"x": 0, "y": 0},
-             "data": {"exec_order": 3, "tag_id": 2}}
+            {
+                "id": "r2",
+                "type": "opc_read",
+                "position": {"x": 0, "y": 0},
+                "data": {"exec_order": 3, "tag_id": 2},
+            }
         )
         arestas.append(
-            {"id": "e2", "source": "r2", "sourceHandle": "out", "target": "fz1",
-             "targetHandle": "sp"}
+            {
+                "id": "e2",
+                "source": "r2",
+                "sourceHandle": "out",
+                "target": "fz1",
+                "targetHandle": "sp",
+            }
         )
     return {"nodes": nos, "edges": arestas}
 

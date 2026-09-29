@@ -68,7 +68,12 @@ def coletor() -> tuple[list[FuzzyState], Callable[[FuzzyState], Awaitable[None]]
 async def test_sp_alimenta_a_ultima_variavel_e_sai_no_quadro():
     quadros, publish = coletor()
     block = FuzzyBlock(
-        "fz1", fll=SP_FLL, n_inputs=1, n_outputs=1, setpoint=75.0, publish=publish,
+        "fz1",
+        fll=SP_FLL,
+        n_inputs=1,
+        n_outputs=1,
+        setpoint=75.0,
+        publish=publish,
         state_min_interval_s=0.0,
     )
 
@@ -85,7 +90,12 @@ async def test_sp_alimenta_a_ultima_variavel_e_sai_no_quadro():
 async def test_comando_muda_so_o_sp_sem_reinstanciar():
     quadros, publish = coletor()
     block = FuzzyBlock(
-        "fz1", fll=SP_FLL, n_inputs=1, n_outputs=1, setpoint=75.0, publish=publish,
+        "fz1",
+        fll=SP_FLL,
+        n_inputs=1,
+        n_outputs=1,
+        setpoint=75.0,
+        publish=publish,
         state_min_interval_s=0.0,
     )
     await passo(block, 25.0)
@@ -130,8 +140,13 @@ def test_contagem_de_entradas_casa_com_o_setpoint():
 async def test_sp_pela_entrada_alimenta_a_ultima_variavel():
     quadros, publish = coletor()
     block = FuzzyBlock(
-        "fz1", fll=SP_FLL, n_inputs=1, n_outputs=1, sp_da_entrada=True,
-        publish=publish, state_min_interval_s=0.0,
+        "fz1",
+        fll=SP_FLL,
+        n_inputs=1,
+        n_outputs=1,
+        sp_da_entrada=True,
+        publish=publish,
+        state_min_interval_s=0.0,
     )
 
     saida = await block.step(
@@ -157,8 +172,13 @@ async def test_sp_frio_na_entrada_segura_as_saidas():
 async def test_sp_invalido_na_entrada_rebaixa_como_entrada_ruim():
     quadros, publish = coletor()
     block = FuzzyBlock(
-        "fz1", fll=SP_FLL, n_inputs=1, n_outputs=1, sp_da_entrada=True,
-        publish=publish, state_min_interval_s=0.0,
+        "fz1",
+        fll=SP_FLL,
+        n_inputs=1,
+        n_outputs=1,
+        sp_da_entrada=True,
+        publish=publish,
+        state_min_interval_s=0.0,
     )
 
     saida = await block.step(
