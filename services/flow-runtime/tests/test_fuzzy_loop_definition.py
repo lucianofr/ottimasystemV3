@@ -1,10 +1,12 @@
-"""fuzzy_loop no runtime: instanciacao, F10 (sintonia in-place) e F11 (estrutural->MAN)."""
+"""fuzzy_loop no runtime: instanciacao, F10 (sintonia in-place), F11 (estrutural->MAN)
+e o build multicanal v2 (n_loops -> portas pv_i/out_i)."""
 
 from typing import Any, cast
 
 from shell_harness import EPS, amostra, passo
 
 from ottima_core.flowgraph import TagRef, parse_graph
+from ottima_core.flowgraph.fll_defaults import fuzzy_loop_default_fll
 from ottima_core.flowgraph.parse import FuzzyLoopConfig, loop_structural
 from ottima_flow_runtime.blocks.kernels.fuzzy import BrokenKernel, FuzzyKernel, build_fuzzy_kernel
 from ottima_flow_runtime.blocks.shell.block import BlockShell
@@ -28,6 +30,8 @@ def _malha(cfg: FuzzyLoopConfig) -> BlockShell:
         "m",
         kernel=build_fuzzy_kernel(cfg.fll, fuzzy_kernel_cfg_from(cfg)),
         cfg=shell_cfg_from(cfg, 1.0),
+        n_channels=cfg.n_loops,
+        channel_ports=True,
     )
 
 
@@ -39,6 +43,11 @@ def test_kernel_cfg_carrega_os_ganhos_e_o_sentido() -> None:
     cfg = fuzzy_kernel_cfg_from(_config(ke=0.2, kde=0.5, ku=7.0, tf_de=2.0, direct_acting=True))
     assert (cfg.ke, cfg.kde, cfg.ku, cfg.tf_de) == (0.2, 0.5, 7.0, 2.0)
     assert cfg.direct_acting is True
+
+
+def test_kernel_cfg_carrega_n_loops() -> None:
+    cfg = fuzzy_kernel_cfg_from(_config(n_loops=2, fll=fuzzy_loop_default_fll(2)))
+    assert cfg.n_loops == 2
 
 
 def test_fll_default_instancia_kernel_real() -> None:
@@ -67,17 +76,17 @@ def test_lut_habilitada_carrega_a_grade_na_instanciacao() -> None:
 async def test_f10_troca_de_ku_em_auto_sem_degrau() -> None:
     b = _malha(_config())
     t = 0.0
-    await passo(b, t, **{"in": amostra(50.0)})
+    await passo(b, t, **{"pv_1": amostra(50.0)})
     b.write_sp(55.0)
     b.write_target(Mode.AUTO)
     for _ in range(5):
         t += 1.0
-        await passo(b, t, **{"in": amostra(50.0)})
+        await passo(b, t, **{"pv_1": amostra(50.0)})
     u_antes = b.u
     nova = _config(ku=6.0)  # dobra KU: classe de sintonia
     b.apply_tuning(shell_cfg_from(nova, 1.0), fuzzy_kernel_cfg_from(nova))
     t += 1.0
-    await passo(b, t, **{"in": amostra(50.0)})
+    await passo(b, t, **{"pv_1": amostra(50.0)})
     # sem degrau de posicao: a variacao do scan e apenas o incremento (agora 2x maior)
     assert abs(b.u - u_antes) <= 2.0 * 3.0 * 1.0 + EPS
     assert b.mode.actual is Mode.AUTO  # sintonia nao mexe no modo
@@ -92,6 +101,15 @@ async def test_f11_troca_de_fll_e_estrutural() -> None:
     assert loop_structural(fa) != loop_structural(fb)  # build_definition re-instancia
     assert loop_structural(fa) == loop_structural(
         {"type": "fuzzy_loop", **_config(ku=9.0).model_dump()}
+    )
+
+
+def test_n_loops_e_chave_estrutural() -> None:
+    """Trocar o numero de canais muda portas e kernel: re-instancia (nunca in-place)."""
+    siso = _config()
+    mimo = _config(n_loops=2, fll=fuzzy_loop_default_fll(2))
+    assert loop_structural({"type": "fuzzy_loop", **siso.model_dump()}) != loop_structural(
+        {"type": "fuzzy_loop", **mimo.model_dump()}
     )
 
 
@@ -125,7 +143,57 @@ def _graph(**over: object) -> dict:
                 "source": "r1",
                 "target": "m",
                 "sourceHandle": "out",
-                "targetHandle": "in",
+                "targetHandle": "pv_1",
+            },
+        ],
+    }
+
+
+def _graph_mimo(**over: object) -> dict:
+    dados: dict[str, object] = {
+        "sp_hi_lim": 100.0,
+        "sp_lo_lim": 0.0,
+        "ke": 0.05,
+        "ku": 2.0,
+        "n_loops": 2,
+        "fll": fuzzy_loop_default_fll(2),
+    }
+    dados.update(over)
+    return {
+        "nodes": [
+            {
+                "id": "r1",
+                "type": "opc_read",
+                "position": {"x": 0.0, "y": 0.0},
+                "data": {"exec_order": 1, "tag_id": 1},
+            },
+            {
+                "id": "r2",
+                "type": "opc_read",
+                "position": {"x": 0.0, "y": 0.0},
+                "data": {"exec_order": 2, "tag_id": 2},
+            },
+            {
+                "id": "m",
+                "type": "fuzzy_loop",
+                "position": {"x": 0.0, "y": 0.0},
+                "data": {"exec_order": 3, **dados},
+            },
+        ],
+        "edges": [
+            {
+                "id": "e1",
+                "source": "r1",
+                "target": "m",
+                "sourceHandle": "out",
+                "targetHandle": "pv_1",
+            },
+            {
+                "id": "e2",
+                "source": "r2",
+                "target": "m",
+                "sourceHandle": "out",
+                "targetHandle": "pv_2",
             },
         ],
     }
@@ -140,7 +208,10 @@ def _build(graph: dict, reuse: dict | None = None):
     none: Any = None
     return build_definition(
         parse_graph(graph),
-        {1: TagRef(id=1, conn_id=1, direction="r", data_type="float")},
+        {
+            1: TagRef(id=1, conn_id=1, direction="r", data_type="float"),
+            2: TagRef(id=2, conn_id=1, direction="r", data_type="float"),
+        },
         flow_id=1,
         ts_seconds=1.0,
         reuse=reuse or {},
@@ -162,6 +233,26 @@ def test_build_definition_instancia_blockshell_com_fuzzykernel() -> None:
     assert bloco.cfg.max_dt == 10.0  # 10x o Ts do flow
 
 
+def test_build_definition_v2_usa_portas_de_canal() -> None:
+    """fuzzy_loop v2: portas pv_i/out_i mesmo com n_loops=1 (contrato dinamico)."""
+    staged = _build(_graph())
+    _, bloco = staged.blocks["m"]
+    assert isinstance(bloco, BlockShell)
+    assert bloco.input_ports == ("pv_1",)
+    assert bloco.output_ports == ("out_1",)
+
+
+def test_build_definition_multicanal_instancia_n_channels() -> None:
+    staged = _build(_graph_mimo())
+    _, bloco = staged.blocks["m"]
+    assert isinstance(bloco, BlockShell)
+    assert bloco.n_channels == 2
+    assert bloco.input_ports == ("pv_1", "pv_2")
+    assert bloco.output_ports == ("out_1", "out_2")
+    assert isinstance(bloco.kernel, FuzzyKernel)
+    assert bloco.kernel.cfg.n_loops == 2
+
+
 def test_build_definition_hotswap_de_sintonia_preserva_a_instancia() -> None:
     antes = _build(_graph())
     bloco = antes.blocks["m"][1]
@@ -177,12 +268,12 @@ async def test_build_definition_hotswap_de_fll_aterrissa_em_man_se_calculava() -
     bloco = antes.blocks["m"][1]
     assert isinstance(bloco, BlockShell)
     t = 0.0
-    await passo(bloco, t, **{"in": amostra(50.0)})
+    await passo(bloco, t, **{"pv_1": amostra(50.0)})
     bloco.write_sp(60.0)
     bloco.write_target(Mode.AUTO)
     for _ in range(3):
         t += 1.0
-        await passo(bloco, t, **{"in": amostra(50.0)})
+        await passo(bloco, t, **{"pv_1": amostra(50.0)})
     assert bloco.mode.actual is Mode.AUTO
     u_antes = bloco.u
 
@@ -195,6 +286,16 @@ async def test_build_definition_hotswap_de_fll_aterrissa_em_man_se_calculava() -
     assert abs(novo.u - u_antes) < 1e-9  # com u mantido, sem degrau
 
 
+async def test_build_definition_troca_de_n_loops_reinstancia() -> None:
+    """n_loops e estrutural: SISO -> MIMO re-instancia o bloco (portas mudam)."""
+    antes = _build(_graph())
+    bloco = antes.blocks["m"][1]
+    depois = _build(_graph_mimo(), reuse=antes.blocks)
+    novo = depois.blocks["m"][1]
+    assert novo is not bloco
+    assert isinstance(novo, BlockShell) and novo.n_channels == 2
+
+
 async def test_ligar_a_lut_por_hot_swap_de_sintonia_no_caminho_do_shell() -> None:
     """O caminho REAL do toggle: `build_definition` -> `apply_tuning` -> `kernel.cfg`.
 
@@ -204,12 +305,12 @@ async def test_ligar_a_lut_por_hot_swap_de_sintonia_no_caminho_do_shell() -> Non
     bloco = antes.blocks["m"][1]
     assert isinstance(bloco, BlockShell)
     t = 0.0
-    await passo(bloco, t, **{"in": amostra(50.0)})
+    await passo(bloco, t, **{"pv_1": amostra(50.0)})
     bloco.write_sp(60.0)
     bloco.write_target(Mode.AUTO)
     for _ in range(3):
         t += 1.0
-        await passo(bloco, t, **{"in": amostra(50.0)})
+        await passo(bloco, t, **{"pv_1": amostra(50.0)})
     assert bloco.kernel.lut is None
     u_antes = bloco.u
 
@@ -218,5 +319,5 @@ async def test_ligar_a_lut_por_hot_swap_de_sintonia_no_caminho_do_shell() -> Non
     assert bloco.kernel.lut is not None and bloco.kernel.lut.shape == (33, 33)
     assert bloco.mode.actual is Mode.AUTO  # nao caiu para MAN
     t += 1.0
-    await passo(bloco, t, **{"in": amostra(50.0)})
+    await passo(bloco, t, **{"pv_1": amostra(50.0)})
     assert abs(bloco.u - u_antes) <= 2.0 * 1.0 + EPS  # sem degrau: so o incremento do scan

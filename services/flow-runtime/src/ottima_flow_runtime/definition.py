@@ -20,7 +20,7 @@ com `mpc` no stage) morreu nesta tarefa: o grafo agora instancia normalmente.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from multiprocessing.connection import Connection
@@ -127,7 +127,7 @@ def build_definition(
     mpc_worker_target: Callable[[Connection, str, float], None] = worker_main,
     sp_seeds: Mapping[str, Mapping[str, float]] | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
-    loop_seeds: Mapping[str, LoopSeed] | None = None,
+    loop_seeds: Mapping[str, LoopSeed | Sequence[LoopSeed]] | None = None,
 ) -> StagedDefinition:
     """Instancia os blocos do grafo (reaproveitando os que não mudaram) e monta a fiação.
 
@@ -260,7 +260,7 @@ def _instantiate(
     watchdog_enabled: bool,
     sp_seed: Mapping[str, float] | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
-    loop_seed: LoopSeed | None = None,
+    loop_seed: LoopSeed | Sequence[LoopSeed] | None = None,
     predecessor: BlockShell | None = None,
 ) -> Block:
     """Instancia o bloco com os serviços do runtime. Bloco novo nasce zerado (§4.1-3)."""
@@ -533,6 +533,7 @@ def fuzzy_kernel_cfg_from(config: FuzzyLoopConfig) -> FuzzyKernelCfg:
         ku=config.ku,
         tf_de=config.tf_de,
         direct_acting=config.direct_acting,
+        n_loops=config.n_loops,
         lut_enabled=config.lut_enabled,
         lut_resolution=config.lut_resolution,
     )
@@ -562,15 +563,28 @@ def _build_loop_kernel(node_type: str, config: Any) -> ControlKernel:
     return PidKernel(pid_kernel_cfg_from(config))
 
 
-async def carregar_loop_seeds(session: AsyncSession, flow_id: int) -> dict[str, LoopSeed]:
-    """`{block_id: LoopSeed(sp, man_out)}` persistido em `loop_setpoints` para o flow —
-    semente de SP e MAN_OUT no deploy (ADR-039 §4.10); TARGET persiste so para auditoria."""
+async def carregar_loop_seeds(
+    session: AsyncSession, flow_id: int
+) -> dict[str, tuple[LoopSeed, ...]]:
+    """`{block_id: (LoopSeed por canal)}` persistido em `loop_setpoints` para o flow —
+    semente de SP e MAN_OUT no deploy (ADR-039 §4.10); TARGET persiste so para auditoria.
+
+    O tuple e denso ate o maior canal persistido: canal sem linha vira `LoopSeed(None,
+    None)` e o bloco usa o default de config para ele."""
     resultado = await session.execute(
-        select(LoopSetpoint.sp, LoopSetpoint.man_out, LoopSetpoint.block_id).where(
-            LoopSetpoint.flow_id == flow_id
-        )
+        select(
+            LoopSetpoint.sp, LoopSetpoint.man_out, LoopSetpoint.block_id, LoopSetpoint.channel
+        ).where(LoopSetpoint.flow_id == flow_id)
     )
-    return {block_id: LoopSeed(sp=sp, man_out=man_out) for sp, man_out, block_id in resultado.all()}
+    por_bloco: dict[str, dict[int, LoopSeed]] = {}
+    for sp, man_out, block_id, canal in resultado.all():
+        por_bloco.setdefault(block_id, {})[canal] = LoopSeed(sp=sp, man_out=man_out)
+    return {
+        block_id: tuple(
+            canais.get(i, LoopSeed(sp=None, man_out=None)) for i in range(max(canais) + 1)
+        )
+        for block_id, canais in por_bloco.items()
+    }
 
 
 def _instantiate_loop(
@@ -580,7 +594,7 @@ def _instantiate_loop(
     ts_seconds: float,
     redis_client: Redis,
     session_factory: async_sessionmaker[AsyncSession] | None,
-    seed: LoopSeed | None,
+    seed: LoopSeed | Sequence[LoopSeed] | None,
     predecessor: BlockShell | None,
 ) -> BlockShell:
     config: Any = node.config
@@ -592,14 +606,16 @@ def _instantiate_loop(
     async def emit_event(**kwargs: Any) -> None:
         await publish_event(redis_client, ts=datetime.now(UTC), **kwargs)
 
-    async def persist_op(field: str, value: float | str) -> None:
+    async def persist_op(field: str, value: float | str, canal: int = 0) -> None:
         """Upsert do valor de operacao em `loop_setpoints` — mesmo teto e postura
-        fire-and-forget do `persist_sp` do MPC (RNF-05)."""
+        fire-and-forget do `persist_sp` do MPC (RNF-05). PK (flow, block, channel)."""
         if session_factory is None:
             return
-        stmt = pg_insert(LoopSetpoint).values(flow_id=flow_id, block_id=node.id, **{field: value})
+        stmt = pg_insert(LoopSetpoint).values(
+            flow_id=flow_id, block_id=node.id, channel=canal, **{field: value}
+        )
         stmt = stmt.on_conflict_do_update(
-            index_elements=["flow_id", "block_id"],
+            index_elements=["flow_id", "block_id", "channel"],
             set_={field: value, "updated_at": func.now()},
         )
 
@@ -611,6 +627,10 @@ def _instantiate_loop(
         await asyncio.wait_for(_grava(), timeout=PERSIST_SP_TIMEOUT_S)
 
     kernel = _build_loop_kernel(node.type, config)
+    seeds_lista: Sequence[LoopSeed] = (
+        () if seed is None else ((seed,) if isinstance(seed, LoopSeed) else seed)
+    )
+    n_channels = int(getattr(config, "n_loops", 1))
     return BlockShell(
         node.id,
         kernel=kernel,
@@ -618,7 +638,9 @@ def _instantiate_loop(
         emit_event=emit_event,
         publish_state=publish,
         persist_op=persist_op,
-        sp_seed=seed.sp if seed else None,
-        man_out_seed=seed.man_out if seed else None,
+        sp_seed=[s.sp for s in seeds_lista] or None,
+        man_out_seed=[s.man_out for s in seeds_lista] or None,
         carry=predecessor.carry_state() if predecessor is not None else None,
+        n_channels=n_channels,
+        channel_ports=node.type == "fuzzy_loop",
     )

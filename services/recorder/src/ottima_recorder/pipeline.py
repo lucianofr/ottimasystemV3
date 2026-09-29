@@ -146,8 +146,9 @@ class RecorderPipeline:
         self._ssto = _DropOldestBuffer(ssto_queue_max)
         self._fuzzy = _DropOldestBuffer(fuzzy_queue_max)
         self._loop = _DropOldestBuffer(loop_queue_max)
-        # Transicao de modo por (flow_id, block_id): `mode` grava so quando o actual muda.
-        self._last_mode: dict[tuple[int, str], str] = {}
+        # Transicao de modo por (flow_id, block_id, canal): `mode` grava so quando o
+        # actual muda. Canal entra na chave: fuzzy_loop v2 publica um LoopState por canal.
+        self._last_mode: dict[tuple[int, str, int], str] = {}
         self._malformed_total = 0
         self._dropped_reported = 0
         self._flush_failures = 0
@@ -458,17 +459,25 @@ class RecorderPipeline:
         `pv`/`sp`/`out` gravam a cada mensagem; `mode` (valor = bit FF do Mode) só na
         transição de `actual` (cache `_last_mode`) — o modo muda raramente e a série
         passo-a-passo reconstrói o resto.
+
+        Multicanal (fuzzy_loop v2): uma mensagem por canal no mesmo canal Redis; o
+        `var_id` do canal 0 permanece `pv`/`sp`/`out`/`mode` (retrocompatível) e os
+        demais canais ganham sufixo `:<canal>` (ex.: `pv:1`).
         """
         state = self._parse(LoopState, raw)
         if state is None:
             return
         flow_id_raw, block_id = channel.removeprefix("loop.state.").split(".", 1)
         flow_id = int(flow_id_raw)
+        sufixo = "" if state.channel == 0 else f":{state.channel}"
         for var_id, v in (("pv", state.pv), ("sp", state.sp), ("out", state.out)):
-            self._append_loop(state.ts, flow_id, block_id, var_id, v)
-        if self._last_mode.get((flow_id, block_id)) != state.actual:
-            self._last_mode[(flow_id, block_id)] = state.actual
-            self._append_loop(state.ts, flow_id, block_id, "mode", _MODE_VALUE[state.actual])
+            self._append_loop(state.ts, flow_id, block_id, var_id + sufixo, v)
+        chave_modo = (flow_id, block_id, state.channel)
+        if self._last_mode.get(chave_modo) != state.actual:
+            self._last_mode[chave_modo] = state.actual
+            self._append_loop(
+                state.ts, flow_id, block_id, "mode" + sufixo, _MODE_VALUE[state.actual]
+            )
 
     def _append_loop(
         self, ts: datetime, flow_id: int, block_id: str, var_id: str, v: float | None

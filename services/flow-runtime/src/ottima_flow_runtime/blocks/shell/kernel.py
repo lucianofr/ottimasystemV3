@@ -1,5 +1,12 @@
-"""Protocolo do kernel de controle (ADR-039 secao 4.5) e o stub dos testes S."""
+"""Protocolos do kernel de controle (ADR-039 secao 4.5) e o stub dos testes S.
 
+Dois protocolos: `ControlKernel` (SISO — `pid_loop`) e `MultiControlKernel` (multicanal —
+`fuzzy_loop` v2 MIMO, um motor de inferencia compartilhado por N canais). O shell despacha
+por `isinstance(kernel, MultiControlKernel)`; um kernel multicanal avalia TODOS os canais
+num unico `process()` do motor, porque as regras cruzam canais.
+"""
+
+from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 
@@ -28,6 +35,27 @@ class ControlKernel(Protocol):
     def validate(self) -> list[str]:
         """Lista de erros de configuracao. Vazia = kernel apto a operar."""
         ...
+
+
+@runtime_checkable
+class MultiControlKernel(Protocol):
+    """Kernel multicanal: um bloco com N malhas (fuzzy_loop v2, SPEC_FUZZY §3.2 v2).
+
+    Mesmo contrato do `ControlKernel`, vetorizado por canal: `compute_all` devolve uma
+    lista de `du/dt` (%span/s) na ordem dos canais; NaN numa posicao = sem resultado
+    valido naquele canal. `align_all` realinha o historico de todos os canais de uma vez
+    (o estado do motor e compartilhado).
+    """
+
+    def compute_all(self, sps: Sequence[float], pvs: Sequence[float], dt: float) -> list[float]: ...
+
+    def align_all(
+        self, us: Sequence[float], sps: Sequence[float], pvs: Sequence[float]
+    ) -> None: ...
+
+    def reset(self) -> None: ...
+
+    def validate(self) -> list[str]: ...
 
 
 class StubKernel:

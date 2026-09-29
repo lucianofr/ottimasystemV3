@@ -199,7 +199,7 @@ def test_entrada_nao_finita_nao_contamina_o_estado_do_filtro() -> None:
     k = _kernel_lut()
     k.align(0.0, 10.0, 10.0)
     k.compute(sp=math.nan, pv=10.0, dt=1.0)
-    assert k.e_prev == 0.0 and k.de_f == 0.0
+    assert k.e_prev == [0.0] and k.de_f == [0.0]
     assert abs(k.compute(sp=10.0, pv=10.0, dt=1.0)) < 1e-9  # segue calculando normalmente
 
 
@@ -233,7 +233,7 @@ def test_align_nao_envenena_o_estado_com_entrada_nao_finita() -> None:
     k = _kernel_lut()
     k.align(0.0, 10.0, 8.0)  # estado bom: e_prev = 2.0
     k.align(0.0, math.nan, 8.0)
-    assert k.e_prev == 2.0  # preservado, nao envenenado
+    assert k.e_prev == [2.0]  # preservado, nao envenenado
 
 
 def test_estado_envenenado_nao_derruba_o_flow_nem_publica_nan() -> None:
@@ -245,7 +245,7 @@ def test_estado_envenenado_nao_derruba_o_flow_nem_publica_nan() -> None:
     """
     for lut in (False, True):
         k = _kernel_lut(kde=1.0, lut_enabled=lut)
-        k.e_prev = math.nan  # estado envenenado, venha de onde vier
+        k.e_prev = [math.nan]  # estado envenenado, venha de onde vier
         r = k.compute(sp=20.0, pv=10.0, dt=1.0)
         assert math.isnan(r), f"lut={lut}"
         assert all(math.isfinite(v) for v in k.diag.values()), f"lut={lut}: {k.diag}"
@@ -254,5 +254,7 @@ def test_estado_envenenado_nao_derruba_o_flow_nem_publica_nan() -> None:
 def test_interp_bilinear_devolve_nan_em_entrada_nao_finita() -> None:
     """Guarda no PROPRIO ponto do crash: nao depender de provar que nenhum NaN sobe."""
     k = _kernel_lut(lut_enabled=True)
-    assert math.isnan(k._interp_bilinear(math.nan, 0.0))
-    assert math.isnan(k._interp_bilinear(0.0, math.nan))
+    lut = k.luts[0]
+    assert lut is not None
+    assert math.isnan(k._interp_bilinear(lut, math.nan, 0.0))
+    assert math.isnan(k._interp_bilinear(lut, 0.0, math.nan))
