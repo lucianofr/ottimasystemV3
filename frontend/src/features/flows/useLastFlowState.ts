@@ -23,10 +23,20 @@ const POLLING_MS = 5000;
 const KIND_RODANDO = "flow_deployed";
 const KIND_PARADO = "flow_stopped";
 const KIND_FALHA = "flow_failed";
+/** Recusas do supervisor (`supervisor.py`, spec F3 §4.3): o comando do operador NÃO virou
+ *  execução. `deploy_rejected` = o flow não subiu (grafo inválido, projeto inativo);
+ *  `reload_rejected` = o hot-swap do grafo salvo foi recusado e o flow segue rodando a
+ *  definição ANTERIOR. Sem tratá-las, a linha ficava com o último estado bom (tipicamente
+ *  "Rodando" de um deploy antigo) — exatamente o "flow com erro mostrando RODANDO" relatado
+ *  pelo dono em 2026-09-28. */
+const RECUSAS: Record<string, true> = {
+  deploy_rejected: true,
+  reload_rejected: true,
+};
 
-/** `reason` de `flow_stopped` e `flow_failed` (spec F3 §4.3) em pt-BR. `flow_deleted` é o
- *  motivo do backstop de watermark: o supervisor encontrou rodando um flow que sumiu do
- *  banco (spec §2.2-9, `supervisor.REASON_FLOW_DELETED`). */
+/** `reason` de `flow_stopped`, `flow_failed` e das recusas (spec F3 §4.3) em pt-BR.
+ *  `flow_deleted` é o motivo do backstop de watermark: o supervisor encontrou rodando um flow
+ *  que sumiu do banco (spec §2.2-9, `supervisor.REASON_FLOW_DELETED`). */
 const MOTIVOS: Record<string, string> = {
   user: "comandado pelo usuário",
   project_activated: "projeto ativado",
@@ -34,9 +44,11 @@ const MOTIVOS: Record<string, string> = {
   flow_deleted: "flow excluído",
   shutdown: "parado no desligamento do runtime",
   unhandled_exception: "exceção não tratada no laço de varredura",
+  invalid_graph: "grafo salvo inválido",
+  project_inactive: "o projeto do flow não é o ativo",
 };
 
-export type EstadoPublicado = "rodando" | "parado" | "falha";
+export type EstadoPublicado = "rodando" | "parado" | "falha" | "recusado";
 
 export interface UltimoEstadoFlow {
   estado: EstadoPublicado;
@@ -66,7 +78,8 @@ export function derivarUltimoEstado(eventos: EventOut[]): ReadonlyMap<number, Ul
   const porFlow = new Map<number, UltimoEstadoFlow>();
   for (const evento of eventos) {
     const kind = texto(evento.payload, "kind");
-    if (kind !== KIND_RODANDO && kind !== KIND_PARADO && kind !== KIND_FALHA) continue;
+    const recusa = kind !== null && RECUSAS[kind] === true;
+    if (kind !== KIND_RODANDO && kind !== KIND_PARADO && kind !== KIND_FALHA && !recusa) continue;
     const id = idDaOrigem(evento.origin);
     if (id === null || porFlow.has(id)) continue;
     if (kind === KIND_RODANDO) {
@@ -75,6 +88,15 @@ export function derivarUltimoEstado(eventos: EventOut[]): ReadonlyMap<number, Ul
     }
     const motivo = texto(evento.payload, "reason");
     const motivoPtBr = (motivo && MOTIVOS[motivo]) ?? "motivo desconhecido";
+    if (recusa) {
+      porFlow.set(id, {
+        estado: "recusado",
+        rotulo: `Recusado: ${motivoPtBr}`,
+        falha: true,
+        ts: evento.ts,
+      });
+      continue;
+    }
     const falha = kind === KIND_FALHA;
     porFlow.set(id, {
       estado: falha ? "falha" : "parado",
@@ -94,14 +116,14 @@ export function derivarUltimoEstado(eventos: EventOut[]): ReadonlyMap<number, Ul
  *
  * Sem evento publicado o estado real é desconhecido: "rodando" desejado é pendente (foi
  * comandado e nada confirmou), "parado" não é (boot parado é o estado natural, ADR-017).
- * `falha` é desfecho publicado, não espera: quem informa é a coluna "Último estado".
- */
+ * `falha` e `recusado` são desfecho publicado, não espera: quem informa é a coluna "Último
+ * estado". */
 export function aguardandoConfirmacao(
   desejado: FlowOut["desired_state"],
   publicado: UltimoEstadoFlow | undefined,
 ): boolean {
   if (!publicado) return desejado === "running";
-  if (publicado.estado === "falha") return false;
+  if (publicado.falha) return false;
   return publicado.estado !== (desejado === "running" ? "rodando" : "parado");
 }
 

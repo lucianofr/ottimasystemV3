@@ -114,8 +114,28 @@ function FlowForm({ projectId, onClose }: { projectId: number; onClose: () => vo
   );
 }
 
-/** Comandado pendente: contorno de acento + o valor comandado em fantasma, com rótulo textual
- *  (Regra do Canal Redundante — cor nunca é o único canal). */
+/** Triângulo de alarme da linha: mesma forma em "Desejado" e "Último estado" — a leitura não
+ *  depende da cor (Regra do Canal Redundante). */
+function IconeAlarme() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      className="shrink-0"
+    >
+      <path d="M8 1 15 14H1L8 1Zm-.75 5v4h1.5V6h-1.5Zm0 5.5V13h1.5v-1.5h-1.5Z" />
+    </svg>
+  );
+}
+
+/** Comando pendente: contorno de acento + o valor comandado em fantasma, com rótulo textual
+ *  (Regra do Canal Redundante — cor nunca é o único canal). Com desfecho publicado que
+ *  DESMENTE o comando (falha do runtime ou recusa do supervisor) o selo muda para alarme:
+ *  o comando não vai ser confirmado sozinho, e sem isto a célula lia como fluxo saudável —
+ *  foi o "flow com erro mostrando RODANDO" relatado em 2026-09-28. */
 function CelulaDesejado({
   flow,
   publicado,
@@ -124,6 +144,18 @@ function CelulaDesejado({
   publicado: UltimoEstadoFlow | undefined;
 }) {
   const rotulo = ROTULO_DESEJADO[flow.desired_state];
+  if (publicado?.falha) {
+    return (
+      <span
+        data-testid="flow-desired"
+        className="inline-flex items-center gap-1.5 rounded-sm border border-alarm px-1.5 py-0.5 text-alarm"
+      >
+        <IconeAlarme />
+        {rotulo}
+        <span className="text-xs">não confirmado</span>
+      </span>
+    );
+  }
   if (!aguardandoConfirmacao(flow.desired_state, publicado)) {
     return <span data-testid="flow-desired">{rotulo}</span>;
   }
@@ -151,16 +183,7 @@ function CelulaUltimoEstado({ estado }: { estado: UltimoEstadoFlow | undefined }
   }
   return (
     <span data-testid="flow-last-state" className="flex items-center gap-1.5 text-alarm">
-      <svg
-        aria-hidden="true"
-        width="12"
-        height="12"
-        viewBox="0 0 16 16"
-        fill="currentColor"
-        className="shrink-0"
-      >
-        <path d="M8 1 15 14H1L8 1Zm-.75 5v4h1.5V6h-1.5Zm0 5.5V13h1.5v-1.5h-1.5Z" />
-      </svg>
+      <IconeAlarme />
       {estado.rotulo}
     </span>
   );
