@@ -29,6 +29,8 @@ def test_settings(tmp_path) -> Settings:
         admin_name="Administrador",
         # Nenhum teste pode escrever no volume real /certs (default de Settings)
         certs_dir=tmp_path / "certs",
+        # Idem para o staging do certificado recebido (default real: /certs-received)
+        received_certs_dir=tmp_path / "certs-received",
     )
 
 
