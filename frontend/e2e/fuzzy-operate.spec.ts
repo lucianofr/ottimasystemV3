@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   criarAmbiente,
@@ -9,10 +9,10 @@ import {
 } from "./fixtures";
 
 /**
- * PW-FZ-01..03 — página FUZZY OPERATE (ADR-030): combobox de blocos fuzzy do projeto ativo,
+ * PW-FZ-01..05 — página FUZZY OPERATE (ADR-030): combobox de blocos fuzzy do projeto ativo,
  * painéis de função de pertinência por variável (entrada e saída), badges das normas do rule
- * block, tabela de regras e trend das portas do bloco (com escala Y por variável na grade,
- * mesma do trend de engenharia).
+ * block, tabela de regras e trend das portas do bloco (escala Y por variável, eixo Y por foco,
+ * valor no cursor e zoom — os mesmos recursos do trend de engenharia).
  *
  * Grafo mínimo: 1 `opc_read` alimentando `IN1` de DOIS blocos `fuzzy` independentes (mesmo
  * padrão de `operate-mpc-select.spec.ts`) — sem deploy, então nada é publicado no canal
@@ -33,6 +33,34 @@ const BLOCK_B = "fz-b";
 
 /** Janela default do trend fuzzy (`JANELA_DEFAULT_SEGUNDOS`, `TrendFuzzy.tsx`). */
 const JANELA_30M_S = 1800;
+
+/** Histórico interceptado: este flow nunca é deployado, então `fuzzy_samples` está vazio e
+ *  sem dado o uPlot não tem o que recortar nem o que ler no cursor. Pena `i` vale `10·(i+1)`
+ *  em 85 carimbos de 5 s terminando 3 min atrás. */
+async function interceptarHistoricoFuzzy(page: Page): Promise<void> {
+  await page.route("**/api/history/fuzzy?*", async (rota) => {
+    const url = new URL(rota.request().url());
+    const ids = (url.searchParams.get("var_ids") ?? "")
+      .split(",")
+      .filter((texto) => texto !== "");
+    const fim = Date.now() - 3 * 60_000;
+    const carimbos = Array.from({ length: 85 }, (_, i) =>
+      new Date(fim - (84 - i) * 5000).toISOString(),
+    );
+    await rota.fulfill({
+      json: {
+        mode: "raw",
+        start: url.searchParams.get("start"),
+        end: url.searchParams.get("end"),
+        series: ids.map((varId, indice) => ({
+          t: carimbos,
+          v: carimbos.map(() => 10 * (indice + 1)),
+          var_id: varId,
+        })),
+      },
+    });
+  });
+}
 
 const FLL = `Engine: minimo
 InputVariable: Nivel
@@ -221,37 +249,13 @@ test.describe("Página FUZZY OPERATE", () => {
     await expect.poll(lerChave).toBeNull();
   });
 
-  test("PW-FZ-03: zoom por arrasto no trend fuzzy volta pelo botão Reset da própria tela", async ({
+  test("PW-FZ-04: zoom por arrasto no trend fuzzy volta pelo Reset layout da própria tela", async ({
     page,
   }) => {
     // Regressão: o `TrendChart` é compartilhado pelas três telas de trend e rastreia o recorte
-    // do arrasto num ref próprio; o aviso manda usar "Reset layout", e aqui o botão é "Reset".
-    // Sem o `resetZoom` no handler desta tela, o recorte ficava preso para sempre.
-    //
-    // Histórico interceptado: este flow nunca é deployado, então `fuzzy_samples` está vazio e
-    // sem dado o uPlot não tem o que recortar.
-    await page.route("**/api/history/fuzzy?*", async (rota) => {
-      const url = new URL(rota.request().url());
-      const ids = (url.searchParams.get("var_ids") ?? "")
-        .split(",")
-        .filter((texto) => texto !== "");
-      const fim = Date.now() - 3 * 60_000;
-      const carimbos = Array.from({ length: 85 }, (_, i) =>
-        new Date(fim - (84 - i) * 5000).toISOString(),
-      );
-      await rota.fulfill({
-        json: {
-          mode: "raw",
-          start: url.searchParams.get("start"),
-          end: url.searchParams.get("end"),
-          series: ids.map((varId, indice) => ({
-            t: carimbos,
-            v: carimbos.map(() => 10 * (indice + 1)),
-            var_id: varId,
-          })),
-        },
-      });
-    });
+    // do arrasto num ref próprio; o aviso manda usar "Reset layout". Sem o `resetZoom` no
+    // handler desta tela, o recorte ficava preso para sempre.
+    await interceptarHistoricoFuzzy(page);
     await page.reload();
 
     const tela = page.getByTestId("trend-chart").locator(".u-over");
@@ -272,5 +276,36 @@ test.describe("Página FUZZY OPERATE", () => {
     await expect(page.getByTestId("trend-zoom")).toHaveCount(0);
     const solto = await escalaXDoGrafico(page, "trend-chart");
     expect(Math.round(solto.max - solto.min)).toBe(JANELA_30M_S);
+  });
+
+  test("PW-FZ-05: eixo Y único por foco na grade e valor no cursor, como no trend de engenharia", async ({
+    page,
+  }) => {
+    await interceptarHistoricoFuzzy(page);
+    await page.reload();
+
+    const linha = (porta: string) =>
+      page.locator(`[data-testid="fuzzy-trend-legend-item"][data-var-port="${porta}"]`);
+    const eixoDe = (porta: string) => linha(porta).getByRole("button");
+    // A primeira porta pré-selecionada nasce dona do eixo.
+    await expect(eixoDe("IN1")).toHaveAttribute("aria-current", "true");
+    await expect(eixoDe("OUT1")).not.toHaveAttribute("aria-current");
+
+    // Clicar no nome traz o eixo sem tirar a pena do gráfico.
+    await eixoDe("OUT1").click();
+    await expect(eixoDe("OUT1")).toHaveAttribute("aria-current", "true");
+    await expect(eixoDe("IN1")).not.toHaveAttribute("aria-current");
+    await expect(page.getByTestId("fuzzy-trend-legend-item")).toHaveCount(2);
+
+    // Desmarcar a dona passa o eixo para a porta que sobrou.
+    await page.locator('[data-testid="fuzzy-trend-option"][data-var-port="OUT1"] input').uncheck();
+    await expect(eixoDe("IN1")).toHaveAttribute("aria-current", "true");
+
+    // Leitura no cursor: o histórico interceptado vale 10 na IN1 em toda a janela com dado.
+    const tela = page.getByTestId("trend-chart").locator(".u-over");
+    const caixa = await tela.boundingBox();
+    if (caixa === null) throw new Error("área de interação do trend fuzzy sem caixa");
+    await page.mouse.move(caixa.x + caixa.width * 0.8, caixa.y + caixa.height / 2);
+    await expect(page.getByTestId("fuzzy-trend-legend-valor-cursor").first()).toHaveText("10");
   });
 });
