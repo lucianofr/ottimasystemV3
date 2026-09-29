@@ -3,9 +3,10 @@ import { expect, test } from "@playwright/test";
 import { criarAmbiente, entrarNoShell, NODES, type AmbienteE2E } from "./fixtures";
 
 /**
- * PW-FZ-01 — página FUZZY OPERATE (ADR-030): combobox de blocos fuzzy do projeto ativo,
+ * PW-FZ-01..03 — página FUZZY OPERATE (ADR-030): combobox de blocos fuzzy do projeto ativo,
  * painéis de função de pertinência por variável (entrada e saída), badges das normas do rule
- * block, tabela de regras e trend das portas do bloco.
+ * block, tabela de regras e trend das portas do bloco (com escala Y por variável na grade,
+ * mesma do trend de engenharia).
  *
  * Grafo mínimo: 1 `opc_read` alimentando `IN1` de DOIS blocos `fuzzy` independentes (mesmo
  * padrão de `operate-mpc-select.spec.ts`) — sem deploy, então nada é publicado no canal
@@ -163,6 +164,51 @@ test.describe("Página FUZZY OPERATE", () => {
     const trend = page.getByTestId("fuzzy-trend");
     await expect(trend).toBeVisible();
     await expect(trend).toContainText("IN1 — Nivel");
-    await expect(trend).toContainText("OUT1 — Abertura (%)");
+    // EU em coluna própria no seletor (paridade com o trend de engenharia), fora do rótulo.
+    const opcaoOut1 = trend.locator('[data-testid="fuzzy-trend-option"][data-var-port="OUT1"]');
+    await expect(opcaoOut1).toContainText("OUT1 — Abertura");
+    await expect(opcaoOut1).toContainText("%");
+    await expect(opcaoOut1).not.toContainText("(%)");
+  });
+
+  test("PW-FZ-03: escala Y da grade é manual por variável, persiste por bloco e o reset limpa", async ({
+    page,
+  }) => {
+    // Sem deploy não há amostra, mas a grade tem uma linha por pena selecionada (SEM DADO):
+    // o editor de escala é o que o operador toca, e ele existe mesmo sem valor.
+    await expect(page).toHaveURL(new RegExp(`bloco=${BLOCK_A}`));
+    await expect(page.getByTestId("fuzzy-trend-legend-item")).toHaveCount(2);
+    const chave = `ottima.fuzzy.escalas.v1:${String(flowId)}/${BLOCK_A}`;
+    const lerChave = () => page.evaluate((k) => window.localStorage.getItem(k), chave);
+
+    const primeiraAuto = page.getByTestId("fuzzy-trend-escala-auto").first();
+    const primeiraMin = page.getByTestId("fuzzy-trend-escala-min").first();
+    const primeiraMax = page.getByTestId("fuzzy-trend-escala-max").first();
+    await expect(primeiraAuto).toBeChecked();
+    await expect(primeiraMin).toBeDisabled();
+
+    await primeiraAuto.uncheck();
+    await primeiraMin.fill("0");
+    await primeiraMax.fill("100");
+    // Independência: fixar a faixa de IN1 não tira OUT1 do autoscale.
+    await expect(page.getByTestId("fuzzy-trend-escala-auto").nth(1)).toBeChecked();
+    await expect.poll(lerChave).not.toBeNull();
+
+    await page.reload();
+    await expect(page.getByTestId("fuzzy-trend-escala-auto").first()).not.toBeChecked();
+    await expect(page.getByTestId("fuzzy-trend-escala-min").first()).toHaveValue("0");
+    await expect(page.getByTestId("fuzzy-trend-escala-max").first()).toHaveValue("100");
+
+    // Outro bloco é outra grandeza: não herda a escala de fz-a.
+    await page.getByTestId("fuzzy-select-bloco").selectOption({ index: 1 });
+    await expect(page).toHaveURL(new RegExp(`bloco=${BLOCK_B}`));
+    await expect(page.getByTestId("fuzzy-trend-escala-auto").first()).toBeChecked();
+    await page.getByTestId("fuzzy-select-bloco").selectOption({ index: 0 });
+    await expect(page.getByTestId("fuzzy-trend-escala-auto").first()).not.toBeChecked();
+
+    await page.getByTestId("fuzzy-trend-janela-reset").click();
+    await expect(page.getByTestId("fuzzy-trend-escala-auto").first()).toBeChecked();
+    await expect(page.getByTestId("fuzzy-trend-escala-min").first()).toBeDisabled();
+    await expect.poll(lerChave).toBeNull();
   });
 });

@@ -1,15 +1,18 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { cn } from "../../lib/cn";
 import { referenciaPersistidaS, useBordaViva, type LeituraViva } from "../trend/bordaViva";
+import { EditorEscala } from "../trend/EditorEscala";
+import { ESCALA_AUTO, gravarEscalas, lerEscalas, limparEscalas, type EscalaVar } from "../trend/escalas";
 import { JanelaTempo } from "../trend/JanelaTempo";
 import { type BadgeLegenda, type LinhaLegenda, PainelLegendaTrend } from "../trend/PainelLegendaTrend";
-import { TrendChart } from "../trend/TrendChart";
+import { TrendChart, type TrendChartHandle } from "../trend/TrendChart";
 import { CLASSES_PENA, LIMITE_PENAS } from "../trend/trendTheme";
 import { useJanelaDeslizante } from "../trend/useJanelaDeslizante";
 import {
+  escalasPorId,
   mesclarHistoricoFuzzyVivo,
   montarMatrizFuzzy,
   resumirSeriesFuzzy,
@@ -38,7 +41,7 @@ interface VarSelecionavel {
 }
 
 function rotuloVarFuzzy(v: VarSelecionavel): string {
-  return v.eu ? `${v.port} — ${v.name} (${v.eu})` : `${v.port} — ${v.name}`;
+  return `${v.port} — ${v.name}`;
 }
 
 export function TrendFuzzy({
@@ -67,6 +70,12 @@ export function TrendFuzzy({
     variaveis.slice(0, LIMITE_PENAS).map((v) => v.port),
   );
   const [janelaSegundos, setJanelaSegundos] = useState(JANELA_DEFAULT_SEGUNDOS);
+  const [aviso, setAviso] = useState<string | null>(null);
+  // Escala Y por variável, persistida por flow+bloco e chaveada pela PORTA: `IN1` de outro
+  // bloco é outra grandeza (mesmo raciocínio de `ottima.operate.escalas.v1`).
+  const chaveEscalas = `ottima.fuzzy.escalas.v1:${String(flowId)}/${blockId}`;
+  const [escalas, setEscalas] = useState<Record<string, EscalaVar>>(() => lerEscalas(chaveEscalas));
+  const chartRef = useRef<TrendChartHandle>(null);
   const deslizante = useJanelaDeslizante(janelaSegundos);
   const historico = useHistoryFuzzy(flowId, blockId, selecionadas, janelaSegundos, deslizante.fimEpochS);
 
@@ -116,11 +125,34 @@ export function TrendFuzzy({
   });
 
   function alternar(port: string): void {
-    setSelecionadas((atual) => {
-      if (atual.includes(port)) return atual.filter((p) => p !== port);
-      if (atual.length >= LIMITE_PENAS) return atual;
-      return [...atual, port];
+    if (selecionadas.includes(port)) {
+      setSelecionadas(selecionadas.filter((p) => p !== port));
+      setAviso(null);
+      return;
+    }
+    if (selecionadas.length >= LIMITE_PENAS) {
+      setAviso(`Máximo de ${String(LIMITE_PENAS)} penas por gráfico`);
+      return;
+    }
+    setSelecionadas([...selecionadas, port]);
+    setAviso(null);
+  }
+
+  function definirEscala(port: string, escala: EscalaVar): void {
+    setEscalas((atual) => {
+      const proximo = { ...atual, [port]: escala };
+      gravarEscalas(chaveEscalas, proximo);
+      return proximo;
     });
+  }
+
+  /** Reset completo, igual ao do trend de engenharia: janela ao vivo, zoom limpo e escalas Y
+   *  de volta ao autoscale (a preferência persistida some junto). */
+  function resetLayout(): void {
+    deslizante.reset();
+    chartRef.current?.resetZoom();
+    limparEscalas(chaveEscalas);
+    setEscalas({});
   }
 
   return (
@@ -168,11 +200,9 @@ export function TrendFuzzy({
               variant="outline"
               size="sm"
               data-testid="fuzzy-trend-janela-reset"
-              onClick={() => {
-                deslizante.reset();
-              }}
+              onClick={resetLayout}
             >
-              Reset
+              Reset layout
             </Button>
           </div>
         </div>
@@ -200,9 +230,15 @@ export function TrendFuzzy({
                   }}
                 />
                 <span className="plaqueta grow text-xs">{rotuloVarFuzzy(v)}</span>
+                <span className="text-xs text-fg-muted">{v.eu}</span>
               </label>
             ))}
           </div>
+          {aviso && (
+            <p role="alert" className="mt-2 text-xs text-warn-fg">
+              {aviso}
+            </p>
+          )}
         </Card>
 
         <div className="grow space-y-3">
@@ -225,7 +261,14 @@ export function TrendFuzzy({
           )}
 
           {dados && (
-            <TrendChart dados={dados} ids={ids} rotulos={rotulos} janelaSegundos={janelaSegundos} escalas={{}} />
+            <TrendChart
+              ref={chartRef}
+              dados={dados}
+              ids={ids}
+              rotulos={rotulos}
+              janelaSegundos={janelaSegundos}
+              escalas={escalasPorId(selecionadas, idPorPorta, escalas)}
+            />
           )}
 
           {resumos.length > 0 && (
@@ -252,12 +295,21 @@ export function TrendFuzzy({
                         className={cn("h-1 w-6 shrink-0", CLASSES_PENA[indice % CLASSES_PENA.length])}
                       />
                       <span className="plaqueta grow text-xs">
-                        {v ? `${v.port} — ${v.name}` : resumo.varId}
+                        {v ? rotuloVarFuzzy(v) : resumo.varId}
                       </span>
                     </>
                   ),
                   badges,
                   valorEu: { valor: resumo.valor, eu: v?.eu ?? "", muted: resumo.semDado },
+                  filhoEscala: (
+                    <EditorEscala
+                      escala={escalas[resumo.varId] ?? ESCALA_AUTO}
+                      prefixoTestid="fuzzy-trend"
+                      aoMudar={(escala) => {
+                        definirEscala(resumo.varId, escala);
+                      }}
+                    />
+                  ),
                 };
                 return linha;
               })}
