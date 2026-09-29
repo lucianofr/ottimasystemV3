@@ -7,8 +7,16 @@ Layout do volume `certs` (spec F2 §5.4):
     <certs_dir>/app/ottima.der          o mesmo certificado em DER, para exportar ao servidor
     <certs_dir>/trusted/conn-<id>.der   certificado do servidor OPC-UA confiado
 
+Volume separado `certs-received` (staging do trust):
+
+    <received_dir>/conn-<id>.der        certificado ENVIADO pelo servidor, capturado pelo
+                                        opc-worker na falha de pin; a API o expõe para
+                                        visualização e o admin decide confiar nele
+
 Chaves privadas nunca vão para o banco: a coluna `server_cert_file` guarda apenas o nome
-do arquivo em `trusted/`.
+do arquivo em `trusted/`. O volume `received` existe separado do `certs` para preservar o
+mount read-only do worker no que já foi confiado (ADR-021): um worker comprometido não
+consegue sobrescrever um pin estabelecido.
 
 Todas as funções são síncronas de propósito. São leituras e gravações de poucos KB, cujo
 custo não é relevante perto de uma troca de contexto do event loop; chamá-las de dentro de
@@ -44,6 +52,10 @@ APP_CERT_DER_NAME = "ottima.der"
 _DIR_MODE = 0o700
 _KEY_MODE = 0o600
 _CERT_MODE = 0o644
+# Teto de tamanho de certificado X.509 aceito em qualquer caminho (upload, captura do
+# worker): um certificado real não chega perto disso; sem teto, corpo ou anúncio hostil
+# viraria gravação/leitura de memória arbitrária.
+MAX_SERVER_CERT_BYTES = 64 * 1024
 # Folga de relógio: servidores atrasados recusariam um certificado ainda não válido.
 _CLOCK_SKEW = timedelta(minutes=5)
 
@@ -85,9 +97,19 @@ def trusted_cert_path(certs_dir: Path, conn_id: int) -> Path:
     Valida `conn_id` em runtime: ele vem de um path param HTTP na tarefa 4.4, e um valor
     fora do contrato de tipos viraria um nome de arquivo arbitrário fora de `trusted/`.
     """
+    _validar_conn_id(conn_id)
+    return certs_dir / TRUSTED_DIR_NAME / f"conn-{conn_id}.der"
+
+
+def received_cert_path(received_dir: Path, conn_id: int) -> Path:
+    """Caminho do certificado recebido do servidor (staging; NUNCA usado para conectar)."""
+    _validar_conn_id(conn_id)
+    return received_dir / f"conn-{conn_id}.der"
+
+
+def _validar_conn_id(conn_id: int) -> None:
     if isinstance(conn_id, bool) or not isinstance(conn_id, int) or conn_id < 0:
         raise ValueError(f"Identificador de conexão inválido: {conn_id!r} (esperado inteiro >= 0).")
-    return certs_dir / TRUSTED_DIR_NAME / f"conn-{conn_id}.der"
 
 
 def read_app_certificate(certs_dir: Path) -> AppCertificateInfo:
@@ -195,10 +217,29 @@ def store_server_certificate(certs_dir: Path, conn_id: int, data: bytes) -> str:
     Devolve o nome do arquivo gravado (`conn-<id>.der`), que é o valor da coluna
     `server_cert_file`. Levanta ValueError se `data` não for um único certificado.
     """
-    path = trusted_cert_path(certs_dir, conn_id)  # valida conn_id antes de qualquer I/O
+    return _store_certificate(trusted_cert_path(certs_dir, conn_id), data)  # valida antes de I/O
+
+
+def store_received_server_certificate(received_dir: Path, conn_id: int, data: bytes) -> str:
+    """Grava o certificado capturado do servidor pelo opc-worker (staging do trust).
+
+    Mesma normalização/validação do trust: um único X.509, gravado como DER. Confiar é
+    decisão explícita do admin via API — este arquivo nunca alimenta `set_security`.
+    """
+    return _store_certificate(received_cert_path(received_dir, conn_id), data)
+
+
+def _store_certificate(path: Path, data: bytes) -> str:
     cert = _load_certificate(data)
-    _ensure_dir(certs_dir / TRUSTED_DIR_NAME)
-    _write_file(path, cert.public_bytes(serialization.Encoding.DER), _CERT_MODE)
+    der = cert.public_bytes(serialization.Encoding.DER)
+    _ensure_dir(path.parent)
+    # Pula a regravação de bytes idênticos: o worker recaptura a cada retry do backoff e
+    # reescrever o mesmo conteúdo só abriria a janela de leitura parcial para a API.
+    if path.exists() and path.read_bytes() == der:
+        return path.name
+    # tmp + rename (mesmo mecanismo do par de aplicação): a API lê este arquivo de outro
+    # container e nunca pode ver o truncate sem o write.
+    _write_all_atomically([(path, der, _CERT_MODE)])
     return path.name
 
 
@@ -227,6 +268,42 @@ def _load_certificate(data: bytes) -> x509.Certificate:
             f"Conteúdo enviado tem {len(certificates)} certificados; informe um único certificado."
         )
     return certificates[0]
+
+
+@dataclass(frozen=True)
+class ServerCertificateInfo:
+    """Metadados de um certificado de servidor lido do disco (trusted ou received)."""
+
+    subject: str
+    issuer: str
+    fingerprint_sha256: str
+    not_before: datetime
+    not_after: datetime
+    pem: str
+
+
+def read_server_certificate_info(path: Path) -> ServerCertificateInfo | None:
+    """Lê metadados + PEM de um certificado de servidor gravado em DER.
+
+    Devolve None quando o arquivo não existe (servidor nunca contatado / sem trust);
+    levanta ValueError se o conteúdo não for um X.509 DER válido.
+    """
+    if not path.exists():
+        return None
+    der = path.read_bytes()
+    try:
+        cert = x509.load_der_x509_certificate(der)
+    except Exception as exc:
+        raise ValueError(f"Arquivo {path.name} não é um certificado X.509 DER válido.") from exc
+    canon = cert.public_bytes(serialization.Encoding.DER)
+    return ServerCertificateInfo(
+        subject=cert.subject.rfc4514_string(),
+        issuer=cert.issuer.rfc4514_string(),
+        fingerprint_sha256=hashlib.sha256(canon).hexdigest(),
+        not_before=cert.not_valid_before_utc,
+        not_after=cert.not_valid_after_utc,
+        pem=cert.public_bytes(serialization.Encoding.PEM).decode("ascii"),
+    )
 
 
 def _info_from_certificate(cert: x509.Certificate) -> AppCertificateInfo:
