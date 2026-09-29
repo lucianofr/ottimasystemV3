@@ -7,6 +7,7 @@ O worker é o supervisor da sessão: o auto-reconnect do asyncua fica desligado 
 import asyncio
 import logging
 import random
+import time
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import replace
@@ -17,6 +18,7 @@ from asyncua import Client, ua
 from redis.asyncio import Redis
 
 from ottima_core.bus import KIND_COMM_FAILURE, KIND_COMM_RESTORED, publish_event
+from ottima_core.certs import store_received_server_certificate
 
 from .heartbeat import HEARTBEAT_INTERVAL_S, ValueHeartbeat
 from .polling import ValuePoller
@@ -25,6 +27,7 @@ from .security import (
     FailureReason,
     configure_client,
     describe_exception,
+    fetch_server_certificate,
     map_connect_exception,
 )
 from .state import (
@@ -45,6 +48,14 @@ SESSION_CHECK_INTERVAL_S = 1.0
 # Acima disso o teto já domina o cálculo; sem o corte, 2**n estoura o float depois de
 # algumas horas de conexão fora do ar.
 _MAX_BACKOFF_EXPONENT = 32
+# Prazo TOTAL da descoberta do certificado do servidor: o `timeout` do asyncua vale por
+# etapa (socket, hello, OpenSecureChannel, GetEndpoints), então sem teto próprio um
+# servidor mudo atrasaria o ciclo de falha em ~4x5 s — e o orçamento de alarme da spec
+# §3.6 é medido até o evento.
+CAPTURA_PRAZO_S = 8.0
+# Intervalo mínimo entre capturas bem-sucedidas: o backoff pode retorçar em ~0 s e a
+# descoberta abre uma conexão plain extra por ciclo; 60 s cobre rotação sem virar flood.
+CAPTURA_INTERVALO_MIN_S = 60.0
 
 # Texto pt-BR para humanos; consumidores fazem match por `kind`/`reason` (spec §7.3).
 _REASON_TEXT: dict[str, str] = {
@@ -89,6 +100,7 @@ class ConnectionRuntime:
         snapshot: ConnectionSnapshot,
         *,
         certs_dir: Path = Path("/certs"),
+        received_certs_dir: Path = Path("/certs-received"),
         fernet_key: str = "",
         backoff_initial_s: float = BACKOFF_INITIAL_S,
         backoff_max_s: float = BACKOFF_MAX_S,
@@ -100,12 +112,14 @@ class ConnectionRuntime:
         self._redis = redis_client
         self._snapshot = snapshot
         self._certs_dir = certs_dir
+        self._received_certs_dir = received_certs_dir
         self._fernet_key = fernet_key
         self._backoff_initial_s = backoff_initial_s
         self._backoff_max_s = backoff_max_s
         self._state = ConnectionState.CONNECTING
         self._client: Client | None = None
         self._task: asyncio.Task[None] | None = None
+        self._ultima_captura_ok: float | None = None
         # Sessão aberta com o gancho de subida já executado: garante que on_session_down
         # rode uma vez só, mesmo com stop() repetido.
         self._session_open = False
@@ -546,7 +560,14 @@ class ConnectionRuntime:
             try:
                 await self._open_session()
             except Exception as exc:
-                await self.fail(*map_connect_exception(exc, pinning_enabled=self._pinning_enabled))
+                reason, detail = map_connect_exception(exc, pinning_enabled=self._pinning_enabled)
+                await self.fail(reason, detail)
+                if reason in ("cert_missing", "cert_mismatch"):
+                    # DEPOIS do alarme: a ordem normativa da spec §3.6 é transição, rajada
+                    # bad, evento — e a descoberta contra servidor mudo leva segundos. O
+                    # poll de 5 s da UI pega a captura no tick seguinte, sem custo no
+                    # orçamento de alarme.
+                    await self._capture_received_certificate()
             else:
                 attempt = 0
                 await self._watch_session()
@@ -554,6 +575,59 @@ class ConnectionRuntime:
                 backoff_delay(attempt, initial=self._backoff_initial_s, maximum=self._backoff_max_s)
             )
             attempt += 1
+
+    async def _capture_received_certificate(self) -> None:
+        """Grava em `received/` o certificado que o servidor anuncia (best-effort).
+
+        Nunca levanta nem atrasa o ciclo de falha: erro de captura (servidor mudo, disco
+        cheio, prazo estourado) só vai para o log, e o throttle de 60 s impede uma
+        descoberta plain por ciclo de backoff quando o received já está fresco.
+        """
+        agora = time.monotonic()
+        if (
+            self._ultima_captura_ok is not None
+            and agora - self._ultima_captura_ok < CAPTURA_INTERVALO_MIN_S
+        ):
+            return
+        try:
+            async with asyncio.timeout(CAPTURA_PRAZO_S):
+                der = await fetch_server_certificate(self._config.endpoint)
+        except TimeoutError:
+            logger.warning(
+                "Descoberta do certificado do servidor da conexão %s estourou %s s",
+                self._config.id,
+                CAPTURA_PRAZO_S,
+            )
+            return
+        except Exception as exc:
+            logger.warning(
+                "Falha ao capturar o certificado do servidor da conexão %s: %s",
+                self._config.id,
+                describe_exception(exc),
+            )
+            logger.debug("Detalhe da captura da conexão %s", self._config.id, exc_info=True)
+            return
+        if der is None:
+            logger.info(
+                "Servidor da conexão %s não anunciou certificado (descoberta sem resultado)",
+                self._config.id,
+            )
+            return
+        try:
+            nome = store_received_server_certificate(self._received_certs_dir, self._config.id, der)
+        except Exception as exc:
+            logger.warning(
+                "Falha ao gravar o certificado recebido da conexão %s: %s",
+                self._config.id,
+                describe_exception(exc),
+            )
+            return
+        self._ultima_captura_ok = time.monotonic()
+        logger.info(
+            "Certificado recebido do servidor da conexão %s gravado em %s",
+            self._config.id,
+            nome,
+        )
 
     async def _open_session(self) -> None:
         """Conecta e sobe para `up`; qualquer exceção deixa a conexão sem cliente nem peças."""
