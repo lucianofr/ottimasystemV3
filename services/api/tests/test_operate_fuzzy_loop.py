@@ -5,6 +5,7 @@ projeto/conexao/tag/flow com `admin_headers`, porque o PUT do grafo exige admin)
 """
 
 from ottima_core.contracts_export import FUZZY_LOOP_DEFAULT_FLL
+from ottima_core.flowgraph.fll_defaults import fuzzy_loop_default_fll
 
 
 async def _projeto(client, headers, nome: str) -> int:
@@ -39,13 +40,13 @@ async def _tag(client, headers, conn_id: int, nome: str) -> int:
     return r.json()["id"]
 
 
-def _aresta(edge_id: str, source: str, target: str) -> dict:
+def _aresta(edge_id: str, source: str, target: str, target_handle: str = "in") -> dict:
     return {
         "id": edge_id,
         "source": source,
         "sourceHandle": "out",
         "target": target,
-        "targetHandle": "in",
+        "targetHandle": target_handle,
     }
 
 
@@ -80,7 +81,7 @@ async def _cenario(client, admin_headers, nome: str) -> tuple[int, str]:
             no("pl1", "pid_loop", 3, sp_hi_lim=100.0, sp_lo_lim=0.0, kc=1.0),
         ],
         "edges": [
-            _aresta("e1", "r1", "fl1"),
+            _aresta("e1", "r1", "fl1", "pv_1"),
             _aresta("e2", "r1", "pl1"),
         ],
     }
@@ -188,3 +189,128 @@ async def test_superficie_com_buraco_serializa_nan_como_null(
     valores = r.json()["values"]
     assert valores[32][64] is None  # e_n = +1 sem regra
     assert valores[32][0] is not None  # o lado negativo segue coberto
+
+
+# --------------------------------------------------------------------------------------
+# v2 multicanal (MIMO): n_loops no discovery/detalhe, surface por canal, SP por canal
+# --------------------------------------------------------------------------------------
+
+
+async def _cenario_mimo(client, admin_headers, nome: str) -> tuple[int, str]:
+    """Flow com `fm` (fuzzy_loop n_loops=2, base default multicanal) e duas tags de PV."""
+
+    pid = await _projeto(client, admin_headers, nome)
+    cid = await _conexao(client, admin_headers, pid, f"plc-{nome}")
+    r = await client.post(
+        "/api/flows",
+        json={"project_id": pid, "name": nome, "ts_seconds": 1},
+        headers=admin_headers,
+    )
+    assert r.status_code == 201, r.text
+    flow_id = r.json()["id"]
+    tag1 = await _tag(client, admin_headers, cid, f"PV1-{nome}")
+    tag2 = await _tag(client, admin_headers, cid, f"PV2-{nome}")
+    graph = {
+        "nodes": [
+            {
+                "id": "r1",
+                "type": "opc_read",
+                "position": {"x": 0.0, "y": 0.0},
+                "data": {"exec_order": 1, "tag_id": tag1},
+            },
+            {
+                "id": "r2",
+                "type": "opc_read",
+                "position": {"x": 0.0, "y": 0.0},
+                "data": {"exec_order": 2, "tag_id": tag2},
+            },
+            {
+                "id": "fm",
+                "type": "fuzzy_loop",
+                "position": {"x": 0.0, "y": 0.0},
+                "data": {
+                    "exec_order": 3,
+                    "sp_hi_lim": 100.0,
+                    "sp_lo_lim": 0.0,
+                    "ke": 0.05,
+                    "kde": 0.0,
+                    "ku": 2.0,
+                    "n_loops": 2,
+                    "fll": fuzzy_loop_default_fll(2),
+                },
+            },
+        ],
+        "edges": [
+            _aresta("e1", "r1", "fm", "pv_1"),
+            _aresta("e2", "r2", "fm", "pv_2"),
+        ],
+    }
+    r = await client.put(f"/api/flows/{flow_id}", json={"graph_json": graph}, headers=admin_headers)
+    assert r.status_code == 200, r.text
+    r = await client.post(f"/api/projects/{pid}/activate", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    return flow_id, "fm"
+
+
+async def test_discovery_traz_n_loops(client, admin_headers, operator_headers):
+    flow_id, _ = await _cenario_mimo(client, admin_headers, "disc-mimo")
+    r = await client.get("/api/operate/loop", headers=operator_headers)
+    assert r.status_code == 200, r.text
+    por_id = {no["block_id"]: no["n_loops"] for no in r.json() if no["flow_id"] == flow_id}
+    assert por_id == {"fm": 2}
+
+
+async def test_detalhe_traz_n_loops(client, admin_headers, operator_headers):
+    flow_id, block_id = await _cenario_mimo(client, admin_headers, "det-mimo")
+    r = await client.get(f"/api/operate/loop/{flow_id}/{block_id}", headers=operator_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["n_loops"] == 2
+
+
+async def test_surface_por_canal(client, admin_headers, operator_headers):
+    flow_id, block_id = await _cenario_mimo(client, admin_headers, "sup-mimo")
+    for canal in (0, 1):
+        r = await client.get(
+            f"/api/operate/loop/{flow_id}/{block_id}/surface",
+            params={"channel": canal},
+            headers=operator_headers,
+        )
+        assert r.status_code == 200, r.text
+        valores = r.json()["values"]
+        assert len(valores) == 65
+    r = await client.get(
+        f"/api/operate/loop/{flow_id}/{block_id}/surface",
+        params={"channel": 2},
+        headers=operator_headers,
+    )
+    assert r.status_code == 422
+
+
+async def test_sp_com_canal_publica_comando(client, admin_headers, operator_headers):
+    flow_id, block_id = await _cenario_mimo(client, admin_headers, "sp-mimo")
+    r = await client.post(
+        f"/api/operate/{flow_id}/{block_id}/sp",
+        json={"value": 42.0, "channel": 1},
+        headers=operator_headers,
+    )
+    assert r.status_code == 202, r.text
+    r = await client.post(
+        f"/api/operate/{flow_id}/{block_id}/sp",
+        json={"value": 42.0, "channel": 2},
+        headers=operator_headers,
+    )
+    assert r.status_code == 422  # canal fora do bloco
+
+
+async def test_sp_sem_canal_segue_compativel(client, admin_headers, operator_headers):
+    flow_id, _ = await _cenario(client, admin_headers, "sp-siso")
+    r = await client.post(
+        f"/api/operate/{flow_id}/fl1/sp", json={"value": 42.0}, headers=operator_headers
+    )
+    assert r.status_code == 202, r.text
+    r = await client.post(
+        f"/api/operate/{flow_id}/fl1/sp",
+        json={"value": 42.0, "channel": 1},
+        headers=operator_headers,
+    )
+    assert r.status_code == 422  # SISO: so o canal 0

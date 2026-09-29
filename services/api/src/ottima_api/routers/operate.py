@@ -18,8 +18,8 @@ import math
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Response
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
+from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,6 +88,8 @@ class LoopModeCommand(BaseModel):
 
 class LoopValueCommand(BaseModel):
     value: float
+    # Canal de controle (0-based) do fuzzy_loop v2 multicanal; blocos SISO usam 0.
+    channel: int = Field(default=0, ge=0)
 
 
 class MvOut(BaseModel):
@@ -221,6 +223,7 @@ class LoopNodeOut(BaseModel):
     block_id: str
     label: str
     type: str
+    n_loops: int = 1  # canais de controle (fuzzy_loop v2); pid_loop é sempre 1
 
 
 class LoopTuningOut(BaseModel):
@@ -264,6 +267,7 @@ class LoopDetailOut(BaseModel):
     out_hi_lim: float
     out_scale_lo: float
     out_scale_hi: float
+    n_loops: int = 1  # canais de controle (fuzzy_loop v2); pid_loop é sempre 1
     tuning: LoopTuningOut | FuzzyLoopTuningOut
 
 
@@ -320,7 +324,7 @@ async def _loop_config(db: AsyncSession, flow_id: int, block_id: str):
 
 
 def _validar_comando_loop(config, cmd: str, body) -> None:
-    """Validacao estatica do comando de malha (ADR-039 4.10): PERMITTED e faixas.
+    """Validacao estatica do comando de malha (ADR-039 4.10): PERMITTED, faixas e canal.
 
     O runtime defende de novo ao materializar — a API so recusa o que o graph_json
     ja garante ser invalido."""
@@ -328,6 +332,9 @@ def _validar_comando_loop(config, cmd: str, body) -> None:
         if body.target not in config.permitted:
             raise _reprovado(f"Modo '{body.target}' fora de PERMITTED")
         return
+    n_loops = int(getattr(config, "n_loops", 1))
+    if body.channel >= n_loops:
+        raise _reprovado(f"Canal {body.channel} fora do bloco (n_loops={n_loops})")
     if cmd == "loop_sp" and not (config.sp_lo_lim <= body.value <= config.sp_hi_lim):
         raise _reprovado(
             f"Valor {body.value} fora da faixa de SP ({config.sp_lo_lim}..{config.sp_hi_lim})"
@@ -425,7 +432,7 @@ async def set_sp(
             user,
             flow_id,
             "loop_sp",
-            {"block_id": block_id, "value": body.value},
+            {"block_id": block_id, "value": body.value, "channel": body.channel},
         )
         return Response(status_code=202)
     if node.type != "mpc":
@@ -494,7 +501,7 @@ async def set_out(
         user,
         flow_id,
         "loop_out",
-        {"block_id": block_id, "value": body.value},
+        {"block_id": block_id, "value": body.value, "channel": body.channel},
     )
     return Response(status_code=202)
 
@@ -756,6 +763,7 @@ def _loop_nodes(flow: Flow) -> list[LoopNodeOut]:
                     block_id=node.id,
                     label=node.label or node.id,
                     type=node.type,
+                    n_loops=int(getattr(node.config, "n_loops", 1)),
                 )
             )
     except GraphParseError:
@@ -807,6 +815,7 @@ async def get_loop_detail(
         out_hi_lim=config.out_hi_lim,
         out_scale_lo=config.out_scale_lo,
         out_scale_hi=config.out_scale_hi,
+        n_loops=int(getattr(config, "n_loops", 1)),
         tuning=_loop_tuning(node.type, config),
     )
 
@@ -853,15 +862,23 @@ class LoopSurfaceOut(BaseModel):
     dependencies=[Depends(require_operator)],
 )
 async def get_loop_surface(
-    flow_id: FlowId, block_id: BlockId, db: AsyncSession = Depends(get_db)
+    flow_id: FlowId,
+    block_id: BlockId,
+    channel: Annotated[int, Query(ge=0)] = 0,
+    db: AsyncSession = Depends(get_db),
 ) -> LoopSurfaceOut:
-    """Grade (e_n, de_n) -> du_n do FLL vigente, para o heatmap de comissionamento."""
+    """Grade (e_n, de_n) -> du_n do FLL vigente PARA UM CANAL, para o heatmap de
+    comissionamento. Num bloco multicanal os demais canais ficam no ponto de operação
+    zero — a fatia 2D inspectável de sempre, agora por canal (v2 MIMO)."""
     node = await _node_do_flow(db, flow_id, block_id)
     if node.type != "fuzzy_loop":
         raise _reprovado(f"Bloco '{block_id}' não é um bloco fuzzy_loop")
     fll = node.config.fll
+    n_loops = node.config.n_loops
+    if channel >= n_loops:
+        raise _reprovado(f"Canal {channel} fora do bloco (n_loops={n_loops})")
     # `sample_surface` é CPU-bound (um process() sobre 65x65 pontos): fora do event loop,
     # mesma postura da introspecção do ADR-030.
-    grade = await asyncio.to_thread(sample_surface, fll)
+    grade = await asyncio.to_thread(sample_surface, fll, n_loops=n_loops, channel=channel)
     valores = [[None if math.isnan(valor) else float(valor) for valor in linha] for linha in grade]
     return LoopSurfaceOut(resolution=len(valores), values=valores)

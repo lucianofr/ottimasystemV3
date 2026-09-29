@@ -148,7 +148,8 @@ _FUZZY_VAR_ID_RE = re.compile(r"^(IN|OUT)[1-8]$")
 
 ERRO_LOOP_VAR_IDS_VAZIO = "var_ids não pode ser vazio"
 ERRO_LOOP_VAR_IDS_MALFORMADO = (
-    "var_ids deve conter apenas pv, sp, out ou mode separados por vírgula"
+    "var_ids deve conter apenas pv, sp, out ou mode (sufixo opcional :canal para bloco "
+    "multicanal, ex. pv:1) separados por vírgula"
 )
 
 _LOOP_VAR_IDS = frozenset({"pv", "sp", "out", "mode"})
@@ -234,12 +235,18 @@ def _parse_fuzzy_var_ids(bruto: str) -> list[str]:
 
 def _parse_loop_var_ids(bruto: str) -> list[str]:
     """Lista separada por vírgula, deduplicada — cada item tem de ser pv/sp/out/mode
-    (variáveis do bloco malha, ADR-039 4.10): fora do conjunto é 422, nunca 5xx."""
+    (variáveis do bloco malha, ADR-039 4.10), com sufixo opcional `:<canal>` (canal >= 1;
+    o canal 0 grava sem sufixo — fuzzy_loop v2 multicanal): fora do formato é 422,
+    nunca 5xx."""
     if not bruto.strip():
         raise HTTPException(status_code=422, detail=ERRO_LOOP_VAR_IDS_VAZIO)
     itens = [p.strip() for p in bruto.split(",")]
-    if any(item not in _LOOP_VAR_IDS for item in itens):
-        raise HTTPException(status_code=422, detail=ERRO_LOOP_VAR_IDS_MALFORMADO)
+    for item in itens:
+        base, _, sufixo = item.partition(":")
+        if base not in _LOOP_VAR_IDS:
+            raise HTTPException(status_code=422, detail=ERRO_LOOP_VAR_IDS_MALFORMADO)
+        if sufixo != "" and not (sufixo.isdigit() and int(sufixo) >= 1):
+            raise HTTPException(status_code=422, detail=ERRO_LOOP_VAR_IDS_MALFORMADO)
     return list(dict.fromkeys(itens))
 
 
