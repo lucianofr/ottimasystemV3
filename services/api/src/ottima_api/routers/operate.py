@@ -211,6 +211,9 @@ class FuzzyNodeOut(BaseModel):
     block_name: str  # `label` do nó; cai para o `block_id` quando o canvas não nomeou o bloco
     #: SP inicial do bloco (`None` = bloco sem SP; a rota `/sp` responde 422 nesse caso).
     setpoint: float | None = None
+    #: Fonte do SP (RF-541 revisado, PRD 3.1): `operador` (rota `/sp`), `entrada` (porta `sp`
+    #: do bloco, fio do flow) ou `None` (sem SP). A página FUZZY só escreve no modo operador.
+    sp_source: str | None = None
     inputs: list[FuzzyPortOut]
     outputs: list[FuzzyOutputPortOut]
 
@@ -280,6 +283,8 @@ class FuzzyDetailOut(BaseModel):
     output_eu: dict[str, str]
     #: SP configurado (semente do operador); `None` = bloco sem SP.
     setpoint: float | None = None
+    #: Fonte do SP: `operador`, `entrada` ou `None` (sem SP) — RF-541 revisado (PRD 3.1).
+    sp_source: str | None = None
     introspection: FuzzyIntrospection
 
 
@@ -435,6 +440,11 @@ async def set_sp(
     if node.type == "fuzzy":
         if not isinstance(body, LoopValueCommand):
             raise _reprovado("Bloco fuzzy exige body {'value': <float>}")
+        if node.config.sp_da_entrada:
+            raise _reprovado(
+                "SP deste bloco vem da entrada 'sp' conectada no flow (sp_source='entrada'); "
+                "a escrita do operador vale só para sp_source='operador'"
+            )
         if node.config.setpoint is None:
             raise _reprovado(
                 "Bloco fuzzy sem SP: configure o setpoint no bloco (com ele, o FLL declara a "
@@ -687,7 +697,7 @@ def _fuzzy_nodes(flow: Flow) -> list[FuzzyNodeOut]:
             if node.type != "fuzzy":
                 continue
             config = node.config
-            intro = introspect_fll(config.fll, ultima_entrada_e_sp=config.setpoint is not None)
+            intro = introspect_fll(config.fll, ultima_entrada_e_sp=config.sp_ativo)
             saida.append(
                 FuzzyNodeOut(
                     flow_id=flow.id,
@@ -695,6 +705,7 @@ def _fuzzy_nodes(flow: Flow) -> list[FuzzyNodeOut]:
                     block_id=node.id,
                     block_name=node.label or node.id,
                     setpoint=config.setpoint,
+                    sp_source=config.sp_source,
                     inputs=[FuzzyPortOut(port=v.port, name=v.name) for v in intro.inputs],
                     outputs=[
                         FuzzyOutputPortOut(
@@ -748,7 +759,7 @@ async def get_fuzzy_detail(
     if flow is None:
         raise HTTPException(status_code=404, detail=MSG_FLOW_NAO_ENCONTRADO)
     node = _fuzzy_flow_and_node(flow, block_id)
-    tem_sp = node.config.setpoint is not None
+    tem_sp = node.config.sp_ativo
     try:
         intro = await asyncio.to_thread(introspect_fll, node.config.fll, ultima_entrada_e_sp=tem_sp)
     except ValueError as erro:
@@ -760,6 +771,7 @@ async def get_fuzzy_detail(
         block_name=node.label or node.id,
         output_eu=node.config.output_eu,
         setpoint=node.config.setpoint,
+        sp_source=node.config.sp_source,
         introspection=intro,
     )
 

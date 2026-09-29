@@ -136,6 +136,7 @@ async def test_fuzzy_lista_nomes_de_porta_do_fll_default(client, admin_headers, 
             "block_id": block_id,
             "block_name": block_id,  # nó sem `label`: cai para o id do bloco
             "setpoint": None,  # sem SP configurado: bloco de sempre, só leitura
+            "sp_source": None,
             "inputs": [{"port": "IN1", "name": "X"}],
             "outputs": [
                 {"port": "OUT1", "name": "Ramps", "eu": None},
@@ -388,3 +389,81 @@ async def test_sp_em_bloco_sem_setpoint_e_em_bloco_nao_fuzzy_422(
         f"/api/operate/{flow_id}/r1/sp", json={"value": 70.0}, headers=operator_headers
     )
     assert r.status_code == 422
+
+
+# ------------------------------------------------------- SP pela porta `sp` (sp_source=entrada)
+
+
+async def _cenario_entrada(client, admin_headers, nome: str, *, fio_sp: bool = True):
+    """Flow com bloco `fuzzy` em `sp_source='entrada'`: PV em IN1 e (opcional) fio em `sp`."""
+    pid = await _projeto(client, admin_headers, nome)
+    cid = await _conexao(client, admin_headers, pid, f"plc-{nome}")
+    flow = await _flow(client, admin_headers, pid, nome)
+    tag_pv = await _tag(client, admin_headers, cid, "PV-1", "r")
+    tag_sp = await _tag(client, admin_headers, cid, "SP-1", "r")
+    arestas = [_aresta("r1", "out", "fz1", "IN1", "e1")]
+    nos = [
+        _no("r1", "opc_read", 1, tag_id=tag_pv),
+        _no("fz1", "fuzzy", 2, fll=SP_FLL, n_inputs=1, n_outputs=1, sp_source="entrada"),
+    ]
+    if fio_sp:
+        nos.insert(1, _no("r2", "opc_read", 3, tag_id=tag_sp))
+        arestas.append(_aresta("r2", "out", "fz1", "sp", "e2"))
+    graph = {"nodes": nos, "edges": arestas}
+    r = await client.put(
+        f"/api/flows/{flow['id']}", json={"graph_json": graph}, headers=admin_headers
+    )
+    return flow["id"], r
+
+
+async def test_sp_pela_entrada_projeta_a_fonte_e_recusa_a_rota_do_operador(
+    client, admin_headers, operator_headers
+):
+    flow_id, r = await _cenario_entrada(client, admin_headers, "FuzzySpEntrada")
+    assert r.status_code == 200, r.text
+    pid = (await client.get(f"/api/flows/{flow_id}", headers=admin_headers)).json()[
+        "project_id"
+    ]
+    await client.post(f"/api/projects/{pid}/activate", headers=admin_headers)
+
+    r = await client.get("/api/operate/fuzzy", headers=operator_headers)
+    assert r.status_code == 200, r.text
+    no = r.json()[0]
+    assert no["sp_source"] == "entrada"
+    assert no["setpoint"] is None
+    assert [p["port"] for p in no["inputs"]] == ["IN1", "SP"]
+
+    r = await client.post(
+        f"/api/operate/{flow_id}/fz1/sp", json={"value": 70.0}, headers=operator_headers
+    )
+    assert r.status_code == 422
+    assert "entrada 'sp'" in r.json()["detail"]
+
+
+async def test_sp_pela_entrada_sem_o_fio_e_422_no_save(client, admin_headers):
+    _flow_id, r = await _cenario_entrada(client, admin_headers, "FuzzySpSemFio", fio_sp=False)
+    assert r.status_code == 422
+    assert "entrada 'sp' é obrigatória" in r.json()["detail"]
+
+
+async def test_sp_source_entrada_com_setpoint_e_422_no_save(client, admin_headers):
+    pid = await _projeto(client, admin_headers, "FuzzySpConflito")
+    cid = await _conexao(client, admin_headers, pid, "plc-conflito")
+    flow = await _flow(client, admin_headers, pid, "FuzzySpConflito")
+    tag = await _tag(client, admin_headers, cid, "PV-1", "r")
+    graph = {
+        "nodes": [
+            _no("r1", "opc_read", 1, tag_id=tag),
+            _no(
+                "fz1", "fuzzy", 2,
+                fll=SP_FLL, n_inputs=1, n_outputs=1,
+                sp_source="entrada", setpoint=50.0,
+            ),
+        ],
+        "edges": [_aresta("r1", "out", "fz1", "IN1", "e1")],
+    }
+    r = await client.put(
+        f"/api/flows/{flow['id']}", json={"graph_json": graph}, headers=admin_headers
+    )
+    assert r.status_code == 422
+    assert "setpoint" in r.json()["detail"]
