@@ -520,6 +520,7 @@ export interface FuzzyVarState {
 export interface FuzzyState {
   ts: string;
   ok: boolean;
+  sp: number | null;
   inputs: FuzzyVarState[];
   rules: number[];
   outputs: FuzzyVarState[];
@@ -682,6 +683,7 @@ export interface FuzzyConfig {
   n_inputs: number;
   n_outputs: number;
   output_eu: Record<string, string>;
+  setpoint: number | null;
 }
 
 export interface PidConfig {

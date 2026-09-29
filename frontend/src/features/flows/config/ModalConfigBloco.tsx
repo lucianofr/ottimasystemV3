@@ -23,7 +23,13 @@ import {
   type NoScript,
 } from "../graph";
 import { BASES_TEMPO } from "../registro";
-import { inteiroDoCampo, matrizDoFormulario, montarDadosPid, numeroDoCampo } from "./campos";
+import {
+  inteiroDoCampo,
+  matrizDoFormulario,
+  montarDadosPid,
+  numeroDoCampo,
+  numeroOuNuloDoCampo,
+} from "./campos";
 import { CamposBlocoPid } from "./CamposBlocoPid";
 import { CamposDeadTime, CamposLeadLag } from "./CamposCompensacao";
 import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
@@ -225,6 +231,24 @@ function CamposFuzzy({
       )}
 
       <div className="space-y-1">
+        <Label htmlFor="setpoint">SP do operador (habilita o controle por setpoint)</Label>
+        <Input
+          id="setpoint"
+          name="setpoint"
+          type="number"
+          step="any"
+          data-testid="config-setpoint"
+          defaultValue={dados.setpoint ?? ""}
+          placeholder="vazio = sem SP"
+        />
+        <p className="text-[10px] text-fg-muted">
+          Com SP definido, o FLL precisa declarar UMA variável de entrada a mais — a última,
+          que recebe o SP escrito pelo operador na página FUZZY; a primeira continua sendo a
+          porta IN1. Vazio desliga o SP (bloco volta a mapear só as portas).
+        </p>
+      </div>
+
+      <div className="space-y-1">
         <Label htmlFor="fll">FLL (FuzzyLite Language)</Label>
         <textarea
           id="fll"
@@ -358,6 +382,9 @@ export function ModalConfigBloco({
                 outputEuDoFormulario(campos, portasScript("OUT", MAX_PORTAS_FUZZY)),
                 n_outputs,
               ),
+              // Vazio desliga o SP (regra ausente/vazio/valor de `campos.ts`): salvar o bloco
+              // pelo modal nunca apaga o SP por acidente, só por escolha do engenheiro.
+              setpoint: numeroOuNuloDoCampo(campos.get("setpoint"), no.data.setpoint),
             },
           },
           execOrder,

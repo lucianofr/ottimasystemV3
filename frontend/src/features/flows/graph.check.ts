@@ -82,7 +82,15 @@ function fuzzy(id: string, ordem: number, entradas = 1, saidas = 4): BlocoNode {
     id,
     type: "fuzzy",
     position: POS,
-    data: { exec_order: ordem, label: "", n_inputs: entradas, n_outputs: saidas, fll: "", output_eu: {} },
+    data: {
+      exec_order: ordem,
+      label: "",
+      n_inputs: entradas,
+      n_outputs: saidas,
+      fll: "",
+      output_eu: {},
+      setpoint: null,
+    },
   };
 }
 
@@ -296,6 +304,7 @@ test("criarBloco('fuzzy', ...) nasce com os defaults do contrato, nunca literal 
     n_outputs: contratoFuzzy.default_counts.n_outputs,
     fll: contratoFuzzy.default_fll,
     output_eu: {},
+    setpoint: null,  // RF-541 revisado: sem SP o bloco e o de sempre (portas verbatim)
   });
 });
 
@@ -560,7 +569,7 @@ test("data sai com exatamente as chaves do contrato, uma lista por tipo", () => 
     ["code", "exec_order", "label", "n_inputs", "n_outputs", "output_eu"],
     ["exec_order", "label", "matrix", "output_eu", "y0"],
     ["exec_order", "label", "models", "multiplier", "name", "variables"],
-    ["exec_order", "fll", "label", "n_inputs", "n_outputs", "output_eu"],
+    ["exec_order", "fll", "label", "n_inputs", "n_outputs", "output_eu", "setpoint"],
   ]);
 });
 
@@ -639,6 +648,7 @@ test("ida e volta pelo graph_json preserva output_eu do Script, TFS e Fuzzy (spe
         n_outputs: 2,
         fll: "Engine: teste\n",
         output_eu: { OUT1: "%" },
+        setpoint: null,
       },
     },
   ];

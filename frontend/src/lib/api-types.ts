@@ -1457,6 +1457,8 @@ export interface components {
             output_eu: {
                 [key: string]: string;
             };
+            /** Setpoint */
+            setpoint?: number | null;
             introspection: components["schemas"]["FuzzyIntrospection"];
         };
         /** FuzzyHistoryResponse */
@@ -1538,6 +1540,8 @@ export interface components {
             block_id: string;
             /** Block Name */
             block_name: string;
+            /** Setpoint */
+            setpoint?: number | null;
             /** Inputs */
             inputs: components["schemas"]["FuzzyPortOut"][];
             /** Outputs */

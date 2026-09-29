@@ -1,10 +1,11 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router";
 
 import { useAssinatura, useCanalAoVivo } from "../../app/CanalAoVivo";
 import { Badge } from "../../components/ui/badge";
 import { Card } from "../../components/ui/card";
 import { Select } from "../../components/ui/select";
+import { ApiError, apiResposta } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { useActiveProject } from "../projects/useProjects";
 import { PainelRegras } from "./PainelRegras";
@@ -16,12 +17,16 @@ import { useFuzzyDetail } from "./useFuzzyDetail";
 
 /**
  * FUZZY OPERATE (ADR-030) — combobox "Bloco fuzzy" do projeto ativo (seleção em query string
- * `?flow=&bloco=`, não path: ao contrário do MPC o bloco fuzzy é somente leitura, então não
- * há "sala de controle" por URL própria a preservar — a query string já sobrevive ao F5),
- * badges das normas do rule block e por saída, grade de painéis SVG (entradas à esquerda,
- * saídas à direita), tabela de regras e trend embaixo. Espelha a casca de `OperatePage.tsx`
- * sem reusar o código dela: o MPC tem faceplates/comandos que o fuzzy não tem — o bloco é
- * somente leitura (ADR-029), sem `POST` nenhum nesta tela.
+ * `?flow=&bloco=`, não path: ao contrário do MPC o bloco fuzzy não tem "sala de controle" por
+ * URL própria a preservar — a query string já sobrevive ao F5), badges das normas do rule
+ * block e por saída, grade de painéis SVG (entradas à esquerda, saídas à direita), tabela de
+ * regras e trend embaixo. Espelha a casca de `OperatePage.tsx` sem reusar o código dela.
+ *
+ * O bloco é somente leitura EXCETO o SP (RF-541 revisado): com `setpoint` configurado no
+ * bloco, o FLL declara uma variável de entrada a mais — a última, rotulada `SP` na
+ * introspecção — e é ela que recebe o valor escrito aqui. Nada de lógica de controle no
+ * cliente: o desvio mostrado é `sp − pv`, leitura de conveniência, não cálculo de malha
+ * (ADR-005).
  */
 
 function chaveNo(no: FuzzyNodeOut): string {
@@ -47,6 +52,104 @@ function BadgesRuleBlock({ bloco }: { bloco: FuzzyRuleBlockOut }) {
   );
 }
 
+/** Número em pt-BR com 2 casas fixas — mesma Regra do Número Tabular do resto da HMI. */
+function formatarSp(valor: number | null): string {
+  return valor === null ? "—" : valor.toFixed(2).replace(".", ",");
+}
+
+/**
+ * Barra de SP do bloco fuzzy (RF-541 revisado). Mostra o SP **publicado** pelo runtime (não o
+ * eco do comando — Regra do Estado Publicado), a medida da porta `IN1` e o desvio `sp − pv`,
+ * e escreve o SP pela rota `/api/operate/{flow}/{block}/sp`. A faixa do campo vem da própria
+ * variável do FLL, via introspecção do servidor (o cliente nunca parseia FLL).
+ */
+function BarraSp({
+  sp,
+  pv,
+  minimo,
+  maximo,
+  aoEnviar,
+}: {
+  sp: number | null;
+  pv: number | null;
+  minimo: number;
+  maximo: number;
+  aoEnviar: (valor: number) => Promise<string | null>;
+}) {
+  const [valor, setValor] = useState("");
+  const [erro, setErro] = useState<string | null>(null);
+  const desvio = sp !== null && pv !== null ? sp - pv : null;
+
+  async function enviar(evento: FormEvent<HTMLFormElement>): Promise<void> {
+    evento.preventDefault();
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) return;
+    const problema = await aoEnviar(numero);
+    setErro(problema);
+    if (problema === null) setValor("");
+  }
+
+  return (
+    <div
+      data-testid="fuzzy-sp"
+      className="flex flex-wrap items-end gap-x-4 gap-y-2 rounded-sm border border-border bg-surface-2 px-3 py-2"
+    >
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-xs text-fg-muted">SP</span>
+        <span className="process-value text-sm" data-testid="fuzzy-sp-vigente">
+          {formatarSp(sp)}
+        </span>
+      </div>
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-xs text-fg-muted">PV (IN1)</span>
+        <span className="process-value text-sm" data-testid="fuzzy-sp-pv">
+          {formatarSp(pv)}
+        </span>
+      </div>
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-xs text-fg-muted">desvio</span>
+        <span
+          className={cn(
+            "process-value text-sm",
+            desvio !== null && Math.abs(desvio) > 0.5 && "text-warn-fg",
+          )}
+          data-testid="fuzzy-sp-desvio"
+        >
+          {desvio === null ? "—" : `${desvio >= 0 ? "+" : "−"}${formatarSp(Math.abs(desvio))}`}
+        </span>
+      </div>
+      <form onSubmit={(e) => void enviar(e)} className="flex items-end gap-2">
+        <label className="text-xs text-fg-muted" htmlFor="fuzzy-sp-input">
+          Escrever SP
+        </label>
+        <input
+          id="fuzzy-sp-input"
+          data-testid="fuzzy-sp-input"
+          type="number"
+          step="any"
+          min={minimo}
+          max={maximo}
+          value={valor}
+          onChange={(e) => setValor(e.target.value)}
+          className="process-value w-24 rounded-sm border border-border bg-surface px-2 py-1 text-xs"
+        />
+        <button
+          type="submit"
+          data-testid="fuzzy-sp-enviar"
+          className="rounded-sm border border-border px-2 py-1 text-xs hover:bg-surface-2"
+        >
+          Enviar
+        </button>
+      </form>
+      {erro !== null && (
+        <p role="alert" data-testid="fuzzy-sp-erro" className="text-xs text-alarm">
+          {erro}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Bloco fuzzy resolvido: assina `fuzzy_state` do bloco (canal ao vivo) e busca a
  *  introspecção do FLL. `key` no componente pai força remonte ao trocar de bloco (mesmo
  *  padrão de `OperacaoDoMpc`/`OperatePage.tsx`): `useAssinatura` só lê o interesse do
@@ -58,6 +161,19 @@ function FuzzyResolvido({ no }: { no: FuzzyNodeOut }) {
   const canal = useCanalAoVivo();
   const estado = canal.fuzzyStates.get(`${String(flowId)}/${blockId}`);
   const detalhe = useFuzzyDetail(flowId, blockId);
+
+  /** POST do SP; devolve a mensagem de erro (ou `null` no sucesso) para a barra exibir. */
+  async function enviarSp(valor: number): Promise<string | null> {
+    try {
+      await apiResposta(`/api/operate/${String(flowId)}/${blockId}/sp`, {
+        method: "POST",
+        body: JSON.stringify({ value: valor }),
+      });
+      return null;
+    } catch (erro) {
+      return erro instanceof ApiError ? erro.message : "Falha ao enviar o SP";
+    }
+  }
 
   const estadosPorPorta = useMemo(() => {
     const mapa = new Map<string, FuzzyVarState>();
@@ -89,12 +205,26 @@ function FuzzyResolvido({ no }: { no: FuzzyNodeOut }) {
   const { introspection, output_eu: outputEu } = detalhe.data;
   const implicacao = introspection.rule_blocks[0]?.implication ?? null;
   const invalido = estado !== undefined && !estado.ok;
+  // Com SP configurado, a introspecção rotula a última variável de entrada como `SP` — é o
+  // mesmo server-side que alimenta o bloco, então a faixa do campo não vem do cliente.
+  const varSp = introspection.inputs.find((variavel) => variavel.port === "SP") ?? null;
+  const pv = estadosPorPorta.get("IN1")?.v ?? null;
 
   return (
     <div className="space-y-6">
       {introspection.rule_blocks.map((bloco) => (
         <BadgesRuleBlock key={bloco.name} bloco={bloco} />
       ))}
+
+      {varSp !== null && (
+        <BarraSp
+          sp={estado?.sp ?? no.setpoint ?? null}
+          pv={pv}
+          minimo={varSp.minimum}
+          maximo={varSp.maximum}
+          aoEnviar={enviarSp}
+        />
+      )}
 
       {invalido && (
         <p

@@ -1189,6 +1189,12 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           n_outputs: inteiro(dados.n_outputs, 0, 0, MAX_PORTAS_FUZZY),
           fll: texto(dados.fll, contratoFuzzy.default_fll),
           output_eu: lerOutputEu(dados.output_eu),
+          // Ausente em grafos salvos antes do SP do operador (RF-541 revisado): vira `null`,
+          // o bloco de sempre. `null` explícito também é "sem SP".
+          setpoint:
+            dados.setpoint === null || dados.setpoint === undefined
+              ? null
+              : numero(dados.setpoint, 0),
         },
       };
     case "pid":
