@@ -19,11 +19,13 @@ from opcsim import (
     NODE_COUNTER,
     NODE_MIRROR_BOOL,
     NODE_MIRROR_FLOAT,
+    NODE_MIRROR_FLOAT2,
     NODE_MIRROR_INT,
     NODE_SINE,
     NODE_STATIC,
     NODE_W_BOOL,
     NODE_W_FLOAT,
+    NODE_W_FLOAT2,
     NODE_W_INT,
     NODE_WD_FROM_SYSTEM,
     NODE_WD_FROM_SYSTEM_2,
@@ -70,10 +72,12 @@ async def test_vars_variam(sim: OpcSimServer) -> None:
 async def test_espelhos_refletem_escrita_do_cliente(sim: OpcSimServer) -> None:
     async with Client(sim.endpoint) as client:
         await client.get_node(NODE_W_FLOAT).write_value(12.5, ua.VariantType.Double)
+        await client.get_node(NODE_W_FLOAT2).write_value(-7.5, ua.VariantType.Double)
         await client.get_node(NODE_W_INT).write_value(7, ua.VariantType.Int32)
         await client.get_node(NODE_W_BOOL).write_value(True, ua.VariantType.Boolean)
 
         await await_until(lambda: _equals(client, NODE_MIRROR_FLOAT, 12.5))
+        await await_until(lambda: _equals(client, NODE_MIRROR_FLOAT2, -7.5))
         await await_until(lambda: _equals(client, NODE_MIRROR_INT, 7))
         await await_until(lambda: _equals(client, NODE_MIRROR_BOOL, True))
 

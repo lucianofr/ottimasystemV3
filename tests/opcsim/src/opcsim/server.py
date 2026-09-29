@@ -45,6 +45,7 @@ NODE_COUNTER = "ns=2;s=sim.int.counter"
 NODE_SQUARE = "ns=2;s=sim.bool.square"
 NODE_STATIC = "ns=2;s=sim.float.static"
 NODE_W_FLOAT = "ns=2;s=sim.w.float"
+NODE_W_FLOAT2 = "ns=2;s=sim.w.float2"
 NODE_W_INT = "ns=2;s=sim.w.int"
 NODE_W_BOOL = "ns=2;s=sim.w.bool"
 NODE_W_ONLY = "ns=2;s=sim.w.only"
@@ -56,6 +57,7 @@ Atenção: o servidor do asyncua NÃO impõe o AccessLevel — uma leitura diret
 `Good`. O nó é um contraexemplo do ATRIBUTO DECLARADO, que é justamente o que o worker
 consulta antes de assinar (`_declares_read_access`)."""
 NODE_MIRROR_FLOAT = "ns=2;s=sim.mirror.float"
+NODE_MIRROR_FLOAT2 = "ns=2;s=sim.mirror.float2"
 NODE_MIRROR_INT = "ns=2;s=sim.mirror.int"
 NODE_MIRROR_BOOL = "ns=2;s=sim.mirror.bool"
 NODE_WD_FROM_SYSTEM = "ns=2;s=sim.watchdog.from_system"
@@ -67,6 +69,10 @@ NODE_WD_FROM_SYSTEM_2 = "ns=2;s=sim.watchdog.from_system_2"
 NODE_WD_TO_SYSTEM_2 = "ns=2;s=sim.watchdog.to_system_2"
 NODE_CTRL_FREEZE_WATCHDOG_2 = "ns=2;s=sim.control.freeze_watchdog_2"
 NODE_CTRL_FREEZE_VALUES = "ns=2;s=sim.control.freeze_values"
+# Segundo par w/espelho float, independente do primeiro: flows MIMO (fuzzy_loop v2
+# multicanal) fecham DUAS malhas físicas pelo OPC (duas MVs), e cada uma precisa do seu
+# par gravável/legível — o grafo do flow não pode ter ciclo (RF-302), então a realimentação
+# passa por aqui (mesmo padrão do ADR-022 usado no E2E-F4).
 
 VALUES_PERIOD = 0.2
 """Cadência do loop de simulação (senoide, contador, onda quadrada e espelhos)."""
@@ -85,9 +91,11 @@ _NODES: tuple[tuple[str, str, Any, ua.VariantType, bool], ...] = (
     (NODE_SQUARE, "square", False, ua.VariantType.Boolean, False),
     (NODE_STATIC, "static", 42.0, ua.VariantType.Double, True),
     (NODE_W_FLOAT, "w_float", 0.0, ua.VariantType.Double, True),
+    (NODE_W_FLOAT2, "w_float2", 0.0, ua.VariantType.Double, True),
     (NODE_W_INT, "w_int", 0, ua.VariantType.Int32, True),
     (NODE_W_BOOL, "w_bool", False, ua.VariantType.Boolean, True),
     (NODE_MIRROR_FLOAT, "mirror_float", 0.0, ua.VariantType.Double, False),
+    (NODE_MIRROR_FLOAT2, "mirror_float2", 0.0, ua.VariantType.Double, False),
     (NODE_MIRROR_INT, "mirror_int", 0, ua.VariantType.Int32, False),
     (NODE_MIRROR_BOOL, "mirror_bool", False, ua.VariantType.Boolean, False),
     (NODE_WD_FROM_SYSTEM, "wd_from_system", False, ua.VariantType.Boolean, True),
@@ -116,6 +124,7 @@ _VARIANT_TYPES: dict[str, ua.VariantType] = {node[0]: node[3] for node in _NODES
 # Tags de escrita e seus espelhos de leitura, na ordem (origem, espelho).
 _MIRRORS: tuple[tuple[str, str], ...] = (
     (NODE_W_FLOAT, NODE_MIRROR_FLOAT),
+    (NODE_W_FLOAT2, NODE_MIRROR_FLOAT2),
     (NODE_W_INT, NODE_MIRROR_INT),
     (NODE_W_BOOL, NODE_MIRROR_BOOL),
 )
