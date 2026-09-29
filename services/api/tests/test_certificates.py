@@ -7,7 +7,13 @@ from cryptography import x509
 from sqlalchemy import event, select
 
 from ottima_api.routers.connections import _excede_o_declarado
-from ottima_core.certs import APPLICATION_URI, app_cert_paths, generate_app_certificate
+from ottima_core.certs import (
+    APPLICATION_URI,
+    app_cert_paths,
+    generate_app_certificate,
+    store_received_server_certificate,
+)
+from ottima_core.certs import received_cert_path as caminho_recebido
 from ottima_core.certs import trusted_cert_path as caminho_confiado
 from ottima_core.models import OpcConnection
 
@@ -538,3 +544,257 @@ async def test_content_length_com_digitos_demais_nao_vira_500(
 )
 def test_guard_de_content_length_classifica_sem_nunca_levantar(declarado, excede):
     assert _excede_o_declarado(declarado) is excede
+
+
+# --- Certificado RECEBIDO do servidor: visualização (GET) e aceite sem upload (POST trust) ---
+
+
+@pytest.fixture
+def received_dir(test_settings):
+    """Diretório de staging que o app enxerga; em produção quem grava é o opc-worker."""
+    return test_settings.received_certs_dir
+
+
+def _simular_captura(received_dir, cid: int, der: bytes) -> None:
+    """Põe o certificado no staging exatamente como o opc-worker põe na falha de pin."""
+    store_received_server_certificate(received_dir, cid, der)
+
+
+def _fp(der: bytes) -> str:
+    return hashlib.sha256(der).hexdigest()
+
+
+async def _trust(client, headers, cid: int, der: bytes):
+    """POST trust com o fingerprint do certificado simulado no staging."""
+    return await client.post(
+        f"/api/connections/{cid}/server-certificate/trust",
+        json={"fingerprint_sha256": _fp(der)},
+        headers=headers,
+    )
+
+
+async def test_get_certificados_vazio_sem_arquivos(client, admin_headers):
+    cid = await _conexao(client, admin_headers, "plc-get-vazio")
+    r = await client.get(f"/api/connections/{cid}/server-certificate", headers=admin_headers)
+    assert r.status_code == 200
+    assert r.json() == {"conn_id": cid, "trusted": None, "received": None}
+
+
+async def test_get_mostra_recebido_antes_do_trust(
+    client, admin_headers, received_dir, cert_servidor
+):
+    _, der = cert_servidor
+    cid = await _conexao(client, admin_headers, "plc-get-recebido")
+    _simular_captura(received_dir, cid, der)
+    url = f"/api/connections/{cid}/server-certificate"
+    corpo = (await client.get(url, headers=admin_headers)).json()
+    assert corpo["trusted"] is None
+    recebido = corpo["received"]
+    assert recebido["fingerprint_sha256"] == _fp(der)
+    assert recebido["pem"].startswith("-----BEGIN CERTIFICATE-----")
+    cert = x509.load_pem_x509_certificate(recebido["pem"].encode())
+    assert recebido["subject"] == cert.subject.rfc4514_string()
+    assert recebido["issuer"] == cert.issuer.rfc4514_string()
+    assert recebido["not_before"] < recebido["not_after"]
+
+
+async def test_get_mostra_confiado_depois_do_trust(
+    client, admin_headers, received_dir, cert_servidor
+):
+    _, der = cert_servidor
+    cid = await _conexao(client, admin_headers, "plc-get-par")
+    _simular_captura(received_dir, cid, der)
+    assert (await _trust(client, admin_headers, cid, der)).status_code == 200
+    corpo = (
+        await client.get(f"/api/connections/{cid}/server-certificate", headers=admin_headers)
+    ).json()
+    assert corpo["trusted"]["fingerprint_sha256"] == corpo["received"]["fingerprint_sha256"]
+
+
+async def test_get_com_coluna_nula_e_arquivo_orfao_nao_mostra_trusted(
+    client, admin_headers, certs_dir, cert_servidor
+):
+    """Arquivo órfão em `trusted/` (trust desfeito por outra rota) não é certificado confiado."""
+    _, der = cert_servidor
+    cid = await _conexao(client, admin_headers, "plc-orfao")
+    caminho_confiado(certs_dir, cid).parent.mkdir(parents=True, exist_ok=True)
+    caminho_confiado(certs_dir, cid).write_bytes(der)
+    corpo = (
+        await client.get(f"/api/connections/{cid}/server-certificate", headers=admin_headers)
+    ).json()
+    assert corpo["trusted"] is None
+
+
+async def test_get_com_coluna_preenchida_e_arquivo_ausente_mostra_trusted_nulo(
+    client, admin_headers, db_session
+):
+    cid = await _conexao(client, admin_headers, "plc-coluna-sem-arquivo")
+    conn = await db_session.get(OpcConnection, cid)
+    conn.server_cert_file = f"conn-{cid}.der"
+    await db_session.commit()
+    corpo = (
+        await client.get(f"/api/connections/{cid}/server-certificate", headers=admin_headers)
+    ).json()
+    assert corpo["trusted"] is None
+
+
+async def test_get_com_recebido_corrompido_degrada_para_none(
+    client, admin_headers, received_dir, cert_servidor
+):
+    """Staging ilegível não derruba o GET: received degrada, trusted íntegro permanece."""
+    _, der = cert_servidor
+    cid = await _conexao(client, admin_headers, "plc-get-corrompido")
+    _simular_captura(received_dir, cid, der)
+    assert (await _trust(client, admin_headers, cid, der)).status_code == 200
+    caminho_recebido(received_dir, cid).write_bytes(b"nao e um certificado")
+    r = await client.get(f"/api/connections/{cid}/server-certificate", headers=admin_headers)
+    assert r.status_code == 200
+    corpo = r.json()
+    assert corpo["received"] is None
+    assert corpo["trusted"]["fingerprint_sha256"] == _fp(der)
+
+
+async def test_trust_recebido_grava_coluna_e_arquivo(
+    client, admin_headers, db_session, certs_dir, received_dir, cert_servidor
+):
+    """Aceite sem upload: o arquivo já está no staging, o POST só o promove a trusted."""
+    _, der = cert_servidor
+    cid = await _conexao(client, admin_headers, "plc-trust")
+    _simular_captura(received_dir, cid, der)
+    r = await _trust(client, admin_headers, cid, der)
+    assert r.status_code == 200
+    assert r.json() == {
+        "conn_id": cid,
+        "server_cert_file": f"conn-{cid}.der",
+        "fingerprint_sha256": _fp(der),
+    }
+    assert caminho_confiado(certs_dir, cid).read_bytes() == der
+    assert await _coluna(db_session, cid) == f"conn-{cid}.der"
+
+
+async def test_trust_com_fingerprint_divergente_409(
+    client, admin_headers, received_dir, cert_servidor
+):
+    """TOCTOU: worker recapturou entre a visualização e o clique ⇒ aceite recusado (ADR-021)."""
+    _, der = cert_servidor
+    cid = await _conexao(client, admin_headers, "plc-toctou")
+    _simular_captura(received_dir, cid, der)
+    r = await client.post(
+        f"/api/connections/{cid}/server-certificate/trust",
+        json={"fingerprint_sha256": "0" * 64},
+        headers=admin_headers,
+    )
+    assert r.status_code == 409
+    assert "mudou desde a visualização" in r.json()["detail"]
+
+
+async def test_trust_sem_recebido_409(client, admin_headers):
+    cid = await _conexao(client, admin_headers, "plc-sem-recebido")
+    r = await client.post(
+        f"/api/connections/{cid}/server-certificate/trust",
+        json={"fingerprint_sha256": "0" * 64},
+        headers=admin_headers,
+    )
+    assert r.status_code == 409
+    assert "recebido" in r.json()["detail"].lower()
+
+
+async def test_trust_conexao_inexistente_404(client, admin_headers):
+    r = await client.post(
+        "/api/connections/999999/server-certificate/trust",
+        json={"fingerprint_sha256": "0" * 64},
+        headers=admin_headers,
+    )
+    assert r.status_code == 404
+
+
+async def test_trust_com_recebido_corrompido_e_fingerprint_do_lixo_422(
+    client, admin_headers, received_dir
+):
+    cid = await _conexao(client, admin_headers, "plc-rec-corrompido")
+    caminho_recebido(received_dir, cid).parent.mkdir(parents=True, exist_ok=True)
+    lixo = b"nao e um certificado"
+    caminho_recebido(received_dir, cid).write_bytes(lixo)
+    r = await client.post(
+        f"/api/connections/{cid}/server-certificate/trust",
+        json={"fingerprint_sha256": _fp(lixo)},
+        headers=admin_headers,
+    )
+    assert r.status_code == 422
+
+
+async def test_trust_repetido_dos_mesmos_bytes_e_no_op(
+    client, admin_headers, eventos, received_dir, cert_servidor, updates_na_conexao
+):
+    """Aceite repetido do mesmo certificado: sem watermark, sem evento, sem reconcile."""
+    _, der = cert_servidor
+    cid = await _conexao(client, admin_headers, "plc-noop")
+    _simular_captura(received_dir, cid, der)
+    assert (await _trust(client, admin_headers, cid, der)).status_code == 200
+    await eventos()  # descarta setup + primeiro trust
+    updates_na_conexao.clear()
+    segundo = await _trust(client, admin_headers, cid, der)
+    assert segundo.status_code == 200
+    assert segundo.json()["fingerprint_sha256"] == _fp(der)
+    assert updates_na_conexao == []
+    assert await eventos() == []
+
+
+async def test_trust_emite_connection_updated_com_fingerprint(
+    client, admin_headers, eventos, received_dir, cert_servidor
+):
+    _, der = cert_servidor
+    uid = await _admin_id(client, admin_headers)
+    cid = await _conexao(client, admin_headers, "plc-trust-ev")
+    pid = await _projeto_da(client, admin_headers, cid)
+    _simular_captura(received_dir, cid, der)
+    await eventos()  # descarta o connection_created do setup
+    r = await _trust(client, admin_headers, cid, der)
+    assert r.status_code == 200
+    (evento,) = await eventos()
+    assert evento["severity"] == "info"
+    assert evento["origin"] == f"user:{uid}"
+    assert evento["payload"] == {
+        "kind": "connection_updated",
+        "conn_id": cid,
+        "project_id": pid,
+        "name": "plc-trust-ev",
+        "fingerprint_sha256": _fp(der),
+    }
+
+
+async def test_retrust_de_recebido_novo_emite_update_de_updated_at(
+    client, admin_headers, received_dir, cert_servidor, tmp_path, updates_na_conexao
+):
+    """Rotação: novo capture + novo trust com coluna de mesmo nome ⇒ watermark tem de mover."""
+    _, der = cert_servidor
+    cid = await _conexao(client, admin_headers, "plc-retrust-rec")
+    _simular_captura(received_dir, cid, der)
+    assert (await _trust(client, admin_headers, cid, der)).status_code == 200
+
+    updates_na_conexao.clear()  # só interessa o que o RE-trust emite
+    generate_app_certificate(tmp_path / "servidor-novo")
+    novo = app_cert_paths(tmp_path / "servidor-novo").der.read_bytes()
+    _simular_captura(received_dir, cid, novo)  # servidor rotacionou; worker recapturou
+    segundo = await _trust(client, admin_headers, cid, novo)
+    assert segundo.status_code == 200
+    assert segundo.json()["fingerprint_sha256"] == _fp(novo)
+    assert len(updates_na_conexao) == 1
+    assert "updated_at" in updates_na_conexao[0]
+
+
+async def test_get_e_trust_respeitam_rbac(
+    client, admin_headers, operator_headers, received_dir, cert_servidor
+):
+    """GET é leitura (operador vê); confiar é decisão de admin (ADR-021)."""
+    _, der = cert_servidor
+    cid = await _conexao(client, admin_headers, "plc-rbac-rec")
+    _simular_captura(received_dir, cid, der)
+    url = f"/api/connections/{cid}/server-certificate"
+    corpo = {"fingerprint_sha256": _fp(der)}
+    assert (await client.get(url, headers=operator_headers)).status_code == 200
+    assert (
+        await client.post(f"{url}/trust", json=corpo, headers=operator_headers)
+    ).status_code == 403
+    assert (await client.get(url)).status_code == 401
+    assert (await client.post(f"{url}/trust", json=corpo)).status_code == 401

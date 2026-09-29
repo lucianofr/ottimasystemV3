@@ -479,6 +479,8 @@ def _instantiate_fuzzy(node: FlowNode, *, flow_id: int, redis_client: Redis) -> 
         fll=config.fll,
         n_inputs=config.n_inputs,
         n_outputs=config.n_outputs,
+        setpoint=config.setpoint,
+        sp_da_entrada=config.sp_da_entrada,
         publish=publish,
     )
 

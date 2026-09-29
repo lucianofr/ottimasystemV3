@@ -40,7 +40,7 @@ export interface ValorEuLegenda {
   readonly testIdValor?: string;
   readonly testIdEu?: string;
   /** Coluna extra à ESQUERDA do valor corrente: a leitura no carimbo sob o ponteiro do mouse.
-   *  `undefined` = a tela não tem leitura no cursor (engenharia, fuzzy) e a coluna não existe;
+   *  `undefined` = a tela não tem leitura no cursor e a coluna não existe;
    *  `null` = a coluna existe e está vazia (ponteiro fora do gráfico, ou pena sem valor ali) —
    *  reservada mesmo vazia para a linha não pular quando o operador entra no gráfico. O valor
    *  corrente NUNCA é substituído por esta leitura: são duas grandezas diferentes na mesma

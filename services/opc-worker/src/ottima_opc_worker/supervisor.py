@@ -36,6 +36,7 @@ from ottima_core.bus import (
     KIND_TAG_UPDATED,
     EventMessage,
 )
+from ottima_core.certs import received_cert_path
 from ottima_core.models import Flow, OpcConnection, Project, Tag
 
 from .connection import ConnectionRuntime
@@ -237,6 +238,7 @@ class Supervisor:
         state: WorkerState,
         *,
         certs_dir: Path = Path("/certs"),
+        received_certs_dir: Path = Path("/certs-received"),
         fernet_key: str = "",
         poll_interval_s: float = POLL_INTERVAL_S,
     ) -> None:
@@ -244,6 +246,7 @@ class Supervisor:
         self._redis = redis_client
         self._state = state
         self._certs_dir = certs_dir
+        self._received_certs_dir = received_certs_dir
         self._fernet_key = fernet_key
         self._poll_interval_s = poll_interval_s
         self._runtimes: dict[int, ConnectionRuntime] = {}
@@ -327,6 +330,7 @@ class Supervisor:
         wanted = {config.id: config for config in self._within_limit(configs)}
         for conn_id in [conn_id for conn_id in self._runtimes if conn_id not in wanted]:
             await self._teardown(conn_id)
+            self._limpar_received(conn_id)
         for conn_id, config in wanted.items():
             desired_watchdogs = flow_watchdogs.get(conn_id, {})
             runtime = self._runtimes.get(conn_id)
@@ -338,8 +342,13 @@ class Supervisor:
                 # pendente atravessa a troca — quem resolve a causa editando a conexão
                 # (confiar no certificado, reinformar a senha) precisa ver o `comm_restored`
                 # quando a sessão nova sobe, senão a tela fica presa no alarme antigo.
+                # Endpoint trocado ⇒ outro servidor: o staging da captura não pode seguir
+                # habilitando "Confiar" o certificado do interlocutor ANTIGO.
+                trocou_servidor = runtime.config.endpoint != config.endpoint
                 pendente = runtime.failure_pending
                 await self._teardown(conn_id)
+                if trocou_servidor:
+                    self._limpar_received(conn_id)
                 await self._spawn(
                     config, failure_pending=pendente, flow_watchdogs=desired_watchdogs
                 )
@@ -381,6 +390,7 @@ class Supervisor:
             self._redis,
             snapshot,
             certs_dir=self._certs_dir,
+            received_certs_dir=self._received_certs_dir,
             fernet_key=self._fernet_key,
             failure_pending=failure_pending,
         )
@@ -411,6 +421,17 @@ class Supervisor:
         finally:
             self._runtimes.pop(conn_id, None)
             self._state.connections.pop(conn_id, None)
+
+    def _limpar_received(self, conn_id: int) -> None:
+        """Remove o staging da captura desta conexão (volume rw só deste processo).
+
+        Chamado quando a conexão sai do projeto ativo ou quando o ENDPOINT muda: o
+        certificado capturado é do servidor antigo e não pode habilitar "Confiar" contra
+        outro interlocutor. Respawn por trust (mesmo servidor) mantém o staging — é o que
+        a UI mostra em "Visualizar" e o que torna o re-aceite idempotente.
+        """
+        with suppress(Exception):
+            received_cert_path(self._received_certs_dir, conn_id).unlink(missing_ok=True)
 
     async def _listen_hints(self) -> None:
         """Traduz evento de auditoria em sinal; o reconcile é sempre do loop de poll.

@@ -516,7 +516,10 @@ export function portasFixas(tipo: TipoBloco, direcao: DirecaoPorta): string[] {
  *  esquerda, saída = MVs à direita, na ordem do config; handle = id estável da variável. */
 export function handlesEntrada(no: BlocoNode): string[] {
   if (no.type === "script") return portasScript("IN", no.data.n_inputs);
-  if (no.type === "fuzzy") return portasScript("IN", no.data.n_inputs);
+  if (no.type === "fuzzy")
+    return no.data.sp_source === "entrada"
+      ? [...portasScript("IN", no.data.n_inputs), "sp"]
+      : portasScript("IN", no.data.n_inputs);
   if (no.type === "fuzzy_loop") return portasMalha("pv_", no.data.n_loops);
   if (no.type === "mpc") {
     const { cvs, constraints, dvs } = no.data.variables;
@@ -1211,6 +1214,18 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           n_outputs: inteiro(dados.n_outputs, 0, 0, MAX_PORTAS_FUZZY),
           fll: texto(dados.fll, contratoFuzzy.default_fll),
           output_eu: lerOutputEu(dados.output_eu),
+          // Ausente em grafos salvos antes do SP do operador (RF-541 revisado): vira `null`,
+          // o bloco de sempre. `null` explícito também é "sem SP".
+          setpoint:
+            dados.setpoint === null || dados.setpoint === undefined
+              ? null
+              : numero(dados.setpoint, 0),
+          // Fonte do SP (RF-541 revisado, PRD 3.1): valores fora do vocabulário viram `null`
+          // (sem SP), mesma postura de tolerância do resto da normalização.
+          sp_source:
+            dados.sp_source === "entrada" || dados.sp_source === "operador"
+              ? dados.sp_source
+              : null,
         },
       };
     case "pid":

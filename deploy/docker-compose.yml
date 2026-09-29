@@ -38,6 +38,10 @@ services:
       OTTIMA_REDIS_URL: redis://redis:6379/0
     volumes:
       - certs:/certs
+      # Staging do certificado RECEBIDO do servidor: o opc-worker grava (rw), a API só lê
+      # (ro) para "Visualizar"/"Confiar certificado". Volume separado de `certs` para o
+      # worker nunca ter escrita sobre o que já foi confiado (ADR-021).
+      - certs-received:/certs-received:ro
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -64,6 +68,7 @@ services:
       OTTIMA_REDIS_URL: redis://redis:6379/0
     volumes:
       - certs:/certs:ro
+      - certs-received:/certs-received
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -189,3 +194,4 @@ services:
 volumes:
   pgdata:
   certs:
+  certs-received:

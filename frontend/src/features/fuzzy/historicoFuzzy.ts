@@ -2,6 +2,7 @@ import type uPlot from "uplot";
 
 import { alinharNoEixo, eixoComMarcasDeSilencio, montarEixoUniao } from "../trend/alinhamento";
 import { colunasVivas, type PontoVivo } from "../trend/bordaViva";
+import { ESCALA_AUTO, type EscalaVar } from "../trend/escalas";
 import { tetoCarryForwardSegundos } from "../trend/useHistory";
 import type { FuzzyHistoryResponse } from "./types";
 
@@ -107,4 +108,17 @@ export function mesclarHistoricoFuzzyVivo(
   }
 
   return mudou ? { ...resposta, series } : resposta;
+}
+
+/** Escalas Y do `TrendChart` (chaveadas pelo id numérico da pena, em texto) a partir das
+ *  escalas persistidas por PORTA: a porta é a identidade estável da variável no bloco, o id
+ *  é só a posição dela que o gráfico exige (`TrendFuzzy.tsx`). */
+export function escalasPorId(
+  selecionadas: readonly string[],
+  idPorPorta: ReadonlyMap<string, number>,
+  escalasPorPorta: Readonly<Record<string, EscalaVar>>,
+): Record<string, EscalaVar> {
+  return Object.fromEntries(
+    selecionadas.map((port) => [String(idPorPorta.get(port) ?? 0), escalasPorPorta[port] ?? ESCALA_AUTO]),
+  );
 }

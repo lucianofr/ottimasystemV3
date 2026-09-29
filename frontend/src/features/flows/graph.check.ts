@@ -84,7 +84,16 @@ function fuzzy(id: string, ordem: number, entradas = 1, saidas = 4): BlocoNode {
     id,
     type: "fuzzy",
     position: POS,
-    data: { exec_order: ordem, label: "", n_inputs: entradas, n_outputs: saidas, fll: "", output_eu: {} },
+    data: {
+      exec_order: ordem,
+      label: "",
+      n_inputs: entradas,
+      n_outputs: saidas,
+      fll: "",
+      output_eu: {},
+      setpoint: null,
+      sp_source: null,
+    },
   };
 }
 
@@ -298,6 +307,8 @@ test("criarBloco('fuzzy', ...) nasce com os defaults do contrato, nunca literal 
     n_outputs: contratoFuzzy.default_counts.n_outputs,
     fll: contratoFuzzy.default_fll,
     output_eu: {},
+    setpoint: null,  // RF-541 revisado: sem SP o bloco e o de sempre (portas verbatim)
+    sp_source: null,
   });
 });
 
@@ -562,7 +573,8 @@ test("data sai com exatamente as chaves do contrato, uma lista por tipo", () => 
     ["code", "exec_order", "label", "n_inputs", "n_outputs", "output_eu"],
     ["exec_order", "label", "matrix", "output_eu", "y0"],
     ["exec_order", "label", "models", "multiplier", "name", "variables"],
-    ["exec_order", "fll", "label", "n_inputs", "n_outputs", "output_eu"],
+    ["exec_order", "fll", "label", "n_inputs", "n_outputs", "output_eu", "setpoint",
+     "sp_source"],
   ]);
 });
 
@@ -641,6 +653,8 @@ test("ida e volta pelo graph_json preserva output_eu do Script, TFS e Fuzzy (spe
         n_outputs: 2,
         fll: "Engine: teste\n",
         output_eu: { OUT1: "%" },
+        setpoint: null,
+        sp_source: null,
       },
     },
   ];
@@ -1274,4 +1288,17 @@ test("pid_loop nasce com as portas fixas do contrato e defaults válidos", () =>
   expect(handlesSaida(pidLoop("m", 1))).toEqual(["out", "bkcal_out"]);
   const novo = criarBloco("pid_loop", "novo", POS, 1);
   expect(novo.type).toBe("pid_loop");
+});
+
+test("fuzzy com sp_source='entrada' ganha a porta sp; nas outras fontes, não", () => {
+  const no = criarBloco("fuzzy", "f", POS, 1);
+  if (no.type !== "fuzzy") throw new Error("tipo preservado");
+  expect(handlesEntrada(no)).toEqual(["IN1"]);
+  const entrada = { ...no, data: { ...no.data, sp_source: "entrada" as const } };
+  expect(handlesEntrada(entrada)).toEqual(["IN1", "sp"]);
+  const operador = {
+    ...no,
+    data: { ...no.data, sp_source: "operador" as const, setpoint: 50 },
+  };
+  expect(handlesEntrada(operador)).toEqual(["IN1"]);
 });

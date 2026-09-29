@@ -21,7 +21,7 @@ BASE = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
 # literais de propósito: o texto pt-BR é o contrato, importá-lo do router tornaria o teste
 # tautológico (passaria mesmo se a mensagem mudasse) — mesmo padrão de test_history_mpc.py
 ERRO_VAZIO = "var_ids não pode ser vazio"
-ERRO_MALFORMADO = "var_ids deve conter portas IN1..IN8/OUT1..OUT8 separadas por vírgula"
+ERRO_MALFORMADO = "var_ids deve conter portas IN1..IN8/OUT1..OUT8 (ou SP) separadas por vírgula"
 
 # O CAgg só materializa fora de transação; os limites vão bindados (nunca interpolados).
 _REFRESH_FUZZY = text(

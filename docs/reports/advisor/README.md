@@ -10,6 +10,22 @@ coisa. Estes são planos de conserto pontual, não de fase.
 
 ---
 
+# Rodada de 2026-09-28 — incidente com o stack no ar
+
+Um plano, derivado de um **incidente real** (não de auditoria): o dono desenhou um bloco `fuzzy` no
+flow `ctrl-fuzzy-prime` e o `PUT /api/flows/{id}` foi recusado por 422 — as contagens de
+entrada/saída do modal divergiam das variáveis declaradas no FLL. O canvas continuou mostrando o
+bloco, o banco ficou com o grafo antigo (`fuzzy_loop`) e a página FUZZY não listava nada. Todo o
+`file:line` do plano foi conferido no código vivo e a evidência (nó ausente em todos os flows do
+banco, 422 do save) veio do stack do dono, com autorização dele. O [012](012-operacao-loop-na-navegacao.md)
+desta rodada anterior foi implementado no mesmo dia (Passos 1-3; Passo 4 pendente do revisor).
+
+| Plano | Título | Prioridade | Esforço | Depende de | Status |
+|---|---|---|---|---|---|
+| [020](020-contagens-fuzzy-vs-fll.md) | Contagens de porta do bloco Fuzzy param de divergir do FLL em silêncio | **P1** | S (opção B) / M (opção A) | decisão do dono (opção A/B) | TODO (Gate: opção A exige emenda de RF-541/ADR-029) |
+
+---
+
 # Rodada de 2026-09-19 — commit `37b0caa`, branch `main`
 
 179 commits e +43k linhas depois da rodada anterior. Nove auditores paralelos (corretude do
@@ -33,7 +49,7 @@ durante toda a auditoria. Nenhum `docker compose`, nenhum `pytest -m e2e`, nenhu
 | [010](010-loop-types-fonte-unica.md) | `LOOP_TYPES` passa a ter uma fonte só | P1 | S | — | TODO |
 | [011](011-escrita-opc-timeout-e-fila-observavel.md) | Escrita OPC ganha timeout de I/O e fila observável | P1 | S | — | TODO (Passo 5 = decisão do dono) |
 | [014](014-nginx-log-sem-token-e-hardening.md) | Proxy para de gravar JWT no access log + cabeçalhos de hardening | P1 | S | — | TODO |
-| [012](012-operacao-loop-na-navegacao.md) | `/operacao/loop` entra na navegação; contrato de nav pinhado | P1 | S/M | 010 (preferível) | TODO |
+| [012](012-operacao-loop-na-navegacao.md) | `/operacao/loop` entra na navegação; contrato de nav pinhado | P1 | S/M | 010 (preferível) | EM ANDAMENTO (Passos 1-3 feitos; Passo 4, spec de browser, pendente do revisor) |
 | [015](015-grafo-invalido-422-nas-rotas-de-bloco.md) | `graph_json` inválido devolve 422, não 500 | P1 | S | 010 (mesmo arquivo) | TODO |
 | [017](017-loop-state-carimbado-na-fronteira.md) | `loop.state` carimbado na fronteira da varredura | P2 | S | — | TODO |
 | [016](016-patch-connections-coerencia-de-auth.md) | `PATCH /connections` valida coerência sobre o estado final | P2 | S | — | TODO |

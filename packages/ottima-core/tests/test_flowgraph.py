@@ -762,11 +762,16 @@ def test_tag_inexistente_e_erro():
     assert has(errors_of(graph), "r1", "99", "projeto")
 
 
-def test_tag_com_direcao_trocada_e_erro():
+def test_opc_read_aceita_tag_de_escrita():
+    """Readback: ler o último valor escrito (ex.: incremento sobre a MV) é legítimo — o
+    opc-worker só publica série de tag `w` legível (CurrentRead), e é essa série que o
+    `opc_read` consome como qualquer outra."""
     graph = base_graph()
-    node_of(graph, "r1")["data"]["tag_id"] = 2  # tag de escrita num opc_read
-    assert has(errors_of(graph), "r1", "2", "direção")
+    node_of(graph, "r1")["data"]["tag_id"] = 2
+    assert errors_of(graph) == []
 
+
+def test_tag_com_direcao_trocada_e_erro():
     graph = base_graph()
     node_of(graph, "w1")["data"]["tag_id"] = 3  # tag de leitura num opc_write
     assert has(errors_of(graph), "w1", "3", "direção")

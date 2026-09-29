@@ -2,7 +2,9 @@ import { expect, test } from "@playwright/test";
 
 import type { PontoVivo } from "../trend/bordaViva";
 import { referenciaPersistidaS } from "../trend/bordaViva";
+import { ESCALA_AUTO } from "../trend/escalas";
 import {
+  escalasPorId,
   mesclarHistoricoFuzzyVivo,
   montarMatrizFuzzy,
   resumirSeriesFuzzy,
@@ -107,4 +109,16 @@ test("silêncio simultâneo de todas as portas vira gap no eixo, não reta inter
   expect(i).toBeGreaterThan(-1);
   expect(entrada[i]).toBeNull();
   expect(saida[i]).toBeNull();
+});
+
+test("escala chaveada por porta vai para o id da pena, em qualquer ordem de seleção", () => {
+  const idPorPorta = new Map([
+    ["IN1", 1],
+    ["IN2", 2],
+    ["OUT1", 3],
+  ]);
+  const manual = { auto: false, min: 0, max: 50 };
+  // Seleção fora da ordem do bloco: a escala de OUT1 não pode cair na pena de IN1.
+  const escalas = escalasPorId(["OUT1", "IN1"], idPorPorta, { OUT1: manual, IN2: manual });
+  expect(escalas).toEqual({ "3": manual, "1": ESCALA_AUTO });
 });

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -300,6 +301,7 @@ class Supervisor:
             "loop_mode": self._loop_command,
             "loop_sp": self._loop_command,
             "loop_out": self._loop_command,
+            "fuzzy_sp": self._fuzzy_command,
         }
         handler = handlers.get(command.cmd)
         if handler is None:
@@ -321,6 +323,31 @@ class Supervisor:
         from .supervisor_loop import loop_command_dispatch
 
         await loop_command_dispatch(self._runtimes, command)
+
+    async def _fuzzy_command(self, command: FlowCommand) -> None:
+        """`fuzzy_sp`: SP do operador no bloco `fuzzy` (RF-541 revisado).
+
+        Só o SP é mutável em runtime — o resto da config do bloco é do grafo (ADR-029), então
+        o comando não toca a definição nem re-instancia nada. Valor não-finito é ignorado: o
+        canal é fire-and-forget e um NaN aqui envenenaria o motor em toda varredura.
+        """
+        from .blocks.fuzzy import FuzzyBlock
+
+        runtime = self._runtimes.get(command.flow_id)
+        if runtime is None or runtime.task.state != "running":
+            return
+        block_id = command.args.get("block_id")
+        entry = runtime.blocks.get(block_id) if isinstance(block_id, str) else None
+        bloco = entry[1] if entry is not None else None
+        if not isinstance(bloco, FuzzyBlock):
+            return
+        if bloco.sp_da_entrada:
+            # SP deste bloco vem do fio (porta `sp`): comando do operador não tem efeito — a
+            # rota já recusa com 422; aqui é a segunda linha de defesa do runtime.
+            return
+        valor = command.args.get("value")
+        if isinstance(valor, (int, float)) and math.isfinite(float(valor)):
+            bloco.setpoint = float(valor)
 
     async def _deploy(self, command: FlowCommand) -> None:
         flow_id = command.flow_id

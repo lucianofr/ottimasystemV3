@@ -277,6 +277,9 @@ class FuzzyState(BaseModel):
 
     ts: datetime
     ok: bool  # `ok_entradas` do passo (RF-542)
+    #: SP do operador vigente (bloco com `setpoint` configurado) — é o valor PUBLICADO, não o
+    #: eco do comando: a página mostra o SP que o motor está usando de fato (ADR-002).
+    sp: float | None = None
     inputs: list[FuzzyVarState]
     rules: list[float]
     outputs: list[FuzzyVarState]

@@ -24,7 +24,14 @@ import {
   type NoScript,
 } from "../graph";
 import { BASES_TEMPO } from "../registro";
-import { indentarComTab, inteiroDoCampo, matrizDoFormulario, montarDadosPid, numeroDoCampo } from "./campos";
+import {
+  indentarComTab,
+  inteiroDoCampo,
+  matrizDoFormulario,
+  montarDadosPid,
+  numeroDoCampo,
+  numeroOuNuloDoCampo,
+} from "./campos";
 import { CamposBlocoPid } from "./CamposBlocoPid";
 import { CamposDeadTime, CamposLeadLag } from "./CamposCompensacao";
 import { CamposMalhaFuzzy } from "./CamposMalhaFuzzy";
@@ -32,6 +39,7 @@ import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
 import { CamposHistoriar } from "./CamposHistoriar";
 import { CamposBusKey, CamposConstant, CamposIntegrator, CamposScaler } from "./CamposUtilitarios";
 import { CamposTfs } from "./CamposTfs";
+import { sufixoDirecao, tagsDoSeletor } from "./tagsDoSeletor";
 
 const OPCOES_PORTAS = Array.from({ length: MAX_PORTAS_SCRIPT + 1 }, (_, i) => i);
 const OPCOES_PORTAS_FUZZY = Array.from({ length: MAX_PORTAS_FUZZY }, (_, i) => i + 1);
@@ -45,8 +53,9 @@ function CamposTag({
   direcao: "r" | "w";
   tags: readonly TagOut[];
 }) {
-  // Seletor filtrado por direção e pelo projeto ativo (a lista já chega recortada por projeto).
-  const disponiveis = tags.filter((tag) => tag.direction === direcao);
+  // Seletor por direção e pelo projeto ativo (a lista já chega recortada por projeto);
+  // leitura também oferece tags de escrita (readback — `tagsDoSeletor`).
+  const disponiveis = tagsDoSeletor(tags, direcao);
   return (
     <div className="space-y-1">
       <Label htmlFor="tag_id">Tag</Label>
@@ -56,12 +65,15 @@ function CamposTag({
           <option key={tag.id} value={tag.id}>
             {tag.name} · {ROTULO_TIPO[tag.data_type]}
             {tag.eu ? ` · ${tag.eu}` : ""}
+            {sufixoDirecao(tag, direcao)}
           </option>
         ))}
       </Select>
       {disponiveis.length === 0 && (
         <p className="text-xs text-warn-fg">
-          Nenhuma tag de {direcao === "r" ? "leitura" : "escrita"} cadastrada no projeto ativo.
+          {direcao === "r"
+            ? "Nenhuma tag cadastrada no projeto ativo."
+            : "Nenhuma tag de escrita cadastrada no projeto ativo."}
         </p>
       )}
     </div>
@@ -168,6 +180,10 @@ function CamposFuzzy({
   aoMudarNOutputs: (n_outputs: number) => void;
 }) {
   const portasEu = portasScript("OUT", nOutputs);
+  // Legado: grafo com `setpoint` cheio e sem `sp_source` é fonte operador (PRD 3.1).
+  const [fonteSp, setFonteSp] = useState<"" | "operador" | "entrada">(
+    dados.sp_source ?? (dados.setpoint !== null ? "operador" : ""),
+  );
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
@@ -213,6 +229,42 @@ function CamposFuzzy({
               />
             </div>
           ))}
+        </div>
+      )}
+
+      <div className="space-y-1">
+        <Label htmlFor="sp_source">Fonte do SP</Label>
+        <Select
+          id="sp_source"
+          name="sp_source"
+          data-testid="config-sp-source"
+          value={fonteSp}
+          onChange={(evento) =>
+            setFonteSp(evento.target.value as "" | "operador" | "entrada")
+          }
+        >
+          <option value="">Sem SP (o FLL mapeia só as portas)</option>
+          <option value="operador">Operador (página FUZZY)</option>
+          <option value="entrada">Entrada sp (fio do flow, ex.: OPC-Read)</option>
+        </Select>
+        <p className="text-[10px] text-fg-muted">
+          Com SP habilitado, o FLL precisa declarar UMA variável de entrada a mais — a última,
+          que recebe o SP. No modo operador o SP é escrito na página FUZZY (a semente é o
+          campo abaixo); no modo entrada ele vem da porta `sp` conectada no canvas.
+        </p>
+      </div>
+
+      {fonteSp === "operador" && (
+        <div className="space-y-1">
+          <Label htmlFor="setpoint">SP inicial do operador (semente)</Label>
+          <Input
+            id="setpoint"
+            name="setpoint"
+            type="number"
+            step="any"
+            data-testid="config-setpoint"
+            defaultValue={dados.setpoint ?? ""}
+          />
         </div>
       )}
 
@@ -336,6 +388,7 @@ export function ModalConfigBloco({
       }
       case "fuzzy": {
         const n_outputs = inteiroDoCampo(campos.get("n_outputs"), 0, 1, MAX_PORTAS_FUZZY);
+        const fonteSp = String(campos.get("sp_source") ?? "");
         onAplicar(
           {
             ...no,
@@ -350,6 +403,15 @@ export function ModalConfigBloco({
                 outputEuDoFormulario(campos, portasScript("OUT", MAX_PORTAS_FUZZY)),
                 n_outputs,
               ),
+              // A fonte manda no setpoint: no modo entrada (ou sem SP) a semente do operador
+              // some — salvar pelo modal nunca deixa um par fonte×semente incoerente, que o
+              // servidor recusaria no save (model_validator de `FuzzyConfig`).
+              setpoint:
+                fonteSp === "operador"
+                  ? numeroOuNuloDoCampo(campos.get("setpoint"), no.data.setpoint)
+                  : null,
+              sp_source:
+                fonteSp === "operador" || fonteSp === "entrada" ? fonteSp : null,
             },
           },
           execOrder,

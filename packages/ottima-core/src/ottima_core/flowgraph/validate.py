@@ -200,7 +200,11 @@ def _input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[s
     if node.type == "script":
         return tuple(f"IN{i}" for i in range(1, node.config.n_inputs + 1))
     if node.type == "fuzzy":
-        return tuple(f"IN{i}" for i in range(1, node.config.n_inputs + 1))
+        portas = tuple(f"IN{i}" for i in range(1, node.config.n_inputs + 1))
+        # Fonte do SP = entrada (RF-541 revisado, PRD 3.1): a porta `sp` existe E é
+        # obrigatória (fuzzy não tem porta opcional além desta); nas outras fontes ela não
+        # existe, então uma aresta `sp` cai no erro de handle inexistente de `_check_handles`.
+        return portas + (("sp",) if node.config.sp_da_entrada else ())
     if node.type == "tfs":
         return ("u1", "u2")
     if node.type == "mpc":
@@ -288,10 +292,11 @@ def _check_tags(nodes: list[FlowNode], tags: Mapping[int, TagRef], errors: list[
                 f"nó '{node.id}' ({node.type}): a tag {node.config.tag_id} não existe ou não "
                 "pertence ao projeto do flow"
             )
-        elif tag.direction != expected:
+        elif tag.direction not in expected:
+            esperadas = " ou ".join(f"'{d}'" for d in expected)
             errors.append(
                 f"nó '{node.id}' ({node.type}): a tag {tag.id} tem direção '{tag.direction}'; "
-                f"este bloco exige direção '{expected}'"
+                f"este bloco exige direção {esperadas}"
             )
 
 
@@ -505,10 +510,20 @@ def _valida_fuzzy(node: FlowNode, errors: list[str]) -> None:
         return
 
     n_inputs = len(engine.input_variables)
-    if n_inputs != config.n_inputs:
+    # Com o SP habilitado (qualquer fonte, RF-541 revisado / PRD 3.1) o FLL declara UMA
+    # variável de entrada a mais, a ÚLTIMA: é o SP. Sem SP, a regra de sempre — contagem igual.
+    n_esperado = config.n_inputs + (1 if config.sp_ativo else 0)
+    if n_inputs != n_esperado:
+        detalhe_sp = (
+            f" (com o SP habilitado, a ÚLTIMA variável de entrada é o SP"
+            f"{' da porta sp' if config.sp_da_entrada else ' do operador'}: "
+            f"n_inputs={config.n_inputs} + 1)"
+            if config.sp_ativo
+            else ""
+        )
         errors.append(
             f"{where}: FLL declara {n_inputs} variável(is) de entrada; a config espera "
-            f"n_inputs={config.n_inputs}"
+            f"n_inputs={n_esperado}{detalhe_sp}"
         )
     n_outputs = len(engine.output_variables)
     if n_outputs != config.n_outputs:

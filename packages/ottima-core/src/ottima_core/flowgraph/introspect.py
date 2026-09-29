@@ -58,11 +58,15 @@ def _nome_da_classe(obj: object | None) -> str | None:
     return None if obj is None else type(obj).__name__
 
 
-def introspect_fll(fll: str) -> FuzzyIntrospection:
+def introspect_fll(fll: str, *, ultima_entrada_e_sp: bool = False) -> FuzzyIntrospection:
     """Monta a introspecção completa de um FLL já validado por `validate_graph` no save.
 
     FLL que não parseia levanta `ValueError` (mesma mensagem-prefixo de `_valida_fuzzy`) —
     o chamador da API converte em 422.
+
+    `ultima_entrada_e_sp` (RF-541 revisado): o bloco tem SP do operador, então a ÚLTIMA
+    variável de entrada não é uma porta do canvas — ela recebe o SP. O rótulo da porta vira
+    `SP`, e é o que a página FUZZY usa para pendurar o campo de escrita e o histórico.
     """
     import fuzzylite as fl
     import numpy as np
@@ -100,9 +104,12 @@ def introspect_fll(fll: str) -> FuzzyIntrospection:
             out.lock_previous = bool(var.lock_previous)
         return out
 
+    entradas = [variavel("IN", i, var) for i, var in enumerate(engine.input_variables, start=1)]
+    if ultima_entrada_e_sp and entradas:
+        entradas[-1].port = "SP"
     return FuzzyIntrospection(
         name=engine.name,
-        inputs=[variavel("IN", i, var) for i, var in enumerate(engine.input_variables, start=1)],
+        inputs=entradas,
         outputs=[variavel("OUT", i, var) for i, var in enumerate(engine.output_variables, start=1)],
         rule_blocks=[
             FuzzyRuleBlockOut(

@@ -2,14 +2,26 @@ import { useMemo, useRef, useState } from "react";
 
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
+import { baixarBlob } from "../../lib/arquivos";
 import { cn } from "../../lib/cn";
 import { referenciaPersistidaS, useBordaViva, type LeituraViva } from "../trend/bordaViva";
+import { EditorEscala } from "../trend/EditorEscala";
+import {
+  ESCALA_AUTO,
+  foraDaFaixa,
+  gravarEscalas,
+  lerEscalas,
+  limparEscalas,
+  type EscalaVar,
+} from "../trend/escalas";
+import { montarCsvTrend, nomeCsvTrend, recortarEmX } from "../trend/exportarCsv";
 import { JanelaTempo } from "../trend/JanelaTempo";
 import { type BadgeLegenda, type LinhaLegenda, PainelLegendaTrend } from "../trend/PainelLegendaTrend";
 import { TrendChart, type TrendChartHandle } from "../trend/TrendChart";
 import { CLASSES_PENA, LIMITE_PENAS } from "../trend/trendTheme";
 import { useJanelaDeslizante } from "../trend/useJanelaDeslizante";
 import {
+  escalasPorId,
   mesclarHistoricoFuzzyVivo,
   montarMatrizFuzzy,
   resumirSeriesFuzzy,
@@ -38,7 +50,7 @@ interface VarSelecionavel {
 }
 
 function rotuloVarFuzzy(v: VarSelecionavel): string {
-  return v.eu ? `${v.port} — ${v.name} (${v.eu})` : `${v.port} — ${v.name}`;
+  return `${v.port} — ${v.name}`;
 }
 
 export function TrendFuzzy({
@@ -67,8 +79,19 @@ export function TrendFuzzy({
     variaveis.slice(0, LIMITE_PENAS).map((v) => v.port),
   );
   const [janelaSegundos, setJanelaSegundos] = useState(JANELA_DEFAULT_SEGUNDOS);
-  const deslizante = useJanelaDeslizante(janelaSegundos);
+  const [aviso, setAviso] = useState<string | null>(null);
+  // Escala Y por variável, persistida por flow+bloco e chaveada pela PORTA: `IN1` de outro
+  // bloco é outra grandeza (mesmo raciocínio de `ottima.operate.escalas.v1`).
+  const chaveEscalas = `ottima.fuzzy.escalas.v1:${String(flowId)}/${blockId}`;
+  const [escalas, setEscalas] = useState<Record<string, EscalaVar>>(() => lerEscalas(chaveEscalas));
+  // Porta dona do único eixo Y desenhado (mesma política do trend de engenharia): a primeira
+  // porta pré-selecionada nasce com o eixo; marcar uma porta passa o eixo para ela e clicar no
+  // nome na legenda traz o eixo sem mexer na seleção.
+  const [foco, setFoco] = useState<string | null>(() => selecionadas[0] ?? null);
+  // Índice do carimbo sob o ponteiro (publicado pelo gráfico), para a coluna de valor no cursor.
+  const [idxCursor, setIdxCursor] = useState<number | null>(null);
   const chartRef = useRef<TrendChartHandle>(null);
+  const deslizante = useJanelaDeslizante(janelaSegundos);
   const historico = useHistoryFuzzy(flowId, blockId, selecionadas, janelaSegundos, deslizante.fimEpochS);
 
   // Ponta viva: o histórico do TimescaleDB desenha o passado até agora e daí em diante o
@@ -117,11 +140,59 @@ export function TrendFuzzy({
   });
 
   function alternar(port: string): void {
-    setSelecionadas((atual) => {
-      if (atual.includes(port)) return atual.filter((p) => p !== port);
-      if (atual.length >= LIMITE_PENAS) return atual;
-      return [...atual, port];
+    if (selecionadas.includes(port)) {
+      const restantes = selecionadas.filter((p) => p !== port);
+      setSelecionadas(restantes);
+      if (foco === port) setFoco(restantes[0] ?? null);
+      setAviso(null);
+      return;
+    }
+    if (selecionadas.length >= LIMITE_PENAS) {
+      setAviso(`Máximo de ${String(LIMITE_PENAS)} penas por gráfico`);
+      return;
+    }
+    setSelecionadas([...selecionadas, port]);
+    setFoco(port);
+    setAviso(null);
+  }
+
+  /** Valor da pena `indice` no carimbo sob o ponteiro — coluna `indice + 1` da mesma matriz do
+   *  gráfico. `null` = ponteiro fora ou silêncio da pena ali (coluna vazia, nunca zero). */
+  function valorNoCursor(indice: number): number | null {
+    if (idxCursor === null || dados === null) return null;
+    const valor = dados[indice + 1]?.[idxCursor] ?? null;
+    return valor !== null && Number.isFinite(valor) ? valor : null;
+  }
+
+  function definirEscala(port: string, escala: EscalaVar): void {
+    setEscalas((atual) => {
+      const proximo = { ...atual, [port]: escala };
+      gravarEscalas(chaveEscalas, proximo);
+      return proximo;
     });
+  }
+
+  /** Reset completo, igual ao do trend de engenharia: janela ao vivo, zoom limpo e escalas Y
+   *  de volta ao autoscale (a preferência persistida some junto). */
+  function resetLayout(): void {
+    deslizante.reset();
+    chartRef.current?.resetZoom();
+    limparEscalas(chaveEscalas);
+    setEscalas({});
+  }
+
+  /** Exporta a mesma matriz do gráfico, recortada na faixa visível (zoom em X incluso). */
+  function exportarCsv(): void {
+    if (!dados || !resposta) return;
+    const matriz = recortarEmX(dados, chartRef.current?.faixaX() ?? null);
+    const csv = montarCsvTrend(
+      matriz,
+      selecionadas.map((port) => {
+        const v = porPorta.get(port);
+        return { rotulo: v ? rotuloVarFuzzy(v) : port, eu: v?.eu ?? "" };
+      }),
+    );
+    baixarBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), nomeCsvTrend(matriz, resposta.mode));
   }
 
   return (
@@ -168,15 +239,20 @@ export function TrendFuzzy({
               type="button"
               variant="outline"
               size="sm"
-              data-testid="fuzzy-trend-janela-reset"
-              onClick={() => {
-                // Solta o recorte do arrasto junto com a janela: o aviso do gráfico manda o
-                // usuário usar este botão, e sem o `resetZoom` a vista ficaria congelada.
-                chartRef.current?.resetZoom();
-                deslizante.reset();
-              }}
+              data-testid="fuzzy-trend-export-csv"
+              disabled={!dados}
+              onClick={exportarCsv}
             >
-              Reset
+              Exportar CSV
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="fuzzy-trend-janela-reset"
+              onClick={resetLayout}
+            >
+              Reset layout
             </Button>
           </div>
         </div>
@@ -204,9 +280,15 @@ export function TrendFuzzy({
                   }}
                 />
                 <span className="plaqueta grow text-xs">{rotuloVarFuzzy(v)}</span>
+                <span className="text-xs text-fg-muted">{v.eu}</span>
               </label>
             ))}
           </div>
+          {aviso && (
+            <p role="alert" className="mt-2 text-xs text-warn-fg">
+              {aviso}
+            </p>
+          )}
         </Card>
 
         <div className="grow space-y-3">
@@ -229,8 +311,6 @@ export function TrendFuzzy({
           )}
 
           {dados && (
-            // `foco={null}`: esta legenda não escolhe dono do eixo Y, então o gráfico desenha
-            // um eixo por porta — as portas fuzzy têm grandezas diferentes entre si.
             <TrendChart
               ref={chartRef}
               dados={dados}
@@ -238,8 +318,9 @@ export function TrendFuzzy({
               rotulos={rotulos}
               janelaSegundos={janelaSegundos}
               fimEpochS={deslizante.fimEpochS}
-              escalas={{}}
-              foco={null}
+              escalas={escalasPorId(selecionadas, idPorPorta, escalas)}
+              foco={foco === null ? null : (idPorPorta.get(foco) ?? null)}
+              onCursorIdx={setIdxCursor}
             />
           )}
 
@@ -256,23 +337,62 @@ export function TrendFuzzy({
                     className: "plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg",
                   });
                 }
+                // Pena cortada pela moldura: a faixa fixada não alcança o valor de agora.
+                const escalaDaVar = escalas[resumo.varId] ?? ESCALA_AUTO;
+                if (foraDaFaixa(escalaDaVar, resumo.valor)) {
+                  badges.push({
+                    testId: "fuzzy-trend-legend-fora-escala",
+                    texto: "FORA DA ESCALA",
+                    className: "plaqueta rounded-sm border border-warn px-1.5 text-xs text-warn-fg",
+                  });
+                }
+                const donaDoEixo = resumo.varId === foco;
+                if (donaDoEixo) {
+                  badges.push({ texto: "Eixo Y", className: "plaqueta text-xs text-fg-muted" });
+                }
                 const linha: LinhaLegenda = {
                   chave: resumo.varId,
                   testId: "fuzzy-trend-legend-item",
+                  dataAttrs: { "data-var-port": resumo.varId },
                   className: "flex items-center gap-3 px-3 py-2",
                   identificacao: (
-                    <>
+                    // Mesmo contrato do trend de engenharia: seleção única do eixo
+                    // (`aria-current`); clicar aqui nunca tira a pena do gráfico.
+                    <button
+                      type="button"
+                      aria-current={donaDoEixo ? "true" : undefined}
+                      title="Trazer o eixo Y para esta variável"
+                      className="focus-ring flex min-h-6 grow cursor-pointer items-center gap-3 text-left"
+                      onClick={() => {
+                        setFoco(resumo.varId);
+                      }}
+                    >
                       <span
                         aria-hidden="true"
                         className={cn("h-1 w-6 shrink-0", CLASSES_PENA[indice % CLASSES_PENA.length])}
                       />
                       <span className="plaqueta grow text-xs">
-                        {v ? `${v.port} — ${v.name}` : resumo.varId}
+                        {v ? rotuloVarFuzzy(v) : resumo.varId}
                       </span>
-                    </>
+                    </button>
                   ),
                   badges,
-                  valorEu: { valor: resumo.valor, eu: v?.eu ?? "", muted: resumo.semDado },
+                  valorEu: {
+                    valor: resumo.valor,
+                    eu: v?.eu ?? "",
+                    muted: resumo.semDado,
+                    valorCursor: valorNoCursor(indice),
+                    testIdValorCursor: "fuzzy-trend-legend-valor-cursor",
+                  },
+                  filhoEscala: (
+                    <EditorEscala
+                      escala={escalaDaVar}
+                      prefixoTestid="fuzzy-trend"
+                      aoMudar={(escala) => {
+                        definirEscala(resumo.varId, escala);
+                      }}
+                    />
+                  ),
                 };
                 return linha;
               })}
