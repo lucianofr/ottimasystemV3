@@ -498,10 +498,19 @@ def _valida_fuzzy(node: FlowNode, errors: list[str]) -> None:
         return
 
     n_inputs = len(engine.input_variables)
-    if n_inputs != config.n_inputs:
+    # Com `setpoint` configurado o FLL declara UMA variável de entrada a mais, a ÚLTIMA: é o
+    # SP do operador (RF-541 revisado). Sem o SP, a regra é a de sempre — contagem igual.
+    n_esperado = config.n_inputs + (1 if config.setpoint is not None else 0)
+    if n_inputs != n_esperado:
+        detalhe_sp = (
+            f" (com setpoint configurado, a ÚLTIMA variável de entrada é o SP do operador: "
+            f"n_inputs={config.n_inputs} + 1)"
+            if config.setpoint is not None
+            else ""
+        )
         errors.append(
             f"{where}: FLL declara {n_inputs} variável(is) de entrada; a config espera "
-            f"n_inputs={config.n_inputs}"
+            f"n_inputs={n_esperado}{detalhe_sp}"
         )
     n_outputs = len(engine.output_variables)
     if n_outputs != config.n_outputs:

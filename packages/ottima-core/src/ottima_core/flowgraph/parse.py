@@ -64,7 +64,7 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
     "opc_write": ("tag_id",),
     "constant": ("value",),
     "script": ("n_inputs", "n_outputs", "code", "output_eu"),
-    "fuzzy": ("fll", "n_inputs", "n_outputs", "output_eu"),
+    "fuzzy": ("fll", "n_inputs", "n_outputs", "output_eu", "setpoint"),
     "tfs": ("matrix", "output_eu", "y0"),
     # `economics` é opcional (ADR-027 §9): `_parse_mpc_config` só repassa as chaves
     # presentes, então config salva antes do SSTO continua parseando.
@@ -227,12 +227,18 @@ class FuzzyConfig(BaseModel):
     `validate_graph` via import lazy de `fuzzylite` (ADR-029).
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     fll: str = Field(max_length=MAX_FUZZY_FLL_LENGTH)
     n_inputs: int = Field(ge=1, le=MAX_SCRIPT_PORTS)
     n_outputs: int = Field(ge=1, le=MAX_SCRIPT_PORTS)
     output_eu: dict[str, str] = Field(default_factory=dict)
+    #: SP do operador (opcional). Definido, habilita a rota de SP do bloco e o FLL passa a
+    #: declarar UMA variável de entrada a mais, a última, que recebe este valor — é o que
+    #: permite uma lei de controle com erro nulo sem ação integral (modelo inverso como
+    #: feedforward + trim do erro). Ausente (`None`) é o bloco de sempre: portas mapeadas
+    #: verbatim às variáveis do FLL.
+    setpoint: float | None = None
 
     @model_validator(mode="after")
     def _valida_output_eu(self) -> "FuzzyConfig":
@@ -1037,6 +1043,16 @@ def _parse_fuzzy_config(where: str, data: dict, errors: list[str]) -> FuzzyConfi
         return None
 
     output_eu = _parse_output_eu(where, data, errors)
+    # `setpoint` ausente ou `null` = bloco sem SP (comportamento de sempre). Presente, tem de
+    # ser número finito: o modelo recusa nan/inf, mas aqui a mensagem precisa nomear o campo.
+    setpoint = data.get("setpoint")
+    if setpoint is not None and (
+        isinstance(setpoint, bool)
+        or not isinstance(setpoint, (int, float))
+        or not math.isfinite(setpoint)
+    ):
+        errors.append(f"{where}: 'setpoint' deve ser um número finito ou ausente/null")
+        return None
     if len(counts) != 2 or output_eu is None:
         return None
     try:
@@ -1045,6 +1061,7 @@ def _parse_fuzzy_config(where: str, data: dict, errors: list[str]) -> FuzzyConfi
             n_inputs=counts["n_inputs"],
             n_outputs=counts["n_outputs"],
             output_eu=output_eu,
+            setpoint=None if setpoint is None else float(setpoint),
         )
     except ValidationError as erro:
         errors.append(f"{where}: {erro.errors()[0]['ctx']['error']}")
