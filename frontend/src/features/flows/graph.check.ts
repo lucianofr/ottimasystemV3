@@ -17,6 +17,7 @@ import {
   ESPESSURA_ARESTA_VIVA,
   estadoDaAresta,
   euDaPortaDeEntrada,
+  fllDefaultMalha,
   handlesEntrada,
   handlesSaida,
   ID_MARCADOR_X,
@@ -32,6 +33,7 @@ import {
   type BlocoNode,
   type FaixaMpc,
   type MapaTags,
+  type NoFuzzyLoop,
 } from "./graph";
 import { validarConfigMpc } from "./mpc/mpcLogic";
 
@@ -1077,19 +1079,41 @@ test("ciclo comum por aresta de dados continua recusado", () => {
   ).toContain("ciclo");
 });
 
-test("fuzzy_loop nasce com as mesmas portas do shell e defaults que o servidor aceita", () => {
+test("fuzzy_loop v2 nasce com portas de canal e defaults que o servidor aceita", () => {
   const bloco = criarBloco("fuzzy_loop", "novo", POS, 1);
   expect(bloco.type).toBe("fuzzy_loop");
-  expect(handlesEntrada(bloco)).toEqual(handlesEntrada(pidLoop("m", 1)));
-  expect(handlesSaida(bloco)).toEqual(["out", "bkcal_out"]);
+  expect(handlesEntrada(bloco)).toEqual(["pv_1"]);
+  expect(handlesSaida(bloco)).toEqual(["out_1"]);
   // O servidor exige ke > 0 e ku > 0 (FuzzyLoopConfig): default inválido faria o bloco
   // recém-arrastado reprovar no save.
-  const dados = bloco.data as { ke: number; ku: number; kde: number; fll: string };
+  const dados = bloco.data as {
+    n_loops: number;
+    ke: number;
+    ku: number;
+    kde: number;
+    fll: string;
+  };
+  expect(dados.n_loops).toBe(1);
   expect(dados.ke).toBeGreaterThan(0);
   expect(dados.ku).toBeGreaterThan(0);
   expect(dados.kde).toBe(0);
   expect(dados.fll).toBe(contratoFuzzyLoop.default_fll);
   expect(dados.fll).toContain("InputVariable: e");
+});
+
+test("fuzzy_loop multicanal deriva as portas de n_loops", () => {
+  const bloco = criarBloco("fuzzy_loop", "novo", POS, 1);
+  if (bloco.type !== "fuzzy_loop") throw new Error("criarBloco deveria devolver fuzzy_loop");
+  const mimo: NoFuzzyLoop = { ...bloco, data: { ...bloco.data, n_loops: 3 } };
+  expect(handlesEntrada(mimo)).toEqual(["pv_1", "pv_2", "pv_3"]);
+  expect(handlesSaida(mimo)).toEqual(["out_1", "out_2", "out_3"]);
+});
+
+test("fllDefaultMalha tira as bases do contrato gerado, sem duplicar texto", () => {
+  expect(fllDefaultMalha(1)).toBe(contratoFuzzyLoop.default_fll);
+  expect(fllDefaultMalha(2)).toBe(contratoFuzzyLoop.default_fll_mimo["2"]);
+  expect(fllDefaultMalha(2)).toContain("InputVariable: e2");
+  expect(fllDefaultMalha(2)).toContain("OutputVariable: du2");
 });
 
 test("pid_loop nasce com as portas fixas do contrato e defaults válidos", () => {

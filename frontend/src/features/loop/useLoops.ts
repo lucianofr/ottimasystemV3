@@ -25,17 +25,21 @@ export function useLoops(): UseQueryResult<LoopNodeOut[]> {
 }
 
 /** Superfície de controle amostrada no servidor (SPEC_FUZZY §5.1) — só existe para
- *  `fuzzy_loop`. `staleTime: Infinity`: a superfície só muda quando o `.fll` muda, e trocar
- *  o `.fll` é hot-swap estrutural (novo deploy), nunca algo que acontece no meio de uma
- *  sessão de faceplate. */
+ *  `fuzzy_loop`; `channel` seleciona o canal num bloco multicanal (v2 MIMO: os demais
+ *  canais são amostrados no ponto de operação zero). `staleTime: Infinity`: a superfície só
+ *  muda quando o `.fll` muda, e trocar o `.fll` é hot-swap estrutural (novo deploy), nunca
+ *  algo que acontece no meio de uma sessão de faceplate. */
 export function useLoopSurface(
   flowId: number,
   blockId: string,
+  channel: number = 0,
 ): UseQueryResult<LoopSurfaceOut> {
   return useQuery({
-    queryKey: [...CHAVE, "surface", flowId, blockId],
+    queryKey: [...CHAVE, "surface", flowId, blockId, channel],
     queryFn: () =>
-      api<LoopSurfaceOut>(`/api/operate/loop/${String(flowId)}/${blockId}/surface`),
+      api<LoopSurfaceOut>(
+        `/api/operate/loop/${String(flowId)}/${blockId}/surface?channel=${String(channel)}`,
+      ),
     enabled: blockId !== "",
     staleTime: Infinity,
   });

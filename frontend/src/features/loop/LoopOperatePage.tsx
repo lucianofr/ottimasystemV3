@@ -111,11 +111,13 @@ function EscritaValor({ rotulo, habilitado, aoEnviar, minimo, maximo }: {
 function LoopResolvido({ flowId, blockId }: { flowId: number; blockId: string }) {
   useAssinatura({ loop_state: [`${String(flowId)}/${blockId}`] });
   const canal = useCanalAoVivo();
-  const estado = canal.loopStates.get(`${String(flowId)}/${blockId}`);
   const config = useLoopConfig(flowId, blockId);
   const [erroComando, setErroComando] = useState<string | null>(null);
 
-  async function comandar(rota: "mode" | "sp" | "out", corpo: Record<string, unknown>): Promise<void> {
+  async function comandar(
+    rota: "mode" | "sp" | "out",
+    corpo: Record<string, unknown>,
+  ): Promise<void> {
     setErroComando(null);
     try {
       await apiResposta(`/api/operate/${String(flowId)}/${blockId}/${rota}`, {
@@ -127,7 +129,15 @@ function LoopResolvido({ flowId, blockId }: { flowId: number; blockId: string })
     }
   }
 
-  if (estado === undefined) {
+  // v2 multicanal: um LoopState por canal na mesma assinatura; SISO (pid_loop e fuzzy de
+  // 1 canal) é o caso n_loops=1 — a página não ramifica por tipo, só por contagem.
+  const nLoops = config.data?.n_loops ?? 1;
+  const estados = Array.from({ length: nLoops }, (_, i) =>
+    canal.loopStates.get(`${String(flowId)}/${blockId}:${String(i)}`),
+  );
+  const primeiro = estados.find((estado) => estado !== undefined);
+
+  if (primeiro === undefined) {
     return (
       <Card className="max-w-lg p-6" data-testid="loop-aguardando">
         <p className="text-sm text-fg-muted">
@@ -146,16 +156,21 @@ function LoopResolvido({ flowId, blockId }: { flowId: number; blockId: string })
     <div className="space-y-4 p-4" data-testid="loop-faceplate">
       <header className="flex flex-wrap items-center gap-3">
         <span className="plaqueta text-sm">{blockId}</span>
+        {nLoops > 1 && (
+          <Badge tone="neutral" data-testid="loop-badge-canais">
+            {nLoops} CANAIS
+          </Badge>
+        )}
         <Badge tone="neutral" data-testid="loop-badge-target">
-          ALVO {estado.target.toUpperCase()}
+          ALVO {primeiro.target.toUpperCase()}
         </Badge>
         <Badge
-          tone={estado.actual === estado.target ? "neutral" : "alarm"}
+          tone={primeiro.actual === primeiro.target ? "neutral" : "alarm"}
           data-testid="loop-badge-actual"
         >
-          REAL {estado.actual.toUpperCase()}
+          REAL {primeiro.actual.toUpperCase()}
         </Badge>
-        {!estado.pv_ok && (
+        {estados.some((estado) => estado !== undefined && !estado.pv_ok) && (
           <Badge tone="alarm" data-testid="loop-badge-pv-ruim">
             PV sem qualidade
           </Badge>
@@ -166,12 +181,12 @@ function LoopResolvido({ flowId, blockId }: { flowId: number; blockId: string })
         {MODOS_COMANDAVEIS.map((modo) => (
           <button
             key={modo}
-            disabled={!podeComandar(estado, modo)}
+            disabled={!podeComandar(primeiro, modo)}
             data-testid={`loop-modo-${modo}`}
             onClick={() => void comandar("mode", { target: modo })}
             className={cn(
               "rounded-sm border border-border px-3 py-1.5 text-xs",
-              estado.target === modo && "bg-accent text-fg",
+              primeiro.target === modo && "bg-accent text-fg",
               "disabled:opacity-40",
             )}
           >
@@ -180,34 +195,51 @@ function LoopResolvido({ flowId, blockId }: { flowId: number; blockId: string })
         ))}
       </div>
 
-      <div className="max-w-md space-y-2">
-        <Barra rotulo="PV" valor={estado.pv} minimo={0} maximo={100} ruim={!estado.pv_ok} />
-        <Barra rotulo="SP" valor={estado.sp} minimo={0} maximo={100} />
-        <Barra
-          rotulo="OUT"
-          valor={estado.out}
-          minimo={0}
-          maximo={100}
-          ruim={estado.hi_limited || estado.lo_limited}
-        />
-      </div>
+      {estados.map((estado, i) =>
+        estado === undefined ? null : (
+          <section
+            key={i}
+            data-testid={`loop-canal-${String(i)}`}
+            className="space-y-2 border-t border-border pt-3 first:border-t-0 first:pt-0"
+          >
+            {nLoops > 1 && (
+              <h3 className="plaqueta text-xs text-fg-muted">Canal {String(i + 1)}</h3>
+            )}
+            <div className="max-w-md space-y-2">
+              <Barra rotulo="PV" valor={estado.pv} minimo={0} maximo={100} ruim={!estado.pv_ok} />
+              <Barra rotulo="SP" valor={estado.sp} minimo={0} maximo={100} />
+              <Barra
+                rotulo="OUT"
+                valor={estado.out}
+                minimo={0}
+                maximo={100}
+                ruim={estado.hi_limited || estado.lo_limited}
+              />
+            </div>
 
-      <div className="flex flex-wrap gap-6">
-        <EscritaValor
-          rotulo="SP"
-          habilitado={estado.actual === "auto"}
-          aoEnviar={(v) => void comandar("sp", { value: v })}
-          minimo={0}
-          maximo={100}
-        />
-        <EscritaValor
-          rotulo="OUT (%)"
-          habilitado={estado.actual === "man"}
-          aoEnviar={(v) => void comandar("out", { value: v })}
-          minimo={0}
-          maximo={100}
-        />
-      </div>
+            <div className="flex flex-wrap gap-6">
+              <EscritaValor
+                rotulo="SP"
+                habilitado={estado.actual === "auto"}
+                aoEnviar={(v) => void comandar("sp", { value: v, channel: i })}
+                minimo={0}
+                maximo={100}
+              />
+              <EscritaValor
+                rotulo="OUT (%)"
+                habilitado={estado.actual === "man"}
+                aoEnviar={(v) => void comandar("out", { value: v, channel: i })}
+                minimo={0}
+                maximo={100}
+              />
+            </div>
+
+            {eFuzzy && (
+              <HeatmapSuperficie flowId={flowId} blockId={blockId} estado={estado} channel={i} />
+            )}
+          </section>
+        ),
+      )}
 
       {erroComando !== null && (
         <p role="alert" data-testid="loop-erro-comando" className="text-sm text-alarm">
@@ -251,8 +283,6 @@ function LoopResolvido({ flowId, blockId }: { flowId: number; blockId: string })
           </dl>
         </Card>
       )}
-
-      {eFuzzy && <HeatmapSuperficie flowId={flowId} blockId={blockId} estado={estado} />}
     </div>
   );
 }

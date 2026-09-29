@@ -309,12 +309,14 @@ function lerFuzzyState(data: Record<string, unknown>): FuzzyState | null {
   return data as unknown as FuzzyState;
 }
 
-/** Espelho de `lerFuzzyState` para `loop.state` (ADR-039 4.10). */
+/** Espelho de `lerFuzzyState` para `loop.state` (ADR-039 4.10). `channel` ausente vira 0
+ *  (payload SISO antigo — o modelo Pydantic sempre serializa o default). */
 function lerLoopState(data: Record<string, unknown>): LoopState | null {
   if (typeof data.ts !== "string") return null;
   if (typeof data.target !== "string" || typeof data.actual !== "string") return null;
   if (!Array.isArray(data.permitted)) return null;
-  return data as unknown as LoopState;
+  const channel = typeof data.channel === "number" ? data.channel : 0;
+  return { ...data, channel } as unknown as LoopState;
 }
 
 function lerEvento(data: Record<string, unknown>): EventMessage | null {
@@ -399,7 +401,12 @@ export function analisarMensagemCanal(raw: string): MensagemCanal | null {
     const blockId = sufixo.slice(ponto + 1);
     if (!/^\d+$/.test(flowIdStr) || blockId.length === 0) return null;
     const state = lerLoopState(data);
-    return state === null ? null : { canal: "loop_state", chave: `${flowIdStr}/${blockId}`, state };
+    // Chave por CANAL (`flow/bloco:canal`): o fuzzy_loop v2 publica um LoopState por canal
+    // no mesmo canal Redis; blocos SISO publicam channel=0. A assinatura do WS segue por
+    // `flow/bloco` — a demultiplexação é aqui.
+    return state === null
+      ? null
+      : { canal: "loop_state", chave: `${flowIdStr}/${blockId}:${String(state.channel)}`, state };
   }
 
   if (canal.startsWith(PREFIXO_OPC_VALUES) || canal === CANAL_CALC_VALUES) {

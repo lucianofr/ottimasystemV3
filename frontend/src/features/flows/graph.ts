@@ -3,7 +3,7 @@ import {
   PORT_CONTRACTS,
   type ConstraintVar,
   type ContratoPortaDinamica,
-  type ContratoPortaFixaComDefault,
+  type ContratoPortaDinamicaMalha,
   type CvVar,
   type DirecaoPorta,
   type DvVar,
@@ -88,10 +88,28 @@ export const MAX_PORTAS_FUZZY = tetoDoContrato(contratoFuzzy.rules[0]);
  *  contrato, mesma fonte única: o backend reprova acima deste tamanho. */
 export const MAX_FLL_LENGTH = contratoFuzzy.max_fll_length;
 
-/** Contrato do `fuzzy_loop`: portas FIXAS (as do shell) mais o FLL default e o teto do
- *  texto — a fonte única de onde a paleta tira o .fll pré-preenchido. */
-export const contratoFuzzyLoop = PORT_CONTRACTS.fuzzy_loop as ContratoPortaFixaComDefault;
-if (contratoFuzzyLoop.dynamic) throw new Error("contrato do fuzzy_loop deveria ser fixo");
+/** Contrato do `fuzzy_loop` v2 (SPEC_FUZZY v2 MIMO): portas DINÂMICAS `pv_i`/`out_i` por
+ *  `n_loops`, mais o FLL default (1 canal) e as bases MIMO geradas no servidor — a fonte
+ *  única de onde a paleta e o modal tiram o .fll pré-preenchido, sem duplicar texto aqui. */
+export const contratoFuzzyLoop = PORT_CONTRACTS.fuzzy_loop as ContratoPortaDinamicaMalha;
+if (!contratoFuzzyLoop.dynamic) throw new Error("contrato do fuzzy_loop deveria ser dinâmico");
+
+/** Teto de canais do fuzzy_loop — do contrato gerado, fonte única com `MAX_FUZZY_LOOPS`. */
+export const MAX_LOOPS_FUZZY = tetoDoContrato(contratoFuzzyLoop.rules[0]);
+
+/** Portas de canal do fuzzy_loop: `pv_1..pv_n` (entrada) / `out_1..out_n` (saída). */
+export function portasMalha(prefixo: "pv_" | "out_", quantidade: number): string[] {
+  return Array.from({ length: quantidade }, (_, i) => `${prefixo}${String(i + 1)}`);
+}
+
+/** Base FLL default para `n` canais — do contrato gerado (fonte única: o frontend nunca
+ *  compõe texto FLL). `n = 1` usa `default_fll`; 2..MAX usam `default_fll_mimo`. */
+export function fllDefaultMalha(n: number): string {
+  if (n <= 1) return contratoFuzzyLoop.default_fll;
+  const base = contratoFuzzyLoop.default_fll_mimo[String(n)];
+  if (base === undefined) throw new Error(`contrato sem base default para ${n} canais`);
+  return base;
+}
 
 /** Rótulo por tipo (ARCH-18/TD-021): concentrado em `registro.ts` junto com
  *  descrição/defaults/componente — reexportado aqui porque a maioria dos consumidores já
@@ -189,9 +207,10 @@ export type DadosPidLoop = DadosBase &
     | "td_seconds"
   >;
 
-/** Fuzzy Malha (SPEC_FUZZY §6.2): mesmo recorte do `pid_loop` no editor, trocando a sintonia
- *  PID pelos ganhos do kernel fuzzy e pelo texto FLL. `fll` é ESTRUTURAL (D11): editar aqui
- *  re-instancia o bloco no próximo deploy e a malha aterrissa em MAN. */
+/** Fuzzy Malha v2 (SPEC_FUZZY v2 MIMO): `n_loops` canais de controle compartilham o FLL
+ *  (posicional: entradas `e_i`/`de_i`, saídas `du_i`) e os ganhos do kernel; portas
+ *  `pv_i`/`out_i`. `fll` e `n_loops` são ESTRUTURAIS (D11): editar aqui re-instancia o
+ *  bloco no próximo deploy e a malha aterrissa em MAN. */
 export type DadosFuzzyLoop = DadosBase &
   Pick<
     FuzzyLoopConfig,
@@ -202,6 +221,7 @@ export type DadosFuzzyLoop = DadosBase &
     | "permitted"
     | "normal"
     | "direct_acting"
+    | "n_loops"
     | "ke"
     | "kde"
     | "ku"
@@ -425,6 +445,7 @@ export function portasFixas(tipo: TipoBloco, direcao: DirecaoPorta): string[] {
 export function handlesEntrada(no: BlocoNode): string[] {
   if (no.type === "script") return portasScript("IN", no.data.n_inputs);
   if (no.type === "fuzzy") return portasScript("IN", no.data.n_inputs);
+  if (no.type === "fuzzy_loop") return portasMalha("pv_", no.data.n_loops);
   if (no.type === "mpc") {
     const { cvs, constraints, dvs } = no.data.variables;
     return [...cvs, ...constraints, ...dvs].map((variavel) => variavel.id);
@@ -446,6 +467,7 @@ export const PORTA_MPC_AUTO = "auto";
 export function handlesSaida(no: BlocoNode): string[] {
   if (no.type === "script") return portasScript("OUT", no.data.n_outputs);
   if (no.type === "fuzzy") return portasScript("OUT", no.data.n_outputs);
+  if (no.type === "fuzzy_loop") return portasMalha("out_", no.data.n_loops);
   if (no.type === "mpc") {
     return [...no.data.variables.mvs.map((mv) => mv.id), PORTA_MPC_LOCAL, PORTA_MPC_AUTO];
   }
@@ -1047,6 +1069,7 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
           normal: typeof dados.normal === "string" ? dados.normal : PADRAO_FUZZY_LOOP.normal,
           direct_acting:
             typeof dados.direct_acting === "boolean" ? dados.direct_acting : PADRAO_FUZZY_LOOP.direct_acting,
+          n_loops: inteiro(dados.n_loops, PADRAO_FUZZY_LOOP.n_loops, 1, MAX_LOOPS_FUZZY),
           ke: numero(dados.ke, PADRAO_FUZZY_LOOP.ke),
           kde: numero(dados.kde, PADRAO_FUZZY_LOOP.kde),
           ku: numero(dados.ku, PADRAO_FUZZY_LOOP.ku),

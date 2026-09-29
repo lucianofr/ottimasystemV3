@@ -214,14 +214,22 @@ test("events vira mensagem de evento com os 5 campos do contrato", () => {
   }
 });
 
-test("loop.state.<flowId>.<blockId> vira mensagem de loop_state com a chave flowId/blockId", () => {
+test("loop.state vira mensagem de loop_state com chave flowId/bloco:canal (ausente = 0)", () => {
   const msg = analisarMensagemCanal(envelope("loop.state.2.m1", LOOP_STATE));
 
   expect(msg?.canal).toBe("loop_state");
   if (msg?.canal === "loop_state") {
-    expect(msg.chave).toBe("2/m1");
+    expect(msg.chave).toBe("2/m1:0");
     expect(msg.state.actual).toBe("man");
     expect(msg.state.sp).toBe(55);
+  }
+
+  const canal2 = analisarMensagemCanal(envelope("loop.state.2.m1", { ...LOOP_STATE, channel: 2 }));
+  if (canal2?.canal === "loop_state") {
+    expect(canal2.chave).toBe("2/m1:2");
+    expect(canal2.state.channel).toBe(2);
+  } else {
+    throw new Error("mensagem do canal 2 descartada");
   }
 });
 

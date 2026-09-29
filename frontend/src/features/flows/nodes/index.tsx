@@ -7,6 +7,7 @@ import {
   PORTA_MPC_LOCAL,
   passagemDireta,
   portasFixas,
+  portasMalha,
   portasScript,
   type NoEscrita,
   type NoFirstOrder,
@@ -351,10 +352,10 @@ export function NoPidLoop({ id, data, selected }: NodeProps<NoPidLoopData>) {
   );
 }
 
-/** Fuzzy Malha (SPEC_FUZZY §6.2): mesmo chassis do PID Malha, resumo com os ganhos do kernel
- *  e o tamanho da base de regras. `KDE` zerado é o default de comissionamento (a derivada
- *  entra por último em campo, §6.4) e aparece como "desligada", mesmo tratamento de caso
- *  degenerado que `NoPidLoop` dá a `Ti`/`Td`. */
+/** Fuzzy Malha v2 (SPEC_FUZZY v2 MIMO): portas dinâmicas `pv_i`/`out_i` por `n_loops`,
+ *  resumo com os ganhos do kernel e o tamanho da base de regras. `KDE` zerado é o default
+ *  de comissionamento (a derivada entra por último em campo, §6.4) e aparece como
+ *  "desligada", mesmo tratamento de caso degenerado que `NoPidLoop` dá a `Ti`/`Td`. */
 export function NoFuzzyLoop({ id, data, selected }: NodeProps<NoFuzzyLoopData>) {
   const linhas = data.fll === "" ? 0 : data.fll.split("\n").length;
   return (
@@ -363,11 +364,12 @@ export function NoFuzzyLoop({ id, data, selected }: NodeProps<NoFuzzyLoopData>) 
       label={data.label}
       execOrder={data.exec_order}
       selecionado={selected}
-      entradas={portas(portasFixas("fuzzy_loop", "input"))}
-      saidas={portas(portasFixas("fuzzy_loop", "output"))}
+      entradas={portas(portasMalha("pv_", data.n_loops))}
+      saidas={portas(portasMalha("out_", data.n_loops))}
       blockId={id}
     >
       <div className="space-y-0.5">
+        <LinhaResumo rotulo="Canais" valor={String(data.n_loops)} />
         <LinhaResumo rotulo="Escala do erro KE" valor={FORMATO_PARAM.format(data.ke)} />
         <LinhaResumo
           rotulo="Escala da derivada KDE"

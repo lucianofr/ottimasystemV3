@@ -34,12 +34,15 @@ export function HeatmapSuperficie({
   flowId,
   blockId,
   estado,
+  channel = 0,
 }: {
   flowId: number;
   blockId: string;
   estado: LoopState | undefined;
+  /** Canal do bloco multicanal (v2 MIMO); a superfície é amostrada por canal. */
+  channel?: number;
 }) {
-  const superficie = useLoopSurface(flowId, blockId);
+  const superficie = useLoopSurface(flowId, blockId, channel);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const dados = superficie.data;
 
@@ -89,7 +92,8 @@ export function HeatmapSuperficie({
   return (
     <Card className="max-w-md space-y-2 p-4" data-testid="loop-superficie">
       <h3 className="text-xs text-fg-muted">
-        Superfície de controle — eixo X: erro normalizado, eixo Y: derivada do erro
+        Superfície de controle{channel > 0 ? ` · canal ${String(channel + 1)}` : ""} — eixo X:
+        erro normalizado, eixo Y: derivada do erro
       </h3>
       <div className="relative aspect-square w-full">
         <canvas

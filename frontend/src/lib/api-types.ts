@@ -649,7 +649,9 @@ export interface paths {
         };
         /**
          * Get Loop Surface
-         * @description Grade (e_n, de_n) -> du_n do FLL vigente, para o heatmap de comissionamento.
+         * @description Grade (e_n, de_n) -> du_n do FLL vigente PARA UM CANAL, para o heatmap de
+         *     comissionamento. Num bloco multicanal os demais canais ficam no ponto de operação
+         *     zero — a fatia 2D inspectável de sempre, agora por canal (v2 MIMO).
          */
         get: operations["get_loop_surface_api_operate_loop__flow_id___block_id__surface_get"];
         put?: never;
@@ -1736,6 +1738,11 @@ export interface components {
             out_scale_lo: number;
             /** Out Scale Hi */
             out_scale_hi: number;
+            /**
+             * N Loops
+             * @default 1
+             */
+            n_loops: number;
             /** Tuning */
             tuning: components["schemas"]["LoopTuningOut"] | components["schemas"]["FuzzyLoopTuningOut"];
         };
@@ -1799,6 +1806,11 @@ export interface components {
             label: string;
             /** Type */
             type: string;
+            /**
+             * N Loops
+             * @default 1
+             */
+            n_loops: number;
         };
         /**
          * LoopSurfaceOut
@@ -1842,6 +1854,11 @@ export interface components {
         LoopValueCommand: {
             /** Value */
             value: number;
+            /**
+             * Channel
+             * @default 0
+             */
+            channel: number;
         };
         /** ModeCommand */
         ModeCommand: {
@@ -3835,7 +3852,9 @@ export interface operations {
     };
     get_loop_surface_api_operate_loop__flow_id___block_id__surface_get: {
         parameters: {
-            query?: never;
+            query?: {
+                channel?: number;
+            };
             header?: never;
             path: {
                 flow_id: number;

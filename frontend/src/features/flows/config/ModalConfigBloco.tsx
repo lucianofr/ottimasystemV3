@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -8,6 +8,7 @@ import type { TagOut } from "../../../lib/api";
 import { ROTULO_TIPO } from "../../tags/useTags";
 import {
   MAX_FLL_LENGTH,
+  MAX_LOOPS_FUZZY,
   MAX_PORTAS_FUZZY,
   MAX_PORTAS_SCRIPT,
   podarOutputEu,
@@ -21,8 +22,9 @@ import {
   type NoMpc,
   type NoScript,
 } from "../graph";
-import { inteiroDoCampo, matrizDoFormulario, montarDadosPid, numeroDoCampo } from "./campos";
+import { indentarComTab, inteiroDoCampo, matrizDoFormulario, montarDadosPid, numeroDoCampo } from "./campos";
 import { CamposBlocoPid } from "./CamposBlocoPid";
+import { CamposMalhaFuzzy } from "./CamposMalhaFuzzy";
 import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
 import { CamposTfs } from "./CamposTfs";
 
@@ -59,16 +61,6 @@ function CamposTag({
       )}
     </div>
   );
-}
-
-/** Tab indenta em vez de sair do campo (spec F3 §6.2: sem editor de código de terceiros). */
-function indentarComTab(evento: KeyboardEvent<HTMLTextAreaElement>): void {
-  if (evento.key !== "Tab" || evento.shiftKey || evento.ctrlKey || evento.altKey || evento.metaKey) {
-    return;
-  }
-  evento.preventDefault();
-  const campo = evento.currentTarget;
-  campo.setRangeText("    ", campo.selectionStart, campo.selectionEnd, "end");
 }
 
 /** Lê o EU de cada porta do FormData; texto livre e opcional — porta ausente ou em branco
@@ -393,6 +385,31 @@ export function ModalConfigBloco({
         // sobrevivem nos defaults do servidor.
         onAplicar({ ...no, data: { ...no.data, label } }, execOrder);
         break;
+      case "fuzzy_loop":
+        // Fuzzy Malha v2 (SPEC_FUZZY v2): canais, ganhos do kernel, limites e FLL.
+        // `permitted`/`normal` seguem nos defaults do servidor (oos/man/auto).
+        onAplicar(
+          {
+            ...no,
+            data: {
+              ...no.data,
+              label,
+              n_loops: inteiroDoCampo(campos.get("n_loops"), no.data.n_loops, 1, MAX_LOOPS_FUZZY),
+              ke: numeroDoCampo(campos.get("ke"), no.data.ke),
+              kde: numeroDoCampo(campos.get("kde"), no.data.kde),
+              ku: numeroDoCampo(campos.get("ku"), no.data.ku),
+              tf_de: numeroDoCampo(campos.get("tf_de"), no.data.tf_de),
+              direct_acting: campos.get("direct_acting") === "true",
+              sp_lo_lim: numeroDoCampo(campos.get("sp_lo_lim"), no.data.sp_lo_lim),
+              sp_hi_lim: numeroDoCampo(campos.get("sp_hi_lim"), no.data.sp_hi_lim),
+              out_scale_lo: numeroDoCampo(campos.get("out_scale_lo"), no.data.out_scale_lo),
+              out_scale_hi: numeroDoCampo(campos.get("out_scale_hi"), no.data.out_scale_hi),
+              fll: String(campos.get("fll") ?? ""),
+            },
+          },
+          execOrder,
+        );
+        break;
     }
     // `onClose` (linha do <dialog>) chama `onFechar`; fechar via `close()` explícito em vez
     // de chamar `onFechar()` direto evita que o desmonte (estado -> null) derrube o <dialog>
@@ -464,6 +481,7 @@ export function ModalConfigBloco({
             <CamposFuzzy dados={no.data} nOutputs={nOutputsFuzzy} aoMudarNOutputs={setNOutputsFuzzy} />
           )}
           {no.type === "pid" && <CamposBlocoPid dados={no.data} />}
+          {no.type === "fuzzy_loop" && <CamposMalhaFuzzy dados={no.data} />}
         </fieldset>
 
         <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">

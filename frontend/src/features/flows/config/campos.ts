@@ -1,3 +1,5 @@
+import type { KeyboardEvent } from "react";
+
 import { type DadosPid, type ElementoTfs, type LinhaTfs, type MatrizTfs } from "../graph";
 
 /**
@@ -13,6 +15,22 @@ export function numeroDoCampo(bruto: FormDataEntryValue | null, padrao: number):
   if (texto === "") return padrao;
   const valor = Number(texto);
   return Number.isFinite(valor) ? valor : padrao;
+}
+
+/** Tab indenta em vez de sair do campo (spec F3 §6.2: sem editor de código de terceiros). */
+export function indentarComTab(evento: KeyboardEvent<HTMLTextAreaElement>): void {
+  if (
+    evento.key !== "Tab" ||
+    evento.shiftKey ||
+    evento.ctrlKey ||
+    evento.altKey ||
+    evento.metaKey
+  ) {
+    return;
+  }
+  evento.preventDefault();
+  const campo = evento.currentTarget;
+  campo.setRangeText("    ", campo.selectionStart, campo.selectionEnd, "end");
 }
 
 /** Limite de saída do PID (RF-551, ADR-031): campo em branco vira `null` — sem limite, e o

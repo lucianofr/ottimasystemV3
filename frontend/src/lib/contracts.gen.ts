@@ -38,19 +38,22 @@ export interface ContratoPortaDinamicaComDefault extends ContratoPortaDinamica {
   max_fll_length: number;
 }
 
-/** Contrato de portas FIXAS que também carrega o default de criação (bloco "fuzzy_loop",
- * SPEC_FUZZY §3.2): as portas são as do shell, mas a paleta precisa do .fll canônico e do
- * teto do texto da mesma fonte única — sem duplicar o FLL no frontend. */
-export interface ContratoPortaFixaComDefault extends ContratoPortaFixa {
+/** Contrato dinâmico com defaults de criação do "fuzzy_loop" (SPEC_FUZZY v2 MIMO):
+ * portas pv_1..pv_n / out_1..out_n derivam de "n_loops"; "default_fll" é a base canônica
+ * de 1 canal e "default_fll_mimo" traz as bases geradas no SERVIDOR para cada contagem
+ * 2..máx — fonte única, o frontend nunca compõe texto FLL. */
+export interface ContratoPortaDinamicaMalha extends ContratoPortaDinamica {
   default_fll: string;
+  default_fll_mimo: Record<string, string>;
+  default_counts: { n_loops: number };
   max_fll_length: number;
 }
 
 export type ContratoPorta =
   | ContratoPortaFixa
-  | ContratoPortaFixaComDefault
   | ContratoPortaDinamica
-  | ContratoPortaDinamicaComDefault;
+  | ContratoPortaDinamicaComDefault
+  | ContratoPortaDinamicaMalha;
 
 export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy" | "first_order" | "kalman" | "pid" | "tfs" | "mpc" | "pid_loop" | "fuzzy_loop", ContratoPorta> = {
   "opc_read": {
@@ -271,60 +274,33 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "script" | "fuzzy
     ]
   },
   "fuzzy_loop": {
-    "dynamic": false,
-    "ports": [
+    "dynamic": true,
+    "source": "config.n_loops (SPEC_FUZZY v2): entradas pv_1..pv_n / saidas out_1..out_n",
+    "rules": [
       {
-        "name": "in",
         "direction": "input",
+        "prefix": "pv_",
+        "count_field": "n_loops",
+        "max": 4,
         "type": "num"
       },
       {
-        "name": "cas_in",
-        "direction": "input",
-        "type": "num"
-      },
-      {
-        "name": "rcas_in",
-        "direction": "input",
-        "type": "num"
-      },
-      {
-        "name": "rout_in",
-        "direction": "input",
-        "type": "num"
-      },
-      {
-        "name": "bkcal_in",
-        "direction": "input",
-        "type": "num"
-      },
-      {
-        "name": "bias_in",
-        "direction": "input",
-        "type": "num"
-      },
-      {
-        "name": "trk_in_d",
-        "direction": "input",
-        "type": "num"
-      },
-      {
-        "name": "lo_in_d",
-        "direction": "input",
-        "type": "num"
-      },
-      {
-        "name": "out",
         "direction": "output",
-        "type": "num"
-      },
-      {
-        "name": "bkcal_out",
-        "direction": "output",
+        "prefix": "out_",
+        "count_field": "n_loops",
+        "max": 4,
         "type": "num"
       }
     ],
     "default_fll": "Engine: fuzzy_loop_padrao\nInputVariable: e\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: NG Triangle -1.000 -1.000 -0.500\n  term: NP Triangle -1.000 -0.500 0.000\n  term: ZE Triangle -0.500 0.000 0.500\n  term: PP Triangle 0.000 0.500 1.000\n  term: PG Triangle 0.500 1.000 1.000\nInputVariable: de\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: N Triangle -1.000 -1.000 0.000\n  term: ZE Triangle -1.000 0.000 1.000\n  term: P Triangle 0.000 1.000 1.000\nOutputVariable: du\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  aggregation: none\n  defuzzifier: WeightedAverage\n  default: nan\n  lock-previous: false\n  term: NG Constant -1.000\n  term: NP Constant -0.500\n  term: ZE Constant 0.000\n  term: PP Constant 0.500\n  term: PG Constant 1.000\nRuleBlock: regras\n  enabled: true\n  conjunction: AlgebraicProduct\n  disjunction: Maximum\n  implication: AlgebraicProduct\n  activation: General\n  rule: if e is NG then du is NG\n  rule: if e is NP then du is NP\n  rule: if e is ZE and de is N then du is NP\n  rule: if e is ZE and de is ZE then du is ZE\n  rule: if e is ZE and de is P then du is PP\n  rule: if e is PP then du is PP\n  rule: if e is PG then du is PG\n",
+    "default_fll_mimo": {
+      "2": "Engine: fuzzy_loop_padrao_2canais\nInputVariable: e1\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: NG Triangle -1.000 -1.000 -0.500\n  term: NP Triangle -1.000 -0.500 0.000\n  term: ZE Triangle -0.500 0.000 0.500\n  term: PP Triangle 0.000 0.500 1.000\n  term: PG Triangle 0.500 1.000 1.000\nInputVariable: de1\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: N Triangle -1.000 -1.000 0.000\n  term: ZE Triangle -1.000 0.000 1.000\n  term: P Triangle 0.000 1.000 1.000\nInputVariable: e2\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: NG Triangle -1.000 -1.000 -0.500\n  term: NP Triangle -1.000 -0.500 0.000\n  term: ZE Triangle -0.500 0.000 0.500\n  term: PP Triangle 0.000 0.500 1.000\n  term: PG Triangle 0.500 1.000 1.000\nInputVariable: de2\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: N Triangle -1.000 -1.000 0.000\n  term: ZE Triangle -1.000 0.000 1.000\n  term: P Triangle 0.000 1.000 1.000\nOutputVariable: du1\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  aggregation: none\n  defuzzifier: WeightedAverage\n  default: nan\n  lock-previous: false\n  term: NG Constant -1.000\n  term: NP Constant -0.500\n  term: ZE Constant 0.000\n  term: PP Constant 0.500\n  term: PG Constant 1.000\nOutputVariable: du2\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  aggregation: none\n  defuzzifier: WeightedAverage\n  default: nan\n  lock-previous: false\n  term: NG Constant -1.000\n  term: NP Constant -0.500\n  term: ZE Constant 0.000\n  term: PP Constant 0.500\n  term: PG Constant 1.000\nRuleBlock: regras\n  enabled: true\n  conjunction: AlgebraicProduct\n  disjunction: Maximum\n  implication: AlgebraicProduct\n  activation: General\n  rule: if e1 is NG then du1 is NG\n  rule: if e1 is NP then du1 is NP\n  rule: if e1 is ZE and de1 is N then du1 is NP\n  rule: if e1 is ZE and de1 is ZE then du1 is ZE\n  rule: if e1 is ZE and de1 is P then du1 is PP\n  rule: if e1 is PP then du1 is PP\n  rule: if e1 is PG then du1 is PG\n  rule: if e2 is NG then du2 is NG\n  rule: if e2 is NP then du2 is NP\n  rule: if e2 is ZE and de2 is N then du2 is NP\n  rule: if e2 is ZE and de2 is ZE then du2 is ZE\n  rule: if e2 is ZE and de2 is P then du2 is PP\n  rule: if e2 is PP then du2 is PP\n  rule: if e2 is PG then du2 is PG\n",
+      "3": "Engine: fuzzy_loop_padrao_3canais\nInputVariable: e1\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: NG Triangle -1.000 -1.000 -0.500\n  term: NP Triangle -1.000 -0.500 0.000\n  term: ZE Triangle -0.500 0.000 0.500\n  term: PP Triangle 0.000 0.500 1.000\n  term: PG Triangle 0.500 1.000 1.000\nInputVariable: de1\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: N Triangle -1.000 -1.000 0.000\n  term: ZE Triangle -1.000 0.000 1.000\n  term: P Triangle 0.000 1.000 1.000\nInputVariable: e2\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: NG Triangle -1.000 -1.000 -0.500\n  term: NP Triangle -1.000 -0.500 0.000\n  term: ZE Triangle -0.500 0.000 0.500\n  term: PP Triangle 0.000 0.500 1.000\n  term: PG Triangle 0.500 1.000 1.000\nInputVariable: de2\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: N Triangle -1.000 -1.000 0.000\n  term: ZE Triangle -1.000 0.000 1.000\n  term: P Triangle 0.000 1.000 1.000\nInputVariable: e3\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: NG Triangle -1.000 -1.000 -0.500\n  term: NP Triangle -1.000 -0.500 0.000\n  term: ZE Triangle -0.500 0.000 0.500\n  term: PP Triangle 0.000 0.500 1.000\n  term: PG Triangle 0.500 1.000 1.000\nInputVariable: de3\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: N Triangle -1.000 -1.000 0.000\n  term: ZE Triangle -1.000 0.000 1.000\n  term: P Triangle 0.000 1.000 1.000\nOutputVariable: du1\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  aggregation: none\n  defuzzifier: WeightedAverage\n  default: nan\n  lock-previous: false\n  term: NG Constant -1.000\n  term: NP Constant -0.500\n  term: ZE Constant 0.000\n  term: PP Constant 0.500\n  term: PG Constant 1.000\nOutputVariable: du2\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  aggregation: none\n  defuzzifier: WeightedAverage\n  default: nan\n  lock-previous: false\n  term: NG Constant -1.000\n  term: NP Constant -0.500\n  term: ZE Constant 0.000\n  term: PP Constant 0.500\n  term: PG Constant 1.000\nOutputVariable: du3\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  aggregation: none\n  defuzzifier: WeightedAverage\n  default: nan\n  lock-previous: false\n  term: NG Constant -1.000\n  term: NP Constant -0.500\n  term: ZE Constant 0.000\n  term: PP Constant 0.500\n  term: PG Constant 1.000\nRuleBlock: regras\n  enabled: true\n  conjunction: AlgebraicProduct\n  disjunction: Maximum\n  implication: AlgebraicProduct\n  activation: General\n  rule: if e1 is NG then du1 is NG\n  rule: if e1 is NP then du1 is NP\n  rule: if e1 is ZE and de1 is N then du1 is NP\n  rule: if e1 is ZE and de1 is ZE then du1 is ZE\n  rule: if e1 is ZE and de1 is P then du1 is PP\n  rule: if e1 is PP then du1 is PP\n  rule: if e1 is PG then du1 is PG\n  rule: if e2 is NG then du2 is NG\n  rule: if e2 is NP then du2 is NP\n  rule: if e2 is ZE and de2 is N then du2 is NP\n  rule: if e2 is ZE and de2 is ZE then du2 is ZE\n  rule: if e2 is ZE and de2 is P then du2 is PP\n  rule: if e2 is PP then du2 is PP\n  rule: if e2 is PG then du2 is PG\n  rule: if e3 is NG then du3 is NG\n  rule: if e3 is NP then du3 is NP\n  rule: if e3 is ZE and de3 is N then du3 is NP\n  rule: if e3 is ZE and de3 is ZE then du3 is ZE\n  rule: if e3 is ZE and de3 is P then du3 is PP\n  rule: if e3 is PP then du3 is PP\n  rule: if e3 is PG then du3 is PG\n",
+      "4": "Engine: fuzzy_loop_padrao_4canais\nInputVariable: e1\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: NG Triangle -1.000 -1.000 -0.500\n  term: NP Triangle -1.000 -0.500 0.000\n  term: ZE Triangle -0.500 0.000 0.500\n  term: PP Triangle 0.000 0.500 1.000\n  term: PG Triangle 0.500 1.000 1.000\nInputVariable: de1\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: N Triangle -1.000 -1.000 0.000\n  term: ZE Triangle -1.000 0.000 1.000\n  term: P Triangle 0.000 1.000 1.000\nInputVariable: e2\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: NG Triangle -1.000 -1.000 -0.500\n  term: NP Triangle -1.000 -0.500 0.000\n  term: ZE Triangle -0.500 0.000 0.500\n  term: PP Triangle 0.000 0.500 1.000\n  term: PG Triangle 0.500 1.000 1.000\nInputVariable: de2\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: N Triangle -1.000 -1.000 0.000\n  term: ZE Triangle -1.000 0.000 1.000\n  term: P Triangle 0.000 1.000 1.000\nInputVariable: e3\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: NG Triangle -1.000 -1.000 -0.500\n  term: NP Triangle -1.000 -0.500 0.000\n  term: ZE Triangle -0.500 0.000 0.500\n  term: PP Triangle 0.000 0.500 1.000\n  term: PG Triangle 0.500 1.000 1.000\nInputVariable: de3\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: N Triangle -1.000 -1.000 0.000\n  term: ZE Triangle -1.000 0.000 1.000\n  term: P Triangle 0.000 1.000 1.000\nInputVariable: e4\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: NG Triangle -1.000 -1.000 -0.500\n  term: NP Triangle -1.000 -0.500 0.000\n  term: ZE Triangle -0.500 0.000 0.500\n  term: PP Triangle 0.000 0.500 1.000\n  term: PG Triangle 0.500 1.000 1.000\nInputVariable: de4\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  term: N Triangle -1.000 -1.000 0.000\n  term: ZE Triangle -1.000 0.000 1.000\n  term: P Triangle 0.000 1.000 1.000\nOutputVariable: du1\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  aggregation: none\n  defuzzifier: WeightedAverage\n  default: nan\n  lock-previous: false\n  term: NG Constant -1.000\n  term: NP Constant -0.500\n  term: ZE Constant 0.000\n  term: PP Constant 0.500\n  term: PG Constant 1.000\nOutputVariable: du2\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  aggregation: none\n  defuzzifier: WeightedAverage\n  default: nan\n  lock-previous: false\n  term: NG Constant -1.000\n  term: NP Constant -0.500\n  term: ZE Constant 0.000\n  term: PP Constant 0.500\n  term: PG Constant 1.000\nOutputVariable: du3\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  aggregation: none\n  defuzzifier: WeightedAverage\n  default: nan\n  lock-previous: false\n  term: NG Constant -1.000\n  term: NP Constant -0.500\n  term: ZE Constant 0.000\n  term: PP Constant 0.500\n  term: PG Constant 1.000\nOutputVariable: du4\n  enabled: true\n  range: -1.000 1.000\n  lock-range: true\n  aggregation: none\n  defuzzifier: WeightedAverage\n  default: nan\n  lock-previous: false\n  term: NG Constant -1.000\n  term: NP Constant -0.500\n  term: ZE Constant 0.000\n  term: PP Constant 0.500\n  term: PG Constant 1.000\nRuleBlock: regras\n  enabled: true\n  conjunction: AlgebraicProduct\n  disjunction: Maximum\n  implication: AlgebraicProduct\n  activation: General\n  rule: if e1 is NG then du1 is NG\n  rule: if e1 is NP then du1 is NP\n  rule: if e1 is ZE and de1 is N then du1 is NP\n  rule: if e1 is ZE and de1 is ZE then du1 is ZE\n  rule: if e1 is ZE and de1 is P then du1 is PP\n  rule: if e1 is PP then du1 is PP\n  rule: if e1 is PG then du1 is PG\n  rule: if e2 is NG then du2 is NG\n  rule: if e2 is NP then du2 is NP\n  rule: if e2 is ZE and de2 is N then du2 is NP\n  rule: if e2 is ZE and de2 is ZE then du2 is ZE\n  rule: if e2 is ZE and de2 is P then du2 is PP\n  rule: if e2 is PP then du2 is PP\n  rule: if e2 is PG then du2 is PG\n  rule: if e3 is NG then du3 is NG\n  rule: if e3 is NP then du3 is NP\n  rule: if e3 is ZE and de3 is N then du3 is NP\n  rule: if e3 is ZE and de3 is ZE then du3 is ZE\n  rule: if e3 is ZE and de3 is P then du3 is PP\n  rule: if e3 is PP then du3 is PP\n  rule: if e3 is PG then du3 is PG\n  rule: if e4 is NG then du4 is NG\n  rule: if e4 is NP then du4 is NP\n  rule: if e4 is ZE and de4 is N then du4 is NP\n  rule: if e4 is ZE and de4 is ZE then du4 is ZE\n  rule: if e4 is ZE and de4 is P then du4 is PP\n  rule: if e4 is PP then du4 is PP\n  rule: if e4 is PG then du4 is PG\n"
+    },
+    "default_counts": {
+      "n_loops": 1
+    },
     "max_fll_length": 200000
   }
 };
@@ -437,6 +413,7 @@ export interface LoopState {
   hi_limited: boolean;
   lo_limited: boolean;
   diag: Record<string, number>;
+  channel: number;
 }
 
 // --------------------------------------------------------------------------------------
@@ -661,6 +638,7 @@ export interface FuzzyLoopConfig {
   ff_scale_hi: number;
   ff_gain: number;
   ff_enable: boolean;
+  n_loops: number;
   ke: number;
   kde: number;
   ku: number;

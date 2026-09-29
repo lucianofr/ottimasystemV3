@@ -115,6 +115,7 @@ export const PADRAO_FUZZY_LOOP = {
   permitted: ["oos", "man", "auto"],
   normal: "auto",
   direct_acting: false,
+  n_loops: 1,
   ke: 0.05,
   kde: 0,
   ku: 2,
