@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent } from "react";
+import { useState } from "react";
 import { Link } from "react-router";
 
 import { Button } from "../../components/ui/button";
@@ -14,11 +14,11 @@ import { useActiveProject } from "../projects/useProjects";
 import { useLastConnectionState, type UltimoEstado } from "./useLastConnectionState";
 import { useConnectionsLive } from "./useConnectionsLive";
 import {
-  certificadoExcedeLimite,
-  MAX_SERVER_CERT_BYTES,
   useClearServerCertificate,
-  useTrustServerCertificate,
+  useServerCertificateInfo,
+  useTrustReceivedCertificate,
 } from "./useServerCertificate";
+import { ChapaCertificadoServidor } from "./ChapaCertificadoServidor";
 
 const POLICY: Record<ConnectionOut["security_policy"], string> = {
   none: "Sem segurança",
@@ -149,38 +149,37 @@ function CelulaUltimoEstado({
 }
 
 /**
- * "Confiar certificado" / "Deixar de confiar" por linha (spec §6.2-2, RF-202, ADR-021,
- * tarefa 3.2). O `<input type="file">` fica sempre no DOM assim que a linha renderiza — nunca
- * atrás de um menu — porque o roteiro E2E (B-F6-04) sobe o arquivo direto nele. O fingerprint
- * só existe no cliente depois de um trust bem-sucedido nesta sessão: a API devolve o
- * `fingerprint_sha256` só de quem acabou de gravar, não há rota para reler o de um certificado
- * já persistido (`ConnectionOut` só traz `server_cert_file`, o nome do arquivo).
+ * "Confiar certificado" / "Visualizar" / "Deixar de confiar" por linha (RF-202, ADR-021).
+ * O aceite não faz mais upload de arquivo: o opc-worker captura o certificado que o
+ * servidor anuncia na falha de pin (`cert_missing`/`cert_mismatch`) e o deixa em staging
+ * (volume `certs-received`); "Confiar certificado" só o promove a confiado
+ * (`POST …/server-certificate/trust`) e fica desabilitado enquanto nada foi recebido.
+ * "Visualizar" abre a chapa de detalhe no topo da página — mesmo padrão page-level do
+ * `ConnectionForm` (regra global 2, FE-08: sem `<dialog>`/modal novo). O fingerprint vem
+ * do `GET …/server-certificate` e persiste entre sessões (antes só existia no cliente
+ * logo após um trust bem-sucedido).
  */
 function CelulaCertificadoServidor({
   conexao,
   onErro,
+  onVisualizar,
 }: {
   conexao: ConnectionOut;
   onErro: (mensagem: string | null) => void;
+  onVisualizar: (conexao: ConnectionOut) => void;
 }) {
-  const confiar = useTrustServerCertificate();
+  const certificados = useServerCertificateInfo(conexao.id, conexao.security_policy !== "none");
+  const confiar = useTrustReceivedCertificate();
   const descartar = useClearServerCertificate();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [fingerprint, setFingerprint] = useState<string | null>(null);
 
-  async function selecionarArquivo(evento: ChangeEvent<HTMLInputElement>): Promise<void> {
-    const arquivo = evento.target.files?.[0];
-    evento.target.value = ""; // permite reenviar o mesmo arquivo depois de um erro
-    if (!arquivo) return;
+  const trusted = certificados.data?.trusted ?? null;
+  const recebido = certificados.data?.received ?? null;
+
+  async function confiarRecebido(): Promise<void> {
+    if (recebido === null) return;
     onErro(null);
-    if (certificadoExcedeLimite(arquivo.size)) {
-      const teto = String(MAX_SERVER_CERT_BYTES / 1024);
-      onErro(`Certificado maior que ${teto} KiB — o servidor recusaria; escolha um arquivo menor.`);
-      return;
-    }
     try {
-      const resultado = await confiar.mutateAsync({ id: conexao.id, arquivo });
-      setFingerprint(resultado.fingerprint_sha256);
+      await confiar.mutateAsync({ id: conexao.id, fingerprint: recebido.fingerprint_sha256 });
     } catch (err) {
       onErro(err instanceof ApiError ? err.message : "Erro de comunicação com o servidor");
     }
@@ -190,7 +189,6 @@ function CelulaCertificadoServidor({
     onErro(null);
     try {
       await descartar.mutateAsync(conexao.id);
-      setFingerprint(null);
     } catch (err) {
       onErro(err instanceof ApiError ? err.message : "Erro de comunicação com o servidor");
     }
@@ -198,40 +196,49 @@ function CelulaCertificadoServidor({
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <input
-        ref={inputRef}
-        type="file"
-        data-testid="cert-servidor-upload-input"
-        className="hidden"
-        onChange={(evento) => void selecionarArquivo(evento)}
-      />
-      {conexao.server_cert_file ? (
+      <div className="flex items-center gap-1">
+        {conexao.server_cert_file ? (
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="cert-servidor-descartar"
+            disabled={descartar.isPending}
+            onClick={() => void descartarCertificado()}
+          >
+            Deixar de confiar
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="cert-servidor-confiar"
+            disabled={confiar.isPending || recebido === null}
+            title={
+              recebido === null
+                ? "Aguardando o servidor enviar o certificado — o opc-worker o captura na falha de conexão"
+                : "Confiar no certificado recebido do servidor"
+            }
+            onClick={() => void confiarRecebido()}
+          >
+            Confiar certificado
+          </Button>
+        )}
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
-          data-testid="cert-servidor-descartar"
-          disabled={descartar.isPending}
-          onClick={() => void descartarCertificado()}
+          data-testid="cert-servidor-visualizar"
+          disabled={trusted === null && recebido === null}
+          onClick={() => onVisualizar(conexao)}
         >
-          Deixar de confiar
+          Visualizar
         </Button>
-      ) : (
-        <Button
-          variant="outline"
-          size="sm"
-          data-testid="cert-servidor-confiar"
-          disabled={confiar.isPending}
-          onClick={() => inputRef.current?.click()}
-        >
-          Confiar certificado
-        </Button>
-      )}
-      {fingerprint && (
+      </div>
+      {trusted && (
         <span
           data-testid="cert-servidor-fingerprint"
           className="process-value text-xs text-fg-muted"
         >
-          {fingerprint}
+          {trusted.fingerprint_sha256}
         </span>
       )}
     </div>
@@ -249,6 +256,7 @@ export function ConnectionsPage() {
   const [emEdicao, setEmEdicao] = useState<ConnectionOut | null>(null);
   const [aConfirmar, setAConfirmar] = useState<number | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [certificadoDe, setCertificadoDe] = useState<ConnectionOut | null>(null);
 
   function abrirCriacao(): void {
     setEmEdicao(null);
@@ -302,6 +310,14 @@ export function ConnectionsPage() {
           conexao={emEdicao}
           projectId={projectId}
           onClose={() => setFormAberto(false)}
+        />
+      )}
+
+      {podeMutar && certificadoDe !== null && (
+        <ChapaCertificadoServidor
+          key={certificadoDe.id}
+          conexao={certificadoDe}
+          onClose={() => setCertificadoDe(null)}
         />
       )}
 
@@ -383,7 +399,11 @@ export function ConnectionsPage() {
                 </td>
                 {podeMutar && (
                   <td className="px-3 py-2">
-                    <CelulaCertificadoServidor conexao={conexao} onErro={setErro} />
+                    <CelulaCertificadoServidor
+                      conexao={conexao}
+                      onErro={setErro}
+                      onVisualizar={setCertificadoDe}
+                    />
                   </td>
                 )}
                 {podeMutar && (

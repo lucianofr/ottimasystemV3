@@ -322,10 +322,12 @@ export interface paths {
          * Trust Received Server Certificate
          * @description Confia no certificado que o servidor enviou (captura do opc-worker), sem upload.
          *
-         *     É o "aceite" da UI: promove o arquivo do staging `received/` para `trusted/` com a
-         *     mesma validação X.509 do upload. A mudança de estado é idêntica à do POST de upload
-         *     (coluna, bump do watermark e evento `connection_updated`) — 409 quando ainda não há
-         *     nada capturado.
+         *     É o "aceite" da UI: promove o arquivo do staging para `trusted/` com a mesma validação
+         *     X.509 do upload. O `fingerprint_sha256` do corpo é o do certificado que o admin
+         *     inspecionou (ADR-021): se o worker recapturou desde a visualização (rotação, captura
+         *     nova), 409 — o aceite é do certificado EXIBIDO, não do que estiver no staging. Aceite
+         *     repetido dos mesmos bytes é no-op: sem watermark, sem evento, sem reconcile inútil de
+         *     uma sessão saudável.
          */
         post: operations["trust_received_server_certificate_api_connections__connection_id__server_certificate_trust_post"];
         delete?: never;
@@ -2192,6 +2194,18 @@ export interface components {
             fingerprint_sha256: string;
         };
         /**
+         * ServerCertificateTrustIn
+         * @description Corpo do aceite: o fingerprint que o admin inspecionou na UI (ADR-021).
+         *
+         *     Obrigatório de propósito: o staging é reescrito pelo worker a cada retry, então
+         *     confiar "no que estiver lá agora" seria TOFU cego — o aceite é do certificado
+         *     exibido, não do arquivo. Divergência no servidor ⇒ 409.
+         */
+        ServerCertificateTrustIn: {
+            /** Fingerprint Sha256 */
+            fingerprint_sha256: string;
+        };
+        /**
          * ServerCertificatesOut
          * @description Estado do certificado do servidor por conexão: o que está confiado e o que o
          *     servidor enviou (captura do opc-worker em staging, ainda não confiada).
@@ -3210,7 +3224,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerCertificateTrustIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
