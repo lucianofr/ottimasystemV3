@@ -122,3 +122,50 @@ def test_contagem_de_entradas_casa_com_o_setpoint():
     # FLL de 2 entradas sem setpoint: espera as 2 portas verbatim -> recusa n_inputs=1.
     with pytest.raises(ValueError, match="espera n_inputs=1"):
         FuzzyBlock("fz1", fll=SP_FLL, n_inputs=1, n_outputs=1)
+
+
+# ------------------------------------------------------------------- SP pela porta `sp`
+
+
+async def test_sp_pela_entrada_alimenta_a_ultima_variavel():
+    quadros, publish = coletor()
+    block = FuzzyBlock(
+        "fz1", fll=SP_FLL, n_inputs=1, n_outputs=1, sp_da_entrada=True,
+        publish=publish, state_min_interval_s=0.0,
+    )
+
+    saida = await block.step(
+        {"IN1": Signal(25.0, quality=Quality.GOOD), "sp": Signal(75.0, quality=Quality.GOOD)}
+    )
+
+    assert block.input_ports == ("IN1", "sp")
+    assert saida["OUT1"].v == pytest.approx(75.0, abs=0.01)
+    assert quadros[-1].sp == 75.0
+    assert [v.port for v in quadros[-1].inputs] == ["IN1", "SP"]
+
+
+async def test_sp_frio_na_entrada_segura_as_saidas():
+    block = FuzzyBlock("fz1", fll=SP_FLL, n_inputs=1, n_outputs=1, sp_da_entrada=True)
+
+    saida = await block.step(
+        {"IN1": Signal(25.0, quality=Quality.GOOD), "sp": Signal(None, quality=Quality.BAD)}
+    )
+
+    assert saida["OUT1"] == Signal(None)
+
+
+async def test_sp_invalido_na_entrada_rebaixa_como_entrada_ruim():
+    quadros, publish = coletor()
+    block = FuzzyBlock(
+        "fz1", fll=SP_FLL, n_inputs=1, n_outputs=1, sp_da_entrada=True,
+        publish=publish, state_min_interval_s=0.0,
+    )
+
+    saida = await block.step(
+        {"IN1": Signal(25.0, quality=Quality.GOOD), "sp": Signal(75.0, quality=Quality.BAD)}
+    )
+
+    # Executa (valor finito) mas propaga a flag ruim, como qualquer entrada do bloco.
+    assert saida["OUT1"].v == pytest.approx(75.0, abs=0.01)
+    assert saida["OUT1"].ok is False
+    assert quadros[-1].ok is False

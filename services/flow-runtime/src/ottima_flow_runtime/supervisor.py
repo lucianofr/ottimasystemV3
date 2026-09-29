@@ -341,6 +341,10 @@ class Supervisor:
         bloco = entry[1] if entry is not None else None
         if not isinstance(bloco, FuzzyBlock):
             return
+        if bloco.sp_da_entrada:
+            # SP deste bloco vem do fio (porta `sp`): comando do operador não tem efeito — a
+            # rota já recusa com 422; aqui é a segunda linha de defesa do runtime.
+            return
         valor = command.args.get("value")
         if isinstance(valor, (int, float)) and math.isfinite(float(valor)):
             bloco.setpoint = float(valor)

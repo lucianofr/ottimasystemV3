@@ -77,6 +77,7 @@ class FuzzyBlock(Block):
         n_inputs: int,
         n_outputs: int,
         setpoint: float | None = None,
+        sp_da_entrada: bool = False,
         publish: Callable[[FuzzyState], Awaitable[None]] | None = None,
         state_min_interval_s: float = FUZZY_STATE_MIN_INTERVAL_S,
     ) -> None:
@@ -88,8 +89,13 @@ class FuzzyBlock(Block):
         #: MAIS, a última, alimentada com este valor — e ele é o único estado que o comando
         #: `fuzzy_sp` muda em runtime (o resto da config é do grafo).
         self.setpoint = setpoint
+        #: Fonte do SP pela porta `sp` (fio do flow, ex.: `opc_read`): a última variável do FLL
+        #: passa a ser alimentada pelo valor da porta, e o comando do operador não vale.
+        self._sp_da_entrada = sp_da_entrada
         where = f"bloco '{block_id}' (fuzzy)"
-        self._input_ports = tuple(f"IN{i}" for i in range(1, n_inputs + 1))
+        self._input_ports = tuple(f"IN{i}" for i in range(1, n_inputs + 1)) + (
+            ("sp",) if sp_da_entrada else ()
+        )
         self._output_ports = tuple(f"OUT{i}" for i in range(1, n_outputs + 1))
 
         try:
@@ -97,7 +103,7 @@ class FuzzyBlock(Block):
         except Exception as erro:
             raise ValueError(f"{where}: FLL inválido — {erro}") from erro
 
-        n_esperado = n_inputs + (1 if setpoint is not None else 0)
+        n_esperado = n_inputs + (1 if (setpoint is not None or sp_da_entrada) else 0)
         if len(engine.input_variables) != n_esperado:
             raise ValueError(
                 f"{where}: FLL declara {len(engine.input_variables)} variável(is) de "
@@ -137,6 +143,10 @@ class FuzzyBlock(Block):
     @property
     def input_ports(self) -> tuple[str, ...]:
         return self._input_ports
+
+    @property
+    def sp_da_entrada(self) -> bool:
+        return self._sp_da_entrada
 
     @property
     def output_ports(self) -> tuple[str, ...]:
@@ -274,7 +284,11 @@ class FuzzyBlock(Block):
         output_states: list[FuzzyVarState],
     ) -> None:
         """Monta e publica o quadro em `fuzzy.state.<flow_id>.<block_id>` (ADR-030)."""
-        portas_do_fll = self._engine.input_variables[: len(self._input_ports)]
+        portas_do_fll = self._engine.input_variables
+        # No modo entrada a porta `sp` é fio como qualquer IN; no quadro publicado ela vira a
+        # entrada sintética `SP` (mesmo rótulo nas duas fontes: página e histórico não
+        # distinguem de onde o SP veio, só o valor vigente).
+        n_fios = len(self._input_ports) - (1 if self._sp_da_entrada else 0)
         inputs = [
             FuzzyVarState(
                 port=port,
@@ -285,24 +299,21 @@ class FuzzyBlock(Block):
                     for term in variable.terms
                 ],
             )
-            for port, variable in zip(self._input_ports, portas_do_fll, strict=True)
+            for port, variable in zip(
+                self._input_ports[:n_fios], portas_do_fll[:n_fios], strict=True
+            )
         ]
         estado_sp = None
-        if self.setpoint is not None:
-            # O SP entra no quadro como variável própria (porta sintética `SP`): a página o
-            # mostra com as MESMAS curvas do FLL, e o recorder ganha a série histórica do SP
-            # sem tabela nova. `sp` carrega o número cru, para o campo de escrita.
-            variavel_sp = self._engine.input_variables[-1]
-            estado_sp = self.setpoint
+        if self._sp_da_entrada or self.setpoint is not None:
+            variavel_sp = portas_do_fll[-1]
+            estado_sp = float(variavel_sp.value) if self._sp_da_entrada else self.setpoint
             inputs.append(
                 FuzzyVarState(
                     port="SP",
                     name=variavel_sp.name,
-                    v=_valor_crisp(self.setpoint),
+                    v=_valor_crisp(estado_sp),
                     terms=[
-                        FuzzyTermDegree(
-                            term=term.name, degree=_grau(term.membership(self.setpoint))
-                        )
+                        FuzzyTermDegree(term=term.name, degree=_grau(term.membership(estado_sp)))
                         for term in variavel_sp.terms
                     ],
                 )
