@@ -684,6 +684,7 @@ export interface FuzzyConfig {
   n_outputs: number;
   output_eu: Record<string, string>;
   setpoint: number | null;
+  sp_source: "operador" | "entrada" | null;
 }
 
 export interface PidConfig {

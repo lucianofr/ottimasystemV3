@@ -216,6 +216,7 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
       fll: contratoFuzzy.default_fll,
       output_eu: {},
       setpoint: null,
+      sp_source: null,
     }),
   },
   pid: {

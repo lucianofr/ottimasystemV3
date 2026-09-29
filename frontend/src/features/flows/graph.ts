@@ -496,7 +496,10 @@ export function portasFixas(tipo: TipoBloco, direcao: DirecaoPorta): string[] {
  *  esquerda, saída = MVs à direita, na ordem do config; handle = id estável da variável. */
 export function handlesEntrada(no: BlocoNode): string[] {
   if (no.type === "script") return portasScript("IN", no.data.n_inputs);
-  if (no.type === "fuzzy") return portasScript("IN", no.data.n_inputs);
+  if (no.type === "fuzzy")
+    return no.data.sp_source === "entrada"
+      ? [...portasScript("IN", no.data.n_inputs), "sp"]
+      : portasScript("IN", no.data.n_inputs);
   if (no.type === "mpc") {
     const { cvs, constraints, dvs } = no.data.variables;
     return [...cvs, ...constraints, ...dvs].map((variavel) => variavel.id);
@@ -1195,6 +1198,12 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
             dados.setpoint === null || dados.setpoint === undefined
               ? null
               : numero(dados.setpoint, 0),
+          // Fonte do SP (RF-541 revisado, PRD 3.1): valores fora do vocabulário viram `null`
+          // (sem SP), mesma postura de tolerância do resto da normalização.
+          sp_source:
+            dados.sp_source === "entrada" || dados.sp_source === "operador"
+              ? dados.sp_source
+              : null,
         },
       };
     case "pid":

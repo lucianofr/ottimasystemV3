@@ -271,7 +271,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Get Server Certificate
+         * @description O certificado confiado e o certificado que o servidor enviou (staging da captura).
+         *
+         *     `trusted` só aparece quando a coluna `server_cert_file` está preenchida: um arquivo
+         *     órfão em `trusted/` (ex.: trust desfeito por outra rota) não é certificado confiado.
+         *     `received` vem do volume gravado pelo opc-worker na falha de pin — a UI o usa para
+         *     "Visualizar" e para habilitar o aceite sem upload.
+         */
+        get: operations["get_server_certificate_api_connections__connection_id__server_certificate_get"];
         put?: never;
         /**
          * Set Server Certificate
@@ -295,6 +304,31 @@ export interface paths {
          *     DELETE numa conexão que já não confia em nada é no-op, e no-op não é evento.
          */
         delete: operations["clear_server_certificate_api_connections__connection_id__server_certificate_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/connections/{connection_id}/server-certificate/trust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trust Received Server Certificate
+         * @description Confia no certificado que o servidor enviou (captura do opc-worker), sem upload.
+         *
+         *     É o "aceite" da UI: promove o arquivo do staging `received/` para `trusted/` com a
+         *     mesma validação X.509 do upload. A mudança de estado é idêntica à do POST de upload
+         *     (coluna, bump do watermark e evento `connection_updated`) — 409 quando ainda não há
+         *     nada capturado.
+         */
+        post: operations["trust_received_server_certificate_api_connections__connection_id__server_certificate_trust_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1459,6 +1493,8 @@ export interface components {
             };
             /** Setpoint */
             setpoint?: number | null;
+            /** Sp Source */
+            sp_source?: string | null;
             introspection: components["schemas"]["FuzzyIntrospection"];
         };
         /** FuzzyHistoryResponse */
@@ -1542,6 +1578,8 @@ export interface components {
             block_name: string;
             /** Setpoint */
             setpoint?: number | null;
+            /** Sp Source */
+            sp_source?: string | null;
             /** Inputs */
             inputs: components["schemas"]["FuzzyPortOut"][];
             /** Outputs */
@@ -2120,6 +2158,30 @@ export interface components {
             /** High */
             high: number;
         };
+        /**
+         * ServerCertificateInfoOut
+         * @description Metadados + PEM de um certificado de servidor gravado em disco (trusted ou received).
+         */
+        ServerCertificateInfoOut: {
+            /** Subject */
+            subject: string;
+            /** Issuer */
+            issuer: string;
+            /** Fingerprint Sha256 */
+            fingerprint_sha256: string;
+            /**
+             * Not Before
+             * Format: date-time
+             */
+            not_before: string;
+            /**
+             * Not After
+             * Format: date-time
+             */
+            not_after: string;
+            /** Pem */
+            pem: string;
+        };
         /** ServerCertificateOut */
         ServerCertificateOut: {
             /** Conn Id */
@@ -2128,6 +2190,17 @@ export interface components {
             server_cert_file: string;
             /** Fingerprint Sha256 */
             fingerprint_sha256: string;
+        };
+        /**
+         * ServerCertificatesOut
+         * @description Estado do certificado do servidor por conexão: o que está confiado e o que o
+         *     servidor enviou (captura do opc-worker em staging, ainda não confiada).
+         */
+        ServerCertificatesOut: {
+            /** Conn Id */
+            conn_id: number;
+            trusted?: components["schemas"]["ServerCertificateInfoOut"] | null;
+            received?: components["schemas"]["ServerCertificateInfoOut"] | null;
         };
         /** SpCommand */
         SpCommand: {
@@ -3037,6 +3110,37 @@ export interface operations {
             };
         };
     };
+    get_server_certificate_api_connections__connection_id__server_certificate_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerCertificatesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_server_certificate_api_connections__connection_id__server_certificate_post: {
         parameters: {
             query?: never;
@@ -3085,6 +3189,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trust_received_server_certificate_api_connections__connection_id__server_certificate_trust_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerCertificateOut"];
+                };
             };
             /** @description Validation Error */
             422: {

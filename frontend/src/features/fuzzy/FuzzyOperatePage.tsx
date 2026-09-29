@@ -68,12 +68,15 @@ function BarraSp({
   pv,
   minimo,
   maximo,
+  escrevivel,
   aoEnviar,
 }: {
   sp: number | null;
   pv: number | null;
   minimo: number;
   maximo: number;
+  /** `false` no modo `sp_source='entrada'`: o SP vem do fio, a página só lê (o POST é 422). */
+  escrevivel: boolean;
   aoEnviar: (valor: number) => Promise<string | null>;
 }) {
   const [valor, setValor] = useState("");
@@ -118,29 +121,35 @@ function BarraSp({
           {desvio === null ? "—" : `${desvio >= 0 ? "+" : "−"}${formatarSp(Math.abs(desvio))}`}
         </span>
       </div>
-      <form onSubmit={(e) => void enviar(e)} className="flex items-end gap-2">
-        <label className="text-xs text-fg-muted" htmlFor="fuzzy-sp-input">
-          Escrever SP
-        </label>
-        <input
-          id="fuzzy-sp-input"
-          data-testid="fuzzy-sp-input"
-          type="number"
-          step="any"
-          min={minimo}
-          max={maximo}
-          value={valor}
-          onChange={(e) => setValor(e.target.value)}
-          className="process-value w-24 rounded-sm border border-border bg-surface px-2 py-1 text-xs"
-        />
-        <button
-          type="submit"
-          data-testid="fuzzy-sp-enviar"
-          className="rounded-sm border border-border px-2 py-1 text-xs hover:bg-surface-2"
-        >
-          Enviar
-        </button>
-      </form>
+      {escrevivel ? (
+        <form onSubmit={(e) => void enviar(e)} className="flex items-end gap-2">
+          <label className="text-xs text-fg-muted" htmlFor="fuzzy-sp-input">
+            Escrever SP
+          </label>
+          <input
+            id="fuzzy-sp-input"
+            data-testid="fuzzy-sp-input"
+            type="number"
+            step="any"
+            min={minimo}
+            max={maximo}
+            value={valor}
+            onChange={(e) => setValor(e.target.value)}
+            className="process-value w-24 rounded-sm border border-border bg-surface px-2 py-1 text-xs"
+          />
+          <button
+            type="submit"
+            data-testid="fuzzy-sp-enviar"
+            className="rounded-sm border border-border px-2 py-1 text-xs hover:bg-surface-2"
+          >
+            Enviar
+          </button>
+        </form>
+      ) : (
+        <p className="text-xs text-fg-muted" data-testid="fuzzy-sp-so-leitura">
+          SP vem da entrada `sp` do flow (sp_source=&quot;entrada&quot;) — somente leitura aqui.
+        </p>
+      )}
       {erro !== null && (
         <p role="alert" data-testid="fuzzy-sp-erro" className="text-xs text-alarm">
           {erro}
@@ -209,6 +218,9 @@ function FuzzyResolvido({ no }: { no: FuzzyNodeOut }) {
   // mesmo server-side que alimenta o bloco, então a faixa do campo não vem do cliente.
   const varSp = introspection.inputs.find((variavel) => variavel.port === "SP") ?? null;
   const pv = estadosPorPorta.get("IN1")?.v ?? null;
+  // Legado: `setpoint` cheio sem `sp_source` = operador. Sem nenhum dos dois, sem barra.
+  const fonteSp =
+    detalhe.data.sp_source ?? (detalhe.data.setpoint !== null ? "operador" : null);
 
   return (
     <div className="space-y-6">
@@ -222,6 +234,7 @@ function FuzzyResolvido({ no }: { no: FuzzyNodeOut }) {
           pv={pv}
           minimo={varSp.minimum}
           maximo={varSp.maximum}
+          escrevivel={fonteSp !== "entrada"}
           aoEnviar={enviarSp}
         />
       )}

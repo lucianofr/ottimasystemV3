@@ -182,6 +182,10 @@ function CamposFuzzy({
   aoMudarNOutputs: (n_outputs: number) => void;
 }) {
   const portasEu = portasScript("OUT", nOutputs);
+  // Legado: grafo com `setpoint` cheio e sem `sp_source` é fonte operador (PRD 3.1).
+  const [fonteSp, setFonteSp] = useState<"" | "operador" | "entrada">(
+    dados.sp_source ?? (dados.setpoint !== null ? "operador" : ""),
+  );
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
@@ -231,22 +235,40 @@ function CamposFuzzy({
       )}
 
       <div className="space-y-1">
-        <Label htmlFor="setpoint">SP do operador (habilita o controle por setpoint)</Label>
-        <Input
-          id="setpoint"
-          name="setpoint"
-          type="number"
-          step="any"
-          data-testid="config-setpoint"
-          defaultValue={dados.setpoint ?? ""}
-          placeholder="vazio = sem SP"
-        />
+        <Label htmlFor="sp_source">Fonte do SP</Label>
+        <Select
+          id="sp_source"
+          name="sp_source"
+          data-testid="config-sp-source"
+          value={fonteSp}
+          onChange={(evento) =>
+            setFonteSp(evento.target.value as "" | "operador" | "entrada")
+          }
+        >
+          <option value="">Sem SP (o FLL mapeia só as portas)</option>
+          <option value="operador">Operador (página FUZZY)</option>
+          <option value="entrada">Entrada sp (fio do flow, ex.: OPC-Read)</option>
+        </Select>
         <p className="text-[10px] text-fg-muted">
-          Com SP definido, o FLL precisa declarar UMA variável de entrada a mais — a última,
-          que recebe o SP escrito pelo operador na página FUZZY; a primeira continua sendo a
-          porta IN1. Vazio desliga o SP (bloco volta a mapear só as portas).
+          Com SP habilitado, o FLL precisa declarar UMA variável de entrada a mais — a última,
+          que recebe o SP. No modo operador o SP é escrito na página FUZZY (a semente é o
+          campo abaixo); no modo entrada ele vem da porta `sp` conectada no canvas.
         </p>
       </div>
+
+      {fonteSp === "operador" && (
+        <div className="space-y-1">
+          <Label htmlFor="setpoint">SP inicial do operador (semente)</Label>
+          <Input
+            id="setpoint"
+            name="setpoint"
+            type="number"
+            step="any"
+            data-testid="config-setpoint"
+            defaultValue={dados.setpoint ?? ""}
+          />
+        </div>
+      )}
 
       <div className="space-y-1">
         <Label htmlFor="fll">FLL (FuzzyLite Language)</Label>
@@ -368,6 +390,7 @@ export function ModalConfigBloco({
       }
       case "fuzzy": {
         const n_outputs = inteiroDoCampo(campos.get("n_outputs"), 0, 1, MAX_PORTAS_FUZZY);
+        const fonteSp = String(campos.get("sp_source") ?? "");
         onAplicar(
           {
             ...no,
@@ -382,9 +405,15 @@ export function ModalConfigBloco({
                 outputEuDoFormulario(campos, portasScript("OUT", MAX_PORTAS_FUZZY)),
                 n_outputs,
               ),
-              // Vazio desliga o SP (regra ausente/vazio/valor de `campos.ts`): salvar o bloco
-              // pelo modal nunca apaga o SP por acidente, só por escolha do engenheiro.
-              setpoint: numeroOuNuloDoCampo(campos.get("setpoint"), no.data.setpoint),
+              // A fonte manda no setpoint: no modo entrada (ou sem SP) a semente do operador
+              // some — salvar pelo modal nunca deixa um par fonte×semente incoerente, que o
+              // servidor recusaria no save (model_validator de `FuzzyConfig`).
+              setpoint:
+                fonteSp === "operador"
+                  ? numeroOuNuloDoCampo(campos.get("setpoint"), no.data.setpoint)
+                  : null,
+              sp_source:
+                fonteSp === "operador" || fonteSp === "entrada" ? fonteSp : null,
             },
           },
           execOrder,
