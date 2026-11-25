@@ -414,6 +414,14 @@ KIND_CALC_TAG_TIMEOUT = "calc_tag_timeout"  # severity "alarm"
 KIND_CALC_TAG_ERROR = "calc_tag_error"  # severity "alarm"
 KIND_CALC_TAG_RECOVERED = "calc_tag_recovered"  # severity "info"
 
+# Sensor virtual (ADR-046, spec SENSOR_VIRTUAL §5.4/§5.6/§5.7). Origin `flow-runtime`; payload
+# sempre com `flow_id` e `block_id`. Extrapolação e modelo ausente saem só na borda.
+KIND_SOFT_SENSOR_MODEL_ACTIVATED = "soft_sensor_model_activated"  # severity "info"
+KIND_SOFT_SENSOR_MODEL_REJECTED = "soft_sensor_model_rejected"  # severity "warning"
+KIND_SOFT_SENSOR_MODEL_MISSING = "soft_sensor_model_missing"  # severity "warning"
+KIND_SOFT_SENSOR_EXTRAPOLATING = "soft_sensor_extrapolating"  # severity "warning"
+KIND_SOFT_SENSOR_PREWARM_SKIPPED = "soft_sensor_prewarm_skipped"  # severity "info"
+
 
 async def publish_event(
     redis_client: Redis,
