@@ -1,5 +1,7 @@
 """SoftSensorBlock: passo de modelo, qualidade da saída e eventos de borda (RF-582/583, §5.2-4)."""
 
+import asyncio
+
 import pytest
 
 from ottima_core.bus import (
@@ -145,7 +147,8 @@ async def test_extrapolacao_emite_evento_so_na_borda():
     ]
 
 
-async def test_persist_e_emit_que_levantam_nao_derrubam_o_step():
+async def test_persist_que_levanta_nao_derruba_o_step():
+    # emit_event também levanta: os dois pontos de saída são capturados e logados.
     async def falha(*_a, **_kw):
         raise RuntimeError("banco fora")
 
@@ -217,3 +220,31 @@ def test_portas():
     b, *_ = bloco(n_inputs=3)
     assert b.input_ports == ("IN1", "IN2", "IN3")
     assert b.output_ports == ("out",)
+
+
+@pytest.mark.parametrize(
+    ("par", "janela", "chamadas"),
+    [
+        (synthetic.pls([1.0, 1.0], 0.0), 1, 0),
+        (synthetic.esn(2, warmup=5), 5, 6),
+        (synthetic.lstm(2, sequence_length=3), 3, 6),
+    ],
+    ids=["pls_inline", "esn_executor", "lstm_executor"],
+)
+async def test_pls_inline_esn_e_lstm_no_executor(monkeypatch, par, janela, chamadas):
+    # ADR-004: ESN/LSTM nunca rodam no event loop; PLS é barato e roda inline.
+    loop = asyncio.get_running_loop()
+    original = loop.run_in_executor
+    contagem = 0
+
+    def espiao(executor, fn, *args):
+        nonlocal contagem
+        contagem += 1
+        return original(executor, fn, *args)
+
+    monkeypatch.setattr(loop, "run_in_executor", espiao)
+    b, *_ = bloco(carregar(par))
+    outs = [(await b.step(entradas(0.1, 0.2)))["out"] for _ in range(6)]
+    assert contagem == chamadas
+    assert outs[janela - 1].v is not None and outs[janela - 1].quality is Quality.GOOD
+    assert all(o.v is None for o in outs[: janela - 1])
