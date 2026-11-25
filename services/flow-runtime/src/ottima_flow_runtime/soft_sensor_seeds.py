@@ -182,15 +182,17 @@ async def load_seeds(
             if reason is not None:
                 seeds[node.id] = SoftSensorSeed(None, None, reason)
                 continue
-            await session.execute(
-                update(SoftSensorBinding)
-                .where(SoftSensorBinding.flow_id == flow_id, SoftSensorBinding.block_id == node.id)
-                .values(active_model_id=row.id, candidate_model_id=None)
-            )
             loaded.append((node.id, model, list(row.input_tag_ids)))
         input_ids = {t for _, _, tag_ids in loaded for t in tag_ids}
         existing = set(await session.scalars(select(Tag.id).where(Tag.id.in_(input_ids))))
-        await session.commit()
+
+    # Regra do Estado Publicado (ADR-002): o vínculo diz o que o bloco RODA — o modelo
+    # carregado ou nenhum. `desired_model_id` é o pedido do usuário e fica como está.
+    in_use = {block_id: model.model_id for block_id, model, _ in loaded}
+    for block_id in desired:
+        await make_persist(session_factory, flow_id, block_id)(
+            BindingUpdate(active_model_id=in_use.get(block_id), candidate_model_id=None)
+        )
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + PREWARM_TIMEOUT_S

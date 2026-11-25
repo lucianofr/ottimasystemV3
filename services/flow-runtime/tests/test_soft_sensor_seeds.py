@@ -191,10 +191,11 @@ def test_model_mismatch():
 
 
 async def test_deploy_carrega_o_desejado_e_grava_o_ativo(session_factory):
-    scenario = await _scenario(session_factory, ["ss"])
-    async with session_factory() as session:  # candidato antigo pendurado: o deploy limpa
+    scenario = await _scenario(session_factory, ["ss", "velho"])
+    async with session_factory() as session:  # ativo antigo e candidato pendurado: o deploy troca
         binding = await session.get_one(SoftSensorBinding, (scenario["flow_id"], "ss"))
-        binding.candidate_model_id = scenario["models"]["ss"]
+        binding.active_model_id = scenario["models"]["velho"]
+        binding.candidate_model_id = scenario["models"]["velho"]
         await session.commit()
 
     seeds = await _seeds(session_factory, scenario, _node("ss"), _node("livre", order=2))
@@ -328,9 +329,18 @@ async def test_reload_com_n_inputs_diferente_do_modelo(session_factory):
     scenario = await _scenario(session_factory, ["ss"])
     node = _node("ss", n_inputs=3)  # flow salvo com uma porta a mais; modelo é de 2
 
+    async with session_factory() as session:  # rodava com o modelo antes do save
+        binding = await session.get_one(SoftSensorBinding, (scenario["flow_id"], "ss"))
+        binding.active_model_id = scenario["models"]["ss"]
+        await session.commit()
+
     seeds = await _seeds(session_factory, scenario, node)
 
     assert seeds["ss"] == SoftSensorSeed(None, None, "n_inputs")
+    binding = await _binding(session_factory, scenario["flow_id"], "ss")
+    assert binding.active_model_id is None  # o bloco roda sem modelo: é o que o vínculo diz
+    assert binding.desired_model_id == scenario["models"]["ss"]  # o pedido fica
+    assert binding.candidate_model_id is None
     block = _instantiate(seeds["ss"], node, _RecordingRedis())
     out = await block.step({"IN1": Signal(1.0), "IN2": Signal(2.0), "IN3": Signal(3.0)})
     assert out["out"].v is None
