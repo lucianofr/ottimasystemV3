@@ -6,6 +6,7 @@ Contrato entre quem treina (ml-worker), quem opera (flow-runtime) e o export: me
 
 import io
 import re
+import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -18,6 +19,7 @@ METHODS: tuple[str, ...] = ("pls", "esn", "lstm")
 BUFFER_STEPS = 256
 RANGE_MARGIN = 0.05
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
+MAX_ARTIFACT_UNPACKED_BYTES = 32 * 1024 * 1024  # teto do descomprimido: contém zip bomb
 
 
 class ArtifactError(ValueError):
@@ -49,22 +51,50 @@ class ModelMeta(BaseModel):
     dataset_ids: list[int] = []
 
 
-def pack_weights(arrays: Mapping[str, np.ndarray]) -> bytes:
-    buf = io.BytesIO()
-    np.savez_compressed(buf, **{k: np.asarray(v, dtype=np.float32) for k, v in arrays.items()})
-    blob = buf.getvalue()
+def _check_limits(blob: bytes) -> None:
+    """Recusa pelos tetos ANTES de descomprimir: bytes do blob e bytes DECLARADOS descomprimidos.
+
+    O tamanho declarado de cada entrada do zip limita a leitura (`ZipExtFile` para em `file_size`),
+    então checá-lo antes do `np.load` basta para um npz forjado não expandir de 8 MB a GB.
+    """
     if len(blob) > MAX_ARTIFACT_BYTES:
         raise ArtifactError(
             f"artefato de {len(blob)} bytes passa do teto de {MAX_ARTIFACT_BYTES} bytes"
         )
+    with zipfile.ZipFile(
+        io.BytesIO(blob)
+    ) as zf:  # BadZipFile (truncado/não-zip): quem chama embrulha
+        unpacked = sum(info.file_size for info in zf.infolist())
+    if unpacked > MAX_ARTIFACT_UNPACKED_BYTES:
+        raise ArtifactError(
+            f"artefato descomprimido de {unpacked} bytes passa do teto de "
+            f"{MAX_ARTIFACT_UNPACKED_BYTES} bytes"
+        )
+
+
+def pack_weights(arrays: Mapping[str, np.ndarray]) -> bytes:
+    f32 = {k: np.asarray(v, dtype=np.float32) for k, v in arrays.items()}
+    raw = sum(v.nbytes for v in f32.values())
+    if raw > MAX_ARTIFACT_UNPACKED_BYTES:  # antes de comprimir centenas de MB à toa
+        raise ArtifactError(
+            f"pesos descomprimidos de {raw} bytes passam do teto de "
+            f"{MAX_ARTIFACT_UNPACKED_BYTES} bytes"
+        )
+    buf = io.BytesIO()
+    np.savez_compressed(buf, **f32)
+    blob = buf.getvalue()
+    _check_limits(blob)  # nunca grava o que unpack_weights recusaria (cabeçalhos .npy incluídos)
     return blob
 
 
 def unpack_weights(blob: bytes) -> dict[str, np.ndarray]:
     try:
+        _check_limits(blob)
         # NpzFile é preguiçoso: a recusa de objeto/pickle só dispara na leitura de cada chave.
         with np.load(io.BytesIO(blob), allow_pickle=False) as npz:
             out = {k: npz[k] for k in npz.files}
+    except ArtifactError:
+        raise
     except Exception as exc:  # zip truncado, não-npz, pickle recusado: tudo é artefato ilegível
         raise ArtifactError(f"artefato de pesos ilegível: {exc}") from exc
     if any(v.dtype.kind not in "fiu" for v in out.values()):

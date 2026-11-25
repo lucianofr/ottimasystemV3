@@ -7,6 +7,8 @@ import numpy as np
 import pytest
 
 from ottima_core.softsensor import (
+    MAX_ARTIFACT_BYTES,
+    MAX_ARTIFACT_UNPACKED_BYTES,
     ArtifactError,
     LoadedModel,
     ModelMeta,
@@ -61,6 +63,41 @@ def test_pack_recusa_acima_do_teto():
     grande = np.random.default_rng(0).random(3_000_000)  # ~12 MB em float32, incompressível
     with pytest.raises(ArtifactError):
         pack_weights({"w": grande, "b": np.zeros(1)})
+
+
+def test_unpack_recusa_blob_acima_do_teto_comprimido_antes_de_ler():
+    buf = io.BytesIO()
+    # npz VÁLIDO (sem compressão) de ~8,4 MB: só o teto de bytes pode recusá-lo.
+    np.savez(buf, w=np.zeros(MAX_ARTIFACT_BYTES // 8 + 1000))
+    assert len(buf.getvalue()) > MAX_ARTIFACT_BYTES
+    with pytest.raises(ArtifactError, match="teto"):
+        unpack_weights(buf.getvalue())
+
+
+def test_unpack_recusa_tamanho_descomprimido_declarado_acima_do_teto():
+    buf = io.BytesIO()
+    # Zip bomb: zeros comprimem a poucas dezenas de KB, mas descomprimem a 32 MiB + 4 bytes.
+    # Montado direto com savez_compressed, sem passar pelo pack_weights.
+    np.savez_compressed(buf, w=np.zeros(MAX_ARTIFACT_UNPACKED_BYTES // 4 + 1, dtype=np.float32))
+    assert len(buf.getvalue()) < MAX_ARTIFACT_BYTES
+    with pytest.raises(ArtifactError, match="descomprimido"):
+        unpack_weights(buf.getvalue())
+
+
+def test_pack_recusa_tamanho_descomprimido_acima_do_teto():
+    grande = np.zeros(MAX_ARTIFACT_UNPACKED_BYTES // 4 + 1, dtype=np.float32)
+    with pytest.raises(ArtifactError, match="descomprimido"):
+        pack_weights({"w": grande, "b": np.zeros(1)})
+
+
+def test_maiores_modelos_da_busca_cabem_nos_dois_tetos():
+    # LSTM 256 un. x 4 camadas (~7 MB comprimido) e ESN 500 un. (spec §6, §8.2).
+    for par in (
+        synthetic.lstm(8, units=256, layers=4, sequence_length=50),
+        synthetic.esn(8, units=500),
+    ):
+        assert len(par[1]) <= MAX_ARTIFACT_BYTES
+        assert _carregar(par).n_inputs == 8
 
 
 def test_load_model_devolve_pesos_em_float64_e_n_inputs():

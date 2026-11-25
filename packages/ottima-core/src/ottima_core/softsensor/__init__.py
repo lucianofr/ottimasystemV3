@@ -4,6 +4,7 @@ from . import synthetic
 from .artifact import (
     BUFFER_STEPS,
     MAX_ARTIFACT_BYTES,
+    MAX_ARTIFACT_UNPACKED_BYTES,
     METHODS,
     RANGE_MARGIN,
     ArtifactError,
@@ -19,6 +20,7 @@ from .forward import predict
 __all__ = [
     "BUFFER_STEPS",
     "MAX_ARTIFACT_BYTES",
+    "MAX_ARTIFACT_UNPACKED_BYTES",
     "METHODS",
     "RANGE_MARGIN",
     "ArtifactError",
