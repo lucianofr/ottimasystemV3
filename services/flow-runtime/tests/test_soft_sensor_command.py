@@ -6,6 +6,7 @@ do buffer em uso no mesmo período; pré-aquecimento pelo histórico em outro), 
 """
 
 import asyncio
+import time
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -336,6 +337,30 @@ async def test_sem_modelo_em_uso_preaquece_pelo_historico(session_factory, monke
 
     [(_, buffer)] = calls
     assert buffer is not None and len(buffer) == BUFFER_STEPS
+
+
+async def test_preaquecimento_lento_no_comando_respeita_o_prazo(session_factory, monkeypatch):
+    scenario = await _scenario(session_factory, PLS_A, PLS_2S)
+    flow_id, (active, lento) = scenario["flow_id"], scenario["models"]
+    block = _block(session_factory, flow_id, _loaded(PLS_A, active))
+
+    async def presa(session, tag_ids, *, end, period_s, steps):
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(soft_sensor_seeds, "load_grid", presa)
+    monkeypatch.setattr(soft_sensor_seeds, "PREWARM_TIMEOUT_S", 0.2)
+    calls = _spy(block)
+    events = _Events()
+
+    inicio = time.monotonic()
+    await _run(session_factory, _runtime(block), _command(flow_id, lento), events)
+
+    assert time.monotonic() - inicio < 1.0
+    [(_, buffer)] = calls
+    assert buffer is None
+    reasons = [c["payload"]["reason"] for c in events.kinds(KIND_SOFT_SENSOR_PREWARM_SKIPPED)]
+    assert reasons == ["timeout"]
+    assert await _binding(session_factory, flow_id) == (None, None, lento)
 
 
 async def test_periodo_diferente_sem_as_tags_entra_vazio_e_avisa(session_factory, no_history):
