@@ -21,7 +21,7 @@ candidato é promovido quando calcula valor com qualidade >= a da saída atual; 
 import asyncio
 import logging
 import math
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -84,7 +84,8 @@ class SoftSensorBlock(Block):
         self._missing_reason = missing_reason or "no_model"
         self._active = self._slot(model, prewarm) if model is not None else None
         self._candidate: _Slot | None = None
-        self._pending: tuple[LoadedModel, SampleBuffer | None] | None = None
+        self._pending: _Slot | None = None
+        self._writes: set[asyncio.Task[None]] = set()  # referência forte até terminar
         self._scan = 0
         self._missing_reported = False
         self._extrapolating = False
@@ -113,7 +114,8 @@ class SoftSensorBlock(Block):
         return self._active.buffer.copy() if self._active else None
 
     def set_candidate(self, model: LoadedModel, buffer: SampleBuffer | None) -> None:
-        self._pending = (model, buffer)  # o último pedido vence; aplicado no próximo `step`
+        # Slot montado aqui (período inválido levanta no pedido); aplicado no próximo `step`.
+        self._pending = self._slot(model, buffer)  # o último pedido vence
 
     def reset(self) -> None:
         self._scan = 0
@@ -125,9 +127,7 @@ class SoftSensorBlock(Block):
         self, inputs: Mapping[str, Signal], *, ts: datetime | None = None
     ) -> dict[str, Signal]:
         if self._pending is not None:
-            model, buffer = self._pending
-            self._pending = None
-            slot = self._slot(model, buffer)
+            slot, self._pending = self._pending, None
             if self._active is None:
                 await self._promote(slot)  # sem modelo em uso: assume na hora (§5.6-5)
             else:
@@ -172,6 +172,10 @@ class SoftSensorBlock(Block):
 
     def _slot(self, model: LoadedModel, buffer: SampleBuffer | None) -> _Slot:
         every = round(model.meta.period_s / self._ts)  # múltiplo inteiro: conferido no deploy
+        if every < 1:
+            raise ValueError(
+                f"período do modelo {model.meta.period_s} s menor que o Ts {self._ts} s"
+            )
         return _Slot(model, buffer if buffer is not None else SampleBuffer(self._n_inputs), every)
 
     def _deadline_scans(self, slot: _Slot) -> int:
@@ -204,33 +208,52 @@ class SoftSensorBlock(Block):
         previous = self.active_model_id
         self._active, self._candidate = slot, None  # estado trocado antes de qualquer await
         model_id = slot.model.model_id
-        await self._save(BindingUpdate(active_model_id=model_id, candidate_model_id=None))
-        await self._event(
-            "info",
-            KIND_SOFT_SENSOR_MODEL_ACTIVATED,
-            f"Sensor virtual '{self.block_id}': modelo {model_id} em uso (antes {previous})",
-            model_id=model_id,
-            previous_model_id=previous,
+        await self._durable(
+            BindingUpdate(active_model_id=model_id, candidate_model_id=None),
+            self._event(
+                "info",
+                KIND_SOFT_SENSOR_MODEL_ACTIVATED,
+                f"Sensor virtual '{self.block_id}': modelo {model_id} em uso (antes {previous})",
+                model_id=model_id,
+                previous_model_id=previous,
+            ),
         )
 
     async def _reject(self, candidate: _Slot, active: _Slot) -> None:
         self._candidate = None
         reason = candidate.evaluation.reason if candidate.evaluation else "incomplete"
         model_id = candidate.model.model_id
-        await self._save(
+        await self._durable(
             BindingUpdate(
                 active_model_id=active.model.model_id,
                 candidate_model_id=None,
                 reset_desired_to_active=True,
-            )
+            ),
+            self._event(
+                "warning",
+                KIND_SOFT_SENSOR_MODEL_REJECTED,
+                f"Sensor virtual '{self.block_id}': modelo {model_id} descartado ({reason})",
+                model_id=model_id,
+                reason=reason,
+            ),
         )
-        await self._event(
-            "warning",
-            KIND_SOFT_SENSOR_MODEL_REJECTED,
-            f"Sensor virtual '{self.block_id}': modelo {model_id} descartado ({reason})",
-            model_id=model_id,
-            reason=reason,
-        )
+
+    async def _durable(self, update: BindingUpdate, event: Coroutine[None, None, None]) -> None:
+        """Grava o vínculo e emite o evento numa task própria, protegida do cancelamento.
+
+        `stop`/`fail` cancelam a varredura no meio do `await`; a troca em memória já foi feita,
+        e perder a gravação deixaria `desired_model_id` num modelo rejeitado, que o próximo
+        deploy carregaria sem validar (§5.6-5). O `CancelledError` segue para quem cancelou.
+        """
+
+        async def write() -> None:
+            await self._save(update)
+            await event
+
+        task = asyncio.create_task(write())
+        self._writes.add(task)
+        task.add_done_callback(self._writes.discard)
+        await asyncio.shield(task)
 
     async def _report_extrapolation(self, slot: _Slot) -> None:
         now = slot.evaluation is not None and slot.evaluation.reason == "extrapolating"

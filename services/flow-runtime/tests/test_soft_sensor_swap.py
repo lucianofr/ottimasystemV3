@@ -5,6 +5,8 @@ do `step` seguinte ao `set_candidate`) e é rejeitado na varredura em que a idad
 `ceil(max(2*K*period_s, 60) / Ts)`, antes de ser avaliado nela.
 """
 
+import asyncio
+
 import pytest
 
 from ottima_core.bus import KIND_SOFT_SENSOR_MODEL_ACTIVATED, KIND_SOFT_SENSOR_MODEL_REJECTED
@@ -197,3 +199,70 @@ async def test_propriedades_do_slot_em_uso():
     assert b.active_period_s == 5.0 and len(copia) == 1
     await b.step(entradas(1.0, 2.0))  # varredura 1: não é passo de modelo
     assert len(copia) == 1 and len(b.active_buffer_copy()) == 1
+
+
+async def _ate(cond):
+    for _ in range(200):
+        if cond():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("condição não satisfeita")
+
+
+def _persist_que_trava(bloqueia):
+    """Persist que segura a gravação de `bloqueia(u)` até `libera` ser setado."""
+    gravacoes, entrou, libera = [], asyncio.Event(), asyncio.Event()
+
+    async def persist(u):
+        if bloqueia(u):
+            entrou.set()
+            await libera.wait()
+        gravacoes.append(u)
+
+    return persist, gravacoes, entrou, libera
+
+
+async def test_rejeicao_sobrevive_ao_cancelamento_da_varredura():
+    # stop/fail cancela a varredura no meio do persist: sem a gravação, o próximo deploy
+    # carregaria `desired_model_id` = modelo rejeitado sem nunca tê-lo validado (§5.6-5).
+    persist, gravacoes, entrou, libera = _persist_que_trava(lambda u: u.reset_desired_to_active)
+    b, eventos, _ = bloco(
+        carregar(synthetic.pls([1.0], 0.0), model_id=1), n_inputs=1, persist=persist
+    )
+    b.set_candidate(carregar(synthetic.pls([1.0], 0.0, ranges=[(0.0, 1.0)]), model_id=2), None)
+    for _ in range(60):
+        await b.step(entradas(5.0))
+    varredura = asyncio.create_task(b.step(entradas(5.0)))  # varredura 60: rejeita
+    await entrou.wait()
+    varredura.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await varredura
+    assert b.candidate_model_id is None and b.active_model_id == 1
+    libera.set()
+    await _ate(lambda: kinds(eventos, KIND_SOFT_SENSOR_MODEL_REJECTED))
+    assert gravacoes == [BindingUpdate(1, None, reset_desired_to_active=True)]
+
+
+async def test_promocao_sobrevive_ao_cancelamento_da_varredura():
+    persist, gravacoes, entrou, libera = _persist_que_trava(lambda u: u.active_model_id == 2)
+    b, eventos, _ = bloco(carregar(synthetic.pls([1.0, 1.0], 0.0), model_id=1), persist=persist)
+    await b.step(entradas(1.0, 2.0))
+    b.set_candidate(carregar(synthetic.pls([2.0, 2.0], 0.0), model_id=2), b.active_buffer_copy())
+    varredura = asyncio.create_task(b.step(entradas(1.0, 2.0)))
+    await entrou.wait()
+    varredura.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await varredura
+    assert b.active_model_id == 2 and b.candidate_model_id is None
+    libera.set()
+    await _ate(lambda: kinds(eventos, KIND_SOFT_SENSOR_MODEL_ACTIVATED))
+    assert gravacoes == [BindingUpdate(2, None)]
+
+
+def test_periodo_menor_que_o_ts_e_recusado_na_construcao_do_slot():
+    curto = carregar(synthetic.pls([1.0, 1.0], 0.0, period_s=0.4))
+    with pytest.raises(ValueError, match="período"):
+        bloco(curto, ts=1.0)
+    b, *_ = bloco(carregar(synthetic.pls([1.0, 1.0], 0.0)), ts=1.0)
+    with pytest.raises(ValueError, match="período"):
+        b.set_candidate(curto, None)  # recusado no pedido, nunca dentro da varredura
