@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 from runtime_test_helpers import (
     USER,
+    await_until,
     create_connection,
     create_flow,
     create_project,
@@ -89,6 +90,7 @@ async def _scenario(
     block_ids: list[str],
     *,
     weights: bytes | None = None,
+    meta_json: object = None,
     n_tags: int = 2,
 ) -> dict:
     """Projeto, tags, um modelo PLS de 2 entradas por bloco e o vínculo desejando esse modelo."""
@@ -107,7 +109,7 @@ async def _scenario(
                 period_s=1.0,
                 n_inputs=2,
                 input_tag_ids=tag_ids[:2],
-                meta=meta.model_dump(mode="json"),
+                meta=meta.model_dump(mode="json") if meta_json is None else meta_json,
                 weights=blob if weights is None else weights,
                 created_by=USER,
             )
@@ -314,6 +316,14 @@ async def test_deploy_com_artefato_corrompido_sobe_sem_modelo(session_factory):
     ]
 
 
+async def test_deploy_com_metadados_que_nem_sao_objeto_sobe_sem_modelo(session_factory):
+    scenario = await _scenario(session_factory, ["ss"], meta_json="lixo")
+
+    seeds = await _seeds(session_factory, scenario, _node("ss"))
+
+    assert seeds["ss"] == SoftSensorSeed(None, None, "corrupt")
+
+
 async def test_reload_com_n_inputs_diferente_do_modelo(session_factory):
     scenario = await _scenario(session_factory, ["ss"])
     node = _node("ss", n_inputs=3)  # flow salvo com uma porta a mais; modelo é de 2
@@ -438,20 +448,20 @@ def test_build_definition_recusa_tipo_desconhecido():
         )
 
 
-async def test_supervisor_deploy_carrega_o_modelo_vinculado(harness_factory, session_factory):
-    scenario = await _scenario(session_factory, ["ss"])
-    await save_graph(
-        session_factory,
-        scenario["flow_id"],
-        graph(
-            [
-                node("c1", "constant", 1, {"value": 1.0}),
-                node("c2", "constant", 2, {"value": 2.0}),
-                _node("ss", order=3),
-            ],
-            [edge("c1", "out", "ss", "IN1"), edge("c2", "out", "ss", "IN2")],
-        ),
+def _supervised_graph(c1: float = 1.0) -> dict:
+    return graph(
+        [
+            node("c1", "constant", 1, {"value": c1}),
+            node("c2", "constant", 2, {"value": 2.0}),
+            _node("ss", order=3),
+        ],
+        [edge("c1", "out", "ss", "IN1"), edge("c2", "out", "ss", "IN2")],
     )
+
+
+async def test_supervisor_deploy_carrega_o_modelo_vinculado(harness_factory, session_factory):
+    scenario = await _scenario(session_factory, ["ss", "outro"])
+    await save_graph(session_factory, scenario["flow_id"], _supervised_graph())
     harness = await harness_factory()
 
     await harness.command("deploy", scenario["flow_id"])
@@ -460,5 +470,20 @@ async def test_supervisor_deploy_carrega_o_modelo_vinculado(harness_factory, ses
     block = harness.supervisor._runtimes[scenario["flow_id"]].blocks["ss"][1]
     assert isinstance(block, SoftSensorBlock)
     assert block.active_model_id == scenario["models"]["ss"]
+    binding = await _binding(session_factory, scenario["flow_id"], "ss")
+    assert binding.active_model_id == scenario["models"]["ss"]
+
+    # Hot-swap que não toca o sensor: o bloco vivo segue e o vínculo não é regravado, mesmo
+    # com outro modelo desejado (a troca é por comando, nunca pelo reload).
+    async with session_factory() as session:
+        row = await session.get_one(SoftSensorBinding, (scenario["flow_id"], "ss"))
+        row.desired_model_id = scenario["models"]["outro"]
+        await session.commit()
+    await save_graph(session_factory, scenario["flow_id"], _supervised_graph(c1=3.0))
+    await harness.command("reload", scenario["flow_id"])
+    runtime = harness.supervisor._runtimes[scenario["flow_id"]]
+    await await_until(lambda: runtime.blocks["c1"][0]["value"] == 3.0)
+
+    assert runtime.blocks["ss"][1] is block
     binding = await _binding(session_factory, scenario["flow_id"], "ss")
     assert binding.active_model_id == scenario["models"]["ss"]

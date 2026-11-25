@@ -26,7 +26,6 @@ from ottima_core.flowgraph import SOFT_SENSOR_METHOD, FlowGraph
 from ottima_core.models import SoftSensorBinding, SoftSensorModel, Tag
 from ottima_core.softsensor import (
     BUFFER_STEPS,
-    ArtifactError,
     LoadedModel,
     SampleBuffer,
     load_grid,
@@ -167,7 +166,7 @@ async def load_seeds(
                 continue
             try:
                 model = await asyncio.to_thread(load_model, row.id, row.meta, row.weights)
-            except ArtifactError as exc:
+            except Exception as exc:  # ArtifactError e também `meta` JSONB que nem é objeto
                 logger.warning("Sensor virtual '%s': modelo %s ilegível: %s", node.id, row.id, exc)
                 seeds[node.id] = SoftSensorSeed(None, None, "corrupt")
                 continue
