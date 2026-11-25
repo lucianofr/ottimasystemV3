@@ -50,7 +50,7 @@ Três fatos de levantamento moldam a fase e precisam ficar escritos, porque cont
 | Bootstrap que gera os segredos do `.env` automaticamente | fora da v1 — passo manual documentado no guia (§8-1). **Não é pré-requisito do aceite:** os segredos que o aceite manda re-informar são os da conexão OPC, não os do `.env` | decisão A-1 |
 | Cenário E2E que derruba `redis`/`timescaledb` como container real | fora da v1 — a resiliência está provada em unit/integração nos 4 serviços (§9.1) e a suíte tem proibição explícita de `down`/`prune` (`tests/e2e/conftest.py:4-6`) | decisão A-1 |
 | Sandbox forte do bloco Script (isolamento de processo, seccomp) | fora da v1 — ADR-018 fixou o escopo restrito (`math`/`numpy`). A F6 fecha o pior impacto (§3.4-2) e trata a proveniência por consentimento explícito (§6.1-6) e documentação (§8-5); o resíduo fica em TD-001 | decisão A-15 |
-| Teto de contagem no import (nº de flows/conexões/tags) e execução da validação fora do worker | fora da v1 — o teto de 4 MiB (§3.2-1) limita o pior caso; o congelamento do `/ws` durante um import grande fica em TD-002 | decisão A-1 |
+| Teto de contagem no import (nº de flows/conexões/tags) e execução da validação fora do worker | fora da v1 — o teto de 32 MiB (§3.2-1, emenda da `SPEC_SENSOR_VIRTUAL` §9) limita o pior caso; o congelamento do `/ws` durante um import grande fica em TD-002 | decisão A-1 |
 | ACK de alarmes | fora da v1 | ADR-020 |
 | Protocolo `Commandable`/`Healthy` | revisitar no 2º bloco comandável | spec F5 §1.2 |
 | Persistir predição/custo/status do MPC | nunca | ADR-016 |
@@ -180,7 +180,7 @@ O PRD tem regra explícita de correção (`PRD.md` §nota inicial); specs anteri
 
 ### 3.2 `POST /api/projects/import` (RF-103; router `projects`; `require_admin`)
 
-1. Corpo `{"name": "...", "bundle": {…}}`, `name` opcional sobrescrevendo `bundle.project.name` (decisão A-6). **Teto de 4 MiB aplicado por middleware/dependência que lê o corpo como stream antes da amarração Pydantic** — o precedente de `_ler_certificado` só funciona porque usa bytes crus, e um `body:` tipado já materializou o payload quando se consegue medi-lo (API-06). Excedente ⇒ **413** com mensagem pt-BR **[NOVA — implementação]**.
+1. Corpo `{"name": "...", "bundle": {…}}`, `name` opcional sobrescrevendo `bundle.project.name` (decisão A-6). **Teto de 32 MiB (emenda da `SPEC_SENSOR_VIRTUAL` §9 / ADR-046 D8; era 4 MiB) aplicado por middleware/dependência que lê o corpo como stream antes da amarração Pydantic** — o precedente de `_ler_certificado` só funciona porque usa bytes crus, e um `body:` tipado já materializou o payload quando se consegue medi-lo (API-06). Excedente ⇒ **413** com mensagem pt-BR **[NOVA — implementação]**.
 2. `schema_version` diferente de `1` ⇒ 422 imediato, sem tentativa de migração.
 3. **Transação única** — tudo-ou-nada, mesmo padrão de `activate_project` (`projects.py:77-112`).
 4. Validação em quatro camadas, ordem determinística, **toda antes do commit** (detalhe da ordem em §2.2-5):
@@ -419,7 +419,7 @@ Com `range`, barra vertical com escala demarcada como MV/CV/Restrição. Sem `ra
 |---|---|
 | E2E-F6-01 | Export: sem `auth_password_enc`, sem `server_cert_file`, sem ids nem timestamps; `tag_ref` objeto nos 6 campos; `schema_version: 1`; `Content-Disposition`; evento `project_exported`; RBAC (operador ⇒ 403). O projeto inclui uma conexão `auth_mode: certificate` |
 | E2E-F6-02 | **ACEITE PRD §8-F6:** round-trip destrutivo — cria projeto completo (conexão segura + conexão `certificate` + duas conexões com tag homônima + flow MPC↔TFS) ⇒ exporta ⇒ `DELETE` do projeto ⇒ importa ⇒ `pending_secrets` lista as três pendências ⇒ re-informa senha, re-confia o certificado do servidor ⇒ ativa ⇒ deploya ⇒ flow roda e o MPC publica estado. Os ids das tags novas são necessariamente maiores que os exportados (`Identity` não reaproveita valor após `DELETE`) |
-| E2E-F6-03 | Recusas: `schema_version: 2`; `tag_ref` órfã; `exec_order` não contíguo; nome duplicado no bundle; nome de projeto colidindo ⇒ 409; corpo > 4 MiB ⇒ 413; operador ⇒ 403. **Banco inalterado após cada recusa** |
+| E2E-F6-03 | Recusas: `schema_version: 2`; `tag_ref` órfã; `exec_order` não contíguo; nome duplicado no bundle; nome de projeto colidindo ⇒ 409; corpo > 32 MiB ⇒ 413; operador ⇒ 403. **Banco inalterado após cada recusa** |
 | E2E-F6-05 | **RNF-09 overrun pela malha TFS** (§7-3) |
 | E2E-F6-06 | **RNF-09 hot-swap pela malha TFS** (§7-3) |
 

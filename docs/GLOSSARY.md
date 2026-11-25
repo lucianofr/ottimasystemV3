@@ -11,7 +11,7 @@
 | **Scan cycle** | Semântica de execução: a cada Ts, todos os blocos do flow são avaliados **em ordem crescente de `exec_order`** com os últimos valores conhecidos. |
 | **exec_order** | Parâmetro de todo bloco: inteiro único de 1 a N que define a ordem de execução na varredura (leituras < Script/MPC < escritas). Auto-numerado na inserção, editável, com badge no nó. Ordem invertida em relação a uma aresta ⇒ consumo do valor da varredura anterior (1 scan de atraso). |
 | **Ts (tempo de amostragem)** | Período do scan de um flow. Valores permitidos: 0.5, 1, 2, 5, 10, 30, 60 s. Definido individualmente por flow. |
-| **Bloco** | Nó do flow com entradas/saídas tipadas. Tipos da v1: OPC-Read, OPC-Write, Constante, MPC, Python-Script, TFS, Filtro 1ª ordem, Filtro Kalman, Fuzzy, PID, PID Malha (`pid_loop`), Fuzzy Malha (`fuzzy_loop`), Scaler, Integrator, Barramento-Publicar (`bus_publish`), Barramento-Assinar (`bus_subscribe`). |
+| **Bloco** | Nó do flow com entradas/saídas tipadas. Tipos da v1: OPC-Read, OPC-Write, Constante, MPC, Python-Script, TFS, Filtro 1ª ordem, Filtro Kalman, Fuzzy, PID, PID Malha (`pid_loop`), Fuzzy Malha (`fuzzy_loop`), Scaler, Integrator, Barramento-Publicar (`bus_publish`), Barramento-Assinar (`bus_subscribe`), Sensor virtual PLS (`soft_sensor_pls`), Sensor virtual ESN (`soft_sensor_esn`), Sensor virtual LSTM (`soft_sensor_lstm`). |
 | **opc-worker** | Processo asyncio que mantém as sessões OPC-UA (asyncua), publica leituras no barramento, executa escritas e opera o watchdog. Único processo que fala com PLC/DCS. |
 | **flow-runtime** | Processo asyncio que interpreta e executa os flows (MPC, scripts) como loops vivos. |
 | **recorder** | Consumidor do barramento que grava amostras na hypertable do TimescaleDB. |
@@ -54,6 +54,13 @@
 | **Integrator** | Bloco totalizador: acumula a entrada (`in`) no tempo, na **base de tempo** configurada (por segundo/minuto/hora — a EU de tempo da entrada). Porta **`reset`** opcional: valor ≠ 0 com qualidade boa zera o total. Amostra inválida ou não-finita congela o acumulado (nunca soma erro). |
 | **Lead-Lag** | Bloco de uma entrada (`in`) e uma saída (`out`) de compensação dinâmica: `G(s) = gain·(tau_lead·s + 1)/(tau_lag·s + 1)`, discretizado no Ts do flow. `gain` aceita qualquer sinal (feedforward negativo é rotineiro); `tau_lag > 0` (é divisor); razão `tau_lead/tau_lag` limitada a 10 no save, porque ela é o realce de alta frequência relativo ao ganho DC (o ganho de alta frequência do bloco é `gain·tau_lead/tau_lag`). Uso típico: compensação de feedforward ligada à porta `bias_in` de um bloco malha. |
 | **Tempo morto (bloco)** | Bloco de uma entrada (`in`) e uma saída (`out`) que atrasa o sinal em `theta` segundos, contados em amostras nominais do flow (`d = round(theta/Ts)`, mesmo arredondamento do θ do TFS/MPC). A fila nasce cheia da primeira amostra válida — não injeta zeros na partida — e transporta a qualidade junto do valor: a saída carrega a qualidade da amostra de `d` varreduras atrás. Não confundir com o **θ** dos modelos SOPDT/IOPDT/IFOPDT, que é parâmetro de modelo, não bloco. |
+| **Sensor virtual** (`soft_sensor`) | Bloco que estima uma variável de laboratório a partir de variáveis de processo, por um modelo treinado. Três tipos, um por método: `soft_sensor_pls`, `soft_sensor_esn`, `soft_sensor_lstm`. (ADR-046) |
+| **Variável de laboratório** (`lab_variable`) | Grandeza medida por análise, identificada por nome único no projeto; não é tag. (ADR-046) |
+| **Análise** (`lab_sample`) | Um valor de uma variável de laboratório, carimbado com o instante da coleta da amostra. (ADR-046) |
+| **Conjunto de treino** (`dataset`) | Janelas de processo emparelhadas com análises, congeladas ao finalizar um período de coleta. (ADR-046) |
+| **Período do modelo** (`period_s`) | Intervalo entre passos do modelo, igual no treino e na operação. (ADR-046) |
+| **Aquecimento** (`warmup`) | Passos de modelo necessários até a saída ser válida. (ADR-046) |
+| **Modelo em uso / candidato** (`active` / `candidate`) | O modelo que produz a saída do bloco e o que está aquecendo para substituí-lo. (ADR-046) |
 | **MV tracking** | Em LOCAL, a saída MV do MPC segue a MV real do PID (tag de readback), garantindo transição bumpless LOCAL→REMOTO. |
 | **Log de eventos** | Hypertable de eventos (info/warning/alarm) com retenção de 1 mês; alimenta o banner de alarmes ativos (sem ACK) e a auditoria de operação. |
 | **Hypertable** | Tabela particionada por tempo do TimescaleDB; amostras com retenção de 1 mês. |
