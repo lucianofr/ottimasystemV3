@@ -11,17 +11,22 @@ própria, porque o `wait_for` cancela a consulta no meio e a sessão cancelada n
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Container
+from collections.abc import Awaitable, Callable, Container, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 from redis.asyncio import Redis
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import undefer
 
-from ottima_core.bus import KIND_SOFT_SENSOR_PREWARM_SKIPPED, publish_event
+from ottima_core.bus import (
+    KIND_SOFT_SENSOR_MODEL_REJECTED,
+    KIND_SOFT_SENSOR_PREWARM_SKIPPED,
+    FlowCommand,
+    publish_event,
+)
 from ottima_core.flowgraph import SOFT_SENSOR_METHOD, FlowGraph
 from ottima_core.models import SoftSensorBinding, SoftSensorModel, Tag
 from ottima_core.softsensor import (
@@ -32,7 +37,8 @@ from ottima_core.softsensor import (
     load_model,
 )
 
-from .blocks.soft_sensor import BindingUpdate
+from .blocks.base import Block
+from .blocks.soft_sensor import BindingUpdate, SoftSensorBlock
 
 logger = logging.getLogger(__name__)
 
@@ -107,23 +113,33 @@ def make_persist(
         }
         if change.reset_desired_to_active:
             values["desired_model_id"] = change.active_model_id
-        stmt = (
-            update(SoftSensorBinding)
-            .where(SoftSensorBinding.flow_id == flow_id, SoftSensorBinding.block_id == block_id)
-            .values(**values)
-        )
-
-        async def write() -> None:
-            async with session_factory() as session:
-                await session.execute(stmt)
-                await session.commit()
-
-        try:
-            await asyncio.wait_for(write(), timeout=PERSIST_TIMEOUT_S)
-        except Exception:
-            logger.exception("Sensor virtual '%s': falha ao gravar o vínculo", block_id)
+        await write_binding(session_factory, flow_id, block_id, **values)
 
     return persist
+
+
+async def write_binding(
+    session_factory: async_sessionmaker[AsyncSession],
+    flow_id: int,
+    block_id: str,
+    **values: int | None,
+) -> None:
+    """Grava só as colunas dadas do vínculo; falha vira log, nunca exceção."""
+    stmt = (
+        update(SoftSensorBinding)
+        .where(SoftSensorBinding.flow_id == flow_id, SoftSensorBinding.block_id == block_id)
+        .values(**values)
+    )
+
+    async def write() -> None:
+        async with session_factory() as session:
+            await session.execute(stmt)
+            await session.commit()
+
+    try:
+        await asyncio.wait_for(write(), timeout=PERSIST_TIMEOUT_S)
+    except Exception:
+        logger.exception("Sensor virtual '%s': falha ao gravar o vínculo", block_id)
 
 
 async def load_seeds(
@@ -197,22 +213,43 @@ async def load_seeds(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + PREWARM_TIMEOUT_S
     for block_id, model, tag_ids in loaded:
-        if len(tag_ids) != model.n_inputs or not existing.issuperset(tag_ids):
-            buffer, skipped = None, "tags"
-        else:
-            buffer, skipped = await _prewarm(
-                session_factory, model, tag_ids, remaining=deadline - loop.time()
-            )
-        if skipped is not None:
-            await emit_event(
-                severity="info",
-                origin=_ORIGIN,
-                message=f"Sensor virtual '{block_id}': sem pré-aquecimento ({skipped})",
-                kind=KIND_SOFT_SENSOR_PREWARM_SKIPPED,
-                payload={"block_id": block_id, "model_id": model.model_id, "reason": skipped},
-            )
+        buffer = await _warm(
+            session_factory,
+            block_id,
+            model,
+            tag_ids,
+            existing,
+            remaining=deadline - loop.time(),
+            emit_event=emit_event,
+        )
         seeds[block_id] = SoftSensorSeed(model, buffer, None)
     return seeds
+
+
+async def _warm(
+    session_factory: async_sessionmaker[AsyncSession],
+    block_id: str,
+    model: LoadedModel,
+    tag_ids: list[int],
+    existing: Container[int],
+    *,
+    remaining: float,
+    emit_event: EmitEvent,
+) -> SampleBuffer | None:
+    """Pré-aquecimento de um bloco, com o aviso `prewarm_skipped` quando não dá."""
+    if len(tag_ids) != model.n_inputs or not all(t in existing for t in tag_ids):
+        buffer, skipped = None, "tags"
+    else:
+        buffer, skipped = await _prewarm(session_factory, model, tag_ids, remaining=remaining)
+    if skipped is not None:
+        await emit_event(
+            severity="info",
+            origin=_ORIGIN,
+            message=f"Sensor virtual '{block_id}': sem pré-aquecimento ({skipped})",
+            kind=KIND_SOFT_SENSOR_PREWARM_SKIPPED,
+            payload={"block_id": block_id, "model_id": model.model_id, "reason": skipped},
+        )
+    return buffer
 
 
 async def _prewarm(
@@ -247,3 +284,109 @@ async def _prewarm(
     except Exception:
         logger.exception("Sensor virtual: pré-aquecimento do modelo %s falhou", model.model_id)
         return None, "error"
+
+
+class _Runtime(Protocol):
+    """O que o comando lê do `_FlowRuntime` do supervisor (import circular evitado)."""
+
+    ts_seconds: float
+    blocks: Mapping[str, tuple[Mapping[str, Any], Block]]
+
+
+async def soft_sensor_command(
+    session_factory: async_sessionmaker[AsyncSession],
+    runtime: _Runtime,
+    command: FlowCommand,
+    *,
+    emit_event: EmitEvent,
+) -> None:
+    """`soft_sensor_model` num flow rodando (spec §5.6-2): monta o candidato e o entrega ao
+    bloco. Recusa vira evento `soft_sensor_model_rejected`; nada levanta para o chamador."""
+    flow_id = command.flow_id
+    block_id, model_id = command.args.get("block_id"), command.args.get("model_id")
+    entry = runtime.blocks.get(block_id) if isinstance(block_id, str) else None
+    block = entry[1] if entry is not None else None
+    if (
+        entry is None
+        or not isinstance(block, SoftSensorBlock)
+        or not isinstance(model_id, int)
+        or isinstance(model_id, bool)
+    ):
+        logger.info("soft_sensor_model ignorado: flow %s, args %s", flow_id, command.args)
+        return
+
+    try:
+        async with session_factory() as session:
+            row = await session.scalar(
+                select(SoftSensorModel)
+                .options(undefer(SoftSensorModel.weights))
+                .where(SoftSensorModel.id == model_id)
+            )
+            tag_ids = list(row.input_tag_ids) if row is not None else []
+            existing = set(await session.scalars(select(Tag.id).where(Tag.id.in_(tag_ids))))
+    except Exception:  # banco fora: não é motivo para desfazer o pedido do usuário
+        logger.exception("Sensor virtual '%s': falha ao ler o modelo %s", block_id, model_id)
+        return
+    if row is None:
+        logger.info("Sensor virtual '%s': modelo %s não existe; ignorado", block_id, model_id)
+        return
+
+    async def reject(reason: str, **values: int | None) -> None:
+        await write_binding(
+            session_factory, flow_id, block_id, desired_model_id=block.active_model_id, **values
+        )
+        try:
+            await emit_event(
+                severity="warning",
+                origin=_ORIGIN,
+                message=f"Sensor virtual '{block_id}': modelo {model_id} descartado ({reason})",
+                kind=KIND_SOFT_SENSOR_MODEL_REJECTED,
+                payload={"block_id": block_id, "model_id": model_id, "reason": reason},
+            )
+        except Exception:
+            logger.exception("Sensor virtual '%s': falha ao emitir a rejeição", block_id)
+
+    try:
+        model = await asyncio.to_thread(load_model, row.id, row.meta, row.weights)
+    except Exception as exc:  # ArtifactError e também `meta` JSONB que nem é objeto
+        logger.warning("Sensor virtual '%s': modelo %s ilegível: %s", block_id, model_id, exc)
+        await reject("corrupt")
+        return
+    config = entry[0]
+    reason = model_mismatch(
+        model.meta.method,
+        model.n_inputs,
+        model.meta.period_s,
+        block_type=config["type"],
+        n_inputs=config["n_inputs"],
+        ts_seconds=runtime.ts_seconds,
+    )
+    if reason is not None:
+        await reject(reason)
+        return
+
+    def same_period() -> bool:
+        active = block.active_period_s
+        return active is not None and abs(active - model.meta.period_s) <= _PERIOD_TOLERANCE
+
+    prewarm = None
+    if not same_period():
+        prewarm = await _warm(
+            session_factory,
+            block_id,
+            model,
+            tag_ids,
+            existing,
+            remaining=PREWARM_TIMEOUT_S,
+            emit_event=emit_event,
+        )
+    # Antes do `set_candidate`: sem modelo em uso a varredura seguinte promove e grava
+    # `(X, None)`, que tem de chegar depois desta gravação.
+    await write_binding(session_factory, flow_id, block_id, candidate_model_id=model_id)
+    # Sem `await` daqui ao `set_candidate`: a cópia leva as amostras empurradas durante as
+    # gravações, e uma promoção no meio pode ter mudado o período do modelo em uso.
+    buffer = block.active_buffer_copy() if same_period() else prewarm
+    try:
+        block.set_candidate(model, buffer)
+    except ValueError:
+        await reject("period", candidate_model_id=block.candidate_model_id)

@@ -68,7 +68,7 @@ from .mpc.host import MpcHost
 from .mpc.worker import worker_main
 from .partition import UNPARTITIONED, Partition
 from .scheduler import FlowTask
-from .soft_sensor_seeds import load_seeds, make_emit_event
+from .soft_sensor_seeds import load_seeds, make_emit_event, soft_sensor_command
 from .state import RuntimeState
 from .supervisor_mpc import MpcOrchestrator
 from .supervisor_resume import ResumeOrchestrator, RetomadaPendente
@@ -303,6 +303,7 @@ class Supervisor:
             "loop_sp": self._loop_command,
             "loop_out": self._loop_command,
             "fuzzy_sp": self._fuzzy_command,
+            "soft_sensor_model": self._soft_sensor_command,
         }
         handler = handlers.get(command.cmd)
         if handler is None:
@@ -349,6 +350,19 @@ class Supervisor:
         valor = command.args.get("value")
         if isinstance(valor, (int, float)) and math.isfinite(float(valor)):
             bloco.setpoint = float(valor)
+
+    async def _soft_sensor_command(self, command: FlowCommand) -> None:
+        """`soft_sensor_model`: troca do modelo do sensor virtual (spec §5.6). Flow parado
+        não faz nada: a API já gravou `desired_model_id` e o próximo deploy o carrega."""
+        runtime = self._runtimes.get(command.flow_id)
+        if runtime is None or runtime.task.state != "running":
+            return
+        await soft_sensor_command(
+            self._session_factory,
+            runtime,
+            command,
+            emit_event=make_emit_event(self._redis, command.flow_id),
+        )
 
     async def _deploy(self, command: FlowCommand) -> None:
         flow_id = command.flow_id
