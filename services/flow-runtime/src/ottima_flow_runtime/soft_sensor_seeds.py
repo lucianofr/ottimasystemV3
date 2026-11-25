@@ -318,7 +318,7 @@ async def soft_sensor_command(
         logger.info("soft_sensor_model ignorado: flow %s, args %s", flow_id, command.args)
         return
 
-    try:
+    async def read() -> tuple[SoftSensorModel | None, list[int], set[int]]:
         async with session_factory() as session:
             row = await session.scalar(
                 select(SoftSensorModel)
@@ -327,7 +327,13 @@ async def soft_sensor_command(
             )
             tag_ids = list(row.input_tag_ids) if row is not None else []
             existing = set(await session.scalars(select(Tag.id).where(Tag.id.in_(tag_ids))))
-    except Exception:  # banco fora: não é motivo para desfazer o pedido do usuário
+        return row, tag_ids, existing
+
+    try:
+        # Com prazo: o handler segura o `_lock` do supervisor, de que `on_comm_failure`
+        # precisa para parar o flow (ADR-009).
+        row, tag_ids, existing = await asyncio.wait_for(read(), timeout=PERSIST_TIMEOUT_S)
+    except Exception:  # banco fora ou lento: não é motivo para desfazer o pedido do usuário
         logger.exception("Sensor virtual '%s': falha ao ler o modelo %s", block_id, model_id)
         return
     if row is None:
@@ -384,8 +390,11 @@ async def soft_sensor_command(
             emit_event=emit_event,
         )
     # Antes do `set_candidate`: sem modelo em uso a varredura seguinte promove e grava
-    # `(X, None)`, que tem de chegar depois desta gravação.
-    await write_binding(session_factory, flow_id, block_id, candidate_model_id=model_id)
+    # `(X, None)`, que tem de chegar depois desta gravação. O desejado vai junto: um candidato
+    # anterior vencido durante os `await` acima devolveu o desejado ao ativo.
+    await write_binding(
+        session_factory, flow_id, block_id, candidate_model_id=model_id, desired_model_id=model_id
+    )
     # Sem `await` daqui ao `set_candidate`: a cópia leva as amostras empurradas durante as
     # gravações, e uma promoção no meio pode ter mudado o período do modelo em uso.
     buffer = block.active_buffer_copy() if same_period() else prewarm

@@ -360,7 +360,7 @@ async def test_preaquecimento_lento_no_comando_respeita_o_prazo(session_factory,
     assert buffer is None
     reasons = [c["payload"]["reason"] for c in events.kinds(KIND_SOFT_SENSOR_PREWARM_SKIPPED)]
     assert reasons == ["timeout"]
-    assert await _binding(session_factory, flow_id) == (None, None, lento)
+    assert await _binding(session_factory, flow_id) == (lento, None, lento)
 
 
 async def test_periodo_diferente_sem_as_tags_entra_vazio_e_avisa(session_factory, no_history):
@@ -382,7 +382,7 @@ async def test_periodo_diferente_sem_as_tags_entra_vazio_e_avisa(session_factory
     assert [c["payload"] for c in skipped] == [
         {"block_id": "ss", "model_id": lento, "reason": "tags"}
     ]
-    assert await _binding(session_factory, flow_id) == (None, None, lento)
+    assert await _binding(session_factory, flow_id) == (lento, None, lento)
 
 
 async def test_rejeicao_durante_troca_devolve_o_desejado_ao_candidato_em_curso(
@@ -420,6 +420,75 @@ async def test_rejeicao_durante_troca_devolve_o_desejado_ao_candidato_em_curso(
     assert await _binding(session_factory, flow_id) == (y, y, None)
 
 
+async def test_candidato_vencido_durante_o_comando_nao_desfaz_o_novo_desejado(
+    session_factory, monkeypatch, no_history
+):
+    """Y vence o prazo enquanto o handler de X grava: a rejeição de Y devolve o desejado ao
+    ativo, mas a aceitação de X grava o desejado de novo. Promovido X, o vínculo é todo X."""
+    pls_y = synthetic.pls([5.0, 5.0], 0.0, period_s=1.0)
+    scenario = await _scenario(session_factory, PLS_A, pls_y, PLS_B)
+    flow_id, (active, y, x) = scenario["flow_id"], scenario["models"]
+    block = _block(session_factory, flow_id, _loaded(PLS_A, active))
+    runtime = _runtime(block)
+    bad = {"IN1": Signal(1.0, quality=Quality.BAD), "IN2": Signal(1.0, quality=Quality.BAD)}
+    await _set_binding(session_factory, flow_id, desired_model_id=y, active_model_id=active)
+    await _run(session_factory, runtime, _command(flow_id, y))
+    await block.step(bad)
+    assert block.candidate_model_id == y  # entrada BAD: Y nunca calcula
+
+    original = soft_sensor_seeds.write_binding
+
+    async def vence_y_no_meio(factory, flow_id, block_id, **values):
+        if values.get("candidate_model_id") == x:
+            for _ in range(100):  # prazo de Y: max(2*1*1, 60) / Ts = 60 varreduras
+                if block.candidate_model_id is None:
+                    break
+                await block.step(bad)
+            assert block.candidate_model_id is None
+            await asyncio.gather(*block._writes)  # rejeição de Y gravou desired = ativo
+        await original(factory, flow_id, block_id, **values)
+
+    monkeypatch.setattr(soft_sensor_seeds, "write_binding", vence_y_no_meio)
+    await _set_binding(session_factory, flow_id, desired_model_id=x)  # como a API faz
+    await _run(session_factory, runtime, _command(flow_id, x))
+    await _steps(block, 1.0)  # X instalado e promovido nesta varredura
+
+    assert block.active_model_id == x
+    await asyncio.gather(*block._writes)
+    assert await _binding(session_factory, flow_id) == (x, x, None)
+
+
+class _HungSession:
+    async def __aenter__(self):
+        await asyncio.sleep(10)
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
+async def test_leitura_do_modelo_presa_retorna_no_prazo_sem_tocar_o_bloco(
+    session_factory, monkeypatch
+):
+    """O handler segura o `_lock` do supervisor, de que `on_comm_failure` precisa (ADR-009):
+    banco parado não pode prendê-lo."""
+    scenario = await _scenario(session_factory, PLS_A, PLS_B)
+    flow_id, (active, novo) = scenario["flow_id"], scenario["models"]
+    block = _block(session_factory, flow_id, _loaded(PLS_A, active))
+    calls = _spy(block)
+    monkeypatch.setattr(soft_sensor_seeds, "PERSIST_TIMEOUT_S", 0.2)
+    events = _Events()
+
+    inicio = time.monotonic()
+    await soft_sensor_command(
+        lambda: _HungSession(), _runtime(block), _command(flow_id, novo), emit_event=events
+    )
+
+    assert time.monotonic() - inicio < 1.0
+    assert calls == [] and events.calls == []
+    assert block.candidate_model_id is None and block.active_model_id == active
+    assert await _binding(session_factory, flow_id) == (None, None, None)
+
+
 async def _raising_emit(**kwargs: object) -> None:
     raise ConnectionError("redis fora")
 
@@ -439,7 +508,7 @@ async def test_falha_ao_avisar_preaquecimento_nao_aborta_o_comando(session_facto
 
     [(_, buffer)] = calls
     assert buffer is None
-    assert await _binding(session_factory, flow_id) == (None, None, lento)
+    assert await _binding(session_factory, flow_id) == (lento, None, lento)
 
 
 async def test_falha_ao_avisar_rejeicao_nao_aborta_o_comando(session_factory):
@@ -541,7 +610,7 @@ async def test_sem_modelo_em_uso_o_vinculo_final_e_ativo_sem_candidato(
     original = soft_sensor_seeds.write_binding
 
     async def lenta(factory, flow_id, block_id, **values):
-        if set(values) == {"candidate_model_id"}:  # só a gravação do handler
+        if "desired_model_id" in values and "active_model_id" not in values:  # do handler
             await asyncio.sleep(3 * HARNESS_TS)
         await original(factory, flow_id, block_id, **values)
 
