@@ -52,18 +52,18 @@ class ModelMeta(BaseModel):
 
 
 def _check_limits(blob: bytes) -> None:
-    """Recusa pelos tetos ANTES de descomprimir: bytes do blob e bytes DECLARADOS descomprimidos.
+    """Rejeição precoce, antes de ler qualquer entrada: bytes do blob e bytes DECLARADOS.
 
-    O tamanho declarado de cada entrada do zip limita a leitura (`ZipExtFile` para em `file_size`),
-    então checá-lo antes do `np.load` basta para um npz forjado não expandir de 8 MB a GB.
+    O `file_size` do diretório central é dado pelo autor do zip e pode mentir: este teste só
+    recusa cedo o artefato honesto e grande. O que limita a leitura de verdade está em
+    `unpack_weights`: `zf.open` para a leitura em `file_size` e `read_array` lê em blocos.
     """
     if len(blob) > MAX_ARTIFACT_BYTES:
         raise ArtifactError(
             f"artefato de {len(blob)} bytes passa do teto de {MAX_ARTIFACT_BYTES} bytes"
         )
-    with zipfile.ZipFile(
-        io.BytesIO(blob)
-    ) as zf:  # BadZipFile (truncado/não-zip): quem chama embrulha
+    # BadZipFile (truncado ou não-zip) sobe para quem chama, que embrulha em ArtifactError.
+    with zipfile.ZipFile(io.BytesIO(blob)) as zf:
         unpacked = sum(info.file_size for info in zf.infolist())
     if unpacked > MAX_ARTIFACT_UNPACKED_BYTES:
         raise ArtifactError(
@@ -88,14 +88,23 @@ def pack_weights(arrays: Mapping[str, np.ndarray]) -> bytes:
 
 
 def unpack_weights(blob: bytes) -> dict[str, np.ndarray]:
+    out: dict[str, np.ndarray] = {}
     try:
         _check_limits(blob)
-        # NpzFile é preguiçoso: a recusa de objeto/pickle só dispara na leitura de cada chave.
-        with np.load(io.BytesIO(blob), allow_pickle=False) as npz:
-            out = {k: npz[k] for k in npz.files}
+        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+            for info in zf.infolist():
+                if not info.filename.endswith(".npy"):
+                    raise ArtifactError(f"entrada {info.filename!r} do artefato não é .npy")
+                # Não usar np.load: se o magic do .npy não bate, ele cai em `zip.read(chave)`,
+                # que descomprime a entrada inteira de uma vez, ignorando o `file_size` forjado.
+                # `zf.open` + `read_array` lê em blocos e para em `file_size`; magic ruim falha.
+                with zf.open(info) as fh:
+                    out[info.filename.removesuffix(".npy")] = np.lib.format.read_array(
+                        fh, allow_pickle=False
+                    )
     except ArtifactError:
         raise
-    except Exception as exc:  # zip truncado, não-npz, pickle recusado: tudo é artefato ilegível
+    except Exception as exc:  # zip truncado, não-npz, magic ruim, pickle recusado, CRC
         raise ArtifactError(f"artefato de pesos ilegível: {exc}") from exc
     if any(v.dtype.kind not in "fiu" for v in out.values()):
         raise ArtifactError("artefato de pesos com array não numérico")

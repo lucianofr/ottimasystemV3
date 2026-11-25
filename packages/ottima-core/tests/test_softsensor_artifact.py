@@ -2,6 +2,9 @@
 `ModelMeta` e `load_model` (chaves e formas por método contra `n_inputs`)."""
 
 import io
+import struct
+import tracemalloc
+import zlib
 
 import numpy as np
 import pytest
@@ -82,6 +85,40 @@ def test_unpack_recusa_tamanho_descomprimido_declarado_acima_do_teto():
     assert len(buf.getvalue()) < MAX_ARTIFACT_BYTES
     with pytest.raises(ArtifactError, match="descomprimido"):
         unpack_weights(buf.getvalue())
+
+
+def _zip_forjado(real_bytes: int, declared: int, nome: bytes = b"w.npy") -> bytes:
+    """Zip de uma entrada deflate de zeros cujo `file_size` declarado mente (`declared`)."""
+    co = zlib.compressobj(9, zlib.DEFLATED, -15)
+    zeros = bytes(1024 * 1024)
+    dados = b"".join(co.compress(zeros) for _ in range(real_bytes // len(zeros))) + co.flush()
+    local = struct.pack(
+        "<IHHHHHIIIHH", 0x04034B50, 20, 0, 8, 0, 0x21, 0, len(dados), declared, len(nome), 0
+    )
+    cd = struct.pack(
+        "<IHHHHHHIIIHHHHHII",
+        0x02014B50, 20, 20, 0, 8, 0, 0x21, 0, len(dados), declared, len(nome), 0, 0, 0, 0, 0, 0,
+    )  # fmt: skip
+    local += nome
+    cd += nome
+    eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 1, 1, len(cd), len(local) + len(dados), 0)
+    return local + dados + cd + eocd
+
+
+@pytest.mark.parametrize("nome", [b"w.npy", b"w.txt"], ids=["entrada_npy", "entrada_nao_npy"])
+def test_unpack_nao_descomprime_alem_do_declarado_em_zip_forjado(nome):
+    # O diretório central diz 5000 bytes; a entrada real tem 50 MiB e não começa com o magic do
+    # .npy. np.load cairia em `zip.read(chave)`, que descomprime tudo de uma vez (~GB no limite).
+    blob = _zip_forjado(50 * 1024 * 1024, declared=5000, nome=nome)
+    assert len(blob) < MAX_ARTIFACT_BYTES
+    tracemalloc.start()
+    try:
+        with pytest.raises(ArtifactError):
+            unpack_weights(blob)
+        _, pico = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert pico < 8 * 1024 * 1024  # a carga real passa de 50 MiB
 
 
 def test_pack_recusa_tamanho_descomprimido_acima_do_teto():
