@@ -385,6 +385,76 @@ async def test_periodo_diferente_sem_as_tags_entra_vazio_e_avisa(session_factory
     assert await _binding(session_factory, flow_id) == (None, None, lento)
 
 
+async def test_rejeicao_durante_troca_devolve_o_desejado_ao_candidato_em_curso(
+    session_factory, no_history
+):
+    """O desejado vai para o modelo que o bloco vai acabar rodando: o candidato em curso
+    (que segue aquecendo), não o ativo. Promovido, o vínculo fica todo nele."""
+    esn_a = synthetic.esn(2, warmup=2, seed=1)
+    esn_y = synthetic.esn(2, warmup=40, seed=2)
+    scenario = await _scenario(session_factory, esn_a, esn_y, PLS_B)
+    flow_id, (active, y, z) = scenario["flow_id"], scenario["models"]
+    block = _block(session_factory, flow_id, _loaded(esn_a, active))
+    runtime = _runtime(block, "soft_sensor_esn")
+    await _steps(block, 1.0, 2.0, 3.0)
+    await _set_binding(session_factory, flow_id, desired_model_id=y, active_model_id=active)
+    await _run(session_factory, runtime, _command(flow_id, y))
+    await _steps(block, 4.0)
+    assert block.candidate_model_id == y  # aquecendo: janela de 40 com 4 amostras
+
+    await _set_binding(session_factory, flow_id, desired_model_id=z)  # como a API faz
+    events = _Events()
+    await _run(session_factory, runtime, _command(flow_id, z), events)  # PLS num bloco ESN
+
+    assert [c["payload"]["reason"] for c in events.kinds(KIND_SOFT_SENSOR_MODEL_REJECTED)] == [
+        "method"
+    ]
+    assert block.candidate_model_id == y
+    assert await _binding(session_factory, flow_id) == (y, active, y)
+    for k in range(60):
+        if block.active_model_id == y:
+            break
+        await _steps(block, 5.0 + k)
+    assert block.active_model_id == y
+    await asyncio.gather(*block._writes)
+    assert await _binding(session_factory, flow_id) == (y, y, None)
+
+
+async def _raising_emit(**kwargs: object) -> None:
+    raise ConnectionError("redis fora")
+
+
+async def test_falha_ao_avisar_preaquecimento_nao_aborta_o_comando(session_factory, no_history):
+    scenario = await _scenario(session_factory, PLS_A, PLS_2S)
+    flow_id, (active, lento) = scenario["flow_id"], scenario["models"]
+    async with session_factory() as session:
+        await session.execute(delete(Tag).where(Tag.id == scenario["tag_ids"][1]))
+        await session.commit()
+    block = _block(session_factory, flow_id, _loaded(PLS_A, active))
+    calls = _spy(block)
+
+    await soft_sensor_command(
+        session_factory, _runtime(block), _command(flow_id, lento), emit_event=_raising_emit
+    )
+
+    [(_, buffer)] = calls
+    assert buffer is None
+    assert await _binding(session_factory, flow_id) == (None, None, lento)
+
+
+async def test_falha_ao_avisar_rejeicao_nao_aborta_o_comando(session_factory):
+    scenario = await _scenario(session_factory, PLS_A, ESN)
+    flow_id, (active, esn) = scenario["flow_id"], scenario["models"]
+    await _set_binding(session_factory, flow_id, desired_model_id=esn, active_model_id=active)
+    block = _block(session_factory, flow_id, _loaded(PLS_A, active))
+
+    await soft_sensor_command(
+        session_factory, _runtime(block), _command(flow_id, esn), emit_event=_raising_emit
+    )
+
+    assert await _binding(session_factory, flow_id) == (active, active, None)
+
+
 # --------------------------------------------------------------------------------------
 # Pelo supervisor e pelo laço de varredura
 # --------------------------------------------------------------------------------------

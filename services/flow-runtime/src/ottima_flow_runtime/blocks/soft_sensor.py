@@ -107,6 +107,13 @@ class SoftSensorBlock(Block):
         return self._candidate.model.model_id if self._candidate else None
 
     @property
+    def intended_model_id(self) -> int | None:
+        """O modelo que o bloco vai acabar rodando se nada falhar: o pedido enfileirado, o
+        candidato aquecendo ou o em uso (a rejeição de um pedido devolve o desejado a ele)."""
+        slot = self._pending or self._candidate or self._active
+        return slot.model.model_id if slot else None
+
+    @property
     def active_period_s(self) -> float | None:
         return self._active.model.meta.period_s if self._active else None
 

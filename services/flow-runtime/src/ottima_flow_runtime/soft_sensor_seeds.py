@@ -242,13 +242,16 @@ async def _warm(
     else:
         buffer, skipped = await _prewarm(session_factory, model, tag_ids, remaining=remaining)
     if skipped is not None:
-        await emit_event(
-            severity="info",
-            origin=_ORIGIN,
-            message=f"Sensor virtual '{block_id}': sem pré-aquecimento ({skipped})",
-            kind=KIND_SOFT_SENSOR_PREWARM_SKIPPED,
-            payload={"block_id": block_id, "model_id": model.model_id, "reason": skipped},
-        )
+        try:
+            await emit_event(
+                severity="info",
+                origin=_ORIGIN,
+                message=f"Sensor virtual '{block_id}': sem pré-aquecimento ({skipped})",
+                kind=KIND_SOFT_SENSOR_PREWARM_SKIPPED,
+                payload={"block_id": block_id, "model_id": model.model_id, "reason": skipped},
+            )
+        except Exception:  # aviso perdido nunca impede o bloco de subir ou o candidato de entrar
+            logger.exception("Sensor virtual '%s': falha ao emitir prewarm_skipped", block_id)
     return buffer
 
 
@@ -333,7 +336,7 @@ async def soft_sensor_command(
 
     async def reject(reason: str, **values: int | None) -> None:
         await write_binding(
-            session_factory, flow_id, block_id, desired_model_id=block.active_model_id, **values
+            session_factory, flow_id, block_id, desired_model_id=block.intended_model_id, **values
         )
         try:
             await emit_event(
@@ -389,4 +392,7 @@ async def soft_sensor_command(
     try:
         block.set_candidate(model, buffer)
     except ValueError:
-        await reject("period", candidate_model_id=block.candidate_model_id)
+        in_flight = block.intended_model_id
+        await reject(
+            "period", candidate_model_id=None if in_flight == block.active_model_id else in_flight
+        )
