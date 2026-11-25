@@ -87,7 +87,7 @@ _FIXED_KEYS = {
     "pls": ("w", "b"),
     "esn": ("W", "Win", "bias", "Wout", "b_out", "lr", "x_mean", "x_std", "y_mean", "y_std"),
 }
-_LSTM_LAYER_KEY = re.compile(r"(?:w_ih|w_hh|b_ih|b_hh)_(\d+)")
+_LSTM_LAYER_KEY = re.compile(r"(?:w_ih|w_hh|b_ih|b_hh)_(\d{1,4})")
 _LSTM_LAYER_PARTS = ("w_ih", "w_hh", "b_ih", "b_hh")
 _LSTM_TAIL = ("fc_w", "fc_b", "x_mean", "x_std", "y_mean", "y_std")
 
@@ -95,7 +95,10 @@ _LSTM_TAIL = ("fc_w", "fc_b", "x_mean", "x_std", "y_mean", "y_std")
 def _lstm_layers(weights: Mapping[str, np.ndarray]) -> int:
     # Maior índice visto, não contagem: camada com chave faltando é erro, não camada a menos.
     indices = [int(m[1]) for k in weights if (m := _LSTM_LAYER_KEY.fullmatch(k))]
-    return max(indices) + 1 if indices else 0
+    layers = max(indices) + 1 if indices else 0
+    if not 1 <= layers <= len(weights):  # sem camadas, ou índice absurdo (não gera chaves demais)
+        raise ArtifactError(f"pesos lstm com {layers} camadas (chaves w_ih/w_hh/b_ih/b_hh_k)")
+    return layers
 
 
 def _required_keys(method: str, weights: Mapping[str, np.ndarray]) -> tuple[str, ...]:

@@ -21,6 +21,10 @@ def _carregar(par: tuple[ModelMeta, bytes]) -> LoadedModel:
     return load_model(1, par[0].model_dump(mode="json"), par[1])
 
 
+def _carregar_bytes(meta: ModelMeta, blob: bytes) -> LoadedModel:
+    return load_model(1, meta.model_dump(mode="json"), blob)
+
+
 def test_pack_unpack_preserva_valores_em_float32():
     blob = pack_weights({"w": np.array([1.5, -2.0]), "b": np.array([0.25])})
     out = unpack_weights(blob)
@@ -129,6 +133,29 @@ def test_load_model_recusa_camada_lstm_com_lacuna():
     }  # camadas 0 e 2: a 2 não é lida em silêncio
     with pytest.raises(ArtifactError):
         load_model(1, meta.model_dump(mode="json"), pack_weights(pesos))
+
+
+def test_load_model_recusa_lstm_sem_nenhuma_camada():
+    # units == n_inputs: sem a recusa, fc_w seria aplicado às entradas e "funcionaria" em silêncio.
+    meta, blob = synthetic.lstm(2, units=2, layers=1)
+    so_a_cauda = {k: v for k, v in unpack_weights(blob).items() if not k[-2:] == "_0"}
+    with pytest.raises(ArtifactError):
+        load_model(1, meta.model_dump(mode="json"), pack_weights(so_a_cauda))
+
+
+def test_load_model_recusa_indice_de_camada_acima_do_numero_de_chaves():
+    meta, blob = synthetic.lstm(2, units=3, layers=2)
+    pesos = unpack_weights(blob) | {"w_ih_9999": np.zeros(1)}  # não vira 10 mil camadas exigidas
+    with pytest.raises(ArtifactError):
+        load_model(1, meta.model_dump(mode="json"), pack_weights(pesos))
+
+
+def test_load_model_ignora_chave_extra_com_indice_gigante_sem_estourar():
+    # Fora de `\d{1,4}` é só chave desconhecida: não expande camadas nem vaza ValueError do int().
+    meta, blob = synthetic.lstm(2, units=3, layers=2)
+    for chave in ("w_ih_9999999999", "b_hh_" + "9" * 5000):
+        pesos = unpack_weights(blob) | {chave: np.zeros(1)}
+        assert _carregar_bytes(meta, pack_weights(pesos)).n_inputs == 2
 
 
 def test_meta_recusa_mais_de_32_entradas_e_warmup_fora_de_1_256():
