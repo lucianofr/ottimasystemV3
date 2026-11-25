@@ -16,6 +16,7 @@ from .artifact import (
     unpack_weights,
 )
 from .forward import predict
+from .grid import grid_instants, load_grid, staleness_limit_s
 from .window import Evaluation, Reason, SampleBuffer, evaluate
 
 __all__ = [
@@ -32,9 +33,12 @@ __all__ = [
     "Reason",
     "SampleBuffer",
     "evaluate",
+    "grid_instants",
+    "load_grid",
     "load_model",
     "pack_weights",
     "predict",
+    "staleness_limit_s",
     "synthetic",
     "unpack_weights",
 ]

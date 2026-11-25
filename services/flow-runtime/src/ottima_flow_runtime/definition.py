@@ -43,6 +43,7 @@ from ottima_core.bus import (
     publish_event,
 )
 from ottima_core.flowgraph import (
+    SOFT_SENSOR_TYPES,
     FlowGraph,
     FlowNode,
     FuzzyLoopConfig,
@@ -78,10 +79,12 @@ from .blocks.shell.block import BlockShell
 from .blocks.shell.config import ShellCfg
 from .blocks.shell.kernel import ControlKernel
 from .blocks.shell.mode import Mode, mode_from_name
+from .blocks.soft_sensor import SoftSensorBlock
 from .blocks.tfs import TfsBlock
 from .mpc.host import MpcHost
 from .mpc.worker import worker_main
 from .scheduler import FlowDefinition, HistorizedPort
+from .soft_sensor_seeds import SoftSensorSeed, make_emit_event, make_persist
 
 LOOP_TYPES: frozenset[str] = frozenset({"pid_loop", "fuzzy_loop"})
 
@@ -137,6 +140,7 @@ def build_definition(
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     loop_seeds: Mapping[str, LoopSeed | Sequence[LoopSeed]] | None = None,
     historized_vars: Sequence[HistorizedVar] = (),
+    soft_sensor_seeds: Mapping[str, SoftSensorSeed] | None = None,
 ) -> StagedDefinition:
     """Instancia os blocos do grafo (reaproveitando os que não mudaram) e monta a fiação.
 
@@ -185,6 +189,7 @@ def build_definition(
                 session_factory=session_factory,
                 loop_seed=(loop_seeds or {}).get(node.id),
                 predecessor=predecessor,
+                soft_sensor_seed=(soft_sensor_seeds or {}).get(node.id),
             )
             # TD-006: config mudou (ou o bloco é novo) — quando o bloco velho é um
             # `MpcBlock` e o conjunto de MVs é IDÊNTICO, o novo transplanta o estado do
@@ -299,6 +304,7 @@ def _instantiate(
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     loop_seed: LoopSeed | Sequence[LoopSeed] | None = None,
     predecessor: BlockShell | None = None,
+    soft_sensor_seed: SoftSensorSeed | None = None,
 ) -> Block:
     """Instancia o bloco com os serviços do runtime. Bloco novo nasce zerado (§4.1-3)."""
     config: Any = node.config
@@ -404,7 +410,21 @@ def _instantiate(
             starting_output=config.starting_output,
             ts_seconds=ts_seconds,
         )
-    return TfsBlock(node.id, matrix=config.matrix, ts_seconds=ts_seconds, y0=config.y0)
+    if node.type in SOFT_SENSOR_TYPES:
+        seed = soft_sensor_seed or SoftSensorSeed(None, None, "no_model")
+        return SoftSensorBlock(
+            node.id,
+            n_inputs=config.n_inputs,
+            ts_seconds=ts_seconds,
+            model=seed.model,
+            prewarm=seed.prewarm,
+            missing_reason=seed.missing_reason,
+            emit_event=make_emit_event(redis_client, flow_id),
+            persist=make_persist(session_factory, flow_id, node.id),
+        )
+    if node.type == "tfs":
+        return TfsBlock(node.id, matrix=config.matrix, ts_seconds=ts_seconds, y0=config.y0)
+    raise ValueError(f"tipo de bloco sem instanciação no runtime: {node.type}")
 
 
 def _instantiate_mpc(

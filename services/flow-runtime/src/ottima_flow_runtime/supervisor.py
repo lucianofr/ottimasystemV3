@@ -68,6 +68,7 @@ from .mpc.host import MpcHost
 from .mpc.worker import worker_main
 from .partition import UNPARTITIONED, Partition
 from .scheduler import FlowTask
+from .soft_sensor_seeds import load_seeds, make_emit_event
 from .state import RuntimeState
 from .supervisor_mpc import MpcOrchestrator
 from .supervisor_resume import ResumeOrchestrator, RetomadaPendente
@@ -586,6 +587,21 @@ class Supervisor:
             select(HistorizedVar).where(HistorizedVar.flow_id == flow.id)
         )
         historized_vars = result.scalars().all()
+        # Sensor virtual (spec §5.6-5/§5.7): sessões próprias, nunca esta (só leitura, sem
+        # commit). Bloco que `build_definition` vai reaproveitar mantém modelo e buffer vivos.
+        kept = {
+            node.id
+            for node in graph.nodes
+            if node.id in reuse and reuse[node.id][0] == node.functional_config()
+        }
+        soft_sensor_seeds = await load_seeds(
+            self._session_factory,
+            flow.id,
+            graph,
+            ts_seconds=ts_seconds,
+            skip=kept,
+            emit_event=make_emit_event(self._redis, flow.id),
+        )
 
         return build_definition(
             graph,
@@ -603,6 +619,7 @@ class Supervisor:
             loop_seeds=await carregar_loop_seeds(session, flow.id),
             historized_vars=historized_vars,
             session_factory=self._session_factory,
+            soft_sensor_seeds=soft_sensor_seeds,
         )
 
     # ----------------------------------------------------------------------------------
