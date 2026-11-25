@@ -15,6 +15,8 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from ottima_core.flowgraph.parse import MAX_SOFT_SENSOR_INPUTS
+
 METHODS: tuple[str, ...] = ("pls", "esn", "lstm")
 BUFFER_STEPS = 256
 RANGE_MARGIN = 0.05
@@ -41,7 +43,7 @@ class ModelMeta(BaseModel):
     schema_version: Literal[1]
     method: Literal["pls", "esn", "lstm"]
     period_s: float = Field(gt=0)
-    inputs: list[InputMeta] = Field(min_length=1, max_length=32)
+    inputs: list[InputMeta] = Field(min_length=1, max_length=MAX_SOFT_SENSOR_INPUTS)
     output_name: str
     output_eu: str = ""
     hyperparams: dict[str, float]

@@ -149,11 +149,20 @@ export interface ContratoPortaDinamicaMalha extends ContratoPortaDinamica {
   max_fll_length: number;
 }
 
+/** Contrato dinâmico COM porta fixa: os blocos de sensor virtual (RF-581, ADR-046) têm
+ * entradas IN1..INn derivadas de "n_inputs" (em "rules") e a saída única "out" em "ports"
+ * — a única mistura \`rules\` + \`ports\` do contrato. */
+export interface ContratoPortaDinamicaSensor extends ContratoPortaDinamica {
+  ports: PortaFixa[];
+  default_counts: { n_inputs: number };
+}
+
 export type ContratoPorta =
   | ContratoPortaFixa
   | ContratoPortaDinamica
   | ContratoPortaDinamicaComDefault
-  | ContratoPortaDinamicaMalha;
+  | ContratoPortaDinamicaMalha
+  | ContratoPortaDinamicaSensor;
 `.trim();
 
 function tabelaPortContracts(portContracts) {

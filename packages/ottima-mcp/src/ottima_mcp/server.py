@@ -508,6 +508,9 @@ TipoBlocoLiteral = Literal[
     "bus_subscribe",
     "lead_lag",
     "dead_time",
+    "soft_sensor_pls",
+    "soft_sensor_esn",
+    "soft_sensor_lstm",
 ]
 """Espelho MANUAL de `NODE_TYPES` — o enum precisa ser estático para aparecer no schema da
 tool (`block_catalog` já devolve a lista dinâmica, mas o schema da tool não pode).

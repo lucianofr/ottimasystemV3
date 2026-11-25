@@ -43,7 +43,9 @@ import json
 from ottima_core.bus import FlowStatus, FuzzyState, LoopState, MpcState, PortValue
 from ottima_core.flowgraph import (
     MAX_SCRIPT_PORTS,
+    MAX_SOFT_SENSOR_INPUTS,
     MPC_FIXED_OUTPUT_PORTS,
+    SOFT_SENSOR_TYPES,
     BusKeyConfig,
     ConstantConfig,
     ConstraintVar,
@@ -61,6 +63,7 @@ from ottima_core.flowgraph import (
     PidLoopConfig,
     ScalerConfig,
     ScriptConfig,
+    SoftSensorConfig,
     SopdtParams,
 )
 from ottima_core.flowgraph.fll_defaults import (
@@ -137,6 +140,23 @@ RuleBlock:
 Fuzzy (ADR-029). Mudar a paleta é editar `default.fll` e colar o conteúdo aqui de novo: os
 dois lugares precisam concordar, nenhum gera o outro."""
 
+# Sensor virtual (RF-581, ADR-046): entradas IN1..INn por `config.n_inputs` e UMA saída fixa
+# `out` — a mistura `rules` + `ports` é a única do contrato; os três tipos o compartilham.
+_SOFT_SENSOR_CONTRACT: dict[str, object] = {
+    "dynamic": True,
+    "source": "config.n_inputs (RF-581, ADR-046)",
+    "rules": [
+        {
+            "direction": "input",
+            "prefix": "IN",
+            "count_field": "n_inputs",
+            "max": MAX_SOFT_SENSOR_INPUTS,
+            "type": "num",
+        },
+    ],
+    "ports": [{"name": "out", "direction": "output", "type": "num"}],
+    "default_counts": {"n_inputs": 2},
+}
 
 PORT_CONTRACTS: dict[str, dict[str, object]] = {
     "opc_read": {
@@ -342,6 +362,7 @@ PORT_CONTRACTS: dict[str, dict[str, object]] = {
         "default_counts": {"n_loops": 1},
         "max_fll_length": MAX_FUZZY_FLL_LENGTH,
     },
+    **dict.fromkeys(SOFT_SENSOR_TYPES, _SOFT_SENSOR_CONTRACT),
 }
 
 # MpcVarState (tarefa 1.3) vem aninhado no schema de MpcState (`vars: dict[str, MpcVarState]`)
@@ -375,6 +396,7 @@ _NODE_CONFIG_MODELS = (
     BusKeyConfig,
     LeadLagConfig,
     DeadTimeConfig,
+    SoftSensorConfig,
 )
 
 

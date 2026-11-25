@@ -32,6 +32,9 @@ NodeType = Literal[
     "bus_subscribe",
     "lead_lag",
     "dead_time",
+    "soft_sensor_pls",
+    "soft_sensor_esn",
+    "soft_sensor_lstm",
 ]
 NODE_TYPES: tuple[str, ...] = (
     "opc_read",
@@ -52,9 +55,21 @@ NODE_TYPES: tuple[str, ...] = (
     "bus_subscribe",
     "lead_lag",
     "dead_time",
+    "soft_sensor_pls",
+    "soft_sensor_esn",
+    "soft_sensor_lstm",
 )
 
 MAX_SCRIPT_PORTS = 8  # spec §3.3
+MAX_SOFT_SENSOR_INPUTS = 32  # SPEC_SENSOR_VIRTUAL §5.1; mesmo teto de `ModelMeta.inputs`
+# Sensor virtual (ADR-046): um tipo de bloco por método, mesma config e mesmas portas; o
+# valor é o `method` do artefato do modelo, e o runtime recusa artefato de outro método.
+SOFT_SENSOR_METHOD: dict[str, str] = {
+    "soft_sensor_pls": "pls",
+    "soft_sensor_esn": "esn",
+    "soft_sensor_lstm": "lstm",
+}
+SOFT_SENSOR_TYPES: tuple[str, ...] = tuple(SOFT_SENSOR_METHOD)
 # Teto do texto FLL (RF-541, ADR-029): exports reais do QtFuzzyLite ficam na casa dos KB;
 # o teto protege o parse/is_ready e limita o número de regras/termos processados (FUZZY-SEC).
 MAX_FUZZY_FLL_LENGTH = 200_000
@@ -163,6 +178,7 @@ _CONFIG_KEYS: dict[str, tuple[str, ...]] = {
     "bus_subscribe": ("key",),
     "lead_lag": ("gain", "tau_lead", "tau_lag"),
     "dead_time": ("theta",),
+    **dict.fromkeys(SOFT_SENSOR_TYPES, ("n_inputs", "output_eu")),
 }
 # Blocos de filtro (ADR-026): config é só um punhado de escalares, e o valor do dicionário
 # diz se o campo exige positivo estrito (divisor) ou apenas não-negativo.
@@ -486,6 +502,16 @@ class BusKeyConfig(BaseModel):
     key: str = Field(pattern=BUS_KEY_PATTERN)
 
 
+class SoftSensorConfig(BaseModel):
+    """Config dos blocos `soft_sensor_pls|esn|lstm` (RF-581, ADR-046): só a contagem de
+    entradas e a unidade da saída. O modelo NÃO está no grafo (o vínculo bloco -> modelo mora
+    em tabela, SPEC_SENSOR_VIRTUAL §7.4), por isso `validate_graph` só confere portas."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    n_inputs: int = Field(ge=1, le=MAX_SOFT_SENSOR_INPUTS)
+    output_eu: str = ""
+
+
 class PidConfig(BaseModel):
     """Bloco PID (RF-551, ADR-031): controlador ISA, motor `simple-pid` por baixo.
 
@@ -651,6 +677,7 @@ NodeConfig = (
     | BusKeyConfig
     | LeadLagConfig
     | DeadTimeConfig
+    | SoftSensorConfig
 )
 
 
@@ -860,6 +887,8 @@ def _parse_config(where: str, node_type: str, data: dict, errors: list[str]) -> 
         return _parse_loop_config(where, node_type, LeadLagConfig, data, errors)
     if node_type == "dead_time":
         return _parse_loop_config(where, node_type, DeadTimeConfig, data, errors)
+    if node_type in SOFT_SENSOR_METHOD:
+        return _parse_loop_config(where, node_type, SoftSensorConfig, data, errors)
     if node_type in _FILTER_KEYS:
         return _parse_filter_config(where, node_type, data, errors)
     return _parse_tfs_config(where, data, errors)

@@ -189,6 +189,9 @@ def test_block_catalog_expoe_node_types_e_contratos() -> None:
         "bus_subscribe",
         "lead_lag",
         "dead_time",
+        "soft_sensor_pls",
+        "soft_sensor_esn",
+        "soft_sensor_lstm",
     ]
     assert "port_contracts" in catalogo
     assert "node_configs" in catalogo
