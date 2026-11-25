@@ -16,6 +16,7 @@ from .artifact import (
     unpack_weights,
 )
 from .forward import predict
+from .window import Evaluation, Reason, SampleBuffer, evaluate
 
 __all__ = [
     "BUFFER_STEPS",
@@ -24,9 +25,13 @@ __all__ = [
     "METHODS",
     "RANGE_MARGIN",
     "ArtifactError",
+    "Evaluation",
     "InputMeta",
     "LoadedModel",
     "ModelMeta",
+    "Reason",
+    "SampleBuffer",
+    "evaluate",
     "load_model",
     "pack_weights",
     "predict",
