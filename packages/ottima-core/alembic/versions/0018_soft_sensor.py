@@ -48,9 +48,12 @@ def upgrade() -> None:
         sa.UniqueConstraint("project_id", "name", name="uq_soft_sensor_models_project_name"),
         sa.CheckConstraint("method IN ('pls','esn','lstm')", name="ck_soft_sensor_models_method"),
     )
-    # As três FKs para o modelo ficam SEM `ON DELETE` (NO ACTION) de propósito: RESTRICT é
-    # checado na hora e barraria a cascata do projeto, que apaga flows (e vínculos) e modelos no
-    # mesmo comando; NO ACTION checa no fim do comando e ainda recusa apagar um modelo vinculado.
+    # As três FKs para o modelo ficam SEM `ON DELETE` (NO ACTION) e DEFERRABLE INITIALLY
+    # DEFERRED: a checagem roda no COMMIT, depois que as cascatas terminam. Apagar um modelo
+    # vinculado continua recusado, mas a cascata do projeto (flows+vínculos e modelos no mesmo
+    # comando) passa: a ordem entre as duas cascatas é a dos triggers de RI (alfabética pelo
+    # nome `RI_ConstraintTrigger_a_<oid>`) e, com a dos modelos primeiro, uma checagem imediata
+    # ainda vê o vínculo de pé. RESTRICT e NO ACTION não adiado são imediatos: mesmo defeito.
     op.create_table(
         "soft_sensor_bindings",
         sa.Column(
@@ -60,9 +63,21 @@ def upgrade() -> None:
             primary_key=True,
         ),
         sa.Column("block_id", sa.Text, primary_key=True),
-        sa.Column("desired_model_id", sa.BigInteger, sa.ForeignKey("soft_sensor_models.id")),
-        sa.Column("active_model_id", sa.BigInteger, sa.ForeignKey("soft_sensor_models.id")),
-        sa.Column("candidate_model_id", sa.BigInteger, sa.ForeignKey("soft_sensor_models.id")),
+        sa.Column(
+            "desired_model_id",
+            sa.BigInteger,
+            sa.ForeignKey("soft_sensor_models.id", deferrable=True, initially="DEFERRED"),
+        ),
+        sa.Column(
+            "active_model_id",
+            sa.BigInteger,
+            sa.ForeignKey("soft_sensor_models.id", deferrable=True, initially="DEFERRED"),
+        ),
+        sa.Column(
+            "candidate_model_id",
+            sa.BigInteger,
+            sa.ForeignKey("soft_sensor_models.id", deferrable=True, initially="DEFERRED"),
+        ),
         sa.Column("updated_by", sa.Text, nullable=False),
         sa.Column(
             "updated_at",

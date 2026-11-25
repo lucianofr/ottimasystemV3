@@ -4,10 +4,15 @@
 são consultadas por polling e não podem trazer o blob. Quem precisa dos pesos (carga no deploy,
 comando de troca, export) pede com `undefer(SoftSensorModel.weights)`.
 
-As três FKs do vínculo para o modelo NÃO têm `ON DELETE` (default `NO ACTION`): apagar um modelo
-vinculado é recusado, mas a cascata do projeto, que apaga flows (e vínculos) e modelos no mesmo
-comando, passa — `RESTRICT` é checado na hora e a barraria. `input_tag_ids` é array, sem FK:
-tag apagada vira id órfão e quem lê trata."""
+As três FKs do vínculo para o modelo NÃO têm `ON DELETE` (default `NO ACTION`) e são
+`DEFERRABLE INITIALLY DEFERRED`: a checagem roda no COMMIT, não no comando. Apagar um modelo
+vinculado continua recusado (IntegrityError no commit), mas a cascata do projeto, que apaga
+flows (e vínculos) e modelos no mesmo comando, passa: a ordem entre as duas cascatas é a dos
+triggers de RI (nome `RI_ConstraintTrigger_a_<oid>`, por ordem alfabética), que varia com o oid,
+e uma checagem imediata falha quando a cascata dos modelos roda antes da dos flows; adiada, só
+vê o estado final. `RESTRICT` e `NO ACTION` não adiado são imediatos e têm o mesmo defeito.
+
+`input_tag_ids` é array, sem FK: tag apagada vira id órfão e quem lê trata."""
 
 from datetime import datetime
 
@@ -66,13 +71,13 @@ class SoftSensorBinding(Base):
     )
     block_id: Mapped[str] = mapped_column(Text, primary_key=True)
     desired_model_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("soft_sensor_models.id")
+        BigInteger, ForeignKey("soft_sensor_models.id", deferrable=True, initially="DEFERRED")
     )
     active_model_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("soft_sensor_models.id")
+        BigInteger, ForeignKey("soft_sensor_models.id", deferrable=True, initially="DEFERRED")
     )
     candidate_model_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("soft_sensor_models.id")
+        BigInteger, ForeignKey("soft_sensor_models.id", deferrable=True, initially="DEFERRED")
     )
     updated_by: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
