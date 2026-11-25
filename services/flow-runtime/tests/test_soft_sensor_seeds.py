@@ -33,6 +33,7 @@ from ottima_core.models.timeseries import samples_table
 from ottima_core.script_pool import ScriptPool
 from ottima_core.signal import Quality
 from ottima_core.softsensor import BUFFER_STEPS, load_model, synthetic
+from ottima_core.softsensor.grid import grid_instants
 from ottima_flow_runtime import soft_sensor_seeds
 from ottima_flow_runtime.blocks.base import Signal
 from ottima_flow_runtime.blocks.soft_sensor import BindingUpdate, SoftSensorBlock
@@ -497,3 +498,31 @@ async def test_supervisor_deploy_carrega_o_modelo_vinculado(harness_factory, ses
     assert runtime.blocks["ss"][1] is block
     binding = await _binding(session_factory, scenario["flow_id"], "ss")
     assert binding.active_model_id == scenario["models"]["ss"]
+
+
+async def test_preaquecimento_termina_um_periodo_antes_do_primeiro_passo(
+    session_factory, monkeypatch
+):
+    """O passo da varredura 0 é o ponto k=0 da janela: a grade pré-aquecida termina em
+    `agora - period_s`, senão as duas linhas mais novas ficam a ~0 s uma da outra."""
+    scenario = await _scenario(session_factory, ["ss"])
+    ends: list[datetime] = []
+
+    async def instantes(session, tag_ids, *, end, period_s, steps):
+        ends.append(end)
+        epoch = [t.timestamp() for t in grid_instants(end, period_s, steps)]
+        return np.array([[e] * len(tag_ids) for e in epoch]), [Quality.GOOD] * steps
+
+    monkeypatch.setattr(soft_sensor_seeds, "load_grid", instantes)
+
+    antes = datetime.now(UTC)
+    seeds = await _seeds(session_factory, scenario, _node("ss"))
+    depois = datetime.now(UTC)
+
+    period = timedelta(seconds=1.0)  # `period_s` do modelo do cenário
+    assert antes - period <= ends[0] <= depois - period
+    block = _instantiate(seeds["ss"], _node("ss"), _RecordingRedis())
+    agora = Signal(datetime.now(UTC).timestamp(), quality=Quality.GOOD)
+    await block.step({"IN1": agora, "IN2": agora})
+    rows, _ = block.active_buffer_copy().last(2)
+    assert rows[1, 0] - rows[0, 0] == pytest.approx(1.0, abs=0.5)

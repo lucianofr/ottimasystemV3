@@ -13,7 +13,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Container
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
 from redis.asyncio import Redis
@@ -231,7 +231,8 @@ async def _prewarm(
             values, qualities = await load_grid(
                 session,
                 tag_ids,
-                end=datetime.now(UTC),
+                # A amostra da varredura 0 do bloco é o ponto k=0: a grade para um período antes.
+                end=datetime.now(UTC) - timedelta(seconds=model.meta.period_s),
                 period_s=model.meta.period_s,
                 steps=BUFFER_STEPS,
             )
