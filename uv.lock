@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.12.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -15,6 +15,7 @@ members = [
     "ottima-core",
     "ottima-flow-runtime",
     "ottima-mcp",
+    "ottima-ml-worker",
     "ottima-opc-worker",
     "ottima-recorder",
     "ottima-workspace",
@@ -851,6 +852,25 @@ requires-dist = [
     { name = "mcp", specifier = ">=2.0.0,<3" },
     { name = "ottima-core", editable = "packages/ottima-core" },
     { name = "websockets", specifier = ">=13" },
+]
+
+[[package]]
+name = "ottima-ml-worker"
+version = "0.1.0"
+source = { editable = "services/ml-worker" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "numpy" },
+    { name = "ottima-core" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "numpy", specifier = ">=2.5" },
+    { name = "ottima-core", editable = "packages/ottima-core" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
 
 [[package]]

@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     # constante de código como `SCRIPT_POOL_SIZE`, porque o número certo depende dos núcleos do
     # host do site (RNF-01: um único host on-prem) — ver `ottima_flow_runtime.partition`.
     flow_partitions: int = 1
+    # Threads de torch/BLAS do ml-worker (ADR-046 D2): o treino não disputa núcleo com a varredura.
+    ml_threads: int = 2
 
 
 @lru_cache
