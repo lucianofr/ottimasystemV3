@@ -64,7 +64,7 @@ def fit_lstm(
 ) -> dict[str, np.ndarray]:
     """`epoch_cb(epoch, perda média da época)`, com `epoch` a partir de 1."""
     torch.set_num_threads(get_settings().ml_threads)
-    torch.manual_seed(0)  # sem semente nos hiperparâmetros: a mesma entrada dá o mesmo modelo
+    torch.manual_seed(42)  # sem semente nos hiperparâmetros: a mesma entrada dá o mesmo modelo
     x_mean, x_std, y_mean, y_std = scaling(x_k, y)
     xs = torch.tensor((x_k - x_mean) / x_std, dtype=torch.float32)
     ys = torch.tensor((y - y_mean) / y_std, dtype=torch.float32)

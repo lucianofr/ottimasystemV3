@@ -31,7 +31,7 @@ SEEDS = [InputSeed("T1", "°C"), InputSeed("P1", "bar")]
 HPS = {
     "pls": PlsHyperparams(n_components=2),
     "esn": EsnHyperparams(units=20, warmup=5, ridge=1e-3),
-    "lstm": LstmHyperparams(units=8, layers=1, epochs=5, batch_size=16, sequence_length=5),
+    "lstm": LstmHyperparams(units=8, layers=1, epochs=5, batch_size=16, sequence_length=5, lr=0.05),
 }
 
 

@@ -32,6 +32,7 @@ def _noise(m: int = 40, k: int = 5):
     return rng.normal(size=(m, k, 2)).astype(np.float32), rng.normal(size=m)
 
 
+@pytest.mark.slow
 def test_parada_antecipada_interrompe_antes_de_todas_as_epocas():
     x, y = _noise()  # alvo sem relação com a entrada: a perda para de melhorar sem demora
     epochs: list[int] = []
