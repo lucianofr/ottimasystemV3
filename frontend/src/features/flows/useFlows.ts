@@ -1,9 +1,26 @@
-import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 
 import { api, type FlowCreate, type FlowDetail, type FlowOut, type FlowSaved } from "../../lib/api";
+import { CHAVE_BLOCOS_SENSOR_VIRTUAL } from "../softsensor/useSoftSensorBlocks";
 import type { GraphJson } from "./graph";
 
 const CHAVE = ["flows"] as const;
+
+/** Salvar e excluir flow mudam quais blocos de sensor virtual existem: sem reler a
+ *  lista, o item condicional "Coleta e treino" da navegação (que nunca remonta) ficaria preso
+ *  até o foco da janela. */
+function invalidarFlows(queryClient: QueryClient) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: CHAVE }),
+    queryClient.invalidateQueries({ queryKey: CHAVE_BLOCOS_SENSOR_VIRTUAL }),
+  ]);
+}
 
 export type TsSegundos = FlowCreate["ts_seconds"];
 
@@ -49,7 +66,7 @@ export function useSaveFlow(flowId: number) {
         method: "PUT",
         body: JSON.stringify({ graph_json }),
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: CHAVE }),
+    onSuccess: () => invalidarFlows(queryClient),
   });
 }
 
@@ -92,7 +109,7 @@ export function useDeleteFlow() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => api<void>(`/api/flows/${String(id)}`, { method: "DELETE" }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: CHAVE }),
+    onSuccess: () => invalidarFlows(queryClient),
   });
 }
 
