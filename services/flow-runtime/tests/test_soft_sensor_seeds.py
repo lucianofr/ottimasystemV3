@@ -26,7 +26,11 @@ from runtime_test_helpers import (
 from sqlalchemy import delete, insert, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ottima_core.bus import KIND_SOFT_SENSOR_MODEL_MISSING, KIND_SOFT_SENSOR_PREWARM_SKIPPED
+from ottima_core.bus import (
+    KIND_SOFT_SENSOR_MODEL_ACTIVATED,
+    KIND_SOFT_SENSOR_MODEL_MISSING,
+    KIND_SOFT_SENSOR_PREWARM_SKIPPED,
+)
 from ottima_core.flowgraph import parse_graph
 from ottima_core.models import SoftSensorBinding, SoftSensorModel, Tag
 from ottima_core.models.timeseries import samples_table
@@ -210,6 +214,38 @@ async def test_deploy_carrega_o_desejado_e_grava_o_ativo(session_factory):
     assert binding.candidate_model_id is None
 
 
+async def test_deploy_que_assume_outro_modelo_avisa_a_ativacao(session_factory):
+    scenario = await _scenario(session_factory, ["ss", "igual", "velho"])
+    flow_id, models = scenario["flow_id"], scenario["models"]
+    async with session_factory() as session:
+        for block_id, active in (("ss", models["velho"]), ("igual", models["igual"])):
+            binding = await session.get_one(SoftSensorBinding, (flow_id, block_id))
+            binding.active_model_id = active
+        await session.commit()
+    events = _Events()
+
+    await _seeds(session_factory, scenario, _node("ss"), _node("igual", order=2), events=events)
+
+    [activated] = events.kinds(KIND_SOFT_SENSOR_MODEL_ACTIVATED)  # "igual" não muda de modelo
+    assert activated["severity"] == "info"
+    assert activated["payload"] == {
+        "block_id": "ss",
+        "model_id": models["ss"],
+        "previous_model_id": models["velho"],
+    }
+
+
+async def test_falha_ao_avisar_ativacao_nao_derruba_o_deploy(session_factory):
+    scenario = await _scenario(session_factory, ["ss"])
+
+    async def quebrado(**kwargs: object) -> None:
+        raise RuntimeError("redis fora")
+
+    seeds = await _seeds(session_factory, scenario, _node("ss"), events=quebrado)
+
+    assert seeds["ss"].model is not None
+
+
 async def test_vinculo_sem_desejado_sobe_sem_modelo(session_factory):
     scenario = await _scenario(session_factory, ["ss"])
     async with session_factory() as session:
@@ -291,7 +327,7 @@ async def test_deploy_com_historico_integro_preaquece(session_factory):
     assert buffer is not None and len(buffer) == BUFFER_STEPS
     _, qualities = buffer.last(BUFFER_STEPS)
     assert set(qualities) == {Quality.GOOD}
-    assert events.calls == []
+    assert events.kinds(KIND_SOFT_SENSOR_PREWARM_SKIPPED) == []
 
 
 async def test_deploy_com_artefato_corrompido_sobe_sem_modelo(session_factory):

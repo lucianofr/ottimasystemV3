@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import undefer
 
 from ottima_core.bus import (
+    KIND_SOFT_SENSOR_MODEL_ACTIVATED,
     KIND_SOFT_SENSOR_MODEL_REJECTED,
     KIND_SOFT_SENSOR_PREWARM_SKIPPED,
     FlowCommand,
@@ -179,7 +180,9 @@ async def load_seeds(
                 SoftSensorBinding.block_id.in_([n.id for n in nodes]),
             )
         )
+        bindings = list(bindings)
         desired = {b.block_id: b.desired_model_id for b in bindings}
+        previous = {b.block_id: b.active_model_id for b in bindings}
         rows = {
             m.id: m
             for m in await session.scalars(
@@ -223,6 +226,24 @@ async def load_seeds(
         await make_persist(session_factory, flow_id, block_id)(
             BindingUpdate(active_model_id=in_use.get(block_id), candidate_model_id=None)
         )
+        model_id, before = in_use.get(block_id), previous[block_id]
+        if model_id is not None and model_id != before:
+            try:
+                await emit_event(
+                    severity="info",
+                    origin=_ORIGIN,
+                    message=(
+                        f"Sensor virtual '{block_id}': modelo {model_id} em uso (antes {before})"
+                    ),
+                    kind=KIND_SOFT_SENSOR_MODEL_ACTIVATED,
+                    payload={
+                        "block_id": block_id,
+                        "model_id": model_id,
+                        "previous_model_id": before,
+                    },
+                )
+            except Exception:  # aviso perdido nunca derruba o deploy
+                logger.exception("Sensor virtual '%s': falha ao emitir a ativação", block_id)
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + PREWARM_TIMEOUT_S
