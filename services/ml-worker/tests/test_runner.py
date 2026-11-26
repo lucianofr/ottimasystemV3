@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from ottima_core.models import MlJob
-from ottima_ml_worker.jobs import ClaimedJob
+from ottima_core.models import MlJob, SoftSensorDataset
+from ottima_ml_worker.jobs import ClaimedJob, claim_next
 from ottima_ml_worker.runner import run_job
 
 
@@ -67,9 +67,11 @@ async def test_kind_desconhecido_vira_failed(session_factory, make_job, migrated
 
 
 async def test_cancelamento_mata_o_filho_e_grava_cancelled(
-    session_factory, make_job, migrated_database_url
+    session_factory, make_job, make_dataset, make_tag, migrated_database_url
 ):
-    job_id = await make_job(status="running")
+    # Linha `dataset_build` (efeito no conjunto) executando o handler que dorme.
+    dataset_id = await make_dataset([await make_tag("t0")])
+    job_id = await make_job("dataset_build", status="running", params={"dataset_id": dataset_id})
     task = asyncio.create_task(
         run_job(
             session_factory,
@@ -88,6 +90,24 @@ async def test_cancelamento_mata_o_filho_e_grava_cancelled(
     assert time.monotonic() - pedido < 3.0
     async with session_factory() as session:
         assert (await session.get(MlJob, job_id)).status == "cancelled"
+        assert (await session.get(SoftSensorDataset, dataset_id)).status == "failed"
+
+
+async def test_dataset_build_de_ponta_a_ponta_no_filho(
+    session_factory, make_job, make_dataset, make_tag, migrated_database_url
+):
+    """Handler real no filho: prova o engine próprio criado a partir de `database_url`."""
+    dataset_id = await make_dataset([await make_tag("t0")])
+    job_id = await make_job("dataset_build", params={"dataset_id": dataset_id})
+
+    job = await claim_next(session_factory)
+    await run_job(session_factory, job, database_url=migrated_database_url)
+
+    async with session_factory() as session:
+        row = await session.get(MlJob, job_id)
+        assert (row.status, row.error) == ("done", None)
+        assert row.result["analyses"] == 0
+        assert (await session.get(SoftSensorDataset, dataset_id)).status == "ready"
 
 
 async def test_filho_que_morre_sem_resultado_vira_failed(
