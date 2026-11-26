@@ -19,7 +19,7 @@ from ottima_ml_worker.jobs import ClaimedJob, Sessions, cancel_requested, finish
 PROGRESS_INTERVAL_S = 1.0
 # Gancho SÓ de teste (o compose não o define): módulo extra de handlers importado no filho.
 EXTRA_HANDLERS_ENV = "OTTIMA_ML_EXTRA_HANDLERS"
-UNEXPECTED_ERROR = "Falha inesperada na montagem do conjunto (ver o log do ml-worker)."
+UNEXPECTED_ERROR = "Falha inesperada no job (ver o log do ml-worker)."
 # O filho importa numpy ao nascer e o BLAS lê estas variáveis nesse momento (ADR-046 D2).
 BLAS_THREADS_ENV = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 _EOF = ("eof", None)

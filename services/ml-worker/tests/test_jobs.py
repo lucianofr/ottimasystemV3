@@ -165,3 +165,35 @@ async def test_laco_encerra_o_job_mesmo_quando_o_finish_de_fallback_tambem_falha
     job = await _job(session_factory, job_id)
     assert (job.status, job.finished_at is not None) == ("failed", True)
     assert await _dataset_status(session_factory, dataset_id) == "failed"
+
+
+async def test_claim_que_comita_mas_perde_a_conexao_na_volta_re_arma_a_varredura_de_orfaos(
+    session_factory, make_job, monkeypatch
+):
+    """O `claim_next` grava `running` e a conexão cai antes de devolver o job: ninguém o executa e
+    ele ficaria `running` para sempre. O laço tem de re-armar o `fail_orphans`."""
+    job_id = await make_job()
+    chamadas = 0
+
+    async def claim_que_perde_a_volta(factory):
+        nonlocal chamadas
+        chamadas += 1
+        if chamadas == 1:
+            await claim_next(factory)  # comita o `running`
+            raise ConnectionError("conexão perdida na volta")
+        return None
+
+    monkeypatch.setattr(main, "claim_next", claim_que_perde_a_volta)
+    monkeypatch.setattr(main, "JOB_POLL_INTERVAL_S", 0.05)
+    task = asyncio.create_task(main._job_loop(session_factory, FastAPI(), "x"))
+    try:
+        for _ in range(100):
+            if (await _job(session_factory, job_id)).status == "failed":
+                break
+            await asyncio.sleep(0.05)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    job = await _job(session_factory, job_id)
+    assert (job.status, job.error) == ("failed", "interrompido pelo reinício do serviço")

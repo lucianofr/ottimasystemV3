@@ -63,7 +63,7 @@ async def test_excecao_inesperada_no_handler_vira_failed_com_mensagem_generica(
 
     assert (job.status, job.error) == (
         "failed",
-        "Falha inesperada na montagem do conjunto (ver o log do ml-worker).",
+        "Falha inesperada no job (ver o log do ml-worker).",
     )
 
 
