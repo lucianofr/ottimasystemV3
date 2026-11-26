@@ -176,12 +176,54 @@ function tabelaPortContracts(portContracts) {
 }
 
 // --------------------------------------------------------------------------------------
+// Hiperparâmetros do sensor virtual (RF-587/588, ADR-046) -> TS
+// --------------------------------------------------------------------------------------
+
+const TIPOS_HIPERPARAMETROS = `
+/** Hiperparâmetro numérico: default e limites do schema Pydantic (\`min\` é exclusivo nos campos
+ * \`gt\`; o servidor recusa o valor, a UI usa só como dica). */
+export interface HiperparametroNumerico {
+  default: number;
+  min: number;
+  max: number;
+}
+
+/** Hiperparâmetro de lista fechada (\`Literal\`): as opções saem do schema. */
+export interface HiperparametroEscolha {
+  default: number;
+  choices: number[];
+}
+
+export type Hiperparametro = HiperparametroNumerico | HiperparametroEscolha;
+
+/** Faixa de busca do Optuna: \`low\`/\`high\` para int/float/log, \`choices\` para choice. */
+export interface FaixaDeBusca {
+  kind: "int" | "float" | "log" | "choice";
+  low?: number;
+  high?: number;
+  choices?: number[];
+}
+`.trim();
+
+function tabelaPorMetodo(nome, tipoDoCampo, tabela) {
+  const metodos = Object.keys(tabela)
+    .map((metodo) => JSON.stringify(metodo))
+    .join(" | ");
+  return (
+    `export const ${nome}: Record<${metodos}, Record<string, ${tipoDoCampo}>> = ` +
+    `${JSON.stringify(tabela, null, 2)};`
+  );
+}
+
+// --------------------------------------------------------------------------------------
 
 function main() {
   const {
     port_contracts: portContracts,
     ws_payloads: wsPayloads,
     node_configs: nodeConfigs,
+    SOFT_SENSOR_HYPERPARAMS: hiperparametros,
+    SOFT_SENSOR_SEARCH_SPACE: espacoDeBusca,
   } = rodarExportadorPython();
 
   const corpo = `// GERADO — não editar; fonte: ottima_core.contracts_export
@@ -206,6 +248,17 @@ ${interfacesDeSchemas(wsPayloads).join("\n\n")}
 // --------------------------------------------------------------------------------------
 
 ${interfacesDeSchemas(nodeConfigs).join("\n\n")}
+
+// --------------------------------------------------------------------------------------
+// Hiperparâmetros do sensor virtual: defaults/limites derivados dos schemas Pydantic e faixas
+// do Optuna (ottima_core.softsensor.hyperparams) — a UI nunca digita esses números.
+// --------------------------------------------------------------------------------------
+
+${TIPOS_HIPERPARAMETROS}
+
+${tabelaPorMetodo("SOFT_SENSOR_HYPERPARAMS", "Hiperparametro", hiperparametros)}
+
+${tabelaPorMetodo("SOFT_SENSOR_SEARCH_SPACE", "FaixaDeBusca", espacoDeBusca)}
 `;
 
   mkdirSync(dirname(ARQUIVO_SAIDA), { recursive: true });

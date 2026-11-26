@@ -28,11 +28,21 @@ from .dataset import (
 )
 from .forward import predict
 from .grid import grid_instants, load_grid, staleness_limit_s
+from .hyperparams import (
+    HYPERPARAMS,
+    SEARCH_SPACE,
+    EsnHyperparams,
+    LstmHyperparams,
+    PlsHyperparams,
+    parse_hyperparams,
+    window_of,
+)
 from .window import Evaluation, Reason, SampleBuffer, evaluate
 
 __all__ = [
     "BUFFER_STEPS",
     "DATASET_STEPS",
+    "HYPERPARAMS",
     "MAX_ARTIFACT_BYTES",
     "MAX_ARTIFACT_UNPACKED_BYTES",
     "MAX_DATASET_BYTES",
@@ -40,12 +50,16 @@ __all__ = [
     "PERIODS_S",
     "PERIOD_TOLERANCE",
     "RANGE_MARGIN",
+    "SEARCH_SPACE",
     "ArtifactError",
     "DatasetError",
+    "EsnHyperparams",
     "Evaluation",
     "InputMeta",
     "LoadedModel",
+    "LstmHyperparams",
     "ModelMeta",
+    "PlsHyperparams",
     "Reason",
     "SampleBuffer",
     "build_dataset",
@@ -56,9 +70,11 @@ __all__ = [
     "model_steps",
     "pack_dataset",
     "pack_weights",
+    "parse_hyperparams",
     "predict",
     "staleness_limit_s",
     "synthetic",
     "unpack_dataset",
     "unpack_weights",
+    "window_of",
 ]
