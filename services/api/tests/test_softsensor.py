@@ -453,6 +453,18 @@ async def test_save_que_troca_o_tipo_do_bloco_apaga_o_vinculo(client, admin_head
     assert await _vinculo(db_session, c["flow_id"]) is None
 
 
+async def test_save_que_troca_o_metodo_do_bloco_apaga_o_vinculo(client, admin_headers, db_session):
+    """pls -> esn continua sendo sensor virtual, mas é outro tipo (spec §7.4): o modelo PLS
+    do vínculo não serve ao bloco ESN."""
+    c = await _cenario(client, admin_headers, "PodaMetodo")
+    modelo = await _modelo(db_session, c["project_id"], "m1")
+    await _inserir_vinculo(db_session, c["flow_id"], desired_model_id=modelo.id)
+
+    await _salvar(client, admin_headers, c["flow_id"], _grafo(c["tags"], _sv("soft_sensor_esn")))
+
+    assert await _vinculo(db_session, c["flow_id"]) is None
+
+
 async def test_save_que_so_muda_rotulo_mantem_o_vinculo(client, admin_headers, db_session):
     c = await _cenario(client, admin_headers, "PodaRotulo")
     modelo = await _modelo(db_session, c["project_id"], "m1")

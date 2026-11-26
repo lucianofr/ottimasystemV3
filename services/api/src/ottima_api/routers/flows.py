@@ -303,7 +303,7 @@ async def update_flow(
     # `IntegrityError` AQUI, fora do `try` do commit que o traduz em 409. Rollback do commit
     # desfaz a poda junto: os dois são a mesma transação.
     nomes_podados = await podar_variaveis_historiadas(db, flow.id, grafo)
-    await podar_vinculos_soft_sensor(db, flow.id, grafo)
+    await podar_vinculos_soft_sensor(db, flow.id, grafo, flow.graph_json)
 
     if body.name is not None:
         flow.name = body.name

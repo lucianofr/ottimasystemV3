@@ -22,6 +22,15 @@ BUFFER_STEPS = 256
 RANGE_MARGIN = 0.05
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
 MAX_ARTIFACT_UNPACKED_BYTES = 32 * 1024 * 1024  # teto do descomprimido: contém zip bomb
+PERIOD_TOLERANCE = 1e-9
+
+
+def model_steps(period_s: float, ts_s: float) -> int | None:
+    """Varreduras por passo de modelo (`period_s / ts_s`, spec §5.2), ou `None` quando o período
+    não é múltiplo inteiro >= 1 do Ts. Regra única da ativação (API) e do deploy (runtime)."""
+    ratio = period_s / ts_s
+    steps = round(ratio)
+    return steps if steps >= 1 and abs(ratio - steps) <= PERIOD_TOLERANCE else None
 
 
 class ArtifactError(ValueError):

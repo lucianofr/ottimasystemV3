@@ -31,10 +31,12 @@ from ottima_core.flowgraph import SOFT_SENSOR_METHOD, FlowGraph
 from ottima_core.models import SoftSensorBinding, SoftSensorModel, Tag
 from ottima_core.softsensor import (
     BUFFER_STEPS,
+    PERIOD_TOLERANCE,
     LoadedModel,
     SampleBuffer,
     load_grid,
     load_model,
+    model_steps,
 )
 
 from .blocks.base import Block
@@ -52,7 +54,6 @@ PERSIST_TIMEOUT_S: Final[float] = 2.0
 varredura, e a gravação de um bloco parado não pode atropelar por muito tempo a do redeploy."""
 
 _ORIGIN = "flow-runtime"
-_PERIOD_TOLERANCE = 1e-9
 
 EmitEvent = Callable[..., Awaitable[None]]
 
@@ -79,8 +80,7 @@ def model_mismatch(
         return "method"
     if model_n_inputs != n_inputs:
         return "n_inputs"
-    ratio = model_period_s / ts_seconds
-    if round(ratio) < 1 or abs(ratio - round(ratio)) > _PERIOD_TOLERANCE:
+    if model_steps(model_period_s, ts_seconds) is None:
         return "period"
     return None
 
@@ -376,7 +376,7 @@ async def soft_sensor_command(
 
     def same_period() -> bool:
         active = block.active_period_s
-        return active is not None and abs(active - model.meta.period_s) <= _PERIOD_TOLERANCE
+        return active is not None and abs(active - model.meta.period_s) <= PERIOD_TOLERANCE
 
     prewarm = None
     if not same_period():

@@ -50,6 +50,7 @@ from ottima_core.flowgraph.fuzzy_surface import sample_surface
 from ottima_core.flowgraph.introspect import FuzzyIntrospection, introspect_fll
 from ottima_core.models import Flow, Project, SoftSensorBinding, SoftSensorModel, User
 from ottima_core.schemas.flows import MAX_BIGINT
+from ottima_core.softsensor import model_steps
 
 logger = logging.getLogger(__name__)
 
@@ -535,9 +536,7 @@ async def set_model(
             f"o bloco '{block_id}' tem {node.config.n_inputs}"
         )
     ts = float(flow.ts_seconds)
-    razao = modelo.period_s / ts
-    # Mesma regra do runtime (`model_mismatch`): múltiplo inteiro >= 1 do Ts, tolerância 1e-9.
-    if round(razao) < 1 or abs(razao - round(razao)) > 1e-9:
+    if model_steps(modelo.period_s, ts) is None:
         raise _reprovado(
             f"Período do modelo ({modelo.period_s:g} s) não é múltiplo do Ts do flow ({ts:g} s)"
         )

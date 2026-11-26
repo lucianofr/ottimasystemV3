@@ -16,6 +16,7 @@ from ottima_core.softsensor import (
     LoadedModel,
     ModelMeta,
     load_model,
+    model_steps,
     pack_weights,
     synthetic,
     unpack_weights,
@@ -282,3 +283,18 @@ def test_sinteticos_preenchem_janela_faixa_e_periodo():
     assert [(i.min, i.max) for i in padrao] == [(-1e6, 1e6)] * 2
     sob_medida = synthetic.pls([1.0], 0.0, ranges=[(0.0, 10.0)])[0].inputs
     assert (sob_medida[0].min, sob_medida[0].max) == (0.0, 10.0)
+
+
+@pytest.mark.parametrize(
+    ("period_s", "ts_s", "esperado"),
+    [
+        (6.0, 2.0, 3),
+        (5.0, 5.0, 1),
+        (0.3, 0.1, 3),  # 0,3 / 0,1 = 2,9999999999999996 em float: múltiplo, dentro da tolerância
+        (5.0, 2.0, None),  # razão 2,5
+        (1.5, 1.0, None),
+        (0.5, 1.0, None),  # período menor que o Ts: menos de um passo
+    ],
+)
+def test_model_steps_e_o_multiplo_inteiro_do_ts_ou_none(period_s, ts_s, esperado):
+    assert model_steps(period_s, ts_s) == esperado
