@@ -660,12 +660,15 @@ async def _halt(harness, flow_id: int, how: str) -> None:
     if how == "stop":
         await harness.command("stop", flow_id)
         await harness.await_state(flow_id, "stopped")
+    elif how == "project":  # `_force_stop`
+        await harness.supervisor.on_project_activated(0)
+        assert harness.flow_state(flow_id) == "stopped"
     else:
         await harness.supervisor.on_comm_failure(0, flow_id)
         assert harness.flow_state(flow_id) == "failed"
 
 
-@pytest.mark.parametrize("how", ["stop", "fail"])
+@pytest.mark.parametrize("how", ["stop", "fail", "project"])
 async def test_parar_com_candidato_aquecendo_limpa_o_candidato(
     harness_factory, session_factory, how
 ):

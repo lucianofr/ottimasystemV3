@@ -112,7 +112,7 @@ def _desired_after_rejection(rejected_model_id: int, target: int | None) -> Colu
 def make_persist(
     session_factory: async_sessionmaker[AsyncSession] | None, flow_id: int, block_id: str
 ) -> Callable[[BindingUpdate], Awaitable[None]]:
-    """Grava `active`/`candidate` (e, ao rejeitar, `desired = active`) no vínculo do bloco."""
+    """Grava `active`/`candidate` (e, ao rejeitar, `desired = active` se ainda pede o rejeitado)."""
 
     async def persist(change: BindingUpdate) -> None:
         if session_factory is None:
