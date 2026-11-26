@@ -68,7 +68,8 @@ async def finish(
     async with session_factory() as session:
         rows = await session.execute(
             update(MlJob)
-            .where(MlJob.id == job_id)
+            # `running`: um `finish(failed)` repetido não desfaz `done`/`cancelled` já gravado
+            .where(MlJob.id == job_id, MlJob.status == "running")
             .values(status=status, result=result, error=error, finished_at=func.now())
             .returning(MlJob.kind, MlJob.params)
         )

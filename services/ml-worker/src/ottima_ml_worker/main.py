@@ -44,9 +44,10 @@ async def _heartbeat_loop(session_factory: Sessions, app: FastAPI) -> None:
         await asyncio.sleep(HEARTBEAT_INTERVAL_S)
 
 
-async def run_claimed(session_factory: Sessions, job: ClaimedJob, *, database_url: str) -> None:
-    """`run_job` que explode (banco fora no `finish`, por exemplo) encerra a linha como `failed`;
-    se nem isso der, o `fail_orphans` da próxima partida encerra."""
+async def run_claimed(session_factory: Sessions, job: ClaimedJob, *, database_url: str) -> bool:
+    """`run_job` que explode (banco fora no `finish`, por exemplo) encerra a linha como `failed`.
+    Devolve False se nem isso deu: a linha pode ter ficado `running` e o laço re-arma o
+    `fail_orphans` (consumidor único: `running` com o job já devolvido é sempre órfão)."""
     try:
         await run_job(session_factory, job, database_url=database_url)
     except Exception as exc:
@@ -60,6 +61,8 @@ async def run_claimed(session_factory: Sessions, job: ClaimedJob, *, database_ur
             )
         except Exception:
             logger.exception("falha ao encerrar o job %d como failed", job.id)
+            return False
+    return True
 
 
 async def _job_loop(session_factory: Sessions, app: FastAPI, database_url: str) -> None:
@@ -74,7 +77,8 @@ async def _job_loop(session_factory: Sessions, app: FastAPI, database_url: str) 
             if job is not None:
                 app.state.running_id = job.id
                 try:
-                    await run_claimed(session_factory, job, database_url=database_url)
+                    if not await run_claimed(session_factory, job, database_url=database_url):
+                        orphans_done = False
                 finally:
                     app.state.running_id = None
                 continue

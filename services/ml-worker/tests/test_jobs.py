@@ -2,6 +2,9 @@
 
 import asyncio
 
+import pytest
+from fastapi import FastAPI
+
 from ottima_core.models import MlJob, SoftSensorDataset
 from ottima_ml_worker import main
 from ottima_ml_worker.jobs import (
@@ -118,3 +121,47 @@ async def test_run_job_que_explode_e_encerrado_como_failed(session_factory, make
     job = await _job(session_factory, job_id)
     assert job.status == "failed"
     assert "runner caiu" in job.error
+
+
+@pytest.mark.parametrize("encerrado", ["done", "cancelled"])
+async def test_finish_nao_sobrescreve_job_ja_encerrado(
+    session_factory, make_job, make_dataset, make_tag, encerrado
+):
+    """`finish(failed)` repetido depois de um commit cujo ack se perdeu não desfaz o resultado."""
+    dataset_id = await make_dataset([await make_tag("t0")])
+    job_id = await make_job("dataset_build", status=encerrado, params={"dataset_id": dataset_id})
+
+    await finish(session_factory, job_id, status="failed", error="tarde demais")
+
+    job = await _job(session_factory, job_id)
+    assert (job.status, job.error) == (encerrado, None)
+    assert await _dataset_status(session_factory, dataset_id) == "building"
+
+
+async def test_laco_encerra_o_job_mesmo_quando_o_finish_de_fallback_tambem_falha(
+    session_factory, make_job, make_dataset, make_tag, monkeypatch
+):
+    """Postgres reinicia no meio do job: `run_job` e o `finish` de fallback explodem. Sem a
+    varredura de órfãos re-armada, a linha ficaria `running` e o conjunto `building` para sempre."""
+    dataset_id = await make_dataset([await make_tag("t0")])
+    job_id = await make_job("dataset_build", params={"dataset_id": dataset_id})
+
+    async def banco_fora(*args, **kwargs):
+        raise ConnectionError("banco fora")
+
+    monkeypatch.setattr(main, "run_job", banco_fora)
+    monkeypatch.setattr(main, "finish", banco_fora)
+    monkeypatch.setattr(main, "JOB_POLL_INTERVAL_S", 0.05)
+    task = asyncio.create_task(main._job_loop(session_factory, FastAPI(), "x"))
+    try:
+        for _ in range(100):  # até 5 s: o laço fecha a linha no segundo ciclo
+            if (await _job(session_factory, job_id)).status == "failed":
+                break
+            await asyncio.sleep(0.05)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    job = await _job(session_factory, job_id)
+    assert (job.status, job.finished_at is not None) == ("failed", True)
+    assert await _dataset_status(session_factory, dataset_id) == "failed"
