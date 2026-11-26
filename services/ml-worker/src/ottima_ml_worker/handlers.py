@@ -82,15 +82,21 @@ async def train_job(ctx: JobContext) -> dict:
     async with ctx.session_factory() as session:
         job = await session.get(MlJob, ctx.job_id)
         datasets = await load_compatible_datasets(session, job.project_id, params["dataset_ids"])
-        # Nome e unidade das entradas são os congelados no conjunto mais recente (spec §7.3).
-        latest = max(datasets, key=lambda ds: ds.end_ts)
-        lab_variable = await session.get(LabVariable, latest.lab_variable_id)
+        first = datasets[0]  # os conjuntos compartilham variável, entradas e período
+        lab_variable = await session.get(LabVariable, first.lab_variable_id)
+        tags = {
+            t.id: t
+            for t in await session.scalars(select(Tag).where(Tag.id.in_(first.input_tag_ids)))
+        }
+        for tag_id in first.input_tag_ids:
+            if tag_id not in tags:
+                raise TrainingError(f"Tag de entrada {tag_id} não existe mais no projeto")
         for ds in datasets:
             await session.refresh(ds, ["data"])
         data = load_train_data([ds.data for ds in datasets])
         project_id, created_by = job.project_id, job.created_by
-        inputs = [InputSeed(m["name"], m["eu"]) for m in latest.inputs_meta]
-        input_tag_ids, period_s = list(latest.input_tag_ids), latest.period_s
+        inputs = [InputSeed(tags[i].name, tags[i].eu) for i in first.input_tag_ids]
+        input_tag_ids, period_s = list(first.input_tag_ids), first.period_s
         dataset_ids = [ds.id for ds in datasets]
         output_name, output_eu = lab_variable.name, lab_variable.eu
     ctx.report({"stage": "training"})

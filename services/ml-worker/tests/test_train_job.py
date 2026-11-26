@@ -18,8 +18,13 @@ from ottima_ml_worker.runner import run_job
 from ottima_ml_worker.training import TrainingError
 
 END = datetime.now(UTC).replace(microsecond=0)
-TAGS = [11, 12]
 PLS = {"method": "pls", "hyperparams": {"n_components": 2}, "name": "modelo"}
+
+
+@pytest.fixture
+async def tags(make_tag) -> list[int]:
+    """Três tags reais, com nome e EU, na ordem T1, T2, T3."""
+    return [await make_tag(f"T{i}", eu="°C") for i in (1, 2, 3)]
 
 
 @pytest.fixture(autouse=True)
@@ -48,8 +53,8 @@ async def _dataset(
     project_id: int,
     lab_variable_id: int,
     name: str,
+    tags: list[int],
     *,
-    tags: list[int] = TAGS,
     status: str = "ready",
     period_s: float = 1.0,
     blob: bytes | None = None,
@@ -66,7 +71,6 @@ async def _dataset(
             start_ts=end_ts - timedelta(hours=1),
             end_ts=end_ts,
             status=status,
-            inputs_meta=[{"tag_id": t, "name": f"T{t}", "eu": "°C"} for t in tags],
             data=blob if status == "ready" else None,
             created_by="teste",
         ),
@@ -91,12 +95,14 @@ async def _models(factory) -> list[SoftSensorModel]:
 
 
 async def test_treino_pls_grava_modelo_com_metricas_e_tags_de_entrada(
-    session_factory, make_job, project_id, lab_variable_id
+    session_factory, make_job, project_id, lab_variable_id, tags
 ):
     async with session_factory() as session:
         (await session.get(LabVariable, lab_variable_id)).eu = "cP"
         await session.commit()
-    dataset_id = await _dataset(session_factory, project_id, lab_variable_id, "d1", blob=_blob())
+    dataset_id = await _dataset(
+        session_factory, project_id, lab_variable_id, "d1", tags[:2], blob=_blob()
+    )
 
     result, reports = await _train(session_factory, make_job, {**PLS, "dataset_ids": [dataset_id]})
 
@@ -106,23 +112,30 @@ async def test_treino_pls_grava_modelo_com_metricas_e_tags_de_entrada(
     assert set(result["metrics"]) == {"r2", "rmse", "mae"}
     assert result["metrics"]["r2"] > 0.95  # y é linear nas entradas, com ruído pequeno
     assert (model.project_id, model.name, model.method) == (project_id, "modelo", "pls")
-    assert (model.period_s, model.n_inputs, model.input_tag_ids) == (1.0, 2, TAGS)
+    assert (model.period_s, model.n_inputs, model.input_tag_ids) == (1.0, 2, tags[:2])
     assert model.created_by == "teste"  # quem enfileirou o job
     assert model.meta["metrics"] == result["metrics"]
     assert model.meta["dataset_ids"] == [dataset_id]
     assert (model.meta["output_name"], model.meta["output_eu"]) == ("Viscosidade", "cP")
-    assert [(i["name"], i["eu"]) for i in model.meta["inputs"]] == [("T11", "°C"), ("T12", "°C")]
+    assert [(i["name"], i["eu"]) for i in model.meta["inputs"]] == [("T1", "°C"), ("T2", "°C")]
     loaded = load_model(model.id, model.meta, model.weights)  # o artefato gravado é utilizável
     assert abs(predict(loaded, np.ones((model.meta["warmup_steps"], 2))) - 4.0) < 0.5
     assert [r["stage"] for r in reports] == ["loading", "training", "saving"]
 
 
 async def test_dois_conjuntos_compativeis_sao_concatenados(
-    session_factory, make_job, project_id, lab_variable_id
+    session_factory, make_job, project_id, lab_variable_id, tags
 ):
-    a = await _dataset(session_factory, project_id, lab_variable_id, "a", blob=_blob(30, seed=1))
+    a = await _dataset(
+        session_factory, project_id, lab_variable_id, "a", tags[:2], blob=_blob(30, seed=1)
+    )
     b = await _dataset(
-        session_factory, project_id, lab_variable_id, "b", blob=_blob(25, seed=2, t0=100.0)
+        session_factory,
+        project_id,
+        lab_variable_id,
+        "b",
+        tags[:2],
+        blob=_blob(25, seed=2, t0=100.0),
     )
 
     result, _ = await _train(session_factory, make_job, {**PLS, "dataset_ids": [a, b]})
@@ -137,24 +150,29 @@ async def test_dois_conjuntos_compativeis_sao_concatenados(
     ["variavel", "entradas", "ordem_das_entradas", "periodo", "nao_ready", "outro_projeto"],
 )
 async def test_conjuntos_incompativeis_falham_com_o_motivo(
-    session_factory, make_job, project_id, lab_variable_id, defeito
+    session_factory, make_job, project_id, lab_variable_id, tags, defeito
 ):
-    boa = await _dataset(session_factory, project_id, lab_variable_id, "boa", blob=_blob())
+    boa = await _dataset(
+        session_factory, project_id, lab_variable_id, "boa", tags[:2], blob=_blob()
+    )
     outra_variavel = await _add(session_factory, LabVariable(project_id=project_id, name="Dens"))
     outro_projeto = await _add(session_factory, Project(name="Outro", description=""))
     variavel_alheia = await _add(
         session_factory, LabVariable(project_id=outro_projeto, name="Viscosidade")
     )
     blob = _blob(seed=3)
+    t1, t2, t3 = tags
     ruim_args = {
-        "variavel": (project_id, outra_variavel, {"blob": blob}),
-        "entradas": (project_id, lab_variable_id, {"tags": [11, 13], "blob": blob}),
-        "ordem_das_entradas": (project_id, lab_variable_id, {"tags": [12, 11], "blob": blob}),
-        "periodo": (project_id, lab_variable_id, {"period_s": 5.0, "blob": blob}),
-        "nao_ready": (project_id, lab_variable_id, {"status": "building"}),
-        "outro_projeto": (outro_projeto, variavel_alheia, {"blob": blob}),
+        "variavel": (project_id, outra_variavel, [t1, t2], {"blob": blob}),
+        "entradas": (project_id, lab_variable_id, [t1, t3], {"blob": blob}),
+        "ordem_das_entradas": (project_id, lab_variable_id, [t2, t1], {"blob": blob}),
+        "periodo": (project_id, lab_variable_id, [t1, t2], {"period_s": 5.0, "blob": blob}),
+        "nao_ready": (project_id, lab_variable_id, [t1, t2], {"status": "building"}),
+        "outro_projeto": (outro_projeto, variavel_alheia, [t1, t2], {"blob": blob}),
     }[defeito]
-    ruim = await _dataset(session_factory, ruim_args[0], ruim_args[1], "ruim", **ruim_args[2])
+    ruim = await _dataset(
+        session_factory, ruim_args[0], ruim_args[1], "ruim", ruim_args[2], **ruim_args[3]
+    )
     esperado = {
         "variavel": "Conjuntos com variáveis de laboratório diferentes",
         "entradas": "Conjuntos com entradas diferentes",
@@ -177,9 +195,11 @@ async def test_nenhum_conjunto_falha_com_mensagem(session_factory, make_job):
 
 
 async def test_nome_de_modelo_repetido_falha_o_segundo_job(
-    session_factory, make_job, project_id, lab_variable_id, migrated_database_url
+    session_factory, make_job, project_id, lab_variable_id, tags, migrated_database_url
 ):
-    dataset_id = await _dataset(session_factory, project_id, lab_variable_id, "d1", blob=_blob())
+    dataset_id = await _dataset(
+        session_factory, project_id, lab_variable_id, "d1", tags[:2], blob=_blob()
+    )
     params = {**PLS, "dataset_ids": [dataset_id]}
     ids = [await make_job("train", status="running", params=params) for _ in range(2)]
 
@@ -198,9 +218,11 @@ async def test_nome_de_modelo_repetido_falha_o_segundo_job(
 
 
 async def test_hiperparametro_invalido_falha_com_mensagem(
-    session_factory, make_job, project_id, lab_variable_id
+    session_factory, make_job, project_id, lab_variable_id, tags
 ):
-    dataset_id = await _dataset(session_factory, project_id, lab_variable_id, "d1", blob=_blob())
+    dataset_id = await _dataset(
+        session_factory, project_id, lab_variable_id, "d1", tags[:2], blob=_blob()
+    )
 
     with pytest.raises(ValueError) as raised:
         await _train(
@@ -214,10 +236,12 @@ async def test_hiperparametro_invalido_falha_com_mensagem(
 
 
 async def test_conjunto_com_numero_de_entradas_diferente_do_blob_falha_com_mensagem(
-    session_factory, make_job, project_id, lab_variable_id
+    session_factory, make_job, project_id, lab_variable_id, tags
 ):
     """O blob tem 3 entradas, mas o conjunto descreve 2: erro de validação, não 'inesperado'."""
-    dataset_id = await _dataset(session_factory, project_id, lab_variable_id, "d1", blob=_blob(d=3))
+    dataset_id = await _dataset(
+        session_factory, project_id, lab_variable_id, "d1", tags[:2], blob=_blob(d=3)
+    )
 
     with pytest.raises(
         TrainingError, match=r"O conjunto tem 3 entrada\(s\), mas foram informados 2"
@@ -225,10 +249,27 @@ async def test_conjunto_com_numero_de_entradas_diferente_do_blob_falha_com_mensa
         await _train(session_factory, make_job, {**PLS, "dataset_ids": [dataset_id]})
 
 
-async def test_progresso_do_lstm_informa_a_epoca(
-    session_factory, make_job, project_id, lab_variable_id
+async def test_tag_de_entrada_apagada_falha_com_mensagem(
+    session_factory, make_job, project_id, lab_variable_id, tags
 ):
-    dataset_id = await _dataset(session_factory, project_id, lab_variable_id, "d1", blob=_blob())
+    apagada = tags[-1] + 999
+    dataset_id = await _dataset(
+        session_factory, project_id, lab_variable_id, "d1", [tags[0], apagada], blob=_blob()
+    )
+
+    with pytest.raises(TrainingError) as raised:
+        await _train(session_factory, make_job, {**PLS, "dataset_ids": [dataset_id]})
+
+    assert str(raised.value) == f"Tag de entrada {apagada} não existe mais no projeto"
+    assert await _models(session_factory) == []
+
+
+async def test_progresso_do_lstm_informa_a_epoca(
+    session_factory, make_job, project_id, lab_variable_id, tags
+):
+    dataset_id = await _dataset(
+        session_factory, project_id, lab_variable_id, "d1", tags[:2], blob=_blob()
+    )
     lstm = {
         "units": 8,
         "layers": 1,
