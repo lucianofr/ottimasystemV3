@@ -7,6 +7,7 @@ from ottima_core.portability.bundle import (
     montar_bundle,
     problemas_de_coerencia_interna,
     ref_por_id,
+    validar_artefato_do_modelo,
 )
 from ottima_core.portability.schemas import (
     SCHEMA_VERSION,
@@ -15,6 +16,8 @@ from ottima_core.portability.schemas import (
     BundleFlow,
     BundleHistorizedVar,
     BundleProject,
+    BundleSoftSensorBinding,
+    BundleSoftSensorModel,
     BundleTag,
     BundleTagRef,
     ProjectBundle,
@@ -34,6 +37,8 @@ __all__ = [
     "BundleFlow",
     "BundleHistorizedVar",
     "BundleProject",
+    "BundleSoftSensorBinding",
+    "BundleSoftSensorModel",
     "BundleTag",
     "BundleTagRef",
     "ProjectBundle",
@@ -45,4 +50,5 @@ __all__ = [
     "montar_bundle",
     "problemas_de_coerencia_interna",
     "ref_por_id",
+    "validar_artefato_do_modelo",
 ]

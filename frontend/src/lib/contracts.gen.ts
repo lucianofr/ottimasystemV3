@@ -49,13 +49,22 @@ export interface ContratoPortaDinamicaMalha extends ContratoPortaDinamica {
   max_fll_length: number;
 }
 
+/** Contrato dinâmico COM porta fixa: os blocos de sensor virtual (RF-581, ADR-046) têm
+ * entradas IN1..INn derivadas de "n_inputs" (em "rules") e a saída única "out" em "ports"
+ * — a única mistura `rules` + `ports` do contrato. */
+export interface ContratoPortaDinamicaSensor extends ContratoPortaDinamica {
+  ports: PortaFixa[];
+  default_counts: { n_inputs: number };
+}
+
 export type ContratoPorta =
   | ContratoPortaFixa
   | ContratoPortaDinamica
   | ContratoPortaDinamicaComDefault
-  | ContratoPortaDinamicaMalha;
+  | ContratoPortaDinamicaMalha
+  | ContratoPortaDinamicaSensor;
 
-export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "constant" | "script" | "fuzzy" | "first_order" | "kalman" | "scaler" | "integrator" | "lead_lag" | "dead_time" | "bus_publish" | "bus_subscribe" | "pid" | "tfs" | "mpc" | "pid_loop" | "fuzzy_loop", ContratoPorta> = {
+export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "constant" | "script" | "fuzzy" | "first_order" | "kalman" | "scaler" | "integrator" | "lead_lag" | "dead_time" | "bus_publish" | "bus_subscribe" | "pid" | "tfs" | "mpc" | "pid_loop" | "fuzzy_loop" | "soft_sensor_pls" | "soft_sensor_esn" | "soft_sensor_lstm", ContratoPorta> = {
   "opc_read": {
     "dynamic": false,
     "ports": [
@@ -397,6 +406,75 @@ export const PORT_CONTRACTS: Record<"opc_read" | "opc_write" | "constant" | "scr
       "n_loops": 1
     },
     "max_fll_length": 200000
+  },
+  "soft_sensor_pls": {
+    "dynamic": true,
+    "source": "config.n_inputs (RF-581, ADR-046)",
+    "rules": [
+      {
+        "direction": "input",
+        "prefix": "IN",
+        "count_field": "n_inputs",
+        "max": 32,
+        "type": "num"
+      }
+    ],
+    "ports": [
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ],
+    "default_counts": {
+      "n_inputs": 2
+    }
+  },
+  "soft_sensor_esn": {
+    "dynamic": true,
+    "source": "config.n_inputs (RF-581, ADR-046)",
+    "rules": [
+      {
+        "direction": "input",
+        "prefix": "IN",
+        "count_field": "n_inputs",
+        "max": 32,
+        "type": "num"
+      }
+    ],
+    "ports": [
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ],
+    "default_counts": {
+      "n_inputs": 2
+    }
+  },
+  "soft_sensor_lstm": {
+    "dynamic": true,
+    "source": "config.n_inputs (RF-581, ADR-046)",
+    "rules": [
+      {
+        "direction": "input",
+        "prefix": "IN",
+        "count_field": "n_inputs",
+        "max": 32,
+        "type": "num"
+      }
+    ],
+    "ports": [
+      {
+        "name": "out",
+        "direction": "output",
+        "type": "num"
+      }
+    ],
+    "default_counts": {
+      "n_inputs": 2
+    }
   }
 };
 
@@ -792,4 +870,9 @@ export interface LeadLagConfig {
 
 export interface DeadTimeConfig {
   theta: number;
+}
+
+export interface SoftSensorConfig {
+  n_inputs: number;
+  output_eu: string;
 }

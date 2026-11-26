@@ -23,6 +23,7 @@ from ottima_core.flowgraph.parse import (
     _FILTER_KEYS,
     _TAG_DIRECTION,
     BUS_TYPES,
+    SOFT_SENSOR_METHOD,
     FlowEdge,
     FlowGraph,
     FlowNode,
@@ -176,12 +177,10 @@ def _output_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[
     if node.type == "fuzzy_loop":
         # v2 multicanal: uma saida por canal de controle (SPEC_FUZZY §3.2 v2).
         return tuple(f"out_{i}" for i in range(1, node.config.n_loops + 1))
-    if node.type in _FILTER_TYPES or node.type in (
-        "scaler",
-        "integrator",
-        "constant",
-        "lead_lag",
-        "dead_time",
+    if (
+        node.type in _FILTER_TYPES
+        or node.type in SOFT_SENSOR_METHOD
+        or node.type in ("scaler", "integrator", "constant", "lead_lag", "dead_time")
     ):
         return ("out",)
     if node.type == "bus_subscribe":
@@ -198,6 +197,10 @@ def _input_handles(node: FlowNode, mpc_configs: dict[str, MpcConfig]) -> tuple[s
         # fallback de `_required_input_handles`, igual à do OPC-Write.
         return ("in",)
     if node.type == "script":
+        return tuple(f"IN{i}" for i in range(1, node.config.n_inputs + 1))
+    if node.type in SOFT_SENSOR_METHOD:
+        # Sensor virtual (RF-581): INk é posicional, a k-ésima entrada do modelo (SPEC §5.1);
+        # todas obrigatórias pelo fallback de `_required_input_handles`.
         return tuple(f"IN{i}" for i in range(1, node.config.n_inputs + 1))
     if node.type == "fuzzy":
         portas = tuple(f"IN{i}" for i in range(1, node.config.n_inputs + 1))

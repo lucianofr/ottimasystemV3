@@ -13,6 +13,8 @@ def test_metadata_tem_todas_as_tabelas_relacionais():
         "flows",
         "mpc_setpoints",
         "loop_setpoints",
+        "soft_sensor_models",
+        "soft_sensor_bindings",
         "history_retention_settings",
         "system_settings",
     }

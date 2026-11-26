@@ -7,6 +7,8 @@ import { Select } from "../../../components/ui/select";
 import type { TagOut } from "../../../lib/api";
 import { ROTULO_TIPO } from "../../tags/useTags";
 import {
+  ehSensorVirtual,
+  MAX_ENTRADAS_SENSOR_VIRTUAL,
   MAX_FLL_LENGTH,
   MAX_LOOPS_FUZZY,
   MAX_PORTAS_FUZZY,
@@ -37,6 +39,7 @@ import { CamposDeadTime, CamposLeadLag } from "./CamposCompensacao";
 import { CamposMalhaFuzzy } from "./CamposMalhaFuzzy";
 import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
 import { CamposHistoriar } from "./CamposHistoriar";
+import { CamposSensorVirtual } from "./CamposSensorVirtual";
 import { CamposBusKey, CamposConstant, CamposIntegrator, CamposScaler } from "./CamposUtilitarios";
 import { CamposTfs } from "./CamposTfs";
 import { sufixoDirecao, tagsDoSeletor } from "./tagsDoSeletor";
@@ -570,6 +573,27 @@ export function ModalConfigBloco({
           execOrder,
         );
         break;
+      case "soft_sensor_pls":
+      case "soft_sensor_esn":
+      case "soft_sensor_lstm":
+        onAplicar(
+          {
+            ...no,
+            data: {
+              ...no.data,
+              label,
+              n_inputs: inteiroDoCampo(
+                campos.get("n_inputs"),
+                no.data.n_inputs,
+                1,
+                MAX_ENTRADAS_SENSOR_VIRTUAL,
+              ),
+              output_eu: String(campos.get("output_eu") ?? "").trim(),
+            },
+          },
+          execOrder,
+        );
+        break;
     }
     // `onClose` (linha do <dialog>) chama `onFechar`; fechar via `close()` explícito em vez
     // de chamar `onFechar()` direto evita que o desmonte (estado -> null) derrube o <dialog>
@@ -649,6 +673,7 @@ export function ModalConfigBloco({
           )}
           {no.type === "pid" && <CamposBlocoPid dados={no.data} />}
           {no.type === "fuzzy_loop" && <CamposMalhaFuzzy dados={no.data} />}
+          {ehSensorVirtual(no) && <CamposSensorVirtual dados={no.data} />}
           <CamposHistoriar
             no={no}
             flowId={flowId}

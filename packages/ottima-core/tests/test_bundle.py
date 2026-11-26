@@ -5,8 +5,11 @@ Todos puros: `Project`/`OpcConnection`/`Tag`/`Flow` aqui são instâncias Python
 nunca persistidas — nenhuma dependência de banco/Redis/disco.
 """
 
+import base64
 from collections.abc import Iterator
 from datetime import UTC, datetime
+
+import pytest
 
 from ottima_core.models import (
     CalculatedTag,
@@ -14,23 +17,30 @@ from ottima_core.models import (
     Flow,
     OpcConnection,
     Project,
+    SoftSensorBinding,
+    SoftSensorModel,
     Tag,
 )
 from ottima_core.portability.bundle import (
     montar_bundle,
     problemas_de_coerencia_interna,
     ref_por_id,
+    validar_artefato_do_modelo,
 )
 from ottima_core.portability.schemas import (
     BundleCalcInputRef,
     BundleConnection,
     BundleFlow,
     BundleProject,
+    BundleSoftSensorBinding,
+    BundleSoftSensorModel,
     BundleTag,
+    BundleTagRef,
     ProjectBundle,
 )
 from ottima_core.portability.tag_ref import grafo_para_banco
 from ottima_core.schemas.calculated_tags import MAX_CALC_INPUTS
+from ottima_core.softsensor import ArtifactError, synthetic
 
 EXPORTED_AT = datetime(2026, 8, 7, 21, 40, tzinfo=UTC)
 
@@ -864,3 +874,235 @@ class TestProblemasDeCoerenciaInterna:
         )
         problemas = problemas_de_coerencia_interna(bundle)
         assert any("CALC-1" in p and "TT-101" in p and "repet" in p for p in problemas)
+
+
+# --------------------------------------------------------------------------------------
+# Sensor virtual no arquivo de projeto (RF-590, ADR-046 D8)
+# --------------------------------------------------------------------------------------
+
+
+def _modelo_linha(nome: str = "m1", *, id_: int = 7, **over: object) -> SoftSensorModel:
+    meta, blob = synthetic.pls([1.0, 2.0], 0.5)
+    dados: dict[str, object] = {
+        "id": id_,
+        "project_id": 10,
+        "name": nome,
+        "method": "pls",
+        "period_s": meta.period_s,
+        "n_inputs": 2,
+        "input_tag_ids": [501, 601],
+        "meta": meta.model_dump(mode="json"),
+        "weights": blob,
+        "created_by": "user:1",
+    }
+    dados.update(over)
+    return SoftSensorModel(**dados)
+
+
+def _vinculo_linha(model_id: int | None = 7, block_id: str = "sv1") -> SoftSensorBinding:
+    return SoftSensorBinding(
+        flow_id=100, block_id=block_id, desired_model_id=model_id, updated_by="user:1"
+    )
+
+
+def _modelo_bundle(nome: str = "m1", artefato: tuple | None = None, **over: object):
+    meta, blob = artefato or synthetic.pls([1.0, 2.0], 0.5)
+    dados: dict[str, object] = {
+        "name": nome,
+        "method": meta.method,
+        "period_s": meta.period_s,
+        "n_inputs": len(meta.inputs),
+        "meta": meta.model_dump(mode="json"),
+        "weights_b64": base64.b64encode(blob).decode("ascii"),
+    }
+    dados.update(over)
+    return BundleSoftSensorModel(**dados)
+
+
+def _flow_com_bloco(tipo: str = "soft_sensor_pls", nome: str = "F1") -> BundleFlow:
+    no = {
+        "id": "sv1",
+        "type": tipo,
+        "position": {"x": 0.0, "y": 0.0},
+        "data": {"exec_order": 1, "n_inputs": 2},
+    }
+    return BundleFlow(name=nome, ts_seconds=1.0, graph={"nodes": [no], "edges": []})
+
+
+def _bundle_sv(modelos: list, vinculos: list, **over: object) -> ProjectBundle:
+    dados: dict[str, object] = {
+        "flows": [_flow_com_bloco()],
+        "soft_sensor_models": modelos,
+        "soft_sensor_bindings": vinculos,
+    }
+    dados.update(over)
+    return _bundle_minimo(**dados)
+
+
+class TestMontarBundleSensorVirtual:
+    def _montar(self, modelos, vinculos, tags=None) -> ProjectBundle:
+        return montar_bundle(
+            project=_projeto(),
+            connections=[_conexao()],
+            tags=tags if tags is not None else [_tag(), _tag_calculada()],
+            calculated_tags=[_calc_spec()],
+            flows=[_flow()],
+            exported_at=EXPORTED_AT,
+            soft_sensor_models=modelos,
+            soft_sensor_bindings=vinculos,
+        )
+
+    def test_leva_o_modelo_vinculado_e_o_vinculo(self) -> None:
+        bundle = self._montar([_modelo_linha("m1")], [_vinculo_linha()])
+        (modelo,) = bundle.soft_sensor_models
+        assert (modelo.name, modelo.method, modelo.n_inputs) == ("m1", "pls", 2)
+        assert base64.b64decode(modelo.weights_b64) == _modelo_linha().weights
+        assert bundle.soft_sensor_bindings == [
+            BundleSoftSensorBinding(flow="Coluna C-101", block_id="sv1", model="m1")
+        ]
+
+    def test_so_leva_modelo_referenciado_pelo_desejado(self) -> None:
+        bundle = self._montar(
+            [_modelo_linha("m1", id_=7), _modelo_linha("solto", id_=8)],
+            [_vinculo_linha(7), _vinculo_linha(None, "sv2")],
+        )
+        assert [m.name for m in bundle.soft_sensor_models] == ["m1"]
+        assert [b.block_id for b in bundle.soft_sensor_bindings] == ["sv1"]
+
+    def test_tag_de_entrada_exportavel_vira_referencia_e_o_resto_none(self) -> None:
+        # 501 = tag OPC; 601 = calculada (sem referência exportável); 999 = tag apagada
+        modelo = _modelo_linha(input_tag_ids=[501, 601, 999])
+        bundle = self._montar([modelo], [_vinculo_linha()])
+        assert bundle.soft_sensor_models[0].input_tags == [
+            BundleTagRef(connection="gateway-1", tag="TT-101"),
+            None,
+            None,
+        ]
+
+    def test_sem_sensor_virtual_as_listas_saem_vazias(self) -> None:
+        bundle = self._montar([], [])
+        assert bundle.soft_sensor_models == [] and bundle.soft_sensor_bindings == []
+
+    def test_ordem_estavel_por_nome_e_por_flow_bloco(self) -> None:
+        bundle = self._montar(
+            [_modelo_linha("b", id_=2), _modelo_linha("a", id_=1)],
+            [_vinculo_linha(2, "sv2"), _vinculo_linha(1, "sv1")],
+        )
+        assert [m.name for m in bundle.soft_sensor_models] == ["a", "b"]
+        assert [(b.block_id, b.model) for b in bundle.soft_sensor_bindings] == [
+            ("sv1", "a"),
+            ("sv2", "b"),
+        ]
+
+
+class TestSchemasSensorVirtual:
+    def test_bundle_antigo_sem_os_campos_novos_valida_com_listas_vazias(self) -> None:
+        bundle = _bundle_minimo()
+        assert bundle.soft_sensor_models == [] and bundle.soft_sensor_bindings == []
+
+    def test_modelo_recusa_campo_desconhecido_e_metodo_fora_do_enum(self) -> None:
+        with pytest.raises(ValueError):
+            _modelo_bundle(extra="x")
+        with pytest.raises(ValueError):
+            _modelo_bundle(method="svm")
+
+
+class TestValidarArtefatoDoModelo:
+    def test_devolve_os_bytes_e_o_meta_do_artefato(self) -> None:
+        meta, blob = synthetic.pls([1.0, 2.0], 0.5)
+        assert validar_artefato_do_modelo(_modelo_bundle()) == (blob, meta.model_dump(mode="json"))
+
+    def test_meta_devolvido_e_canonico_sem_campo_extra_de_entrada(self) -> None:
+        meta, blob = synthetic.pls([1.0, 2.0], 0.5)
+        sujo = meta.model_dump(mode="json")
+        sujo["inputs"][0]["lixo"] = float("nan")  # JSONB recusaria o NaN (500 no insert)
+        _, canonico = validar_artefato_do_modelo(_modelo_bundle(meta=sujo))
+        assert canonico == meta.model_dump(mode="json")
+
+    @pytest.mark.parametrize("texto", ["isto nao e base64!", "ab", "é"])
+    def test_base64_invalido_e_recusado(self, texto: str) -> None:
+        with pytest.raises(ArtifactError, match="base64"):
+            validar_artefato_do_modelo(_modelo_bundle(weights_b64=texto))
+
+    def test_artefato_que_load_model_recusa(self) -> None:
+        lixo = base64.b64encode(b"nao sou um npz").decode("ascii")
+        with pytest.raises(ArtifactError):
+            validar_artefato_do_modelo(_modelo_bundle(weights_b64=lixo))
+
+    def test_pesos_incoerentes_com_o_n_inputs_do_meta(self) -> None:
+        meta, _ = synthetic.pls([1.0, 2.0, 3.0], 0.0)
+        _, blob_2_entradas = synthetic.pls([1.0, 2.0], 0.0)
+        modelo = _modelo_bundle(artefato=(meta, blob_2_entradas), n_inputs=3)
+        with pytest.raises(ArtifactError):
+            validar_artefato_do_modelo(modelo)
+
+    @pytest.mark.parametrize(
+        ("campo", "valor"), [("method", "esn"), ("period_s", 9.0), ("n_inputs", 3)]
+    )
+    def test_coluna_declarada_que_diverge_do_meta_e_recusada(self, campo, valor) -> None:
+        with pytest.raises(ArtifactError, match=campo):
+            validar_artefato_do_modelo(_modelo_bundle(**{campo: valor}))
+
+
+class TestProblemasDeCoerenciaSensorVirtual:
+    def test_bundle_coerente_nao_tem_problemas(self) -> None:
+        bundle = _bundle_sv(
+            [_modelo_bundle("m1")], [BundleSoftSensorBinding(flow="F1", block_id="sv1", model="m1")]
+        )
+        assert problemas_de_coerencia_interna(bundle) == []
+
+    def test_tag_de_entrada_que_nao_resolve_nao_e_problema(self) -> None:
+        modelo = _modelo_bundle(
+            "m1", input_tags=[BundleTagRef(connection="nao-existe", tag="X"), None]
+        )
+        bundle = _bundle_sv(
+            [modelo], [BundleSoftSensorBinding(flow="F1", block_id="sv1", model="m1")]
+        )
+        assert problemas_de_coerencia_interna(bundle) == []
+
+    def test_nome_de_modelo_duplicado(self) -> None:
+        bundle = _bundle_sv([_modelo_bundle("m1"), _modelo_bundle("m1")], [])
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("m1" in p and "duplicad" in p for p in problemas)
+
+    @pytest.mark.parametrize(
+        ("vinculo", "trecho"),
+        [
+            (dict(flow="outro", block_id="sv1", model="m1"), "flow 'outro'"),
+            (dict(flow="F1", block_id="nao-existe", model="m1"), "bloco 'nao-existe'"),
+            (dict(flow="F1", block_id="sv1", model="fantasma"), "modelo 'fantasma'"),
+        ],
+    )
+    def test_vinculo_orfao(self, vinculo: dict, trecho: str) -> None:
+        bundle = _bundle_sv([_modelo_bundle("m1")], [BundleSoftSensorBinding(**vinculo)])
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any(trecho in p and "não existe" in p for p in problemas), problemas
+
+    def test_vinculo_para_bloco_que_nao_e_sensor_virtual(self) -> None:
+        bundle = _bundle_sv(
+            [_modelo_bundle("m1")],
+            [BundleSoftSensorBinding(flow="F1", block_id="sv1", model="m1")],
+            flows=[_flow_com_bloco("constant")],
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("sv1" in p and "não é" in p for p in problemas), problemas
+
+    def test_vinculo_para_sensor_virtual_de_outro_metodo(self) -> None:
+        bundle = _bundle_sv(
+            [_modelo_bundle("m1")],  # PLS
+            [BundleSoftSensorBinding(flow="F1", block_id="sv1", model="m1")],
+            flows=[_flow_com_bloco("soft_sensor_esn")],
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("sv1" in p and "PLS" in p for p in problemas), problemas
+
+    def test_vinculo_duplicado_para_o_mesmo_bloco(self) -> None:
+        bundle = _bundle_sv(
+            [_modelo_bundle("m1"), _modelo_bundle("m2")],
+            [
+                BundleSoftSensorBinding(flow="F1", block_id="sv1", model="m1"),
+                BundleSoftSensorBinding(flow="F1", block_id="sv1", model="m2"),
+            ],
+        )
+        problemas = problemas_de_coerencia_interna(bundle)
+        assert any("sv1" in p and "duas vezes" in p for p in problemas), problemas

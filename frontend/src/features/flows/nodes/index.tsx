@@ -21,6 +21,7 @@ import {
   type NoKalman,
   type NoLeitura,
   type NoScaler as NoScalerData,
+  type NoSensorVirtual as NoSensorVirtualData,
   type NoMpc as NoMpcData,
   type NoPid as NoPidData,
   type NoFuzzyLoop as NoFuzzyLoopData,
@@ -546,6 +547,33 @@ export function NoFuzzyLoop({ id, data, selected }: NodeProps<NoFuzzyLoopData>) 
   );
 }
 
+/** Sensor virtual (RF-581, ADR-046): um componente para os três métodos (`type` vem do
+ *  próprio nó). Entradas `IN1..INn` por `n_inputs` e a saída fixa `out` do contrato, com a
+ *  unidade declarada. O modelo não aparece aqui: o vínculo bloco → modelo mora em tabela
+ *  (SPEC_SENSOR_VIRTUAL §5.1); rótulos de porta com o nome da tag esperada ficam para a SV-3. */
+export function NoSensorVirtual({ id, type, data, selected }: NodeProps<NoSensorVirtualData>) {
+  return (
+    <BlocoChapa
+      tipo={type}
+      label={data.label}
+      execOrder={data.exec_order}
+      selecionado={selected}
+      entradas={portas(portasScript("IN", data.n_inputs))}
+      saidas={portasFixas(type, "output").map((porta) => ({
+        id: porta,
+        rotulo: porta,
+        eu: data.output_eu || undefined,
+      }))}
+      blockId={id}
+    >
+      <div className="space-y-0.5">
+        <LinhaResumo rotulo="Entradas" valor={String(data.n_inputs)} />
+        <LinhaResumo rotulo="Unidade da saída" valor={data.output_eu || "—"} />
+      </div>
+    </BlocoChapa>
+  );
+}
+
 /** Mapa de COMPONENTES por tipo (ARCH-18/TD-021). Mora AQUI, não em `registro.ts`: o
  *  registro é alcançado pelo chunk inicial via `CanalAoVivo.tsx` → `graph.ts` →
  *  `registro.ts`, e tocar os componentes de nó dali arrastaria o `@xyflow/react` de volta
@@ -576,4 +604,7 @@ export const TIPOS_DE_NO: Record<TipoBloco, ComponenteNo> = {
   dead_time: NoDeadTime,
   bus_publish: NoBusPublish,
   bus_subscribe: NoBusSubscribe,
+  soft_sensor_pls: NoSensorVirtual,
+  soft_sensor_esn: NoSensorVirtual,
+  soft_sensor_lstm: NoSensorVirtual,
 };

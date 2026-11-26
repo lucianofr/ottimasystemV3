@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import undefer
 
 from ottima_api.deps import get_app_settings, get_db, get_redis, require_admin, require_operator
 from ottima_api.historized import problema_de_porta
@@ -43,6 +44,8 @@ from ottima_core.models import (
     HistorizedVar,
     OpcConnection,
     Project,
+    SoftSensorBinding,
+    SoftSensorModel,
     Tag,
     User,
 )
@@ -54,6 +57,7 @@ from ottima_core.portability import (
     grafo_para_banco,
     montar_bundle,
     problemas_de_coerencia_interna,
+    validar_artefato_do_modelo,
 )
 from ottima_core.portability.pendencias import pendencias_da_conexao
 from ottima_core.schemas.projects import (
@@ -63,6 +67,7 @@ from ottima_core.schemas.projects import (
     ProjectOut,
     ProjectUpdate,
 )
+from ottima_core.softsensor import ArtifactError
 
 # Sem dependência no router: os papéis variam por rota (ADR-015)
 router = APIRouter()
@@ -275,6 +280,28 @@ async def export_project(
         )
     )
     flows = list(await db.scalars(select(Flow).where(Flow.project_id == project_id)))
+    # Sensor virtual (RF-590, ADR-046 D8): vínculos dos flows deste projeto e, deles, só o
+    # modelo DESEJADO (`weights` é deferred: o `undefer` traz o blob nesta consulta, em vez de
+    # um lazy-load por modelo, que o AsyncSession recusa). Duas consultas fixas.
+    soft_sensor_bindings = list(
+        await db.scalars(
+            select(SoftSensorBinding)
+            .join(Flow, SoftSensorBinding.flow_id == Flow.id)
+            .where(Flow.project_id == project_id)
+        )
+    )
+    soft_sensor_models = list(
+        await db.scalars(
+            select(SoftSensorModel)
+            .options(undefer(SoftSensorModel.weights))
+            .where(
+                SoftSensorModel.project_id == project_id,
+                SoftSensorModel.id.in_(
+                    {b.desired_model_id for b in soft_sensor_bindings if b.desired_model_id}
+                ),
+            )
+        )
+    )
     try:
         bundle = montar_bundle(
             project=project,
@@ -283,6 +310,8 @@ async def export_project(
             calculated_tags=calculated_tags,
             calculated_tag_inputs=calculated_tag_inputs,
             historized_vars=historized_vars,
+            soft_sensor_models=soft_sensor_models,
+            soft_sensor_bindings=soft_sensor_bindings,
             flows=flows,
             exported_at=datetime.now(UTC),
         )
@@ -313,14 +342,14 @@ async def export_project(
     )
 
 
-MAX_IMPORT_BUNDLE_BYTES = 4 * 1024 * 1024  # 4 MiB (spec §3.2-1)
+MAX_IMPORT_BUNDLE_BYTES = 32 * 1024 * 1024  # 32 MiB (spec §3.2-1, emenda ADR-046 D8)
 _MAX_DIGITOS_TETO_IMPORT = len(str(MAX_IMPORT_BUNDLE_BYTES))
-_MSG_IMPORT_GRANDE = "Corpo do import excede o limite de 4 MiB."
+_MSG_IMPORT_GRANDE = "Corpo do import excede o limite de 32 MiB."
 _MSG_JSON_INVALIDO = "Corpo não é JSON válido"
 
 
 def _excede_o_declarado_import(declarado: str | None) -> bool:
-    """Mesmo raciocínio de `connections._excede_o_declarado`, com o teto de 4 MiB do import
+    """Mesmo raciocínio de `connections._excede_o_declarado`, com o teto de 32 MiB do import
     (spec §3.2-1): `isdecimal()` filtra o alfabeto do header antes de qualquer `int()`, e a
     contagem de dígitos resolve sozinha o caso "grande demais" sem estourar
     `sys.get_int_max_str_digits()`."""
@@ -333,7 +362,7 @@ def _excede_o_declarado_import(declarado: str | None) -> bool:
 
 
 async def _ler_corpo_import(request: Request) -> bytes:
-    """Corpo bruto do arquivo de projeto (bundle), com teto de 4 MiB — molde exato de
+    """Corpo bruto do arquivo de projeto (bundle), com teto de 32 MiB — molde exato de
     `connections._ler_certificado`: um parâmetro `body:` tipado só materializa o payload
     inteiro no momento em que dá para medi-lo (API-06), então a leitura é em fluxo e aborta
     no primeiro chunk que cruza o teto, nunca depois de bufferizar tudo (spec §3.2-1).
@@ -354,7 +383,7 @@ async def _ler_corpo_import(request: Request) -> bytes:
     "/import",
     response_model=ProjectImportOut,
     status_code=201,
-    # O corpo é lido em stream via `_ler_corpo_import` (teto de 4 MiB antes de materializar,
+    # O corpo é lido em stream via `_ler_corpo_import` (teto de 32 MiB antes de materializar,
     # API-06) — sem parâmetro `body: ProjectImportIn`, o FastAPI não teria como documentar o
     # requestBody sozinho. `openapi_extra` publica o schema (derivado do próprio modelo, não
     # reescrito à mão) sem amarrar a leitura em stream (tarefa 6.1, fix round 1).
@@ -415,6 +444,17 @@ async def import_project(
 
     # Camada 3 (§3.2-4): referências internas, em memória, antes de qualquer insert.
     problemas = problemas_de_coerencia_interna(bundle)
+    # Artefatos de sensor virtual (RF-590, ADR-046 D8): o bundle é fronteira de confiança, então
+    # cada modelo passa pelo MESMO `load_model` do runtime (tetos de bytes, sem pickle, chaves e
+    # formas) antes de qualquer insert. Descompressão e conferência são CPU-bound: uma thread
+    # por modelo devolve o event loop entre eles (TD-002). Bytes e `meta` canônico seguem para o
+    # insert, sem decodificar de novo.
+    artefatos: dict[str, tuple[bytes, dict]] = {}
+    for modelo in bundle.soft_sensor_models:
+        try:
+            artefatos[modelo.name] = await asyncio.to_thread(validar_artefato_do_modelo, modelo)
+        except ArtifactError as exc:
+            problemas.append(f"modelo de sensor virtual '{modelo.name}': {exc}")
     if problemas:
         raise HTTPException(
             status_code=422, detail=formatar_problemas(problemas, cabecalho="Import recusado")
@@ -643,6 +683,47 @@ async def import_project(
                 port=bhv.port,
             )
         )
+
+    # Sensor virtual (RF-590, ADR-046 D8): modelos do bundle, depois os vínculos. Só `desired`
+    # é gravado: `active`/`candidate` são do runtime, que os preenche no deploy (spec §5.6).
+    # `input_tag_ids` é posicional (uma tag por porta): lista incompleta ou de tamanho
+    # diferente de `n_inputs` não serve ao pré-aquecimento e vira vazia, sem recusar o
+    # import (spec §9). Só tag OPC resolve: `BundleTagRef` sempre traz conexão. O arquivo
+    # não traz autor: os dois campos `*_by` levam o admin que importa, no formato da API.
+    autor = f"user:{user.id}"
+    modelos_por_nome: dict[str, SoftSensorModel] = {}
+    for bm in bundle.soft_sensor_models:
+        ids = [
+            tags_por_ref[(ref.connection, ref.tag)].id
+            if ref is not None and (ref.connection, ref.tag) in tags_por_ref
+            else None
+            for ref in bm.input_tags
+        ]
+        resolvido = len(ids) == bm.n_inputs and None not in ids
+        modelo = SoftSensorModel(
+            project_id=project.id,
+            name=bm.name,
+            method=bm.method,
+            period_s=bm.period_s,
+            n_inputs=bm.n_inputs,
+            input_tag_ids=ids if resolvido else [],
+            meta=artefatos[bm.name][1],
+            weights=artefatos[bm.name][0],
+            created_by=autor,
+        )
+        db.add(modelo)
+        modelos_por_nome[bm.name] = modelo
+    if bundle.soft_sensor_bindings:
+        await db.flush()  # ids dos modelos e dos flows novos, para o `desired_model_id`/`flow_id`
+        for bb in bundle.soft_sensor_bindings:
+            db.add(
+                SoftSensorBinding(
+                    flow_id=flows_por_nome[bb.flow].id,
+                    block_id=bb.block_id,
+                    desired_model_id=modelos_por_nome[bb.model].id,
+                    updated_by=autor,
+                )
+            )
 
     await db.commit()
     await db.refresh(project)

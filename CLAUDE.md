@@ -40,6 +40,7 @@ services/
                       #   target_calculation/  -> SSTO: alvos de regime permanente por LP (ADR-027)
   recorder/           # barramento → hypertable
   calc-worker/        # tags calculadas: uma task asyncio por tag + ScriptPool (ADR-033)
+  ml-worker/          # treino de sensor virtual: fila `ml_jobs`, torch/scikit-learn/optuna, health 8005 (ADR-046) — chega na SV-2; a stack passa a 9 serviços
 deploy/               # docker-compose.yml, Dockerfiles, .env.example
 tests/                # integração cross-service (malha fechada MPC↔TFS — RNF-09)
 ```
@@ -49,8 +50,9 @@ Python organizado como **uv workspace** (um `pyproject.toml` por package/service
 ## Invariantes de engenharia (violar = bug de arquitetura)
 
 - **Nunca bloquear o event loop.** `mpc.make_step()` (IPOPT) e `exec()` de scripts sempre via `run_in_executor`. (ADR-004)
-- **Sem Celery, sem filas de job.** MPC/OPC são loops vivos em asyncio. (ADR-004)
+- **Sem Celery. O caminho de controle nunca passa por fila; a única fila é `ml_jobs`, do treino de sensor virtual (ADR-046).** MPC/OPC são loops vivos em asyncio. (ADR-004)
 - **`opc-worker` é o ÚNICO processo que fala OPC-UA.** Todo o resto usa o barramento. (ADR-006)
+- **O flow-runtime nunca importa biblioteca de treino nem abre pickle;** modelo de sensor virtual é `.npz` lido com `allow_pickle=False`. (ADR-046)
 - **Barramento: apenas os canais do PRD §7.1.** Criar/alterar canal exige ADR. Pub/sub é fire-and-forget: comandos vão por `flow.commands` e a UI reflete **estado publicado**, nunca eco de comando. (ADR-002)
 - **Segurança de processo:** nenhuma escrita OPC sem flow em deploy + watchdog vivo + modo REMOTO; falha de comunicação ⇒ cessa escrita e para o flow; boot sobe tudo **parado**. Em LOCAL o sistema não escreve MV (a MV do MPC faz *tracking* do readback do PID). (ADR-009, 010, 017)
 - **Banco único** Postgres/TimescaleDB. Sem SQLite, sem segundo banco. Retenção (1 mês) e downsampling via policies/continuous aggregates do Timescale — **nunca** código manual de limpeza. (ADR-003)
@@ -137,7 +139,7 @@ OTTIMA_E2E=1 bash deploy/smoke.sh                   # L1 — stack, retenção, 
 # deixa o flow no mapa como stopped. Re-rodar o L1 depois da L2 da vermelho falso; nesse caso
 # `docker compose ... restart flow-runtime` antes.
 E2E_ADMIN_USERNAME=$(grep -m1 '^OTTIMA_ADMIN_USERNAME=' deploy/.env|cut -d= -f2-) E2E_ADMIN_PASSWORD=$(grep -m1 '^OTTIMA_ADMIN_PASSWORD=' deploy/.env|cut -d= -f2-) uv run pytest -m e2e tests/e2e -v
-                                                     # L2 — 43 cenários (5 F1 + 9 F2 + 10 F3 + 10 F4 + 7 F5 + 2 fuzzy)
+                                                     # L2 — 47 cenários (5 F1 + 9 F2 + 10 F3 + 10 F4 + 7 F5 + 2 fuzzy + 4 SV)
 # tests/e2e/test_api_e2e.py (F1) lê credenciais só de os.environ (default ""), nunca de
 # deploy/.env: a bateria completa exige o env inline acima (não basta o deploy/.env preenchido).
 # F4: POST /api/operate/{flow_id}/{block_id}/mode|sp|mv publica FlowCommand (202); o runtime

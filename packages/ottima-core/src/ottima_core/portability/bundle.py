@@ -8,11 +8,14 @@ ou faz o insert.
 
 from __future__ import annotations
 
+import base64
 from collections import Counter
 from collections.abc import Sequence
 from datetime import datetime
+from typing import Any
 
 from ottima_core.calc_script import problemas_do_script
+from ottima_core.flowgraph import SOFT_SENSOR_METHOD
 from ottima_core.models import (
     CalculatedTag,
     CalculatedTagInput,
@@ -20,6 +23,8 @@ from ottima_core.models import (
     HistorizedVar,
     OpcConnection,
     Project,
+    SoftSensorBinding,
+    SoftSensorModel,
     Tag,
 )
 from ottima_core.portability.schemas import (
@@ -29,11 +34,15 @@ from ottima_core.portability.schemas import (
     BundleFlow,
     BundleHistorizedVar,
     BundleProject,
+    BundleSoftSensorBinding,
+    BundleSoftSensorModel,
     BundleTag,
+    BundleTagRef,
     ProjectBundle,
 )
 from ottima_core.portability.tag_ref import grafo_para_bundle, problemas_de_tag_ref
 from ottima_core.schemas.calculated_tags import MAX_CALC_INPUTS
+from ottima_core.softsensor import ArtifactError, load_model
 
 
 def ref_por_id(
@@ -64,6 +73,8 @@ def montar_bundle(
     calculated_tags: Sequence[CalculatedTag] = (),
     calculated_tag_inputs: Sequence[CalculatedTagInput] = (),
     historized_vars: Sequence[HistorizedVar] = (),
+    soft_sensor_models: Sequence[SoftSensorModel] = (),
+    soft_sensor_bindings: Sequence[SoftSensorBinding] = (),
 ) -> ProjectBundle:
     """Projeta o estado vivo de um projeto no arquivo de portabilidade (spec §2.1-7).
 
@@ -79,6 +90,11 @@ def montar_bundle(
     por `(connection, name)` como antes, calculadas por `name`, historiadas por
     `(flow, block_id, port)` — para que um arquivo que circula entre plantas nunca produza
     diff espúrio entre duas execuções do mesmo export.
+
+    Sensor virtual (RF-590, ADR-046 D8): sai um vínculo por bloco com `desired_model_id` e só
+    os modelos que algum deles referencia, por nome; quem chama carrega `weights` com
+    `undefer` (a coluna é deferred). Tag de entrada sem referência exportável — calculada,
+    historiada (ambas sem conexão) ou apagada — vira `None` na posição da porta.
     """
     refs = ref_por_id(connections, tags)
     nome_da_conexao = {connection.id: connection.name for connection in connections}
@@ -106,6 +122,19 @@ def montar_bundle(
     historizadas_ordenadas = sorted(
         historized_vars, key=lambda hv: (nome_do_flow[hv.flow_id], hv.block_id, hv.port)
     )
+
+    modelos_por_id = {m.id: m for m in soft_sensor_models}
+    vinculos_ordenados = sorted(
+        (b for b in soft_sensor_bindings if b.desired_model_id in modelos_por_id),
+        key=lambda b: (nome_do_flow[b.flow_id], b.block_id),
+    )
+    modelos_ordenados = sorted(
+        {modelos_por_id[b.desired_model_id] for b in vinculos_ordenados}, key=lambda m: m.name
+    )
+
+    def _ref_de_entrada(tag_id: int) -> BundleTagRef | None:
+        ref = refs.get(tag_id)
+        return BundleTagRef(connection=ref[0], tag=ref[1]) if ref and ref[0] is not None else None
 
     def _bundle_tag(t: Tag) -> BundleTag:
         if t.connection_id is not None:
@@ -174,6 +203,26 @@ def montar_bundle(
                 port=hv.port,
             )
             for hv in historizadas_ordenadas
+        ],
+        soft_sensor_models=[
+            BundleSoftSensorModel(
+                name=m.name,
+                method=m.method,
+                period_s=m.period_s,
+                n_inputs=m.n_inputs,
+                meta=m.meta,
+                weights_b64=base64.b64encode(m.weights).decode("ascii"),
+                input_tags=[_ref_de_entrada(tag_id) for tag_id in m.input_tag_ids],
+            )
+            for m in modelos_ordenados
+        ],
+        soft_sensor_bindings=[
+            BundleSoftSensorBinding(
+                flow=nome_do_flow[b.flow_id],
+                block_id=b.block_id,
+                model=modelos_por_id[b.desired_model_id].name,
+            )
+            for b in vinculos_ordenados
         ],
     )
 
@@ -303,4 +352,91 @@ def problemas_de_coerencia_interna(bundle: ProjectBundle) -> list[str]:
                 f"existe no flow '{hv.flow}'"
             )
 
+    # Sensor virtual (RF-590, ADR-046 D8): modelo de nome único; cada vínculo resolve para um
+    # flow, um bloco e um modelo do bundle, o bloco é sensor virtual DO MÉTODO do modelo (a
+    # mesma regra da ativação) e cada bloco tem um vínculo só (`pk_soft_sensor_bindings`).
+    # `input_tags` NÃO é checado: referência que não resolve não impede o import (o modelo
+    # entra sem tags e o bloco apenas não pré-aquece, spec §9).
+    modelos_por_nome: dict[str, BundleSoftSensorModel] = {}
+    for modelo in bundle.soft_sensor_models:
+        if modelo.name in modelos_por_nome:
+            problemas.append(f"modelo de sensor virtual '{modelo.name}' duplicado no bundle")
+        modelos_por_nome.setdefault(modelo.name, modelo)
+
+    for chave, contagem in Counter(
+        (b.flow, b.block_id) for b in bundle.soft_sensor_bindings
+    ).items():
+        if contagem > 1:
+            problemas.append(
+                f"sensor virtual: o bloco '{chave[1]}' do flow '{chave[0]}' foi vinculado "
+                "duas vezes no bundle"
+            )
+
+    for vinculo in bundle.soft_sensor_bindings:
+        onde = f"vínculo de sensor virtual do bloco '{vinculo.block_id}'"
+        flow = nomes_flow.get(vinculo.flow)
+        modelo = modelos_por_nome.get(vinculo.model)
+        if flow is None:
+            problemas.append(f"{onde} referencia flow '{vinculo.flow}' que não existe no bundle")
+        if modelo is None:
+            problemas.append(f"{onde} referencia modelo '{vinculo.model}' que não existe no bundle")
+        if flow is None or modelo is None:
+            continue
+        nodes = flow.graph.get("nodes")
+        tipos = (
+            {n.get("id"): n.get("type") for n in nodes if isinstance(n, dict)}
+            if isinstance(nodes, list)
+            else {}
+        )
+        if vinculo.block_id not in tipos:
+            problemas.append(
+                f"{onde} referencia bloco '{vinculo.block_id}' que não existe no flow "
+                f"'{vinculo.flow}'"
+            )
+            continue
+        metodo_do_bloco = SOFT_SENSOR_METHOD.get(tipos[vinculo.block_id])
+        if metodo_do_bloco is None:
+            problemas.append(
+                f"{onde}: o bloco '{vinculo.block_id}' do flow '{vinculo.flow}' "
+                f"({tipos[vinculo.block_id]!r}) não é um bloco de sensor virtual"
+            )
+        elif metodo_do_bloco != modelo.method:
+            problemas.append(
+                f"{onde}: o bloco '{vinculo.block_id}' do flow '{vinculo.flow}' é "
+                f"{metodo_do_bloco.upper()} e o modelo '{modelo.name}' é {modelo.method.upper()}"
+            )
+
     return problemas
+
+
+def validar_artefato_do_modelo(modelo: BundleSoftSensorModel) -> tuple[bytes, dict[str, Any]]:
+    """Decodifica `weights_b64` e confere o artefato com `load_model` (a mesma validação do
+    runtime: tetos de bytes, `allow_pickle=False`, metadados, chaves e formas); devolve
+    `(bytes, meta)` para o insert, com o `meta` CANÔNICO (reserializado do `ModelMeta` validado:
+    campo extra de entrada, que o modelo não conhece, e valor não finito, que o JSONB recusa
+    com 500, não passam para o banco).
+
+    As colunas `method`/`period_s`/`n_inputs` do bundle têm de bater com o `meta` (a ativação
+    lê as colunas, o runtime lê o `meta`: um arquivo adulterado não pode deixá-los divergir).
+    `ArtifactError` com mensagem pt-BR; CPU-bound (descompressão e conferência de formas):
+    quem chama dentro do event loop usa `asyncio.to_thread`.
+    """
+    try:
+        blob = base64.b64decode(modelo.weights_b64, validate=True)
+    except ValueError as exc:  # `binascii.Error` e texto fora do ASCII
+        raise ArtifactError("weights_b64 não é base64 válido") from exc
+    carregado = load_model(0, modelo.meta, blob)
+    divergentes = [
+        campo
+        for campo, no_bundle, no_meta in (
+            ("method", modelo.method, carregado.meta.method),
+            ("period_s", modelo.period_s, carregado.meta.period_s),
+            ("n_inputs", modelo.n_inputs, carregado.n_inputs),
+        )
+        if no_bundle != no_meta
+    ]
+    if divergentes:
+        raise ArtifactError(
+            f"{', '.join(divergentes)} do modelo diverge(m) dos metadados do artefato"
+        )
+    return blob, carregado.meta.model_dump(mode="json")

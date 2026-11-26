@@ -6,7 +6,7 @@ espelho dos schemas `Create`/`Out` que expõem estado interno do banco.
 """
 
 from datetime import datetime
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -163,6 +163,35 @@ class BundleHistorizedVar(BaseModel):
     port: str
 
 
+class BundleSoftSensorModel(BaseModel):
+    """Modelo de sensor virtual (RF-590, ADR-046 D8): metadados + pesos em base64 (o `.npz`
+    do artefato, spec §6). `method`/`period_s`/`n_inputs` repetem as colunas da tabela e o
+    import confere cada uma contra `meta` (a ativação confia nas colunas, o runtime nos
+    metadados). `input_tags`: uma referência por porta de entrada, na ordem das portas;
+    `None` onde a tag não tem referência exportável (calculada, historiada ou apagada)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    method: Literal["pls", "esn", "lstm"]
+    period_s: float
+    n_inputs: int
+    meta: dict[str, Any]
+    weights_b64: str
+    input_tags: list[BundleTagRef | None] = Field(default_factory=list)
+
+
+class BundleSoftSensorBinding(BaseModel):
+    """Vínculo bloco -> modelo: chave natural `(flow, block_id)`, modelo por nome. Só o
+    modelo DESEJADO viaja; `active`/`candidate` são estado do runtime (ADR-046 D6)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    flow: str
+    block_id: str
+    model: str
+
+
 class ProjectBundle(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -176,3 +205,7 @@ class ProjectBundle(BaseModel):
     # ADR-040 D6): `schema_version` continua 1 — um bundle exportado antes do ADR-041 importa
     # sem mudança, com a lista vazia (nenhuma variável historiada existia para exportar).
     historized_vars: list[BundleHistorizedVar] = Field(default_factory=list)
+    # Idem (ADR-046 D8, RF-590): bundle anterior ao sensor virtual importa com as duas listas
+    # vazias; `schema_version` continua 1.
+    soft_sensor_models: list[BundleSoftSensorModel] = Field(default_factory=list)
+    soft_sensor_bindings: list[BundleSoftSensorBinding] = Field(default_factory=list)

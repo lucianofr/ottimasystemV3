@@ -6,6 +6,7 @@ import {
   type ConstraintVar,
   type ContratoPortaDinamica,
   type ContratoPortaDinamicaMalha,
+  type ContratoPortaDinamicaSensor,
   type CvVar,
   type DeadTimeConfig,
   type DirecaoPorta,
@@ -28,6 +29,7 @@ import {
   type RegraPortaDinamica,
   type ScalerConfig,
   type ScriptConfig,
+  type SoftSensorConfig,
   type SopdtParams,
 } from "../../lib/contracts.gen";
 import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
@@ -46,6 +48,11 @@ import { BASES_TEMPO, PADRAO_CONSTANT, PADRAO_DEAD_TIME, PADRAO_FIRST_ORDER, PAD
  * (`exec_order`, `label` e a config do tipo). Chave desconhecida dentro de `data` é 422; por
  * isso nenhum estado de interface pode morar ali.
  */
+
+/** Sensor virtual (RF-581, ADR-046): três métodos, um só schema de config e um só contrato de
+ *  portas. Definido antes de `TIPOS_BLOCO`, que o espalha no fim da paleta. */
+export const TIPOS_SENSOR_VIRTUAL = ["soft_sensor_pls", "soft_sensor_esn", "soft_sensor_lstm"] as const;
+export type TipoSensorVirtual = (typeof TIPOS_SENSOR_VIRTUAL)[number];
 
 export const TIPOS_BLOCO = [
   "opc_read",
@@ -66,6 +73,7 @@ export const TIPOS_BLOCO = [
   "dead_time",
   "bus_publish",
   "bus_subscribe",
+  ...TIPOS_SENSOR_VIRTUAL,
 ] as const;
 export type TipoBloco = (typeof TIPOS_BLOCO)[number];
 
@@ -124,6 +132,16 @@ export function fllDefaultMalha(n: number): string {
   return base;
 }
 
+/** Contrato dos três sensores virtuais (RF-581, ADR-046): entradas `IN1..INn` dinâmicas por
+ *  `n_inputs` (em `rules`) e a saída fixa `out` (em `ports`) — a única mistura dos dois no
+ *  contrato. É idêntico nos três tipos, então um só serve de fonte. */
+export const contratoSensorVirtual = PORT_CONTRACTS.soft_sensor_pls as ContratoPortaDinamicaSensor;
+if (!contratoSensorVirtual.dynamic) throw new Error("contrato do sensor virtual deveria ser dinâmico");
+
+/** Teto de entradas do sensor virtual — do contrato gerado, mesma fonte única que
+ *  `MAX_PORTAS_FUZZY` (32, bem acima dos 8 do Script: PLS com muitas entradas é o caso comum). */
+export const MAX_ENTRADAS_SENSOR_VIRTUAL = tetoDoContrato(contratoSensorVirtual.rules[0]);
+
 /** Rótulo por tipo (ARCH-18/TD-021): concentrado em `registro.ts` junto com
  *  descrição/defaults/componente — reexportado aqui porque a maioria dos consumidores já
  *  importa de `graph.ts`, e trocar 6 arquivos de import só para mover o dono não paga o
@@ -150,6 +168,11 @@ export type DadosScript = DadosBase & Pick<ScriptConfig, keyof ScriptConfig>;
 /** `n_inputs`/`n_outputs` mapeiam posicionalmente às `InputVariable`/`OutputVariable`
  *  declaradas no `fll`, na ordem de declaração (RF-541, ADR-029). */
 export type DadosFuzzy = DadosBase & Pick<FuzzyConfig, keyof FuzzyConfig>;
+
+/** `n_inputs` define as portas `IN1..INn`; `output_eu` é UMA unidade (string) para a saída
+ *  única `out` — ao contrário do Script/TFS/Fuzzy, onde `output_eu` é um mapa por porta. O
+ *  modelo NÃO mora aqui: o vínculo bloco → modelo é tabela (SPEC_SENSOR_VIRTUAL §5.1/§7.4). */
+export type DadosSensorVirtual = DadosBase & Pick<SoftSensorConfig, keyof SoftSensorConfig>;
 
 /** `SopdtParams`/`IopdtParams` (`parse.py::TfsElement`) são planas — sobrevivem à geração
  *  (ARCH-06/TD-018) sem ressalva. `ElementoTfs`/`DadosTfs` continuam manuais: no Pydantic,
@@ -382,7 +405,8 @@ export type DadosBloco =
   | DadosIntegrator
   | DadosConstant
   | DadosBusPublish
-  | DadosBusSubscribe;
+  | DadosBusSubscribe
+  | DadosSensorVirtual;
 /** `type` é opcional em `Node`; aqui ele é o discriminante e nunca falta. */
 type Bloco<D extends Record<string, unknown>, T extends TipoBloco> = Node<D, T> & { type: T };
 
@@ -405,6 +429,8 @@ export type NoIntegrator = Bloco<DadosIntegrator, "integrator">;
 export type NoConstant = Bloco<DadosConstant, "constant">;
 export type NoBusPublish = Bloco<DadosBusPublish, "bus_publish">;
 export type NoBusSubscribe = Bloco<DadosBusSubscribe, "bus_subscribe">;
+/** Um nó só para os três métodos: mesmo schema e mesmo contrato, só o `type` muda. */
+export type NoSensorVirtual = Bloco<DadosSensorVirtual, TipoSensorVirtual>;
 export type BlocoNode =
   | NoLeitura
   | NoEscrita
@@ -423,7 +449,13 @@ export type BlocoNode =
   | NoIntegrator
   | NoConstant
   | NoBusPublish
-  | NoBusSubscribe;
+  | NoBusSubscribe
+  | NoSensorVirtual;
+
+export function ehSensorVirtual(no: BlocoNode): no is NoSensorVirtual {
+  return TIPOS_SENSOR_VIRTUAL.some((tipo) => tipo === no.type);
+}
+
 /** Toda aresta do editor nasce de um par de handles resolvidos; `null` nunca chega ao save. */
 export type BlocoEdge = Omit<Edge, "sourceHandle" | "targetHandle"> & {
   sourceHandle: string;
@@ -504,10 +536,11 @@ export function portasScript(prefixo: "IN" | "OUT", quantidade: number): string[
 /** Portas fixas do tipo (nome só, na direção pedida) — vem de `PORT_CONTRACTS`
  *  (`contracts.gen.ts`), fonte única com `flowgraph.py` (débito 2+4, plano F4a). Tipo
  *  dinâmico (Script) devolve `[]` aqui: quem resolve é `portasScript`, com a contagem da
- *  config do bloco. */
+ *  config do bloco. Exceção: o contrato dinâmico que TAMBÉM traz `ports` (sensor virtual,
+ *  saída `out`) devolve essas portas fixas — as dinâmicas continuam sendo de `portasScript`. */
 export function portasFixas(tipo: TipoBloco, direcao: DirecaoPorta): string[] {
   const contrato = PORT_CONTRACTS[tipo];
-  if (contrato.dynamic) return [];
+  if (!("ports" in contrato)) return [];
   return contrato.ports.filter((porta) => porta.direction === direcao).map((porta) => porta.name);
 }
 
@@ -521,6 +554,7 @@ export function handlesEntrada(no: BlocoNode): string[] {
       ? [...portasScript("IN", no.data.n_inputs), "sp"]
       : portasScript("IN", no.data.n_inputs);
   if (no.type === "fuzzy_loop") return portasMalha("pv_", no.data.n_loops);
+  if (ehSensorVirtual(no)) return portasScript("IN", no.data.n_inputs);
   if (no.type === "mpc") {
     const { cvs, constraints, dvs } = no.data.variables;
     return [...cvs, ...constraints, ...dvs].map((variavel) => variavel.id);
@@ -581,6 +615,7 @@ export function tipoPorta(no: BlocoNode, tags: MapaTags): TipoPorta {
   )
     return "num";
   if (no.type === "fuzzy") return "num";
+  if (ehSensorVirtual(no)) return "num";
   if (no.type === "pid" || no.type === "pid_loop" || no.type === "fuzzy_loop") return "num";
   if (no.data.tag_id === null) return "desconhecido";
   const dado = tags.get(no.data.tag_id);
@@ -798,7 +833,8 @@ export function euDaPortaDeEntrada(
 }
 
 /** EU declarada nas portas de SAÍDA de cada nó, por tipo de bloco: Script/TFS/Fuzzy
- *  declaram `output_eu` por porta; OPC-Read/Write herdam a EU da tag para todas as portas
+ *  declaram `output_eu` por porta; o sensor virtual declara UMA `output_eu` (string) para a
+ *  sua saída única; OPC-Read/Write herdam a EU da tag para todas as portas
  *  de saída (o contrato dá os handles, nunca hardcoded); MPC declara por variável
  *  (`variavel.id`, o handle da porta). Blocos sem EU declarada (PID, filtros, Scaler, ou
  *  tag/variável com `eu` vazia) ficam FORA do mapa — chave ausente, não registro vazio.
@@ -812,6 +848,9 @@ export function euDeSaidaPorNo(
   for (const no of nodes) {
     if (no.type === "script" || no.type === "tfs" || no.type === "fuzzy") {
       if (Object.keys(no.data.output_eu).length > 0) porNo.set(no.id, no.data.output_eu);
+    } else if (ehSensorVirtual(no)) {
+      const eu = no.data.output_eu;
+      if (eu !== "") porNo.set(no.id, Object.fromEntries(handlesSaida(no).map((porta) => [porta, eu])));
     } else if (no.type === "mpc") {
       const eus: Record<string, string> = {};
       for (const variavel of [
@@ -1226,6 +1265,26 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
             dados.sp_source === "entrada" || dados.sp_source === "operador"
               ? dados.sp_source
               : null,
+        },
+      };
+    case "soft_sensor_pls":
+    case "soft_sensor_esn":
+    case "soft_sensor_lstm":
+      return {
+        id,
+        type: tipo,
+        position,
+        data: {
+          exec_order,
+          label,
+          // O servidor exige `ge=1` e `strict`: faixa 1..teto, e fora dela o valor padrão.
+          n_inputs: inteiro(
+            dados.n_inputs,
+            contratoSensorVirtual.default_counts.n_inputs,
+            1,
+            MAX_ENTRADAS_SENSOR_VIRTUAL,
+          ),
+          output_eu: texto(dados.output_eu, ""),
         },
       };
     case "pid":

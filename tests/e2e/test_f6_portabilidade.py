@@ -572,8 +572,8 @@ class TestE2EF603Recusas:
         assert antes == depois
 
     @pytest.mark.e2e
-    def test_corpo_acima_4mib(self, admin: httpx.Client) -> None:
-        """Corpo > 4 MiB ⇒ 413."""
+    def test_corpo_acima_32mib(self, admin: httpx.Client) -> None:
+        """Corpo > 32 MiB ⇒ 413 (teto do import, emenda ADR-046 D8; nginx e API)."""
         antes = _contar_linhas_db(admin)
 
         bundle = {
@@ -581,7 +581,7 @@ class TestE2EF603Recusas:
             "exported_at": (datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")),
             "project": {
                 "name": "teste_grande",
-                "description": "x" * (4 * 1024 * 1024 + 1),
+                "description": "x" * (32 * 1024 * 1024 + 1),
             },
             "connections": [],
             "tags": [],
