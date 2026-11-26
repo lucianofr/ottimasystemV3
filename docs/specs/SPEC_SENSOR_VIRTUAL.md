@@ -262,7 +262,9 @@ Ao **instanciar** o bloco com um modelo vinculado (deploy, retomada automática,
 recria o bloco), o runtime preenche o buffer de 256 passos antes da primeira varredura, com os
 valores das tags de entrada do modelo lidos de `samples`.
 
-- **Grade:** instantes `agora − k × period_s`, `k = 0..255`. Cada ponto é o último valor da tag
+- **Grade:** instantes `agora − k × period_s`, `k = 1..256` contados do pré-aquecimento, sendo
+  o primeiro passo do bloco o ponto `k = 0` (emenda de 2026-11-25 (implementação SV-1): esse ponto é a amostra real da
+  primeira varredura; tirá-lo também do histórico o poria duas vezes na janela). Cada ponto é o último valor da tag
   em ou antes do instante, não mais velho que `max(3 × period_s, 180 s)`. É a **mesma função**
   de grade do congelamento do conjunto (§7.3), compartilhada em `ottima_core.softsensor`, para
   treino, conjunto e pré-aquecimento nunca divergirem.
@@ -314,12 +316,17 @@ rodam em paralelo até o novo ter resultado válido; então o antigo é descarta
    a janela dele for maior que as amostras disponíveis ou enquanto o processo estiver fora da
    faixa de treino dele.
 4. Se o candidato não for promovido em `2 × K × period_s` (mínimo 60 s), é descartado, o antigo
-   continua, o runtime limpa `candidate_model_id`, devolve `desired_model_id` ao valor de
-   `active_model_id` e emite `soft_sensor_model_rejected` (severidade warning) com o motivo
-   (janela incompleta, entrada BAD ou extrapolação).
+   continua, o runtime limpa `candidate_model_id`, devolve `desired_model_id` ao modelo que o
+   bloco vai acabar rodando (o pedido enfileirado, o candidato em curso, o em uso ou NULL), e
+   só se ele ainda aponta para o rejeitado, e emite `soft_sensor_model_rejected` (severidade
+   warning) com o motivo (janela incompleta, entrada BAD ou extrapolação). A mesma devolução
+   vale para a recusa no comando (método, `n_inputs`, período, artefato ilegível). Condicional
+   por emenda de 2026-11-25 (implementação SV-1): um pedido mais novo, gravado pela API durante a recusa, não é desfeito.
 5. Bloco sem modelo em uso: o candidato vira o modelo em uso na hora (a saída segue BAD até
    a janela completar). Flow parado: só `desired_model_id` muda; o próximo deploy carrega
-   `desired_model_id` direto e iguala `active_model_id`.
+   `desired_model_id` direto e iguala `active_model_id`. Flow que para ou cai em falha com uma
+   troca em voo tem `candidate_model_id` limpo pelo runtime, sem esperar o banco;
+   `desired_model_id` fica (emenda de 2026-11-25 (implementação SV-1)).
 6. Uma segunda ativação durante a troca substitui o candidato.
 
 A ativação **não** é edição do grafo: um modelo guardado na config do bloco mudaria o bloco a
@@ -445,10 +452,13 @@ concatenados em ordem de tempo. É assim que o dado de seis meses atrás sobrevi
 - `soft_sensor_bindings(flow_id → flows ON DELETE CASCADE, block_id, desired_model_id,
   active_model_id, candidate_model_id, updated_by, updated_at)` com
   `PRIMARY KEY(flow_id, block_id)`. `desired_model_id` é gravado pela API (e devolvido
-  pelo runtime ao valor do ativo quando rejeita um candidato); `active_model_id` e
+  pelo runtime quando rejeita um pedido, §5.6-4); `active_model_id` e
   `candidate_model_id`, só pelo runtime (§5.6). As três colunas
-  referenciam `soft_sensor_models` com `ON DELETE RESTRICT`: modelo vinculado a um bloco não
-  pode ser apagado.
+  referenciam `soft_sensor_models` com FK `DEFERRABLE INITIALLY DEFERRED`, sem `ON DELETE`
+  (emenda de 2026-11-25 (implementação SV-1); era `ON DELETE RESTRICT`): a ordem entre as cascatas projeto → flows → vínculos e
+  projeto → modelos é a dos triggers de RI, que varia, e uma checagem imediata falharia ao
+  apagar o projeto; adiada, ela só vê o estado final, no COMMIT. Modelo vinculado a um bloco
+  continua não podendo ser apagado (a recusa sai no COMMIT).
 - **Faxina no save do flow:** o save apaga o vínculo de todo `block_id` que saiu do grafo ou
   mudou de tipo, na mesma transação. É a mesma faxina que o ADR-041 faz com a porta historiada
   que deixou de existir; sem ela, um bloco removido deixaria um vínculo órfão que impede apagar
@@ -592,8 +602,9 @@ sai de BAD.
 
 - **Tags de entrada do modelo** (`input_tag_ids`) viajam como referência de tag do bundle e são
   religadas no import pelo mesmo mecanismo das referências de tag do grafo. Referência que não
-  resolve não impede o import: o modelo entra sem aquela tag e o bloco apenas não pré-aquece
-  (§5.7).
+  resolve não impede o import: o modelo entra com `input_tag_ids` vazio, tudo ou nada, porque
+  as portas são posicionais e uma lista com buraco ligaria a tag errada à porta; o bloco apenas
+  não pré-aquece (§5.7) (emenda de 2026-11-25 (implementação SV-1)).
 - **`schema_version` continua 1.** Os campos novos são opcionais, como foram os de tag
   calculada e de variável historiada. O import recusa qualquer versão diferente de 1
   (`routers/projects.py:396-398`, cenário E2E-F6-03); subir a versão tornaria todo export
