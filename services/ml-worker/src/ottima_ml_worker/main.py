@@ -14,7 +14,7 @@ from ottima_core.config import get_settings
 from ottima_core.db import create_engine, create_session_factory
 from ottima_core.logging import setup_logging, watch_log_level
 from ottima_core.models import MlJob
-from ottima_ml_worker.jobs import Sessions, claim_next, fail_orphans
+from ottima_ml_worker.jobs import ClaimedJob, Sessions, claim_next, fail_orphans, finish
 from ottima_ml_worker.runner import run_job
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,24 @@ async def _heartbeat_loop(session_factory: Sessions, app: FastAPI) -> None:
         await asyncio.sleep(HEARTBEAT_INTERVAL_S)
 
 
+async def run_claimed(session_factory: Sessions, job: ClaimedJob, *, database_url: str) -> None:
+    """`run_job` que explode (banco fora no `finish`, por exemplo) encerra a linha como `failed`;
+    se nem isso der, o `fail_orphans` da próxima partida encerra."""
+    try:
+        await run_job(session_factory, job, database_url=database_url)
+    except Exception as exc:
+        logger.exception("falha ao executar o job %d", job.id)
+        try:
+            await finish(
+                session_factory,
+                job.id,
+                status="failed",
+                error=f"falha no ml-worker: {str(exc) or type(exc).__name__}",
+            )
+        except Exception:
+            logger.exception("falha ao encerrar o job %d como failed", job.id)
+
+
 async def _job_loop(session_factory: Sessions, app: FastAPI, database_url: str) -> None:
     orphans_done = False
     while True:
@@ -56,13 +74,12 @@ async def _job_loop(session_factory: Sessions, app: FastAPI, database_url: str) 
             if job is not None:
                 app.state.running_id = job.id
                 try:
-                    await run_job(session_factory, job, database_url=database_url)
+                    await run_claimed(session_factory, job, database_url=database_url)
                 finally:
                     app.state.running_id = None
                 continue
         except Exception:
-            # Banco fora ou falha ao gravar o desfecho: o laço segue; job sem desfecho fica
-            # `running` e vira órfão na próxima partida.
+            # Banco fora no claim ou nos órfãos: o laço segue e tenta de novo.
             logger.exception("falha no laço de jobs do ml-worker")
         await asyncio.sleep(JOB_POLL_INTERVAL_S)
 

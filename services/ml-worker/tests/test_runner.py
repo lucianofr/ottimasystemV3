@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from ottima_core.models import MlJob, SoftSensorDataset
+from ottima_ml_worker import runner
 from ottima_ml_worker.jobs import ClaimedJob, claim_next
 from ottima_ml_worker.runner import run_job
 
@@ -118,3 +119,32 @@ async def test_filho_que_morre_sem_resultado_vira_failed(
     job = await _run(session_factory, migrated_database_url, job_id, "teste_morre")
 
     assert (job.status, job.error) == ("failed", "processo terminou sem resultado (código 3)")
+
+
+async def test_falha_transitoria_de_progresso_e_cancelamento_nao_aborta_o_job(
+    session_factory, make_job, migrated_database_url, monkeypatch
+):
+    """Banco piscando no meio do job: progresso e consulta de cancelamento são best-effort."""
+
+    def falha_uma_vez(real):
+        chamadas = []
+
+        async def wrapper(*args, **kwargs):
+            chamadas.append(args)
+            if len(chamadas) == 1:
+                raise ConnectionError("banco piscou")
+            return await real(*args, **kwargs)
+
+        return wrapper, chamadas
+
+    progress, progress_calls = falha_uma_vez(runner.write_progress)
+    cancel, cancel_calls = falha_uma_vez(runner.cancel_requested)
+    monkeypatch.setattr(runner, "write_progress", progress)
+    monkeypatch.setattr(runner, "cancel_requested", cancel)
+    job_id = await make_job(status="running")
+
+    job = await _run(session_factory, migrated_database_url, job_id, "teste_progresso")
+
+    assert job.status == "done"
+    assert job.progress == {"done": 2, "total": 2}
+    assert progress_calls and cancel_calls, "as duas falhas precisam ter acontecido"

@@ -3,6 +3,7 @@
 import asyncio
 
 from ottima_core.models import MlJob, SoftSensorDataset
+from ottima_ml_worker import main
 from ottima_ml_worker.jobs import (
     ClaimedJob,
     cancel_requested,
@@ -99,3 +100,21 @@ async def test_progresso_e_cancelamento(session_factory, make_job):
 
     assert (await _job(session_factory, job_id)).progress == {"done": 1, "total": 4}
     assert await cancel_requested(session_factory, job_id) is True
+
+
+async def test_run_job_que_explode_e_encerrado_como_failed(session_factory, make_job, monkeypatch):
+    """Falha do próprio runner (banco fora no `finish`, por exemplo): o laço encerra a linha."""
+
+    async def explode(*args, **kwargs):
+        raise RuntimeError("runner caiu")
+
+    monkeypatch.setattr(main, "run_job", explode)
+    job_id = await make_job(status="running")
+
+    await main.run_claimed(
+        session_factory, ClaimedJob(id=job_id, kind="train", params={}), database_url="x"
+    )
+
+    job = await _job(session_factory, job_id)
+    assert job.status == "failed"
+    assert "runner caiu" in job.error

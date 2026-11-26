@@ -5,6 +5,7 @@ bloqueia o event loop: a espera no `Pipe` e o `join` vão para thread. Cancelar 
 
 import asyncio
 import importlib
+import logging
 import multiprocessing
 import os
 import time
@@ -18,6 +19,27 @@ PROGRESS_INTERVAL_S = 1.0
 # Módulo extra de handlers importado no filho; só os testes o definem.
 EXTRA_HANDLERS_ENV = "OTTIMA_ML_EXTRA_HANDLERS"
 _EOF = ("eof", None)
+
+logger = logging.getLogger(__name__)
+
+
+async def _try_progress(session_factory: Sessions, job_id: int, progress: dict) -> bool:
+    """Best-effort: banco piscando não pode abortar o job por causa de uma barra de progresso."""
+    try:
+        await write_progress(session_factory, job_id, progress)
+        return True
+    except Exception:
+        logger.exception("falha ao gravar o progresso do job %d", job_id)
+        return False
+
+
+async def _try_cancel_requested(session_factory: Sessions, job_id: int) -> bool:
+    """Best-effort: sem resposta do banco, o job segue e a consulta repete no próximo ciclo."""
+    try:
+        return await cancel_requested(session_factory, job_id)
+    except Exception:
+        logger.exception("falha ao consultar o cancelamento do job %d", job_id)
+        return False
 
 
 async def _run_handler(kind: str, job_id: int, params: dict, database_url: str, conn) -> dict:
@@ -84,7 +106,7 @@ async def run_job(
                     pending = payload
                 else:
                     if pending is not None:
-                        await write_progress(session_factory, job.id, pending)
+                        await _try_progress(session_factory, job.id, pending)
                     if kind == "done":
                         await finish(session_factory, job.id, status="done", result=payload)
                     elif kind == "error":
@@ -96,11 +118,12 @@ async def run_job(
                     return
             now = time.monotonic()
             if pending is not None and now - last_write >= PROGRESS_INTERVAL_S:
-                await write_progress(session_factory, job.id, pending)
-                pending, last_write = None, now
+                if await _try_progress(session_factory, job.id, pending):
+                    pending = None
+                last_write = now
             if now >= next_cancel_check:
                 next_cancel_check = now + poll_s
-                if await cancel_requested(session_factory, job.id):
+                if await _try_cancel_requested(session_factory, job.id):
                     proc.kill()
                     await asyncio.to_thread(proc.join)
                     await finish(session_factory, job.id, status="cancelled")
