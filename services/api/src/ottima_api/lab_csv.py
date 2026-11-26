@@ -125,8 +125,8 @@ def parse_lab_csv(
                     break
             else:
                 rows[row.variable_id, row.sampled_at] = row
-    except csv.Error as e:  # ex.: campo acima do limite do módulo csv
-        problems.append(f"linha {last_line + 1}: CSV malformado ({e})")
+    except csv.Error:  # ex.: campo acima do limite do módulo csv
+        problems.append(f"linha {last_line + 1}: CSV malformado")
 
     if problems:
         raise LabCsvError(problems)

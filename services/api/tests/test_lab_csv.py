@@ -31,7 +31,10 @@ def test_linha_simples():
 
 
 def test_csv_do_excel_brasileiro():
-    bruto = "﻿" + '"nome do TAG";"data/hora";"valor"\r\n"ENXOFRE";"25/11/2026 08:30";"12,5"\r\n\r\n'
+    bruto = (
+        "\ufeff"
+        + '"nome do TAG";"data/hora";"valor"\r\n"ENXOFRE";"25/11/2026 08:30";"12,5"\r\n\r\n'
+    )
     rows = parse_lab_csv(bruto.encode("utf-8"), tz="America/Sao_Paulo", known=CONHECIDAS, now=AGORA)
     assert rows == [LabCsvRow(1, SP_08_30, 12.5)]
 
@@ -127,6 +130,13 @@ def test_valor_nao_numerico_e_nan_sao_recusados():
     ]
 
 
+def test_primeira_linha_com_valor_ilegivel_e_tratada_como_cabecalho():
+    # Regra da spec §7.2 lida ao pé da letra: a linha 1 sem número na 3a coluna é descartada.
+    assert p("ENXOFRE;25/11/2026 08:30;abc\nENXOFRE;25/11/2026 09:30;2") == [
+        LabCsvRow(1, datetime(2026, 11, 25, 12, 30, tzinfo=UTC), 2.0)
+    ]
+
+
 def test_nan_na_primeira_linha_e_dado_nao_cabecalho():
     # "nan" é número para float(); só texto que não vira número faz a linha 1 ser cabeçalho.
     assert problemas("ENXOFRE;25/11/2026 08:30;nan") == [
@@ -179,10 +189,14 @@ def test_linha_so_de_separadores_do_excel_e_vazia():
     assert p("ENXOFRE;25/11/2026 08:30;1\n;;\n  ;  ;  \n") == [LabCsvRow(1, SP_08_30, 1.0)]
 
 
+def test_campo_gigante_e_recusado_como_csv_malformado():
+    assert problemas("ENXOFRE;25/11/2026 08:30;" + "9" * 200_000) == ["linha 1: CSV malformado"]
+
+
 def test_arquivo_vazio_devolve_lista_vazia():
     assert p("") == []
     assert p("\r\n\r\n") == []
-    assert p("﻿") == []  # só BOM
+    assert p("\ufeff") == []  # só BOM
     assert p('"nome do TAG";"data/hora";"valor"') == []  # só cabeçalho
 
 
