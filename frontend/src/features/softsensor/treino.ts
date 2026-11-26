@@ -116,6 +116,15 @@ export function formatarAquecimento(segundos: number | null | undefined): string
   return partes.join(" ");
 }
 
+/** Coluna "Aquecimento" do modelo. Um passo (`warmup_steps = 1`, o PLS) não espera nada além da
+ *  primeira amostra, mas a API devolve `warmup_s = 1 x período`: sem esta regra o PLS apareceria
+ *  como "1 min", e a spec o mostra como "nenhum" (§8.3). */
+export function aquecimentoDoModelo(
+  modelo: Pick<SoftSensorModelOut, "warmup_steps" | "warmup_s">,
+): string {
+  return modelo.warmup_steps === 1 ? "nenhum" : formatarAquecimento(modelo.warmup_s);
+}
+
 export function formatarMetrica(valor: number | undefined): string {
   return valor === undefined || !Number.isFinite(valor) ? "—" : FORMATO_METRICA.format(valor);
 }

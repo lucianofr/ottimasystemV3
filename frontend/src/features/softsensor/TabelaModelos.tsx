@@ -5,12 +5,7 @@ import { Card } from "../../components/ui/card";
 import { Select } from "../../components/ui/select";
 import { useCanMutate } from "../auth/useAuth";
 import { mensagem } from "./coleta";
-import {
-  blocosCompativeis,
-  estadoDoModelo,
-  formatarAquecimento,
-  formatarMetrica,
-} from "./treino";
+import { aquecimentoDoModelo, blocosCompativeis, estadoDoModelo, formatarMetrica } from "./treino";
 import type { SoftSensorBlockOut, SoftSensorModelOut } from "./types";
 import { useActivateModel, useDeleteModel, useModels } from "./useModels";
 import { useSoftSensorBlocks } from "./useSoftSensorBlocks";
@@ -75,7 +70,7 @@ function LinhaModelo({ modelo, blocos, podeMutar }: LinhaProps) {
       <td className="process-value px-4 py-2">{formatarMetrica(modelo.metrics.r2)}</td>
       <td className="process-value px-4 py-2">{formatarMetrica(modelo.metrics.rmse)}</td>
       <td className="process-value px-4 py-2">{formatarMetrica(modelo.metrics.mae)}</td>
-      <td className="px-4 py-2">{formatarAquecimento(modelo.warmup_s)}</td>
+      <td className="px-4 py-2">{aquecimentoDoModelo(modelo)}</td>
       <td data-testid="sv-coleta-modelo-estado" className="px-4 py-2">
         {estadoDoModelo(modelo)}
       </td>

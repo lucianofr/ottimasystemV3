@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { SOFT_SENSOR_HYPERPARAMS } from "../../lib/contracts.gen";
 import type { DatasetOut, SoftSensorBlockOut } from "./types";
 import {
+  aquecimentoDoModelo,
   blocosCompativeis,
   conjuntosCompativeis,
   estadoDoModelo,
@@ -151,7 +152,7 @@ test("estadoDoModelo distingue em uso, aquecendo e aguardando", () => {
 });
 
 test("formatarAquecimento", () => {
-  expect(formatarAquecimento(0)).toBe("nenhum"); // PLS: 1 passo, nenhum passo de aquecimento
+  expect(formatarAquecimento(0)).toBe("nenhum");
   expect(formatarAquecimento(600)).toBe("10 min");
   expect(formatarAquecimento(6000)).toBe("1 h 40 min");
   expect(formatarAquecimento(3600)).toBe("1 h");
@@ -160,6 +161,15 @@ test("formatarAquecimento", () => {
   // sem `warmup_steps` no meta do modelo: não inventa
   expect(formatarAquecimento(null)).toBe("—");
   expect(formatarAquecimento(undefined)).toBe("—");
+});
+
+test("aquecimentoDoModelo: um passo (PLS) é nenhum, mesmo com warmup_s = 1 x período", () => {
+  // o PLS grava warmup_steps = 1, então a API devolve warmup_s = período (60 s aqui), nunca 0
+  expect(aquecimentoDoModelo({ warmup_steps: 1, warmup_s: 60 })).toBe("nenhum");
+  expect(aquecimentoDoModelo({ warmup_steps: 10, warmup_s: 600 })).toBe("10 min");
+  expect(aquecimentoDoModelo({ warmup_steps: 100, warmup_s: 6000 })).toBe("1 h 40 min");
+  expect(aquecimentoDoModelo({ warmup_steps: null, warmup_s: null })).toBe("—");
+  expect(aquecimentoDoModelo({})).toBe("—");
 });
 
 test("formatarMetrica usa vírgula e não inventa número", () => {
