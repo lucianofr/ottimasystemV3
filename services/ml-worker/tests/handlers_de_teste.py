@@ -28,6 +28,13 @@ async def dorme(ctx: JobContext) -> dict:
     return {}
 
 
+async def threads(ctx: JobContext) -> dict:
+    return {
+        name: os.environ.get(name)
+        for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+    }
+
+
 async def morre(ctx: JobContext) -> dict:
     os._exit(3)
 
@@ -39,5 +46,6 @@ HANDLERS.update(
         "teste_explode": explode,
         "teste_dorme": dorme,
         "teste_morre": morre,
+        "teste_threads": threads,
     }
 )

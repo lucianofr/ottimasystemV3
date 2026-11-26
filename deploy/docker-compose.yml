@@ -175,6 +175,36 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  ml-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+      args:
+        PACKAGE: ottima-ml-worker
+    command: ["uvicorn", "ottima_ml_worker.main:app", "--host", "0.0.0.0", "--port", "8005"]
+    # ADR-046 D2: o treino do sensor virtual não usa Redis (a fila é a tabela `ml_jobs`) e
+    # executa código de modelagem sobre dados do banco, então não recebe o `.env` inteiro via
+    # `env_file`; só as variáveis abaixo, sem OTTIMA_SECRET_KEY nem OTTIMA_FERNET_KEY. Sem
+    # volume `certs`: nunca fala OPC-UA. `cpus` limita o treino para não disputar núcleo com
+    # a varredura do flow-runtime.
+    environment:
+      OTTIMA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
+      OTTIMA_LOG_LEVEL: ${OTTIMA_LOG_LEVEL:-INFO}
+      OTTIMA_ML_THREADS: ${OTTIMA_ML_THREADS:-2}
+    cpus: ${OTTIMA_ML_CPUS:-2}
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8005/health',timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
   frontend:
     build:
       context: ../frontend

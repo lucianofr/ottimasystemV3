@@ -1,5 +1,5 @@
 # Override de teste (spec F2 §10.4): publica em 127.0.0.1 a porta do Redis que a
-# suite L2 precisa alcancar a partir do host. Producao continua com 8 servicos e
+# suite L2 precisa alcancar a partir do host. Producao continua com 9 servicos e
 # uma unica porta (ADR-023) — este arquivo nunca sobe sem ser pedido explicitamente.
 #
 # O simulador OPC-UA nao faz mais parte da stack: o opc-worker e so cliente (spec

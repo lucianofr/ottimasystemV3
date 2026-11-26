@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     health_url_flow_runtime: str = "http://flow-runtime:8002/health"
     health_url_recorder: str = "http://recorder:8003/health"
     health_url_calc_worker: str = "http://calc-worker:8004/health"
+    health_url_ml_worker: str = "http://ml-worker:8005/health"
     # tamanho do pool de processos do ScriptPool das tags calculadas (spec tags-calculadas)
     calc_pool_size: int = 4
     # Número de processos em que o flow-runtime divide os flows (ADR-004, "um event loop por

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from ottima_core.config import Settings
 from ottima_core.models import MlJob, SoftSensorDataset
 from ottima_ml_worker import runner
 from ottima_ml_worker.jobs import ClaimedJob, claim_next
@@ -109,6 +110,24 @@ async def test_dataset_build_de_ponta_a_ponta_no_filho(
         assert (row.status, row.error) == ("done", None)
         assert row.result["analyses"] == 0
         assert (await session.get(SoftSensorDataset, dataset_id)).status == "ready"
+
+
+async def test_filho_nasce_com_as_threads_de_blas_limitadas_por_ml_threads(
+    session_factory, make_job, migrated_database_url, monkeypatch
+):
+    # Valor sentinela: prova a sobrescrita e deixa o monkeypatch restaurar o os.environ do pai.
+    for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+        monkeypatch.setenv(name, "99")
+    monkeypatch.setattr(runner, "get_settings", lambda: Settings(ml_threads=3))
+    job_id = await make_job(status="running")
+
+    job = await _run(session_factory, migrated_database_url, job_id, "teste_threads")
+
+    assert job.result == {
+        "OMP_NUM_THREADS": "3",
+        "OPENBLAS_NUM_THREADS": "3",
+        "MKL_NUM_THREADS": "3",
+    }
 
 
 async def test_filho_que_morre_sem_resultado_vira_failed(

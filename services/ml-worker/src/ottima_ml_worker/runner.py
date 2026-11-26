@@ -11,6 +11,7 @@ import os
 import time
 from multiprocessing.connection import Connection
 
+from ottima_core.config import get_settings
 from ottima_core.db import create_engine, create_session_factory
 from ottima_ml_worker.handlers import HANDLERS, JobContext
 from ottima_ml_worker.jobs import ClaimedJob, Sessions, cancel_requested, finish, write_progress
@@ -18,6 +19,8 @@ from ottima_ml_worker.jobs import ClaimedJob, Sessions, cancel_requested, finish
 PROGRESS_INTERVAL_S = 1.0
 # Módulo extra de handlers importado no filho; só os testes o definem.
 EXTRA_HANDLERS_ENV = "OTTIMA_ML_EXTRA_HANDLERS"
+# O filho importa numpy ao nascer e o BLAS lê estas variáveis nesse momento (ADR-046 D2).
+BLAS_THREADS_ENV = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 _EOF = ("eof", None)
 
 logger = logging.getLogger(__name__)
@@ -84,6 +87,8 @@ def _recv(conn: Connection, timeout: float) -> tuple | None:
 async def run_job(
     session_factory: Sessions, job: ClaimedJob, *, database_url: str, poll_s: float = 0.5
 ) -> None:
+    for name in BLAS_THREADS_ENV:
+        os.environ[name] = str(get_settings().ml_threads)  # o `spawn` herda o os.environ do pai
     ctx = multiprocessing.get_context("spawn")
     receiver, sender = ctx.Pipe(duplex=False)
     proc = ctx.Process(
