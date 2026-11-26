@@ -4,6 +4,7 @@ import { SOFT_SENSOR_HYPERPARAMS } from "../../lib/contracts.gen";
 import type { DatasetOut, SoftSensorBlockOut } from "./types";
 import {
   aquecimentoDoModelo,
+  ativacaoRecente,
   blocosCompativeis,
   conjuntosCompativeis,
   estadoDoModelo,
@@ -179,24 +180,44 @@ test("formatarMetrica usa vírgula e não inventa número", () => {
   expect(formatarMetrica(Number.NaN)).toBe("—");
 });
 
-test("precisaAcompanhar só com troca pendente", () => {
+test("ativacaoRecente: janela de 60 s a partir da ativação deste cliente", () => {
+  expect(ativacaoRecente(null, 1_000_000)).toBe(false);
+  expect(ativacaoRecente(1_000_000, 1_000_000)).toBe(true);
+  expect(ativacaoRecente(1_000_000, 1_059_999)).toBe(true);
+  expect(ativacaoRecente(1_000_000, 1_060_000)).toBe(false);
+});
+
+test("precisaAcompanhar só com candidato aquecendo ou logo após a ativação deste cliente", () => {
   expect(precisaAcompanhar(undefined)).toBe(false);
   expect(precisaAcompanhar([])).toBe(false);
   // sem vínculo, ou pedido já atendido
   expect(precisaAcompanhar([bloco()])).toBe(false);
   expect(precisaAcompanhar([bloco({ desired_model_id: 5, active_model_id: 5 })])).toBe(false);
-  // pedido que o runtime ainda não atendeu
-  expect(precisaAcompanhar([bloco({ desired_model_id: 5 })])).toBe(true);
-  expect(precisaAcompanhar([bloco({ desired_model_id: 5, active_model_id: 4 })])).toBe(true);
+  // pedido que o runtime não atendeu e sem candidato (flow parado, import de projeto, deploy
+  // que não carregou o modelo): estado que dura para sempre, então NÃO mantém o polling
+  expect(precisaAcompanhar([bloco({ desired_model_id: 5 })])).toBe(false);
+  expect(precisaAcompanhar([bloco({ desired_model_id: 5, active_model_id: 4 })])).toBe(false);
   // candidato aquecendo, mesmo com desired == active
   expect(
     precisaAcompanhar([bloco({ desired_model_id: 5, active_model_id: 5, candidate_model_id: 6 })]),
   ).toBe(true);
+  expect(precisaAcompanhar([bloco({ candidate_model_id: 6 })])).toBe(true);
   // basta um bloco
-  expect(precisaAcompanhar([bloco(), bloco({ desired_model_id: 5 })])).toBe(true);
+  expect(precisaAcompanhar([bloco(), bloco({ candidate_model_id: 6 })])).toBe(true);
 });
 
-test("temTrocaPendente olha o in_use dos modelos", () => {
+test("precisaAcompanhar: pedido sem candidato só acompanha dentro da janela da própria ativação", () => {
+  const pendente = [bloco({ desired_model_id: 5 })];
+  const ativadoEm = 1_000_000;
+
+  // o runtime ainda vai pegar o `desired` e criar o candidato: 60 s de polling
+  expect(precisaAcompanhar(pendente, ativadoEm, ativadoEm + 59_999)).toBe(true);
+  expect(precisaAcompanhar(pendente, ativadoEm, ativadoEm + 60_000)).toBe(false);
+  // sem ativação deste cliente (outra aba, import, deploy) não há janela
+  expect(precisaAcompanhar(pendente, null, ativadoEm)).toBe(false);
+});
+
+test("temTrocaPendente: candidato nos modelos ou logo após a ativação deste cliente", () => {
   const uso = (state: "active" | "candidate" | "pending") => ({
     flow_id: 1,
     flow_name: "F1",
@@ -207,7 +228,11 @@ test("temTrocaPendente olha o in_use dos modelos", () => {
   expect(temTrocaPendente(undefined)).toBe(false);
   expect(temTrocaPendente([{ in_use: [] }, { in_use: [uso("active")] }])).toBe(false);
   expect(temTrocaPendente([{ in_use: [uso("active")] }, { in_use: [uso("candidate")] }])).toBe(true);
-  expect(temTrocaPendente([{ in_use: [uso("pending")] }])).toBe(true);
+  // "aguardando o runtime" sozinho (sem candidato) não mantém o polling
+  expect(temTrocaPendente([{ in_use: [uso("pending")] }])).toBe(false);
+  // na janela de 60 s da própria ativação o pedido ainda é acompanhado
+  expect(temTrocaPendente([{ in_use: [uso("pending")] }], 1_000_000, 1_059_999)).toBe(true);
+  expect(temTrocaPendente([{ in_use: [uso("pending")] }], 1_000_000, 1_060_000)).toBe(false);
 });
 
 test("progressoDoTreino lê epoch/epochs; sem época a barra fica indeterminada", () => {

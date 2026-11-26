@@ -49,6 +49,8 @@ function GerarModelo({ conjunto, conjuntos, jobs }: GerarModeloProps) {
   const [textos, setTextos] = useState(textosIniciais);
   const [outros, setOutros] = useState<readonly number[]>([]);
   const [erro, setErro] = useState<string | null>(null);
+  // Cancelar pede confirmação inline, como o cancelar da montagem do conjunto (`RodapeConjunto`).
+  const [cancelando, setCancelando] = useState(false);
 
   // O job de treino mais novo deste conjunto (a lista vem do mais novo para o mais antigo).
   const job = jobs?.find((candidato) => candidato.kind === "train");
@@ -83,6 +85,7 @@ function GerarModelo({ conjunto, conjuntos, jobs }: GerarModeloProps) {
     evento.preventDefault();
     if (!podeGerar) return;
     setErro(null);
+    setCancelando(false);
     try {
       await enfileirar.mutateAsync({
         kind: "train",
@@ -104,6 +107,8 @@ function GerarModelo({ conjunto, conjuntos, jobs }: GerarModeloProps) {
       await cancelar.mutateAsync(job.id);
     } catch (err) {
       setErro(mensagem(err));
+    } finally {
+      setCancelando(false);
     }
   }
 
@@ -224,16 +229,41 @@ function GerarModelo({ conjunto, conjuntos, jobs }: GerarModeloProps) {
                   época {String(progresso.feito)} de {String(progresso.total)}
                 </span>
               )}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                data-testid="sv-coleta-treino-cancelar"
-                disabled={cancelar.isPending}
-                onClick={() => void cancelarTreino()}
-              >
-                Cancelar
-              </Button>
+              {cancelando ? (
+                <>
+                  <span className="text-xs text-fg-muted">
+                    Cancelar o treino? Nenhum modelo será gravado.
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    data-testid="sv-coleta-treino-cancelar-confirmar"
+                    disabled={cancelar.isPending}
+                    onClick={() => void cancelarTreino()}
+                  >
+                    Confirmar
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    data-testid="sv-coleta-treino-cancelar-voltar"
+                    onClick={() => setCancelando(false)}
+                  >
+                    Voltar
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="sv-coleta-treino-cancelar"
+                  onClick={() => setCancelando(true)}
+                >
+                  Cancelar
+                </Button>
+              )}
             </div>
           )}
         </div>

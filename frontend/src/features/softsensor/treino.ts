@@ -129,30 +129,45 @@ export function formatarMetrica(valor: number | undefined): string {
   return valor === undefined || !Number.isFinite(valor) ? "—" : FORMATO_METRICA.format(valor);
 }
 
-/** Troca de modelo em curso em algum bloco: candidato aquecendo, ou pedido (`desired`) que o
- *  runtime ainda não atendeu. É o que mantém o polling de `/blocks` ligado (2 s). */
+/** Janela de polling rápido depois que ESTE cliente pede uma ativação: o runtime precisa pegar o
+ *  `desired` e criar o candidato, e isso só aparece em `/blocks` quando acontece. */
+const JANELA_ATIVACAO_MS = 60_000;
+
+/** `ativadoEmMs`: instante (ms) da última ativação bem-sucedida deste cliente, ou `null`. O
+ *  relógio entra por parâmetro (`agoraMs`) para a regra ser testada sem esperar. */
+export function ativacaoRecente(ativadoEmMs: number | null, agoraMs: number): boolean {
+  return ativadoEmMs !== null && agoraMs - ativadoEmMs < JANELA_ATIVACAO_MS;
+}
+
+/**
+ * Polling rápido (2 s) de `/blocks` só enquanto há candidato aquecendo (`candidate_model_id`) ou
+ * dentro da janela da própria ativação (`ativacaoRecente`). Pedido sem candidato (`desired !=
+ * active`) NÃO conta: persiste depois de import de projeto, de ativação em flow parado ou de
+ * deploy que não carregou o modelo, e `useSoftSensorBlocks` mora no AppShell — contar faria toda
+ * página consultar a API a cada 2 s para sempre.
+ */
 export function precisaAcompanhar(
-  blocos:
-    | readonly Pick<
-        SoftSensorBlockOut,
-        "desired_model_id" | "active_model_id" | "candidate_model_id"
-      >[]
-    | undefined,
+  blocos: readonly Pick<SoftSensorBlockOut, "candidate_model_id">[] | undefined,
+  ativadoEmMs: number | null = null,
+  agoraMs: number = Date.now(),
 ): boolean {
   return (
-    blocos?.some(
-      (bloco) =>
-        (bloco.candidate_model_id ?? null) !== null ||
-        (bloco.desired_model_id ?? null) !== (bloco.active_model_id ?? null),
-    ) ?? false
+    ativacaoRecente(ativadoEmMs, agoraMs) ||
+    (blocos?.some((bloco) => (bloco.candidate_model_id ?? null) !== null) ?? false)
   );
 }
 
-/** Mesma troca vista de `/models`: algum `in_use` que não é `active`. */
+/** Mesma regra vista de `/models`: algum `in_use` aquecendo (`candidate`) ou janela da ativação.
+ *  `pending` ("aguardando o runtime") sozinho não mantém o polling. */
 export function temTrocaPendente(
   modelos: readonly Pick<SoftSensorModelOut, "in_use">[] | undefined,
+  ativadoEmMs: number | null = null,
+  agoraMs: number = Date.now(),
 ): boolean {
-  return modelos?.some((modelo) => modelo.in_use.some((uso) => uso.state !== "active")) ?? false;
+  return (
+    ativacaoRecente(ativadoEmMs, agoraMs) ||
+    (modelos?.some((modelo) => modelo.in_use.some((uso) => uso.state === "candidate")) ?? false)
+  );
 }
 
 /** `null` sem `epoch`/`epochs` numéricos (PLS e ESN não reportam; a fila e a gravação também

@@ -3,20 +3,25 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tan
 import { api } from "../../lib/api";
 import { temTrocaPendente } from "./treino";
 import type { SoftSensorModelOut } from "./types";
-import { CHAVE_BLOCOS_SENSOR_VIRTUAL } from "./useSoftSensorBlocks";
+import {
+  CHAVE_BLOCOS_SENSOR_VIRTUAL,
+  registrarAtivacao,
+  ultimaAtivacaoMs,
+} from "./useSoftSensorBlocks";
 
 export const CHAVE_MODELOS = ["softsensor", "models"] as const;
 
 /**
  * Modelos do projeto ativo (todos, não só os do conjunto em tela), com métricas e `in_use`.
- * Atualiza a cada 2 s enquanto algum bloco aquece ou aguarda o runtime (`temTrocaPendente`): é
- * assim que "aquecendo" vira "em uso" na tela, sem depender do WebSocket.
+ * Atualiza a cada 2 s enquanto algum bloco aquece, ou logo após a ativação deste cliente
+ * (`temTrocaPendente`): é assim que "aquecendo" vira "em uso" na tela, sem depender do WebSocket.
  */
 export function useModels(): UseQueryResult<SoftSensorModelOut[]> {
   return useQuery({
     queryKey: CHAVE_MODELOS,
     queryFn: () => api<SoftSensorModelOut[]>("/api/softsensor/models"),
-    refetchInterval: (query) => (temTrocaPendente(query.state.data) ? 2000 : false),
+    refetchInterval: (query) =>
+      temTrocaPendente(query.state.data, ultimaAtivacaoMs()) ? 2000 : false,
   });
 }
 
@@ -26,8 +31,9 @@ interface Ativacao {
   modelId: number;
 }
 
-/** Admin. 202: só grava o pedido (`desired_model_id`); quem ativa e aquece é o runtime. 422 traz o
- *  motivo inteiro (método, entradas ou Ts incompatíveis). */
+/** Admin. 202: só grava o pedido (`desired_model_id`); quem ativa e aquece é o runtime. Abre a
+ *  janela de 60 s de polling rápido. 422 traz o motivo inteiro (método, entradas ou Ts
+ *  incompatíveis). */
 export function useActivateModel() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -36,11 +42,13 @@ export function useActivateModel() {
         method: "POST",
         body: JSON.stringify({ model_id: modelId }),
       }),
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: () => {
+      registrarAtivacao(); // antes de invalidar: o refetch já reavalia o `refetchInterval`
+      return Promise.all([
         queryClient.invalidateQueries({ queryKey: CHAVE_MODELOS }),
         queryClient.invalidateQueries({ queryKey: CHAVE_BLOCOS_SENSOR_VIRTUAL }),
-      ]),
+      ]);
+    },
   });
 }
 
