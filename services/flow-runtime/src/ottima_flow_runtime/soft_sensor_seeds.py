@@ -137,14 +137,16 @@ async def write_binding(
     session_factory: async_sessionmaker[AsyncSession],
     flow_id: int,
     block_id: str,
+    only_if_candidate: int | None = None,
     **values: object,
 ) -> None:
     """Grava só as colunas dadas do vínculo; falha vira log, nunca exceção."""
-    stmt = (
-        update(SoftSensorBinding)
-        .where(SoftSensorBinding.flow_id == flow_id, SoftSensorBinding.block_id == block_id)
-        .values(**values)
+    stmt = update(SoftSensorBinding).where(
+        SoftSensorBinding.flow_id == flow_id, SoftSensorBinding.block_id == block_id
     )
+    if only_if_candidate is not None:
+        stmt = stmt.where(SoftSensorBinding.candidate_model_id == only_if_candidate)
+    stmt = stmt.values(**values)
 
     async def write() -> None:
         async with session_factory() as session:
@@ -155,6 +157,38 @@ async def write_binding(
         await asyncio.wait_for(write(), timeout=PERSIST_TIMEOUT_S)
     except Exception:
         logger.exception("Sensor virtual '%s': falha ao gravar o vínculo", block_id)
+
+
+_clearing: set[asyncio.Task[None]] = set()  # referência forte até a gravação terminar
+
+
+def clear_candidates(
+    session_factory: async_sessionmaker[AsyncSession],
+    flow_id: int,
+    blocks: Mapping[str, tuple[Mapping[str, Any], Block]],
+) -> list[asyncio.Task[None]]:
+    """Flow parado ou em falha: o candidato em voo morre com ele, e o vínculo não pode seguir
+    dizendo "aquecendo" (estado publicado, ADR-002). Gravação destacada e com prazo: a parada
+    para o lado seguro nunca espera o banco. `desired_model_id` fica (spec §5.6-5)."""
+    tasks = []
+    for block_id, (_, block) in blocks.items():
+        model_id = block.drop_candidate() if isinstance(block, SoftSensorBlock) else None
+        if model_id is None:
+            continue
+        # Só o candidato que morreu: um redeploy seguido de troca pode já ter gravado outro.
+        task = asyncio.create_task(
+            write_binding(
+                session_factory,
+                flow_id,
+                block_id,
+                only_if_candidate=model_id,
+                candidate_model_id=None,
+            )
+        )
+        _clearing.add(task)
+        task.add_done_callback(_clearing.discard)
+        tasks.append(task)
+    return tasks
 
 
 async def load_seeds(

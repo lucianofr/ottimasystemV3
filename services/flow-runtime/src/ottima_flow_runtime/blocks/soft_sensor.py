@@ -126,6 +126,12 @@ class SoftSensorBlock(Block):
         # Slot montado aqui (período inválido levanta no pedido); aplicado no próximo `step`.
         self._pending = self._slot(model, buffer)  # o último pedido vence
 
+    def drop_candidate(self) -> int | None:
+        """Flow parado: esquece pedido e candidato; devolve o id que o vínculo tem em voo."""
+        slot = self._pending or self._candidate  # o handler grava o pedido mais novo
+        self._pending = self._candidate = None
+        return slot.model.model_id if slot else None
+
     def reset(self) -> None:
         self._scan = 0
         if self._active is not None:

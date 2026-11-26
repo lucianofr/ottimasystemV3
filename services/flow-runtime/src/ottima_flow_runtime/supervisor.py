@@ -68,7 +68,12 @@ from .mpc.host import MpcHost
 from .mpc.worker import worker_main
 from .partition import UNPARTITIONED, Partition
 from .scheduler import FlowTask
-from .soft_sensor_seeds import load_seeds, make_emit_event, soft_sensor_command
+from .soft_sensor_seeds import (
+    clear_candidates,
+    load_seeds,
+    make_emit_event,
+    soft_sensor_command,
+)
 from .state import RuntimeState
 from .supervisor_mpc import MpcOrchestrator
 from .supervisor_resume import ResumeOrchestrator, RetomadaPendente
@@ -493,6 +498,7 @@ class Supervisor:
         for block_id, host in self._mpc.detach_hosts(runtime).items():
             self._mpc.stop_host_background(runtime, host, flow_id=flow_id, block_id=block_id)
         await runtime.task.stop(user=command.user, reason=REASON_USER)
+        clear_candidates(self._session_factory, flow_id, runtime.blocks)
         await publish_flow_stopped(
             self._redis, flow_id=flow_id, reason=REASON_USER, user=command.user
         )
@@ -693,6 +699,7 @@ class Supervisor:
         self._resume.pendentes[flow_id] = RetomadaPendente(conn_id=conn_id, estados=estados)
         try:
             await runtime.task.fail(reason=REASON_COMM_FAILURE)
+            clear_candidates(self._session_factory, flow_id, runtime.blocks)
         except Exception:
             # Isolado por flow: um que falhe ao cair não pode poupar os seguintes.
             logger.exception(
@@ -734,6 +741,9 @@ class Supervisor:
         """
         async with self._lock:
             await self._handback_failed_mpc()
+            for flow_id, runtime in self._runtimes.items():
+                if runtime.task.state == "failed":  # falha interna não passa por `_fail_flow`
+                    clear_candidates(self._session_factory, flow_id, runtime.blocks)
             running = [
                 flow_id
                 for flow_id, runtime in self._runtimes.items()
@@ -830,6 +840,7 @@ class Supervisor:
             for block_id, host in self._mpc.detach_hosts(runtime).items():
                 self._mpc.stop_host_background(runtime, host, flow_id=flow_id, block_id=block_id)
             await runtime.task.stop(user=SYSTEM_ACTOR, reason=reason)
+            clear_candidates(self._session_factory, flow_id, runtime.blocks)
         except Exception:
             logger.exception("Falha ao parar o flow %s (motivo=%s)", flow_id, reason)
             return
@@ -882,6 +893,11 @@ class Supervisor:
                     # sobreviver ao `Supervisor.stop()` (spec F5 §6.5, tarefa 4.2 F5a).
                     await asyncio.gather(*runtime.mpc_stop_tasks, return_exceptions=True)
                 await runtime.task.stop(user=SYSTEM_ACTOR, reason=REASON_SHUTDOWN)
+                # Desligamento: espera a limpeza (cada uma com o prazo de `write_binding`), senão
+                # o processo sai antes de ela chegar ao banco.
+                await asyncio.gather(
+                    *clear_candidates(self._session_factory, flow_id, runtime.blocks)
+                )
                 if was_running:
                     # Sem usuário comandando um desligamento: a chave `user` é omitida, como
                     # nos demais caminhos de parada sem comando (ruling do controlador).

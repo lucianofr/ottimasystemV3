@@ -266,3 +266,16 @@ def test_periodo_menor_que_o_ts_e_recusado_na_construcao_do_slot():
     b, *_ = bloco(carregar(synthetic.pls([1.0, 1.0], 0.0)), ts=1.0)
     with pytest.raises(ValueError, match="período"):
         b.set_candidate(curto, None)  # recusado no pedido, nunca dentro da varredura
+
+
+async def test_drop_candidate_devolve_o_pedido_que_o_vinculo_tem_em_voo():
+    b, _, gravacoes = bloco(carregar(synthetic.pls([1.0], 0.0), model_id=1), n_inputs=1)
+    assert b.drop_candidate() is None
+    fora = synthetic.pls([1.0], 0.0, ranges=[(0.0, 1.0)])
+    b.set_candidate(carregar(fora, model_id=2), None)
+    await b.step(entradas(5.0))  # 2 aquecendo
+    b.set_candidate(carregar(fora, model_id=3), None)  # 3 enfileirado: é o que o handler gravou
+    assert b.drop_candidate() == 3
+    assert b.intended_model_id == 1 and b.candidate_model_id is None
+    await b.step(entradas(5.0))
+    assert b.active_model_id == 1 and gravacoes == []

@@ -640,3 +640,64 @@ async def test_sem_modelo_em_uso_o_vinculo_final_e_ativo_sem_candidato(
 
 async def _empty_grid(session, tag_ids, *, end, period_s, steps):
     return np.zeros((steps, len(tag_ids))), [GOOD] * steps
+
+
+# Candidato que nunca é promovido: as constantes 1 e 2 ficam fora da faixa de treino.
+PLS_FORA = synthetic.pls([2.0, 2.0], 0.0, period_s=HARNESS_TS, ranges=[(0.0, 0.1), (0.0, 0.1)])
+
+
+async def _warming(harness_factory, session_factory):
+    pls_a = synthetic.pls([1.0, 1.0], 0.0, period_s=HARNESS_TS)
+    harness, scenario, block = await _deployed(harness_factory, session_factory, pls_a, PLS_FORA)
+    flow_id, (active, novo) = scenario["flow_id"], scenario["models"]
+    await _activate(harness, session_factory, flow_id, novo)
+    await await_until(lambda: block.candidate_model_id == novo)
+    assert await _binding(session_factory, flow_id) == (novo, active, novo)
+    return harness, flow_id, active, novo
+
+
+async def _halt(harness, flow_id: int, how: str) -> None:
+    if how == "stop":
+        await harness.command("stop", flow_id)
+        await harness.await_state(flow_id, "stopped")
+    else:
+        await harness.supervisor.on_comm_failure(0, flow_id)
+        assert harness.flow_state(flow_id) == "failed"
+
+
+@pytest.mark.parametrize("how", ["stop", "fail"])
+async def test_parar_com_candidato_aquecendo_limpa_o_candidato(
+    harness_factory, session_factory, how
+):
+    harness, flow_id, active, novo = await _warming(harness_factory, session_factory)
+
+    await _halt(harness, flow_id, how)
+
+    async def limpo() -> bool:  # o desejado fica: o próximo deploy o carrega (§5.6-5)
+        return await _binding(session_factory, flow_id) == (novo, active, None)
+
+    await await_until(limpo)
+
+
+@pytest.mark.parametrize("falha", ["levanta", "trava"])
+async def test_banco_fora_nao_atrasa_nem_quebra_a_parada(
+    harness_factory, session_factory, monkeypatch, falha
+):
+    harness, flow_id, *_ = await _warming(harness_factory, session_factory)
+    liberar = asyncio.Event()
+
+    async def quebrada(*args, **kwargs):
+        if falha == "levanta":
+            raise RuntimeError("banco fora")
+        await liberar.wait()
+
+    monkeypatch.setattr(soft_sensor_seeds, "write_binding", quebrada)
+    inicio = time.monotonic()
+    try:
+        await _halt(harness, flow_id, "stop")
+        assert time.monotonic() - inicio < 1.0
+    finally:
+        monkeypatch.undo()
+        liberar.set()
+    await harness.command("deploy", flow_id)  # o supervisor segue atendendo comandos
+    await harness.await_state(flow_id, "running")
