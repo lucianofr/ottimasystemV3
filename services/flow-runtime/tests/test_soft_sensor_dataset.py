@@ -125,13 +125,29 @@ def test_unpack_recusa_blob_fora_do_contrato(blob):
         unpack_dataset(blob)
 
 
-def test_unpack_nunca_abre_pickle():
-    obj = np.empty(1, dtype=object)
-    obj[0] = {"x": 1}
-    blob = _npz(x=obj, y=np.zeros(1), ts=np.zeros(1))
+_PICKLE_RAN: list[str] = []
 
-    with pytest.raises(DatasetError):
+
+def _pickle_side_effect() -> None:
+    _PICKLE_RAN.append("executado")
+
+
+class _PickleBomb:
+    def __reduce__(self):  # roda ao gravar (inofensivo); `_pickle_side_effect` roda ao ABRIR
+        return (_pickle_side_effect, ())
+
+
+def test_unpack_nunca_abre_pickle():
+    _PICKLE_RAN.clear()
+    obj = np.empty(1, dtype=object)
+    obj[0] = _PickleBomb()
+    blob = _npz(x=obj, y=np.zeros(1), ts=np.zeros(1))
+    assert _PICKLE_RAN == []  # gravar o npz não dispara o efeito: só desserializar dispara
+
+    with pytest.raises(DatasetError, match="allow_pickle"):
         unpack_dataset(blob)
+
+    assert _PICKLE_RAN == []  # o pickle nunca foi desserializado
 
 
 async def test_janela_termina_no_instante_da_coleta(session_factory):
