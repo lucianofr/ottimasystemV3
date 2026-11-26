@@ -13,8 +13,10 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 
 import numpy as np
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ottima_core.models import SoftSensorDataset
 from ottima_core.signal import Quality
 from ottima_core.softsensor.grid import load_grid
 
@@ -138,3 +140,36 @@ async def build_dataset(
         "full_window": full_window,
     }
     return blob, stats
+
+
+async def load_compatible_datasets(
+    session: AsyncSession, project_id: int, dataset_ids: Sequence[int]
+) -> list[SoftSensorDataset]:
+    """Conjuntos de um treino (RF-586): `ready`, do projeto, com a mesma variável, as mesmas
+    entradas na mesma ordem e o mesmo período. Sem o `data` (deferred); repetido conta uma vez."""
+    ids = list(dict.fromkeys(dataset_ids))
+    if not ids:
+        raise DatasetError("Informe ao menos um conjunto de treino")
+    found = {
+        ds.id: ds
+        for ds in await session.scalars(
+            select(SoftSensorDataset).where(
+                SoftSensorDataset.project_id == project_id, SoftSensorDataset.id.in_(ids)
+            )
+        )
+    }
+    datasets = []
+    for dataset_id in ids:
+        if dataset_id not in found:
+            raise DatasetError(f"Conjunto {dataset_id} não existe neste projeto")
+        if found[dataset_id].status != "ready":
+            raise DatasetError(f"Conjunto '{found[dataset_id].name}' ainda não está pronto")
+        datasets.append(found[dataset_id])
+    first = datasets[0]
+    if any(ds.lab_variable_id != first.lab_variable_id for ds in datasets):
+        raise DatasetError("Conjuntos com variáveis de laboratório diferentes")
+    if any(ds.input_tag_ids != first.input_tag_ids for ds in datasets):
+        raise DatasetError("Conjuntos com entradas diferentes")
+    if any(ds.period_s != first.period_s for ds in datasets):
+        raise DatasetError("Conjuntos com períodos diferentes")
+    return datasets

@@ -23,6 +23,7 @@ from .dataset import (
     PERIODS_S,
     DatasetError,
     build_dataset,
+    load_compatible_datasets,
     pack_dataset,
     unpack_dataset,
 )
@@ -65,6 +66,7 @@ __all__ = [
     "build_dataset",
     "evaluate",
     "grid_instants",
+    "load_compatible_datasets",
     "load_grid",
     "load_model",
     "model_steps",
