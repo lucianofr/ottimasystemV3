@@ -404,7 +404,8 @@ _NODE_CONFIG_MODELS = (
 def _hyperparams_contract() -> dict[str, dict[str, dict[str, object]]]:
     """Por método e campo, `{default, min, max}` (ou `{default, choices}` para `Literal`),
     derivado do JSON Schema dos modelos de hiperparâmetro — nenhum limite digitado aqui.
-    `gt` vira `min` exclusivo (a UI usa só como dica; quem recusa é o servidor)."""
+    `gt` vira `min` com `exclusive_min: true` (valor igual a `min` é recusado); campo `ge` não
+    leva a chave. Os schemas não usam `lt`; se um dia usarem, `prop["maximum"]` falha alto."""
     contract: dict[str, dict[str, dict[str, object]]] = {}
     for method, model in HYPERPARAMS.items():
         fields: dict[str, dict[str, object]] = {}
@@ -414,6 +415,8 @@ def _hyperparams_contract() -> dict[str, dict[str, dict[str, object]]]:
             else:
                 low = prop["minimum"] if "minimum" in prop else prop["exclusiveMinimum"]
                 fields[name] = {"default": prop["default"], "min": low, "max": prop["maximum"]}
+                if "exclusiveMinimum" in prop:
+                    fields[name]["exclusive_min"] = True
         contract[method] = fields
     return contract
 

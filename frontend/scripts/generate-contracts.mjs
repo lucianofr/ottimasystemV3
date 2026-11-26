@@ -180,12 +180,13 @@ function tabelaPortContracts(portContracts) {
 // --------------------------------------------------------------------------------------
 
 const TIPOS_HIPERPARAMETROS = `
-/** Hiperparâmetro numérico: default e limites do schema Pydantic (\`min\` é exclusivo nos campos
- * \`gt\`; o servidor recusa o valor, a UI usa só como dica). */
+/** Hiperparâmetro numérico: default e limites do schema Pydantic. \`min\` é inclusivo, exceto
+ * quando \`exclusive_min\` é true (campo \`gt\`): aí o valor igual a \`min\` é recusado. */
 export interface HiperparametroNumerico {
   default: number;
   min: number;
   max: number;
+  exclusive_min?: boolean;
 }
 
 /** Hiperparâmetro de lista fechada (\`Literal\`): as opções saem do schema. */

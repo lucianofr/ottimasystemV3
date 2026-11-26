@@ -3,6 +3,7 @@ limites, janela e faixas do Optuna saem de um módulo só, e o contrato exportad
 derivado dos schemas (nenhum número digitado duas vezes)."""
 
 import pytest
+from annotated_types import Gt
 
 from ottima_core.contracts_export import build_contracts
 from ottima_core.softsensor import METHODS
@@ -103,13 +104,25 @@ def test_contrato_exporta_default_min_max():
     assert contrato["lstm"]["units"] == {"default": 64, "min": 8, "max": 256}
     assert contrato["esn"]["units"] == {"default": 500, "min": 10, "max": 500}
     assert contrato["pls"]["n_components"] == {"default": 3, "min": 1, "max": 50}
-    # gt vira o limite exclusivo como `min`; ge/le sem exclusivo
-    assert contrato["esn"]["sr"] == {"default": 0.9, "min": 0, "max": 2.0}
+    # `gt` (limite exclusivo) carrega `exclusive_min`; `ge` não tem a chave
+    assert contrato["esn"]["sr"] == {"default": 0.9, "min": 0, "max": 2.0, "exclusive_min": True}
     assert contrato["esn"]["ridge"] == {"default": 1e-6, "min": 0, "max": 1.0}
+    assert "exclusive_min" not in contrato["lstm"]["units"]
     # Literal: as opções saem do schema, não de uma segunda lista
     assert contrato["lstm"]["batch_size"] == {"default": 32, "choices": [8, 16, 32, 64]}
     for method, modelo in HYPERPARAMS.items():
         assert set(contrato[method]) == set(modelo.model_fields)
+
+
+def test_exclusive_min_so_nos_campos_gt():
+    # Fonte independente da derivação: o metadado `Gt` do próprio campo Pydantic.
+    contrato = build_contracts()["SOFT_SENSOR_HYPERPARAMS"]
+    for method, modelo in HYPERPARAMS.items():
+        for nome, campo in modelo.model_fields.items():
+            tem_gt = any(isinstance(meta, Gt) for meta in campo.metadata)
+            assert ("exclusive_min" in contrato[method][nome]) == tem_gt, f"{method}.{nome}"
+            if tem_gt:
+                assert contrato[method][nome]["exclusive_min"] is True
 
 
 def test_contrato_exporta_espaco_de_busca():

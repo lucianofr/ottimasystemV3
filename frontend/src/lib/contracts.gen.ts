@@ -882,12 +882,13 @@ export interface SoftSensorConfig {
 // do Optuna (ottima_core.softsensor.hyperparams) — a UI nunca digita esses números.
 // --------------------------------------------------------------------------------------
 
-/** Hiperparâmetro numérico: default e limites do schema Pydantic (`min` é exclusivo nos campos
- * `gt`; o servidor recusa o valor, a UI usa só como dica). */
+/** Hiperparâmetro numérico: default e limites do schema Pydantic. `min` é inclusivo, exceto
+ * quando `exclusive_min` é true (campo `gt`): aí o valor igual a `min` é recusado. */
 export interface HiperparametroNumerico {
   default: number;
   min: number;
   max: number;
+  exclusive_min?: boolean;
 }
 
 /** Hiperparâmetro de lista fechada (`Literal`): as opções saem do schema. */
@@ -923,27 +924,32 @@ export const SOFT_SENSOR_HYPERPARAMS: Record<"pls" | "esn" | "lstm", Record<stri
     "sr": {
       "default": 0.9,
       "min": 0,
-      "max": 2
+      "max": 2,
+      "exclusive_min": true
     },
     "lr": {
       "default": 0.3,
       "min": 0,
-      "max": 1
+      "max": 1,
+      "exclusive_min": true
     },
     "rc_connectivity": {
       "default": 0.1,
       "min": 0,
-      "max": 1
+      "max": 1,
+      "exclusive_min": true
     },
     "input_connectivity": {
       "default": 0.1,
       "min": 0,
-      "max": 1
+      "max": 1,
+      "exclusive_min": true
     },
     "input_scaling": {
       "default": 1,
       "min": 0,
-      "max": 5
+      "max": 5,
+      "exclusive_min": true
     },
     "ridge": {
       "default": 0.000001,
@@ -994,7 +1000,8 @@ export const SOFT_SENSOR_HYPERPARAMS: Record<"pls" | "esn" | "lstm", Record<stri
     "lr": {
       "default": 0.001,
       "min": 0,
-      "max": 0.1
+      "max": 0.1,
+      "exclusive_min": true
     }
   }
 };
