@@ -31,6 +31,7 @@ const ROTAS_COM_NAV = [
   "/engenharia/flows",
   "/engenharia/trend",
   "/engenharia/sensor-virtual/coleta",
+  "/engenharia/sensor-virtual/otimizacao",
   "/configuracoes",
 ] as const;
 
@@ -74,7 +75,20 @@ test("configurações vive só no grupo admin — o único condicionado a role",
 test("sensor virtual vive em constante própria: NAV_ENGENHARIA segue estático (item condicional)", () => {
   const paraEngenharia = NAV_ENGENHARIA.map((item) => item.para);
 
-  expect(NAV_SENSOR_VIRTUAL.map((item) => item.para)).toEqual(["/engenharia/sensor-virtual/coleta"]);
-  expect(NAV_SENSOR_VIRTUAL.map((item) => item.testid)).toEqual(["nav-sv-coleta"]);
+  expect(NAV_SENSOR_VIRTUAL.map((item) => item.para)).toEqual([
+    "/engenharia/sensor-virtual/coleta",
+    "/engenharia/sensor-virtual/otimizacao",
+  ]);
   expect(paraEngenharia).not.toContain("/engenharia/sensor-virtual/coleta");
+  expect(paraEngenharia).not.toContain("/engenharia/sensor-virtual/otimizacao");
+});
+
+test("rota de otimização está na navegação", () => {
+  // depois de "Coleta e treino", no mesmo grupo condicional (só com bloco de sensor virtual)
+  expect(NAV_SENSOR_VIRTUAL.map((item) => item.testid)).toEqual(["nav-sv-coleta", "nav-sv-otim"]);
+  expect(NAV_SENSOR_VIRTUAL[1]).toEqual({
+    rotulo: "Otimização",
+    para: "/engenharia/sensor-virtual/otimizacao",
+    testid: "nav-sv-otim",
+  });
 });

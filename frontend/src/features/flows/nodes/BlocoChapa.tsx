@@ -120,7 +120,11 @@ function LinhaPorta({
         position={entrada ? Position.Left : Position.Right}
         id={porta.id}
       />
-      <span className="plaqueta text-[10px] leading-none text-fg-muted">{porta.rotulo}</span>
+      {/* `anywhere`: o nome de tag longo do sensor virtual quebra dentro da coluna em vez de
+          empurrar a saída para fora do cartão; só palavra mais larga que a coluna muda. */}
+      <span className="plaqueta text-[10px] leading-none text-fg-muted [overflow-wrap:anywhere]">
+        {porta.rotulo}
+      </span>
       {valores !== null && (
         <ValorPorta valor={valores[porta.id]} eu={porta.eu ?? euHerdada ?? eu} />
       )}

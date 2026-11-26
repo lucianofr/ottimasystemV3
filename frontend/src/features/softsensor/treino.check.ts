@@ -1,19 +1,24 @@
 import { expect, test } from "@playwright/test";
 
-import { SOFT_SENSOR_HYPERPARAMS } from "../../lib/contracts.gen";
+import { SOFT_SENSOR_HYPERPARAMS, SOFT_SENSOR_SEARCH_SPACE } from "../../lib/contracts.gen";
 import type { DatasetOut, SoftSensorBlockOut } from "./types";
 import {
   aquecimentoDoModelo,
   ativacaoRecente,
   blocosCompativeis,
   conjuntosCompativeis,
+  descricaoDaFaixa,
   estadoDoModelo,
   formatarAquecimento,
   formatarMetrica,
   hiperparametrosIniciais,
+  linhasDeTentativas,
   precisaAcompanhar,
   problemaDoCampo,
+  progressoDaBusca,
   progressoDoTreino,
+  resultadoDaBusca,
+  rotuloDaPorta,
   temTrocaPendente,
   validarHiperparametros,
 } from "./treino";
@@ -268,4 +273,106 @@ test("conjuntosCompativeis: mesmo pronto, variável, entradas na mesma ordem e p
   ];
 
   expect(conjuntosCompativeis(base, todos)).toEqual([compativel]);
+});
+
+test("linhasDeTentativas ordena da mais nova e traduz falha e poda", () => {
+  const linhas = linhasDeTentativas({
+    trial: 4,
+    n_trials: 20,
+    trials: [
+      { number: 0, r2: 0.81234, state: "COMPLETE", params: { units: 300, sr: 0.837261 } },
+      // `number` do Optuna é base 0 e `trial` do job é contagem: a linha mais nova é a "Tentativa 4"
+      { number: 1, r2: null, state: "PRUNED", params: { units: 120 } },
+      // falha do ajuste: o worker a conta como COMPLETE com R² -1e9
+      { number: 2, r2: -1e9, state: "COMPLETE", params: { units: 80 } },
+      { number: 3, r2: 0.5, state: "COMPLETE", params: {} },
+    ],
+  });
+
+  expect(linhas.map((linha) => linha.numero)).toEqual([4, 3, 2, 1]);
+  expect(linhas[0]).toEqual({ numero: 4, r2: "0,5", estado: "concluída", parametros: "—" });
+  expect(linhas[1]).toEqual({ numero: 3, r2: "falhou", estado: "falhou", parametros: "units=80" });
+  expect(linhas[2]).toEqual({ numero: 2, r2: "—", estado: "podada", parametros: "units=120" });
+  // 4 casas no R², 4 dígitos significativos nos parâmetros, vírgula decimal
+  expect(linhas[3]).toEqual({
+    numero: 1,
+    r2: "0,8123",
+    estado: "concluída",
+    parametros: "units=300; sr=0,8373",
+  });
+});
+
+test("linhasDeTentativas não zera parâmetro de escala log e tolera progresso sem tentativas", () => {
+  const [linha] = linhasDeTentativas({
+    trials: [{ number: 0, r2: 0.9, state: "COMPLETE", params: { ridge: 3.2e-8, lr: 0.0005 } }],
+  });
+  expect(linha?.parametros).toBe("ridge=0,000000032; lr=0,0005");
+
+  expect(linhasDeTentativas({})).toEqual([]);
+  expect(linhasDeTentativas({ trials: "x" })).toEqual([]);
+  expect(linhasDeTentativas({ trials: [null, 3, { r2: 1 }] })).toEqual([]);
+});
+
+test("progressoDaBusca lê trial/n_trials; sem eles a barra fica indeterminada", () => {
+  expect(progressoDaBusca({ trial: 5, n_trials: 20, best_r2: 0.91 })).toEqual({
+    feito: 5,
+    total: 20,
+    melhor: 0.91,
+  });
+  // nenhuma tentativa válida ainda
+  expect(progressoDaBusca({ trial: 0, n_trials: 20, best_r2: null })).toEqual({
+    feito: 0,
+    total: 20,
+    melhor: null,
+  });
+  // parada antecipada por R² mínimo termina com trial < n_trials; relato fora de ordem não estoura o max
+  expect(progressoDaBusca({ trial: 25, n_trials: 20, best_r2: 0.5 })?.feito).toBe(20);
+  // job na fila
+  expect(progressoDaBusca({})).toBeNull();
+  expect(progressoDaBusca({ trial: "5", n_trials: "20" })).toBeNull();
+  expect(progressoDaBusca({ trial: 1, n_trials: 0 })).toBeNull();
+});
+
+test("resultadoDaBusca devolve melhores parâmetros e métricas do modelo gerado", () => {
+  expect(resultadoDaBusca(null)).toBeNull();
+  expect(
+    resultadoDaBusca({
+      model_id: 9,
+      metrics: { r2: 0.84123, rmse: 1.23456, mae: 0.9 },
+      best_params: { units: 300, sr: 0.9 },
+      best_cv_r2: 0.8,
+      trials_run: 20,
+    }),
+  ).toEqual({ parametros: "units=300; sr=0,9", r2: "0,8412", rmse: "1,2346", mae: "0,9" });
+  // resultado sem métricas: não inventa número
+  expect(resultadoDaBusca({ best_params: {} })).toEqual({
+    parametros: "—",
+    r2: "—",
+    rmse: "—",
+    mae: "—",
+  });
+});
+
+test("descricaoDaFaixa mostra o intervalo, a escala e a lista fechada do contrato", () => {
+  expect(descricaoDaFaixa(SOFT_SENSOR_SEARCH_SPACE.pls.n_components)).toBe("1 a 20 (inteiro)");
+  expect(descricaoDaFaixa(SOFT_SENSOR_SEARCH_SPACE.esn.sr)).toBe("0,1 a 1,5");
+  // escala log: o limite inferior 1e-8 não pode virar 0
+  expect(descricaoDaFaixa(SOFT_SENSOR_SEARCH_SPACE.esn.ridge)).toBe(
+    "0,00000001 a 0,1 (escala logarítmica)",
+  );
+  expect(descricaoDaFaixa(SOFT_SENSOR_SEARCH_SPACE.lstm.batch_size)).toBe("8, 16, 32, 64");
+});
+
+test("rotuloDaPorta sem modelo mostra só IN<n>", () => {
+  // `indice` é a posição na lista (base 0); a porta é IN<indice + 1>
+  expect(rotuloDaPorta(0, null)).toBe("IN1");
+  expect(rotuloDaPorta(0, undefined)).toBe("IN1");
+  // `n_inputs` não salvo pode passar dos nomes do modelo ativo: cai no IN<n>
+  expect(rotuloDaPorta(2, ["FIC-100.PV", "TIC-101.PV"])).toBe("IN3");
+  expect(rotuloDaPorta(0, [""])).toBe("IN1");
+});
+
+test("rotuloDaPorta com modelo mostra o nome da tag", () => {
+  expect(rotuloDaPorta(0, ["FIC-100.PV", "TIC-101.PV"])).toBe("IN1 · FIC-100.PV");
+  expect(rotuloDaPorta(1, ["FIC-100.PV", "TIC-101.PV"])).toBe("IN2 · TIC-101.PV");
 });

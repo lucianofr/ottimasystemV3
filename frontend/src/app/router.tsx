@@ -14,6 +14,7 @@ import { OperateSelectorPage } from "../features/operate/OperateSelectorPage";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { ColetaTreinoPage } from "../features/softsensor/ColetaTreinoPage";
+import { OtimizacaoPage } from "../features/softsensor/OtimizacaoPage";
 import { TagsPage } from "../features/tags/TagsPage";
 import { TrendPage } from "../features/trend/TrendPage";
 import { AppShell } from "./AppShell";
@@ -64,6 +65,7 @@ export function App() {
                 />
                 <Route path="/engenharia/trend" element={<TrendPage />} />
                 <Route path="/engenharia/sensor-virtual/coleta" element={<ColetaTreinoPage />} />
+                <Route path="/engenharia/sensor-virtual/otimizacao" element={<OtimizacaoPage />} />
                 <Route path="/configuracoes" element={<SettingsPage />} />
               </Route>
               {/* dentro do guarda: rota desconhecida sem sessão vai direto a /login */}

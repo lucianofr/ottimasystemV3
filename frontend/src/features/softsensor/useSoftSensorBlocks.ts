@@ -25,12 +25,14 @@ export function ultimaAtivacaoMs(): number | null {
  * só enquanto um candidato aquece ou logo após a ativação deste cliente (`precisaAcompanhar`): é
  * assim que "aquecendo" vira "em uso" na tela, sem depender do WebSocket. Pedido sem candidato
  * não mantém o polling — pode durar para sempre e este hook roda em toda página.
+ * `acompanhar = false` só LÊ o cache que o do AppShell mantém: cada observador do react-query tem
+ * o próprio timer, e um por nó do canvas multiplicaria as requisições do aquecimento.
  */
-export function useSoftSensorBlocks(): UseQueryResult<SoftSensorBlockOut[]> {
+export function useSoftSensorBlocks(acompanhar = true): UseQueryResult<SoftSensorBlockOut[]> {
   return useQuery({
     queryKey: CHAVE_BLOCOS_SENSOR_VIRTUAL,
     queryFn: () => api<SoftSensorBlockOut[]>("/api/softsensor/blocks"),
     refetchInterval: (query) =>
-      precisaAcompanhar(query.state.data, ativadoEmMs) ? 2000 : false,
+      acompanhar && precisaAcompanhar(query.state.data, ativadoEmMs) ? 2000 : false,
   });
 }

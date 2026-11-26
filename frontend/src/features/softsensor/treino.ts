@@ -4,7 +4,11 @@
  * `SOFT_SENSOR_HYPERPARAMS` (contrato gerado do Pydantic): a tela nunca digita esses números.
  */
 
-import { SOFT_SENSOR_HYPERPARAMS, type Hiperparametro } from "../../lib/contracts.gen";
+import {
+  SOFT_SENSOR_HYPERPARAMS,
+  type FaixaDeBusca,
+  type Hiperparametro,
+} from "../../lib/contracts.gen";
 import type { DatasetOut, MlJobOut, SoftSensorBlockOut, SoftSensorModelOut } from "./types";
 
 export type MetodoSensor = keyof typeof SOFT_SENSOR_HYPERPARAMS;
@@ -14,6 +18,8 @@ export const METODOS: readonly MetodoSensor[] = ["pls", "esn", "lstm"];
 /** Decimal com vírgula como o resto da tela; 10 casas para não arredondar um limite como 1e-4. */
 const FORMATO_LIMITE = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 10 });
 const FORMATO_METRICA = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 4 });
+/** Valor amostrado pelo Optuna: 4 dígitos significativos, para um `ridge` de 3e-8 não virar 0. */
+const FORMATO_AMOSTRA = new Intl.NumberFormat("pt-BR", { maximumSignificantDigits: 4 });
 
 export function hiperparametrosIniciais(metodo: MetodoSensor): Record<string, number> {
   return Object.fromEntries(
@@ -180,4 +186,114 @@ export function progressoDoTreino(
   const { epoch, epochs } = progresso;
   if (typeof epoch !== "number" || typeof epochs !== "number" || !(epochs > 0)) return null;
   return { feito: Math.min(Math.max(epoch, 0), epochs), total: epochs };
+}
+
+/** Faixa de busca do Optuna (`SOFT_SENSOR_SEARCH_SPACE`) em texto, para a tabela somente leitura
+ *  da página Otimização. Os limites saem exatos (`FORMATO_LIMITE`): 1e-8 não pode virar 0. */
+export function descricaoDaFaixa(faixa: FaixaDeBusca): string {
+  if (faixa.kind === "choice") return (faixa.choices ?? []).join(", ");
+  const intervalo = `${FORMATO_LIMITE.format(faixa.low ?? 0)} a ${FORMATO_LIMITE.format(faixa.high ?? 0)}`;
+  if (faixa.kind === "int") return `${intervalo} (inteiro)`;
+  return faixa.kind === "log" ? `${intervalo} (escala logarítmica)` : intervalo;
+}
+
+/** `INVALID` do ml-worker (`tune.py`): a tentativa conta, mas não produziu modelo utilizável. */
+const R2_INVALIDO = -1e9;
+
+const ESTADO_TENTATIVA: Record<string, string> = {
+  COMPLETE: "concluída",
+  PRUNED: "podada",
+  FAIL: "falhou",
+};
+
+/** `k=v; k=v`. Inteiro sai inteiro (nunca pelo formato de 4 dígitos, que arredondaria 12345). */
+function formatarParametros(parametros: unknown): string {
+  if (typeof parametros !== "object" || parametros === null) return "—";
+  const partes = Object.entries(parametros).map(([campo, valor]) => {
+    const texto =
+      typeof valor === "number" && !Number.isInteger(valor)
+        ? FORMATO_AMOSTRA.format(valor)
+        : String(valor);
+    return `${campo}=${texto}`;
+  });
+  return partes.length === 0 ? "—" : partes.join("; ");
+}
+
+export interface LinhaDeTentativa {
+  numero: number;
+  r2: string;
+  estado: string;
+  parametros: string;
+}
+
+/** Tabela de tentativas do `progress` de um job `tune`, mais nova primeiro. O worker só envia as
+ *  últimas (`PROGRESS_TRIALS`): a contagem total vem de `progressoDaBusca`, nunca daqui. `numero`
+ *  é o `number` do Optuna (base 0) mais um, para a linha mais nova coincidir com "Tentativa k".
+ *  Falha do ajuste chega como `COMPLETE` com R² -1e9: sai "falhou" nas duas colunas. Podada não
+ *  tem R² (`null`). */
+export function linhasDeTentativas(progresso: MlJobOut["progress"]): LinhaDeTentativa[] {
+  const tentativas: unknown = progresso.trials;
+  if (!Array.isArray(tentativas)) return [];
+  return tentativas
+    .flatMap((item: unknown) => {
+      if (typeof item !== "object" || item === null) return [];
+      const t = item as Record<string, unknown>;
+      if (typeof t.number !== "number") return [];
+      const r2 = typeof t.r2 === "number" ? t.r2 : undefined;
+      const falhou = r2 !== undefined && r2 <= R2_INVALIDO;
+      return [
+        {
+          numero: t.number + 1,
+          r2: falhou ? "falhou" : formatarMetrica(r2),
+          estado: falhou ? "falhou" : (ESTADO_TENTATIVA[String(t.state)] ?? String(t.state)),
+          parametros: formatarParametros(t.params),
+        },
+      ];
+    })
+    .sort((a, b) => b.numero - a.numero);
+}
+
+/** `null` na fila (`progress` vazio): a tela desenha o `<progress>` indeterminado. A parada
+ *  antecipada por R² mínimo termina com `trial < n_trials`, e isso não é erro. */
+export function progressoDaBusca(
+  progresso: MlJobOut["progress"],
+): { feito: number; total: number; melhor: number | null } | null {
+  const { trial, n_trials: total, best_r2: melhor } = progresso;
+  if (typeof trial !== "number" || typeof total !== "number" || !(total > 0)) return null;
+  return {
+    feito: Math.min(Math.max(trial, 0), total),
+    total,
+    melhor: typeof melhor === "number" ? melhor : null,
+  };
+}
+
+/** `result` de um `tune` concluído: o do treino (`metrics` do modelo gerado) mais `best_params`. */
+export function resultadoDaBusca(
+  resultado: MlJobOut["result"],
+): { parametros: string; r2: string; rmse: string; mae: string } | null {
+  if (resultado === null) return null;
+  const { metrics, best_params: parametros } = resultado;
+  const metricas = (typeof metrics === "object" && metrics !== null ? metrics : {}) as Record<
+    string,
+    unknown
+  >;
+  const valor = (chave: string): number | undefined => {
+    const v = metricas[chave];
+    return typeof v === "number" ? v : undefined;
+  };
+  return {
+    parametros: formatarParametros(parametros),
+    r2: formatarMetrica(valor("r2")),
+    rmse: formatarMetrica(valor("rmse")),
+    mae: formatarMetrica(valor("mae")),
+  };
+}
+
+/** Rótulo da porta de entrada do bloco no canvas. `indice` é a posição na lista (base 0): a
+ *  porta é `IN<indice + 1>` e o nome é o da tag que o modelo ativo espera nessa posição. Sem
+ *  modelo, ou com `n_inputs` não salvo além dos nomes dele, fica só `IN<n>`. */
+export function rotuloDaPorta(indice: number, nomes: readonly string[] | null | undefined): string {
+  const porta = `IN${String(indice + 1)}`;
+  const nome = nomes?.[indice];
+  return nome === undefined || nome === "" ? porta : `${porta} · ${nome}`;
 }

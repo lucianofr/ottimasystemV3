@@ -20,3 +20,4 @@ export type MlJobOut = components["schemas"]["MlJobOut"];
 export type SoftSensorModelOut = components["schemas"]["SoftSensorModelOut"];
 export type SoftSensorUseOut = components["schemas"]["SoftSensorUseOut"];
 export type TrainJobIn = components["schemas"]["TrainJobIn"];
+export type TuneJobIn = components["schemas"]["TuneJobIn"];
