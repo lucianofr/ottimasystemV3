@@ -20,6 +20,10 @@ from ottima_ml_worker.runner import run_job
 def handlers_de_teste(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).parent))
     monkeypatch.setenv("OTTIMA_ML_EXTRA_HANDLERS", "handlers_de_teste")
+    # `run_job` escreve estas variáveis no os.environ do pai; o monkeypatch as restaura no fim
+    # de cada teste (o valor sentinela também prova a sobrescrita no teste de threads).
+    for name in runner.BLAS_THREADS_ENV:
+        monkeypatch.setenv(name, "99")
 
 
 async def _run(factory, url: str, job_id: int, kind: str, params: dict | None = None) -> MlJob:
@@ -115,9 +119,6 @@ async def test_dataset_build_de_ponta_a_ponta_no_filho(
 async def test_filho_nasce_com_as_threads_de_blas_limitadas_por_ml_threads(
     session_factory, make_job, migrated_database_url, monkeypatch
 ):
-    # Valor sentinela: prova a sobrescrita e deixa o monkeypatch restaurar o os.environ do pai.
-    for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
-        monkeypatch.setenv(name, "99")
     monkeypatch.setattr(runner, "get_settings", lambda: Settings(ml_threads=3))
     job_id = await make_job(status="running")
 

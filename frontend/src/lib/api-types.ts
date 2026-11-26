@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * Health Workers
-         * @description Agrega os 4 workers em paralelo, 1 thread cada (F5R-09: urllib stdlib, sem httpx em
+         * @description Agrega os 5 workers em paralelo, 1 thread cada (F5R-09: urllib stdlib, sem httpx em
          *     produção).
          */
         get: operations["health_workers_api_health_workers_get"];
