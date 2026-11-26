@@ -263,7 +263,9 @@ class SoftSensorBlock(Block):
         await asyncio.shield(task)
 
     async def _report_extrapolation(self, slot: _Slot) -> None:
-        now = slot.evaluation is not None and slot.evaluation.reason == "extrapolating"
+        if slot.evaluation is None or slot.evaluation.value is None:
+            return  # janela BAD não diz nada sobre a faixa: anunciar a volta seria falso
+        now = slot.evaluation.reason == "extrapolating"
         if now == self._extrapolating:
             return
         self._extrapolating = now

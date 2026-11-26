@@ -147,6 +147,17 @@ async def test_extrapolacao_emite_evento_so_na_borda():
     ]
 
 
+async def test_janela_bad_no_meio_da_extrapolacao_nao_anuncia_volta_a_faixa():
+    b, eventos, _ = bloco(
+        carregar(synthetic.pls([1.0], 0.0, ranges=[(0.0, 10.0)]), model_id=7), n_inputs=1
+    )
+    await b.step(entradas(20.0))
+    await b.step({"IN1": Signal(None, quality=Quality.BAD)})  # bad_sample: sem valor
+    await b.step(entradas(20.0))
+    extrap = [e for e in eventos if e["kind"] == KIND_SOFT_SENSOR_EXTRAPOLATING]
+    assert [e["payload"]["active"] for e in extrap] == [True]
+
+
 async def test_persist_que_levanta_nao_derruba_o_step():
     # emit_event também levanta: os dois pontos de saída são capturados e logados.
     async def falha(*_a, **_kw):
