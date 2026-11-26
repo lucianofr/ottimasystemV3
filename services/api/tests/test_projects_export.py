@@ -8,9 +8,19 @@ ausência de segredos/ids em qualquer profundidade do corpo. A montagem pura do 
 router -> `montar_bundle` -> resposta.
 """
 
+import base64
 from collections.abc import Iterator
 
-from ottima_core.models import CalculatedTag, CalculatedTagInput, Flow, OpcConnection, Tag
+from ottima_core.models import (
+    CalculatedTag,
+    CalculatedTagInput,
+    Flow,
+    OpcConnection,
+    SoftSensorBinding,
+    SoftSensorModel,
+    Tag,
+)
+from ottima_core.softsensor import synthetic
 
 
 async def _projeto(client, headers, name: str) -> int:
@@ -316,3 +326,130 @@ async def test_export_tag_calculada_com_entradas_ordenadas_e_tag_opc_antes(
     assert [t["name"] for t in body["tags"]] == ["TT-101", "CALC-1"]
     calc = body["tags"][1]
     assert calc["input_tags"] == [{"connection": "gw1", "tag": "TT-101"}]
+
+
+# ------------------------------------------------------------- sensor virtual (RF-590, ADR-046 D8)
+
+
+def _grafo_sensor_virtual(tag_a: int, tag_b: int) -> dict:
+    """`r1`/`r2` (opc_read) alimentando `sv1` (`soft_sensor_pls`, 2 entradas)."""
+    no_sv = {
+        "id": "sv1",
+        "type": "soft_sensor_pls",
+        "position": {"x": 0.0, "y": 0.0},
+        "data": {"exec_order": 3, "n_inputs": 2, "output_eu": "%"},
+    }
+    return {
+        "nodes": [_no_opc("r1", "opc_read", 1, tag_a), _no_opc("r2", "opc_read", 2, tag_b), no_sv],
+        "edges": [
+            {
+                "id": f"e{i}",
+                "source": f"r{i}",
+                "sourceHandle": "out",
+                "target": "sv1",
+                "targetHandle": f"IN{i}",
+            }
+            for i in (1, 2)
+        ],
+    }
+
+
+async def _cenario_sensor_virtual(client, headers, db_session, nome: str) -> dict:
+    pid = await _projeto(client, headers, nome)
+    gw = await _conexao(client, headers, pid, "gw1")
+    tag_a = await _tag(client, headers, gw, "TT-A")
+    tag_b = await _tag(client, headers, gw, "TT-B")
+    flow_id = await _flow_com_grafo(
+        client, headers, pid, "Malha", _grafo_sensor_virtual(tag_a, tag_b)
+    )
+    return {"pid": pid, "flow_id": flow_id, "tags": [tag_a, tag_b]}
+
+
+async def _modelo(db_session, pid: int, nome: str, input_tag_ids: list[int]) -> tuple:
+    meta, blob = synthetic.pls([1.0, 2.0], 0.5)
+    modelo = SoftSensorModel(
+        project_id=pid,
+        name=nome,
+        method="pls",
+        period_s=meta.period_s,
+        n_inputs=2,
+        input_tag_ids=input_tag_ids,
+        meta=meta.model_dump(mode="json"),
+        weights=blob,
+        created_by="user:1",
+    )
+    db_session.add(modelo)
+    await db_session.commit()
+    return modelo.id, blob
+
+
+async def _vincular(db_session, flow_id: int, **colunas) -> None:
+    db_session.add(
+        SoftSensorBinding(flow_id=flow_id, block_id="sv1", updated_by="user:1", **colunas)
+    )
+    await db_session.commit()
+
+
+async def test_export_leva_o_modelo_vinculado_e_o_vinculo(client, admin_headers, db_session):
+    c = await _cenario_sensor_virtual(client, admin_headers, db_session, "ComSensor")
+    modelo_id, blob = await _modelo(db_session, c["pid"], "pls-1", c["tags"])
+    await _vincular(db_session, c["flow_id"], desired_model_id=modelo_id)
+
+    r = await client.get(f"/api/projects/{c['pid']}/export", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    (modelo,) = body["soft_sensor_models"]
+    assert (modelo["name"], modelo["method"], modelo["n_inputs"]) == ("pls-1", "pls", 2)
+    assert modelo["period_s"] == 1.0
+    assert modelo["meta"]["method"] == "pls"
+    assert base64.b64decode(modelo["weights_b64"]) == blob
+    assert modelo["input_tags"] == [
+        {"connection": "gw1", "tag": "TT-A"},
+        {"connection": "gw1", "tag": "TT-B"},
+    ]
+    assert body["soft_sensor_bindings"] == [{"flow": "Malha", "block_id": "sv1", "model": "pls-1"}]
+    assert list(_chaves_proibidas(body)) == []
+
+
+async def test_export_leva_o_modelo_desejado_e_nao_o_ativo(client, admin_headers, db_session):
+    c = await _cenario_sensor_virtual(client, admin_headers, db_session, "DesejadoXAtivo")
+    ativo, _ = await _modelo(db_session, c["pid"], "ativo", [])
+    desejado, _ = await _modelo(db_session, c["pid"], "desejado", [])
+    await _vincular(db_session, c["flow_id"], desired_model_id=desejado, active_model_id=ativo)
+
+    r = await client.get(f"/api/projects/{c['pid']}/export", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [m["name"] for m in body["soft_sensor_models"]] == ["desejado"]
+    assert [b["model"] for b in body["soft_sensor_bindings"]] == ["desejado"]
+
+
+async def test_export_nao_leva_modelo_sem_vinculo(client, admin_headers, db_session):
+    c = await _cenario_sensor_virtual(client, admin_headers, db_session, "ModeloSolto")
+    await _modelo(db_session, c["pid"], "solto", c["tags"])
+
+    r = await client.get(f"/api/projects/{c['pid']}/export", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["soft_sensor_models"] == []
+    assert body["soft_sensor_bindings"] == []
+
+
+async def test_export_entrada_sem_referencia_exportavel_vira_null(
+    client, admin_headers, db_session
+):
+    """Tag calculada (sem conexão) e tag apagada (id órfão no array) viram `null` na posição."""
+    c = await _cenario_sensor_virtual(client, admin_headers, db_session, "EntradaSemRef")
+    calc = Tag(project_id=c["pid"], name="CALC-1", direction="r", data_type="float")
+    db_session.add(calc)
+    await db_session.flush()
+    db_session.add(CalculatedTag(tag_id=calc.id, code="OUT = 1.0", period_seconds=5))
+    await db_session.commit()
+    modelo_id, _ = await _modelo(db_session, c["pid"], "pls-1", [c["tags"][0], calc.id, 999999])
+    await _vincular(db_session, c["flow_id"], desired_model_id=modelo_id)
+
+    r = await client.get(f"/api/projects/{c['pid']}/export", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    (modelo,) = r.json()["soft_sensor_models"]
+    assert modelo["input_tags"] == [{"connection": "gw1", "tag": "TT-A"}, None, None]

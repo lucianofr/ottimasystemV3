@@ -1,6 +1,6 @@
 """Testes de `POST /api/projects/import` (spec F6 §3.2, RF-103).
 
-Camada HTTP completa: teto de stream de 4 MiB antes de qualquer amarração Pydantic, as
+Camada HTTP completa: teto de stream de 32 MiB antes de qualquer amarração Pydantic, as
 quatro camadas de validação (schema_version, forma do bundle, referências internas, grafo),
 transação única (falha em qualquer camada não deixa linha nenhuma no banco), 409 de nome
 duplicado, `pending_secrets` com os 3 predicados e o evento de auditoria. A montagem pura
@@ -9,7 +9,12 @@ HTTP completo: corpo bruto -> camadas -> insert -> resposta (mesmo padrão de du
 fixture de `test_projects_export.py` — cada suíte é auto-contida).
 """
 
+import base64
+
+import numpy as np
+import pytest
 from sqlalchemy import func, select
+from sqlalchemy.orm import undefer
 
 from ottima_core.models import (
     CalculatedTag,
@@ -17,9 +22,12 @@ from ottima_core.models import (
     Flow,
     OpcConnection,
     Project,
+    SoftSensorBinding,
+    SoftSensorModel,
     Tag,
 )
 from ottima_core.schemas.calculated_tags import MAX_CALC_INPUTS
+from ottima_core.softsensor import load_model, predict, synthetic
 
 IMPORT = "/api/projects/import"
 
@@ -107,6 +115,8 @@ def _bundle(
     tags: list[dict] | None = None,
     flows: list[dict] | None = None,
     historized_vars: list[dict] | None = None,
+    soft_sensor_models: list[dict] | None = None,
+    soft_sensor_bindings: list[dict] | None = None,
 ) -> dict:
     corpo = {
         "schema_version": schema_version,
@@ -120,6 +130,10 @@ def _bundle(
     # continuar importando, e é isso que a maioria dos testes deste arquivo exercita.
     if historized_vars is not None:
         corpo["historized_vars"] = historized_vars
+    if soft_sensor_models is not None:
+        corpo["soft_sensor_models"] = soft_sensor_models
+    if soft_sensor_bindings is not None:
+        corpo["soft_sensor_bindings"] = soft_sensor_bindings
     return corpo
 
 
@@ -343,10 +357,10 @@ async def test_import_bundle_sem_polling_period_ms_usa_default_1000(
     assert conn.polling_period_ms == 1000
 
 
-async def test_corpo_acima_de_4_mib_413_sem_materializar(client, admin_headers, db_session):
+async def test_corpo_acima_de_32_mib_413_sem_materializar(client, admin_headers, db_session):
     antes = await _contagens(db_session)
     chunk = 65536
-    total_chunks = 128  # 8 MiB, o dobro do teto de 4 MiB
+    total_chunks = 640  # 40 MiB, acima do teto de 32 MiB
     enviados = 0
 
     async def corpo():
@@ -360,6 +374,26 @@ async def test_corpo_acima_de_4_mib_413_sem_materializar(client, admin_headers, 
     )
     assert r.status_code == 413, r.text
     assert enviados < total_chunks  # o gerador não foi drenado
+    assert await _contagens(db_session) == antes
+
+
+async def test_import_aceita_corpo_de_20_mib_e_recusa_de_40(client, admin_headers, db_session):
+    """O teto subiu de 4 para 32 MiB (ADR-046 D8): 20 MiB passam; 40 MiB declarados no
+    `content-length` são recusados sem ler o corpo (o outro caminho do teto, ao lado do corte
+    em fluxo do teste acima)."""
+    bundle = _bundle(project_name="Grande")
+    bundle["project"]["description"] = "x" * (20 * 1024 * 1024)
+    r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
+    assert r.status_code == 201, r.text[:300]
+
+    antes = await _contagens(db_session)
+    r = await client.post(
+        IMPORT,
+        content=b"x" * (40 * 1024 * 1024),
+        headers={**admin_headers, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 413, r.text
+    assert r.json()["detail"] == "Corpo do import excede o limite de 32 MiB."
     assert await _contagens(db_session) == antes
 
 
@@ -709,3 +743,252 @@ async def test_evento_project_imported_publicado(client, admin_headers, eventos)
         # bundle, e o número entra na auditoria junto das outras contagens.
         "historized_vars": 0,
     }
+
+
+# ------------------------------------------------------------- sensor virtual (RF-590, ADR-046 D8)
+
+
+def _no_sv(tipo: str = "soft_sensor_pls") -> dict:
+    return {
+        "id": "sv1",
+        "type": tipo,
+        "position": {"x": 0.0, "y": 0.0},
+        "data": {"exec_order": 3, "n_inputs": 2, "output_eu": "%"},
+    }
+
+
+def _arestas_sv() -> list[dict]:
+    """`r1`/`r2` -> `IN1`/`IN2` de `sv1`."""
+    return [
+        {
+            "id": f"e{i}",
+            "source": f"r{i}",
+            "sourceHandle": "out",
+            "target": "sv1",
+            "targetHandle": f"IN{i}",
+        }
+        for i in (1, 2)
+    ]
+
+
+def _grafo_sv_bundle(conn: str, tag_a: str, tag_b: str, tipo: str = "soft_sensor_pls") -> dict:
+    """`r1`/`r2` (opc_read) alimentando `sv1` (2 entradas), na forma do bundle (`tag_ref`)."""
+    return {
+        "nodes": [
+            _no_bundle("r1", "opc_read", 1, conn, tag_a),
+            _no_bundle("r2", "opc_read", 2, conn, tag_b),
+            _no_sv(tipo),
+        ],
+        "edges": _arestas_sv(),
+    }
+
+
+def _modelo_sv_bundle(nome: str = "m1", artefato: tuple | None = None, **campos) -> dict:
+    meta, blob = artefato or synthetic.pls([1.0, 2.0], 0.5)
+    return {
+        "name": nome,
+        "method": meta.method,
+        "period_s": meta.period_s,
+        "n_inputs": len(meta.inputs),
+        "meta": meta.model_dump(mode="json"),
+        "weights_b64": base64.b64encode(blob).decode("ascii"),
+        "input_tags": [{"connection": "gw1", "tag": "TT-A"}, {"connection": "gw1", "tag": "TT-B"}],
+        **campos,
+    }
+
+
+def _bundle_sv(modelos: list[dict], vinculos: list[dict], *, tipo: str = "soft_sensor_pls") -> dict:
+    return _bundle(
+        connections=[_conexao_bundle("gw1")],
+        tags=[_tag_bundle("gw1", "TT-A"), _tag_bundle("gw1", "TT-B")],
+        flows=[_flow_bundle("Malha", _grafo_sv_bundle("gw1", "TT-A", "TT-B", tipo))],
+        soft_sensor_models=modelos,
+        soft_sensor_bindings=vinculos,
+    )
+
+
+_VINCULO = {"flow": "Malha", "block_id": "sv1", "model": "m1"}
+
+
+async def _contagens_sv(db_session) -> tuple[int, int]:
+    async def _n(model) -> int:
+        return (await db_session.execute(select(func.count()).select_from(model))).scalar_one()
+
+    return await _n(SoftSensorModel), await _n(SoftSensorBinding)
+
+
+async def _id_admin(client, admin_headers) -> int:
+    return (await client.get("/api/auth/me", headers=admin_headers)).json()["id"]
+
+
+async def test_import_cria_vinculo_so_com_o_desejado(client, admin_headers, db_session):
+    meta, blob = synthetic.pls([1.0, 2.0], 0.5)
+    bundle = _bundle_sv([_modelo_sv_bundle("m1")], [_VINCULO])
+
+    r = await client.post(
+        IMPORT, json={"name": "ComSensor", "bundle": bundle}, headers=admin_headers
+    )
+    assert r.status_code == 201, r.text
+    novo_pid = r.json()["project"]["id"]
+    autor = f"user:{await _id_admin(client, admin_headers)}"
+
+    modelo = await db_session.scalar(
+        select(SoftSensorModel)
+        .options(undefer(SoftSensorModel.weights))
+        .where(SoftSensorModel.project_id == novo_pid)
+    )
+    assert (modelo.name, modelo.method, modelo.n_inputs, modelo.period_s) == ("m1", "pls", 2, 1.0)
+    assert modelo.created_by == autor
+    assert modelo.weights == blob
+    assert modelo.meta == meta.model_dump(mode="json")
+    ids_das_tags = dict(
+        (
+            await db_session.execute(
+                select(Tag.name, Tag.id)
+                .join(OpcConnection, Tag.connection_id == OpcConnection.id)
+                .where(OpcConnection.project_id == novo_pid)
+            )
+        ).all()
+    )
+    assert modelo.input_tag_ids == [ids_das_tags["TT-A"], ids_das_tags["TT-B"]]
+
+    flow_id = await db_session.scalar(select(Flow.id).where(Flow.project_id == novo_pid))
+    vinculo = (
+        await db_session.execute(
+            select(
+                SoftSensorBinding.desired_model_id,
+                SoftSensorBinding.active_model_id,
+                SoftSensorBinding.candidate_model_id,
+                SoftSensorBinding.updated_by,
+            ).where(SoftSensorBinding.flow_id == flow_id, SoftSensorBinding.block_id == "sv1")
+        )
+    ).one()
+    assert tuple(vinculo) == (modelo.id, None, None, autor)
+
+
+async def test_import_com_tag_de_entrada_que_nao_resolve_nao_falha(
+    client, admin_headers, db_session
+):
+    modelo = _modelo_sv_bundle("m1", input_tags=[{"connection": "gw1", "tag": "NAO-EXISTE"}, None])
+    r = await client.post(
+        IMPORT,
+        json={"name": "SemTags", "bundle": _bundle_sv([modelo], [_VINCULO])},
+        headers=admin_headers,
+    )
+    assert r.status_code == 201, r.text
+    novo_pid = r.json()["project"]["id"]
+    ids = await db_session.scalar(
+        select(SoftSensorModel.input_tag_ids).where(SoftSensorModel.project_id == novo_pid)
+    )
+    assert ids == []
+
+
+async def test_roundtrip_export_import_preserva_a_estimativa(client, admin_headers, db_session):
+    pid = await _projeto(client, admin_headers, "OrigemSensor")
+    gw = await _conexao(client, admin_headers, pid, "gw1")
+    tag_a = await _tag(client, admin_headers, gw, "TT-A")
+    tag_b = await _tag(client, admin_headers, gw, "TT-B")
+    grafo = {
+        "nodes": [
+            _no_db("r1", "opc_read", 1, tag_a),
+            _no_db("r2", "opc_read", 2, tag_b),
+            _no_sv("soft_sensor_esn"),
+        ],
+        "edges": _arestas_sv(),
+    }
+    flow_id = await _flow_com_grafo(client, admin_headers, pid, "Malha", grafo)
+
+    meta, blob = synthetic.esn(2, units=8, warmup=4)
+    original = SoftSensorModel(
+        project_id=pid,
+        name="esn-1",
+        method="esn",
+        period_s=meta.period_s,
+        n_inputs=2,
+        input_tag_ids=[tag_a, tag_b],
+        meta=meta.model_dump(mode="json"),
+        weights=blob,
+        created_by="user:1",
+    )
+    db_session.add(original)
+    await db_session.flush()
+    db_session.add(
+        SoftSensorBinding(
+            flow_id=flow_id, block_id="sv1", desired_model_id=original.id, updated_by="user:1"
+        )
+    )
+    await db_session.commit()
+
+    exportado = await client.get(f"/api/projects/{pid}/export", headers=admin_headers)
+    assert exportado.status_code == 200, exportado.text
+    r = await client.post(
+        IMPORT, json={"name": "DestinoSensor", "bundle": exportado.json()}, headers=admin_headers
+    )
+    assert r.status_code == 201, r.text
+    novo_pid = r.json()["project"]["id"]
+
+    importado = await db_session.scalar(
+        select(SoftSensorModel)
+        .options(undefer(SoftSensorModel.weights))
+        .where(SoftSensorModel.project_id == novo_pid)
+    )
+    assert importado.id != original.id
+    janela = np.random.default_rng(7).normal(size=(meta.warmup_steps, 2))
+    estimativa_original = predict(load_model(original.id, original.meta, blob), janela)
+    estimativa_importada = predict(
+        load_model(importado.id, importado.meta, importado.weights), janela
+    )
+    assert np.isfinite(estimativa_original)
+    assert estimativa_importada == estimativa_original
+
+
+def _lixo_b64() -> str:
+    return base64.b64encode(b"nao sou um npz").decode("ascii")
+
+
+def _defeito(nome: str) -> tuple[list[dict], list[dict]]:
+    """`(modelos, vinculos)` de um bundle com exatamente um defeito de sensor virtual."""
+    if nome == "base64":
+        return [_modelo_sv_bundle("m1", weights_b64="isto nao e base64!")], [_VINCULO]
+    if nome == "artefato":
+        return [_modelo_sv_bundle("m1", weights_b64=_lixo_b64())], [_VINCULO]
+    if nome == "nome_duplicado":
+        return [_modelo_sv_bundle("m1"), _modelo_sv_bundle("m1")], [_VINCULO]
+    if nome == "vinculo_orfao":
+        return [_modelo_sv_bundle("m1")], [{**_VINCULO, "flow": "nao-existe"}]
+    if nome == "bloco_comum":
+        return [_modelo_sv_bundle("m1")], [{**_VINCULO, "block_id": "r1"}]
+    raise AssertionError(nome)
+
+
+@pytest.mark.parametrize(
+    "defeito", ["base64", "artefato", "nome_duplicado", "vinculo_orfao", "bloco_comum"]
+)
+async def test_import_recusado_nao_grava_nada(client, admin_headers, db_session, defeito):
+    modelos, vinculos = _defeito(defeito)
+    antes = (await _contagens(db_session), await _contagens_sv(db_session))
+
+    r = await client.post(
+        IMPORT, json={"bundle": _bundle_sv(modelos, vinculos)}, headers=admin_headers
+    )
+
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"].startswith("Import recusado")
+    assert (await _contagens(db_session), await _contagens_sv(db_session)) == antes
+
+
+async def test_bundle_antigo_sem_os_campos_novos_continua_importando(
+    client, admin_headers, db_session
+):
+    bundle = _bundle(
+        connections=[_conexao_bundle("gw1")],
+        tags=[_tag_bundle("gw1", "TT-101"), _tag_bundle("gw1", "FV-101", direction="w")],
+        flows=[_flow_bundle("Malha", _grafo_bundle_read_write("gw1", "TT-101", "FV-101"))],
+    )
+    assert "soft_sensor_models" not in bundle and "soft_sensor_bindings" not in bundle
+    antes = await _contagens_sv(db_session)
+
+    r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
+
+    assert r.status_code == 201, r.text
+    assert await _contagens_sv(db_session) == antes

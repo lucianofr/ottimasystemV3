@@ -56,7 +56,7 @@ test("particionarDetalhe com um problema só ainda usa '(1 problemas)' (backend 
 });
 
 test("particionarDetalhe NÃO explode detail fora do formato agregado (413 de tamanho)", () => {
-  const detail = "Corpo do import excede o limite de 4 MiB.";
+  const detail = "Corpo do import excede o limite de 32 MiB.";
   expect(particionarDetalhe(detail)).toEqual([detail]);
 });
 
