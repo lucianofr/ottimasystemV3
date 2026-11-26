@@ -17,32 +17,48 @@ from .artifact import (
     pack_weights,
     unpack_weights,
 )
+from .dataset import (
+    DATASET_STEPS,
+    MAX_DATASET_BYTES,
+    PERIODS_S,
+    DatasetError,
+    build_dataset,
+    pack_dataset,
+    unpack_dataset,
+)
 from .forward import predict
 from .grid import grid_instants, load_grid, staleness_limit_s
 from .window import Evaluation, Reason, SampleBuffer, evaluate
 
 __all__ = [
     "BUFFER_STEPS",
+    "DATASET_STEPS",
     "MAX_ARTIFACT_BYTES",
     "MAX_ARTIFACT_UNPACKED_BYTES",
+    "MAX_DATASET_BYTES",
     "METHODS",
+    "PERIODS_S",
     "PERIOD_TOLERANCE",
     "RANGE_MARGIN",
     "ArtifactError",
+    "DatasetError",
     "Evaluation",
     "InputMeta",
     "LoadedModel",
     "ModelMeta",
     "Reason",
     "SampleBuffer",
+    "build_dataset",
     "evaluate",
     "grid_instants",
     "load_grid",
     "load_model",
     "model_steps",
+    "pack_dataset",
     "pack_weights",
     "predict",
     "staleness_limit_s",
     "synthetic",
+    "unpack_dataset",
     "unpack_weights",
 ]
