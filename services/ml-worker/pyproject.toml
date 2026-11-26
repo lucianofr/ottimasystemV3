@@ -8,10 +8,21 @@ dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.32",
   "numpy>=2.5",
+  "torch>=2.5",
+  "scikit-learn>=1.5",
+  "optuna>=4.0",
 ]
 
 [tool.uv.sources]
 ottima-core = { workspace = true }
+torch = { index = "pytorch-cpu" }
+
+# Roda de CPU do PyTorch (ADR-046): sem este índice o lock puxa as rodas CUDA e `nvidia-*`.
+# `explicit`: só o `torch` sai daqui; o resto continua no PyPI.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]
