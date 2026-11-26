@@ -142,6 +142,25 @@ async def test_nome_com_ponto_e_virgula_ou_aspas_e_422(client, admin_headers, no
     assert (r.status_code, r.json()["detail"]) == (422, MSG_NOME_INVALIDO)
 
 
+@pytest.mark.parametrize(
+    ("metodo", "sufixo", "corpo"),
+    [
+        ("PATCH", "", {"name": "x"}),
+        ("DELETE", "", None),
+        ("GET", "/samples", None),
+        ("POST", "/samples", {"value": 1.0, "sampled_at": "2025-03-01T10:00:00Z"}),
+        ("DELETE", "/samples?sampled_at=2025-03-01T10:00:00Z", None),
+    ],
+)
+async def test_id_de_variavel_acima_de_bigint_e_422(client, admin_headers, metodo, sufixo, corpo):
+    # acima de bigint o driver estoura (500); na borda vira 422, como nas rotas de conjunto e job
+    await _ativar(client, admin_headers)
+
+    r = await client.request(metodo, f"{VARS}/{10**20}{sufixo}", json=corpo, headers=admin_headers)
+
+    assert r.status_code == 422, r.text
+
+
 async def test_nome_e_aparado_e_nao_pode_ser_vazio(client, admin_headers):
     await _ativar(client, admin_headers)
 

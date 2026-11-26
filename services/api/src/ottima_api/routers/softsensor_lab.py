@@ -300,7 +300,7 @@ async def create_lab_variable(
 
 @router.patch("/lab-variables/{var_id}", response_model=LabVariableOut)
 async def update_lab_variable(
-    var_id: int,
+    var_id: Id,
     body: LabVariableUpdate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
@@ -331,7 +331,7 @@ async def update_lab_variable(
 
 @router.delete("/lab-variables/{var_id}", status_code=204)
 async def delete_lab_variable(
-    var_id: int,
+    var_id: Id,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
     redis_client: Redis = Depends(get_redis),
@@ -372,7 +372,7 @@ async def delete_lab_variable(
     dependencies=[Depends(require_operator)],
 )
 async def list_lab_samples(
-    var_id: int,
+    var_id: Id,
     start: datetime | None = None,
     end: datetime | None = None,
     db: AsyncSession = Depends(get_db),
@@ -396,7 +396,7 @@ async def list_lab_samples(
 
 @router.post("/lab-variables/{var_id}/samples", response_model=LabSampleOut, status_code=201)
 async def add_lab_sample(
-    var_id: int,
+    var_id: Id,
     body: LabSampleIn,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_operator),
@@ -440,7 +440,7 @@ async def add_lab_sample(
 
 @router.delete("/lab-variables/{var_id}/samples", status_code=204)
 async def delete_lab_sample(
-    var_id: int,
+    var_id: Id,
     sampled_at: datetime,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_operator),
