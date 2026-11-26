@@ -42,6 +42,7 @@ from ottima_core.models import (
     CalculatedTagInput,
     Flow,
     HistorizedVar,
+    LabVariable,
     OpcConnection,
     Project,
     SoftSensorBinding,
@@ -302,6 +303,9 @@ async def export_project(
             )
         )
     )
+    lab_variables = list(
+        await db.scalars(select(LabVariable).where(LabVariable.project_id == project_id))
+    )
     try:
         bundle = montar_bundle(
             project=project,
@@ -312,6 +316,7 @@ async def export_project(
             historized_vars=historized_vars,
             soft_sensor_models=soft_sensor_models,
             soft_sensor_bindings=soft_sensor_bindings,
+            lab_variables=lab_variables,
             flows=flows,
             exported_at=datetime.now(UTC),
         )
@@ -724,6 +729,12 @@ async def import_project(
                     updated_by=autor,
                 )
             )
+
+    # Variáveis de laboratório (RF-590): só as definições; nome já validado na camada 3.
+    for bv in bundle.lab_variables:
+        db.add(
+            LabVariable(project_id=project.id, name=bv.name, eu=bv.eu, description=bv.description)
+        )
 
     await db.commit()
     await db.refresh(project)

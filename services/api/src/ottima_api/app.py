@@ -93,6 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         operate,
         projects,
         softsensor,
+        softsensor_lab,
         system_settings,
         tags,
         users,
@@ -113,6 +114,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(flows.router, prefix="/api/flows", tags=["flows"])
     app.include_router(operate.router, prefix="/api/operate", tags=["operate"])
     app.include_router(softsensor.router, prefix="/api/softsensor", tags=["softsensor"])
+    app.include_router(softsensor_lab.router, prefix="/api/softsensor", tags=["softsensor"])
     app.include_router(events.router, prefix="/api/events", tags=["events"])
     app.include_router(history.router, prefix="/api/history", tags=["history"])
     app.include_router(history_retention.router, prefix="/api", tags=["history-retention"])

@@ -25,7 +25,7 @@ export type AcaoProjeto = "criar" | "renomear" | "excluir" | "ativar" | "importa
  */
 export function chavesInvalidadasPor(acao: AcaoProjeto): readonly (readonly unknown[])[] {
   if (acao === "ativar" || acao === "importar") {
-    return [CHAVE_PROJETOS, ["connections"], ["tags"], ["flows"], ["operate", "mpcs"]];
+    return [CHAVE_PROJETOS, ["connections"], ["tags"], ["flows"], ["operate", "mpcs"], ["softsensor"]];
   }
   return [CHAVE_PROJETOS];
 }

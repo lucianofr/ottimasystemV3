@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 
 const POLLING_MS = 5000;
 
-export type WorkerId = "opc_worker" | "flow_runtime" | "recorder" | "calc_worker";
+export type WorkerId = "opc_worker" | "flow_runtime" | "recorder" | "calc_worker" | "ml_worker";
 
 /** Corpo por worker (`_fetch_worker_health`, `routers/health.py`): `up` é o único campo
  *  garantido — o resto (`status`/`service`/`version`/...) só existe quando `up: true`, e a
@@ -31,10 +31,17 @@ const ROTULO_WORKER: Record<WorkerId, string> = {
   flow_runtime: "Flow Runtime",
   recorder: "Recorder",
   calc_worker: "Calc Worker",
+  ml_worker: "ML Worker",
 };
 
 /** Ordem fixa das lâmpadas (mesma do agregador, `health.py`). */
-const ORDEM: readonly WorkerId[] = ["opc_worker", "flow_runtime", "recorder", "calc_worker"];
+const ORDEM: readonly WorkerId[] = [
+  "opc_worker",
+  "flow_runtime",
+  "recorder",
+  "calc_worker",
+  "ml_worker",
+];
 
 /** Deriva as lâmpadas do agregador (`GET /api/health/workers`, spec F5 §4.2, decisão A-8).
  *  Sem resposta ainda (pending ou erro de rede) todas ficam indisponíveis — a lâmpada nunca

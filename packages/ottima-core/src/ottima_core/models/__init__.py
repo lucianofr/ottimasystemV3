@@ -6,10 +6,13 @@ from ottima_core.models.connection import OpcConnection
 from ottima_core.models.flow import Flow
 from ottima_core.models.historized_var import HistorizedVar
 from ottima_core.models.history_retention import HistoryRetentionSettings
+from ottima_core.models.lab import LabSample, LabVariable
 from ottima_core.models.loop_setpoint import LoopSetpoint
+from ottima_core.models.ml_job import MlJob
 from ottima_core.models.mpc_setpoint import MpcSetpoint
 from ottima_core.models.project import Project
 from ottima_core.models.soft_sensor import SoftSensorBinding, SoftSensorModel
+from ottima_core.models.soft_sensor_dataset import SoftSensorDataset
 from ottima_core.models.system_settings import SystemSettings
 from ottima_core.models.tag import Tag
 from ottima_core.models.timeseries import (
@@ -37,6 +40,10 @@ __all__ = [
     "LoopSetpoint",
     "SoftSensorModel",
     "SoftSensorBinding",
+    "LabVariable",
+    "LabSample",
+    "SoftSensorDataset",
+    "MlJob",
     "HistoryRetentionSettings",
     "SystemSettings",
     "samples_table",

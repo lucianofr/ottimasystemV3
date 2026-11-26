@@ -20,6 +20,7 @@ from ottima_core.models import (
     CalculatedTag,
     CalculatedTagInput,
     Flow,
+    LabVariable,
     OpcConnection,
     Project,
     SoftSensorBinding,
@@ -117,6 +118,7 @@ def _bundle(
     historized_vars: list[dict] | None = None,
     soft_sensor_models: list[dict] | None = None,
     soft_sensor_bindings: list[dict] | None = None,
+    lab_variables: list[dict] | None = None,
 ) -> dict:
     corpo = {
         "schema_version": schema_version,
@@ -134,6 +136,8 @@ def _bundle(
         corpo["soft_sensor_models"] = soft_sensor_models
     if soft_sensor_bindings is not None:
         corpo["soft_sensor_bindings"] = soft_sensor_bindings
+    if lab_variables is not None:
+        corpo["lab_variables"] = lab_variables
     return corpo
 
 
@@ -992,3 +996,72 @@ async def test_bundle_antigo_sem_os_campos_novos_continua_importando(
 
     assert r.status_code == 201, r.text
     assert await _contagens_sv(db_session) == antes
+
+
+# ---------------------------------------------------- variáveis de laboratório (RF-590, ADR-046 D8)
+
+
+async def _n_variaveis_de_laboratorio(db_session) -> int:
+    return (await db_session.execute(select(func.count()).select_from(LabVariable))).scalar_one()
+
+
+async def test_import_recria_as_variaveis(client, admin_headers, db_session):
+    bundle = _bundle(
+        lab_variables=[
+            {"name": "viscosidade", "eu": "cP", "description": "Ubbelohde"},
+            {"name": "densidade"},
+        ]
+    )
+
+    r = await client.post(IMPORT, json={"name": "ComLab", "bundle": bundle}, headers=admin_headers)
+
+    assert r.status_code == 201, r.text
+    novo_pid = r.json()["project"]["id"]
+    linhas = await db_session.execute(
+        select(LabVariable.name, LabVariable.eu, LabVariable.description)
+        .where(LabVariable.project_id == novo_pid)
+        .order_by(LabVariable.name)
+    )
+    assert [tuple(linha) for linha in linhas] == [
+        ("densidade", "", ""),
+        ("viscosidade", "cP", "Ubbelohde"),
+    ]
+
+
+async def test_import_com_nome_de_variavel_duplicado_e_422(client, admin_headers, db_session):
+    bundle = _bundle(lab_variables=[{"name": "viscosidade"}, {"name": "viscosidade", "eu": "cP"}])
+    antes = (await _contagens(db_session), await _n_variaveis_de_laboratorio(db_session))
+
+    r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
+
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"].startswith("Import recusado")
+    assert "variável de laboratório 'viscosidade' duplicada" in r.json()["detail"]
+    assert (await _contagens(db_session), await _n_variaveis_de_laboratorio(db_session)) == antes
+
+
+@pytest.mark.parametrize("nome", ["", "   ", "a;b", 'a"b', " viscosidade", "viscosidade "])
+async def test_import_com_nome_de_variavel_que_a_api_recusaria_e_422(
+    client, admin_headers, db_session, nome
+):
+    """Mesmas regras de `POST /api/softsensor/lab-variables`: o arquivo não as contorna."""
+    bundle = _bundle(lab_variables=[{"name": nome}])
+    antes = (await _contagens(db_session), await _n_variaveis_de_laboratorio(db_session))
+
+    r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
+
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"].startswith("Import recusado")
+    assert "variável de laboratório" in r.json()["detail"]  # recusa de coerência, não de forma
+    assert (await _contagens(db_session), await _n_variaveis_de_laboratorio(db_session)) == antes
+
+
+async def test_bundle_sem_lab_variables_continua_importando(client, admin_headers, db_session):
+    bundle = _bundle()
+    assert "lab_variables" not in bundle
+    antes = await _n_variaveis_de_laboratorio(db_session)
+
+    r = await client.post(IMPORT, json={"bundle": bundle}, headers=admin_headers)
+
+    assert r.status_code == 201, r.text
+    assert await _n_variaveis_de_laboratorio(db_session) == antes

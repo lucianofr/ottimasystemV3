@@ -192,6 +192,17 @@ class BundleSoftSensorBinding(BaseModel):
     model: str
 
 
+class BundleLabVariable(BaseModel):
+    """Variável de laboratório (RF-590, ADR-046 D8): só a definição. As análises
+    (`lab_samples`) são dado histórico e nunca viajam (spec §9); a chave natural é o nome."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    eu: str = ""
+    description: str = ""
+
+
 class ProjectBundle(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -205,7 +216,8 @@ class ProjectBundle(BaseModel):
     # ADR-040 D6): `schema_version` continua 1 — um bundle exportado antes do ADR-041 importa
     # sem mudança, com a lista vazia (nenhuma variável historiada existia para exportar).
     historized_vars: list[BundleHistorizedVar] = Field(default_factory=list)
-    # Idem (ADR-046 D8, RF-590): bundle anterior ao sensor virtual importa com as duas listas
+    # Idem (ADR-046 D8, RF-590): bundle anterior ao sensor virtual importa com as listas
     # vazias; `schema_version` continua 1.
     soft_sensor_models: list[BundleSoftSensorModel] = Field(default_factory=list)
     soft_sensor_bindings: list[BundleSoftSensorBinding] = Field(default_factory=list)
+    lab_variables: list[BundleLabVariable] = Field(default_factory=list)

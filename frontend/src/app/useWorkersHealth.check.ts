@@ -15,26 +15,29 @@ function saude(overrides: Partial<WorkersHealth> = {}): WorkersHealth {
     flow_runtime: { up: true },
     recorder: { up: true },
     calc_worker: { up: true },
+    ml_worker: { up: true },
   };
   return { ...base, ...overrides };
 }
 
-test("sem resposta ainda: as 4 lâmpadas ficam indisponíveis, nunca somem", () => {
+test("sem resposta ainda: as 5 lâmpadas ficam indisponíveis, nunca somem", () => {
   expect(derivarLampadas(undefined)).toEqual([
     { id: "opc_worker", rotulo: "OPC Worker", estado: "Indisponível", ativo: false },
     { id: "flow_runtime", rotulo: "Flow Runtime", estado: "Indisponível", ativo: false },
     { id: "recorder", rotulo: "Recorder", estado: "Indisponível", ativo: false },
     { id: "calc_worker", rotulo: "Calc Worker", estado: "Indisponível", ativo: false },
+    { id: "ml_worker", rotulo: "ML Worker", estado: "Indisponível", ativo: false },
   ]);
 });
 
-test("todos up: as 4 ficam ativas, na ordem opc_worker/flow_runtime/recorder/calc_worker", () => {
+test("todos up: as 5 ficam ativas, na ordem opc_worker/flow_runtime/recorder/calc_worker/ml_worker", () => {
   const lampadas = derivarLampadas(saude());
   expect(lampadas.map((l) => l.id)).toEqual([
     "opc_worker",
     "flow_runtime",
     "recorder",
     "calc_worker",
+    "ml_worker",
   ]);
   expect(lampadas.every((l) => l.ativo && l.estado === "Ativo")).toBe(true);
 });
@@ -51,6 +54,7 @@ test("um worker down: só a lâmpada dele muda, com rótulo textual junto (não 
     "opc_worker",
     "flow_runtime",
     "calc_worker",
+    "ml_worker",
   ]);
 });
 

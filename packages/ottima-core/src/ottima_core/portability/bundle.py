@@ -21,6 +21,7 @@ from ottima_core.models import (
     CalculatedTagInput,
     Flow,
     HistorizedVar,
+    LabVariable,
     OpcConnection,
     Project,
     SoftSensorBinding,
@@ -33,6 +34,7 @@ from ottima_core.portability.schemas import (
     BundleConnection,
     BundleFlow,
     BundleHistorizedVar,
+    BundleLabVariable,
     BundleProject,
     BundleSoftSensorBinding,
     BundleSoftSensorModel,
@@ -75,6 +77,7 @@ def montar_bundle(
     historized_vars: Sequence[HistorizedVar] = (),
     soft_sensor_models: Sequence[SoftSensorModel] = (),
     soft_sensor_bindings: Sequence[SoftSensorBinding] = (),
+    lab_variables: Sequence[LabVariable] = (),
 ) -> ProjectBundle:
     """Projeta o estado vivo de um projeto no arquivo de portabilidade (spec §2.1-7).
 
@@ -95,6 +98,9 @@ def montar_bundle(
     os modelos que algum deles referencia, por nome; quem chama carrega `weights` com
     `undefer` (a coluna é deferred). Tag de entrada sem referência exportável — calculada,
     historiada (ambas sem conexão) ou apagada — vira `None` na posição da porta.
+
+    Variáveis de laboratório (RF-590): só as definições, por nome; análises e conjuntos de
+    treino nunca entram (spec §9).
     """
     refs = ref_por_id(connections, tags)
     nome_da_conexao = {connection.id: connection.name for connection in connections}
@@ -223,6 +229,10 @@ def montar_bundle(
                 model=modelos_por_id[b.desired_model_id].name,
             )
             for b in vinculos_ordenados
+        ],
+        lab_variables=[
+            BundleLabVariable(name=v.name, eu=v.eu, description=v.description)
+            for v in sorted(lab_variables, key=lambda v: v.name)
         ],
     )
 
@@ -405,6 +415,22 @@ def problemas_de_coerencia_interna(bundle: ProjectBundle) -> list[str]:
                 f"{onde}: o bloco '{vinculo.block_id}' do flow '{vinculo.flow}' é "
                 f"{metodo_do_bloco.upper()} e o modelo '{modelo.name}' é {modelo.method.upper()}"
             )
+
+    # Variáveis de laboratório (RF-590): o arquivo é fronteira de confiança e não contorna as
+    # regras de `POST /api/softsensor/lab-variables` (nome não vazio, sem `;` nem aspas — a
+    # primeira coluna do CSV —, sem espaço nas pontas, que a API apara). Nome único por
+    # projeto (`uq_lab_variables_project_name`); o mesmo Counter evita o 500 do `flush()`.
+    for variavel in bundle.lab_variables:
+        nome = variavel.name
+        if not nome.strip():
+            problemas.append("variável de laboratório com nome vazio")
+        elif ";" in nome or '"' in nome:
+            problemas.append(f"variável de laboratório {nome!r} não pode ter ';' nem aspas no nome")
+        elif nome != nome.strip():
+            problemas.append(f"variável de laboratório {nome!r} tem espaço no começo ou no fim")
+    for nome, contagem in Counter(v.name for v in bundle.lab_variables).items():
+        if contagem > 1:
+            problemas.append(f"variável de laboratório {nome!r} duplicada no bundle")
 
     return problemas
 

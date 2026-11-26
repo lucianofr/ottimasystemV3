@@ -9,14 +9,19 @@ router -> `montar_bundle` -> resposta.
 """
 
 import base64
+import json
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 from ottima_core.models import (
     CalculatedTag,
     CalculatedTagInput,
     Flow,
+    LabSample,
+    LabVariable,
     OpcConnection,
     SoftSensorBinding,
+    SoftSensorDataset,
     SoftSensorModel,
     Tag,
 )
@@ -453,3 +458,68 @@ async def test_export_entrada_sem_referencia_exportavel_vira_null(
     assert r.status_code == 200, r.text
     (modelo,) = r.json()["soft_sensor_models"]
     assert modelo["input_tags"] == [{"connection": "gw1", "tag": "TT-A"}, None, None]
+
+
+# ---------------------------------------------------- variáveis de laboratório (RF-590, ADR-046 D8)
+
+
+async def test_export_leva_as_variaveis_de_laboratorio(client, admin_headers, db_session):
+    pid = await _projeto(client, admin_headers, "ComLab")
+    outro = await _projeto(client, admin_headers, "OutroProjeto")
+    db_session.add_all(
+        [
+            LabVariable(project_id=pid, name="viscosidade", eu="cP", description="Ubbelohde"),
+            LabVariable(project_id=pid, name="densidade"),
+            LabVariable(project_id=outro, name="de-outro-projeto"),
+        ]
+    )
+    await db_session.commit()
+
+    r = await client.get(f"/api/projects/{pid}/export", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["lab_variables"] == [
+        {"name": "densidade", "eu": "", "description": ""},
+        {"name": "viscosidade", "eu": "cP", "description": "Ubbelohde"},
+    ]
+    assert list(_chaves_proibidas(body)) == []
+
+
+async def test_export_nunca_leva_analises_nem_conjuntos(client, admin_headers, db_session):
+    pid = await _projeto(client, admin_headers, "ComAnalises")
+    variavel = LabVariable(project_id=pid, name="viscosidade")
+    db_session.add(variavel)
+    await db_session.flush()
+    coleta = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    db_session.add_all(
+        [
+            LabSample(
+                lab_variable_id=variavel.id,
+                sampled_at=coleta,
+                value=12345.678,
+                source="manual",
+                created_by="user:1",
+            ),
+            SoftSensorDataset(
+                project_id=pid,
+                name="conjunto-sentinela",
+                lab_variable_id=variavel.id,
+                input_tag_ids=[1, 2],
+                period_s=60.0,
+                start_ts=coleta,
+                created_by="user:1",
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    r = await client.get(f"/api/projects/{pid}/export", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert [v["name"] for v in body["lab_variables"]] == ["viscosidade"]
+    assert not {"lab_samples", "datasets", "soft_sensor_datasets"} & body.keys()
+    texto = json.dumps(body)
+    assert "12345.678" not in texto
+    assert "conjunto-sentinela" not in texto

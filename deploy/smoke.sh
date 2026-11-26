@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # L1 do gate E2E da F1: stack completo healthy + login do seed + retenção ativa.
-# 8 serviços, uma porta publicada (ADR-023). O simulador OPC-UA saiu da stack
+# 9 serviços, uma porta publicada (ADR-023). O simulador OPC-UA saiu da stack
 # (dev-only): quando a suíte e2e precisa de um servidor OPC, ela o sobe standalone
 # no host (tests/e2e/conftest.py).
 set -euo pipefail
@@ -10,12 +10,13 @@ set -a; source .env; set +a
 PORT="${OTTIMA_HTTP_PORT:-80}"
 BASE="http://localhost:${PORT}"
 
-# 8 serviços, uma porta publicada (ADR-023). O calc-worker (ADR-033) soma 1 na contagem.
+# 9 serviços, uma porta publicada (ADR-023). O calc-worker (ADR-033) e o ml-worker (ADR-046)
+# somam 1 cada na contagem.
 COMPOSE=(docker compose)
-ESPERADOS=8
+ESPERADOS=9
 
 # --remove-orphans: sem ele, um serviço deixado por um override anterior sobrevive ao
-# `down` do modo produção, entra na contagem do `ps` e quebra o aceite de 8 serviços.
+# `down` do modo produção, entra na contagem do `ps` e quebra o aceite de 9 serviços.
 "${COMPOSE[@]}" up -d --build --remove-orphans
 
 echo "aguardando os ${ESPERADOS} serviços ficarem healthy..."
@@ -40,7 +41,7 @@ assert "db_ok" in corpo, corpo
 '
 
 echo "E2E-01b: healths internos dos workers..."
-for svc in "opc-worker:8001" "flow-runtime:8002" "recorder:8003" "calc-worker:8004"; do
+for svc in "opc-worker:8001" "flow-runtime:8002" "recorder:8003" "calc-worker:8004" "ml-worker:8005"; do
   nome="${svc%%:*}"; porta="${svc##*:}"
   "${COMPOSE[@]}" exec -T "${nome}" python -c "import urllib.request; assert urllib.request.urlopen('http://localhost:${porta}/health', timeout=3).status == 200"
 done
@@ -51,11 +52,11 @@ TOKEN=$(curl -fsS -X POST "${BASE}/api/auth/login" -H 'Content-Type: application
   | python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])')
 curl -fsS -H "Authorization: Bearer ${TOKEN}" "${BASE}/api/auth/me" | grep -q '"role"'
 
-echo "E2E-03: GET /api/health/workers com os 4 workers up:true (F5R-09, ADR-033)..."
+echo "E2E-03: GET /api/health/workers com os 5 workers up:true (F5R-09, ADR-033, ADR-046)..."
 curl -fsS -H "Authorization: Bearer ${TOKEN}" "${BASE}/api/health/workers" | python3 -c '
 import json, sys
 corpo = json.load(sys.stdin)
-for nome in ("opc_worker", "flow_runtime", "recorder", "calc_worker"):
+for nome in ("opc_worker", "flow_runtime", "recorder", "calc_worker", "ml_worker"):
     assert corpo[nome]["up"] is True, corpo
 '
 

@@ -40,7 +40,7 @@ services/
                       #   target_calculation/  -> SSTO: alvos de regime permanente por LP (ADR-027)
   recorder/           # barramento → hypertable
   calc-worker/        # tags calculadas: uma task asyncio por tag + ScriptPool (ADR-033)
-  ml-worker/          # treino de sensor virtual: fila `ml_jobs`, torch/scikit-learn/optuna, health 8005 (ADR-046) — chega na SV-2; a stack passa a 9 serviços
+  ml-worker/          # sensor virtual: fila `ml_jobs`, job em processo filho `spawn`, health 8005 (ADR-046); torch/scikit-learn/optuna entram no treino (SV-3). A stack tem 9 serviços
 deploy/               # docker-compose.yml, Dockerfiles, .env.example
 tests/                # integração cross-service (malha fechada MPC↔TFS — RNF-09)
 ```
@@ -122,7 +122,7 @@ cd frontend && npm run generate:contracts           # só os contratos (portas p
 uv run pytest -m slow services/flow-runtime/tests   # carga do MPC (RNF-02); o run default exclui `slow` além de `e2e`
 
 # Stack. O override e2e só expõe portas de host do gate: use SEMPRE os dois arquivos.
-cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 8 serviços
+cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 9 serviços
 # O opcsim NÃO é serviço do compose (docker-compose.e2e.yml §5-8): o opc-worker é só cliente e a
 # suíte e2e sobe o opcsim standalone no host (tests/e2e/conftest.py). Sem o override, o Redis
 # não fica acessível do host e a L2 não conecta.
@@ -139,19 +139,24 @@ OTTIMA_E2E=1 bash deploy/smoke.sh                   # L1 — stack, retenção, 
 # deixa o flow no mapa como stopped. Re-rodar o L1 depois da L2 da vermelho falso; nesse caso
 # `docker compose ... restart flow-runtime` antes.
 E2E_ADMIN_USERNAME=$(grep -m1 '^OTTIMA_ADMIN_USERNAME=' deploy/.env|cut -d= -f2-) E2E_ADMIN_PASSWORD=$(grep -m1 '^OTTIMA_ADMIN_PASSWORD=' deploy/.env|cut -d= -f2-) uv run pytest -m e2e tests/e2e -v
-                                                     # L2 — 47 cenários (5 F1 + 9 F2 + 10 F3 + 10 F4 + 7 F5 + 2 fuzzy + 4 SV)
+                                                     # L2 — 51 cenários (5 F1 + 9 F2 + 10 F3 + 10 F4 + 7 F5 + 2 fuzzy + 4 SV + 4 SV2)
 # tests/e2e/test_api_e2e.py (F1) lê credenciais só de os.environ (default ""), nunca de
 # deploy/.env: a bateria completa exige o env inline acima (não basta o deploy/.env preenchido).
 # F4: POST /api/operate/{flow_id}/{block_id}/mode|sp|mv publica FlowCommand (202); o runtime
 # materializa e audita — a API não emite evento (spec F4 §6.1).
 # F5: GET /api/history/mpc, GET /api/operate/mpcs, GET /api/health/workers (todas require_operator).
 # F6: GET /api/projects/{project_id}/export e POST /api/projects/import (ambas require_admin).
-# Envs novos: OTTIMA_HEALTH_URL_OPC_WORKER/_FLOW_RUNTIME/_RECORDER/_CALC_WORKER (defaults
+# Envs novos: OTTIMA_HEALTH_URL_OPC_WORKER/_FLOW_RUNTIME/_RECORDER/_CALC_WORKER/_ML_WORKER (defaults
 # http://opc-worker:8001/health, http://flow-runtime:8002/health, http://recorder:8003/health,
-# http://calc-worker:8004/health) e OTTIMA_MPC_QUEUE_MAX (default 100000, teto do buffer de
+# http://calc-worker:8004/health, http://ml-worker:8005/health) e OTTIMA_MPC_QUEUE_MAX (default 100000, teto do buffer de
 # mpc_samples no recorder). calc-worker (porta 8004): 1 asyncio task por tag calculada, sandbox
 # de script via ScriptPool (OTTIMA_CALC_POOL_SIZE, default 4); mesmo padrão RNF-04/ADR-018 do
-# flow-runtime — não recebe o `.env` inteiro.
+# flow-runtime — não recebe o `.env` inteiro. ml-worker (porta 8005, ADR-046): sem Redis, sem
+# `env_file` (só OTTIMA_DATABASE_URL, OTTIMA_LOG_LEVEL e OTTIMA_ML_THREADS) e sem volume de
+# certs; OTTIMA_ML_THREADS (default 2) vira OMP/OPENBLAS/MKL_NUM_THREADS do processo filho e
+# OTTIMA_ML_CPUS (default 2, só do compose) limita o contêiner, para o treino não disputar
+# núcleo com o flow-runtime. O corpo do import de CSV de laboratório tem location própria no
+# nginx (6m; o teto de 5 MiB e o 413 em pt-BR são da API).
 # Telas da F5b (operador; admin herda): /operacao (seletor; 1 MPC redireciona direto),
 # /operacao/:flowId/:blockId (faceplate principal + faceplates de variável + trend com
 # predição) e /eventos. Nav do shell em dois grupos: Operação · Fuzzy · Eventos | engenharia.
@@ -189,7 +194,7 @@ cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -
 `npm run generate:contracts` + `git diff --exit-code` (contrato gerado em dia). Sem segredo, sem
 Docker, sem stack. **`uv run pytest` e o gate E2E de 3 camadas continuam MANUAIS** e são
 responsabilidade de quem abre o PR: o pytest precisaria de Docker no runner (~20 min, com o
-histórico de vermelho falso por contenção do TD-009) e o E2E precisaria da stack de 8 serviços
+histórico de vermelho falso por contenção do TD-009) e o E2E precisaria da stack de 9 serviços
 mais as credenciais de `deploy/.env`. Não confunda "CI verde" com "gate completo".
 
 ## Proibições rápidas para agentes

@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     health_url_flow_runtime: str = "http://flow-runtime:8002/health"
     health_url_recorder: str = "http://recorder:8003/health"
     health_url_calc_worker: str = "http://calc-worker:8004/health"
+    health_url_ml_worker: str = "http://ml-worker:8005/health"
     # tamanho do pool de processos do ScriptPool das tags calculadas (spec tags-calculadas)
     calc_pool_size: int = 4
     # Número de processos em que o flow-runtime divide os flows (ADR-004, "um event loop por
@@ -51,6 +52,8 @@ class Settings(BaseSettings):
     # constante de código como `SCRIPT_POOL_SIZE`, porque o número certo depende dos núcleos do
     # host do site (RNF-01: um único host on-prem) — ver `ottima_flow_runtime.partition`.
     flow_partitions: int = 1
+    # Threads de torch/BLAS do ml-worker (ADR-046 D2): o treino não disputa núcleo com a varredura.
+    ml_threads: int = 2
 
 
 @lru_cache

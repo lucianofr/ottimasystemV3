@@ -50,13 +50,14 @@ test("criar, renomear e excluir só invalidam a lista de projetos", () => {
   }
 });
 
-test("ativar invalida projects, connections, tags, flows e operate.mpcs — o recorte inteiro das telas de engenharia", () => {
+test("ativar invalida projects, connections, tags, flows, operate.mpcs e softsensor — o recorte inteiro das telas de engenharia", () => {
   expect(chavesInvalidadasPor("ativar")).toEqual([
     ["projects"],
     ["connections"],
     ["tags"],
     ["flows"],
     ["operate", "mpcs"],
+    ["softsensor"],
   ]);
 });
 
