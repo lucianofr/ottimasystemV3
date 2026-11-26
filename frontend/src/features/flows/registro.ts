@@ -1,6 +1,7 @@
 import {
   contratoFuzzy,
   contratoFuzzyLoop,
+  contratoSensorVirtual,
   matrizPadrao,
   y0Padrao,
   type DadosBase,
@@ -19,6 +20,7 @@ import {
   type DadosPidLoop,
   type DadosScript,
   type DadosScaler,
+  type DadosSensorVirtual,
   type DadosTag,
   type DadosTfs,
   type TipoBloco,
@@ -66,7 +68,8 @@ type ConfigDoBloco =
   | Omit<DadosDeadTime, keyof DadosBase>
   | Omit<DadosConstant, keyof DadosBase>
   | Omit<DadosBusPublish, keyof DadosBase>
-  | Omit<DadosBusSubscribe, keyof DadosBase>;
+  | Omit<DadosBusSubscribe, keyof DadosBase>
+  | Omit<DadosSensorVirtual, keyof DadosBase>;
 
 export interface DefinicaoBloco {
   rotulo: string;
@@ -161,6 +164,17 @@ export const PADRAO_FUZZY_LOOP = {
   ku: 2,
   tf_de: 1,
 };
+
+/** Os três sensores virtuais (RF-581, ADR-046) só diferem no rótulo: mesma descrição e mesma
+ *  config inicial — `n_inputs` vem do contrato (lido dentro do thunk, não na avaliação do
+ *  módulo, pelo mesmo motivo do `fll` do Fuzzy Malha) e a unidade da saída nasce vazia. */
+function sensorVirtual(rotulo: string): DefinicaoBloco {
+  return {
+    rotulo,
+    descricao: "Estima uma variável de laboratório por modelo treinado",
+    defaults: () => ({ n_inputs: contratoSensorVirtual.default_counts.n_inputs, output_eu: "" }),
+  };
+}
 
 export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
   opc_read: {
@@ -265,6 +279,9 @@ export const REGISTRO_BLOCO: Record<TipoBloco, DefinicaoBloco> = {
     descricao: "Consome do barramento um valor publicado por outro flow",
     defaults: () => ({ ...PADRAO_BUS_SUBSCRIBE }),
   },
+  soft_sensor_pls: sensorVirtual("Sensor virtual PLS"),
+  soft_sensor_esn: sensorVirtual("Sensor virtual ESN"),
+  soft_sensor_lstm: sensorVirtual("Sensor virtual LSTM"),
 };
 
 const TIPOS_DO_REGISTRO = Object.keys(REGISTRO_BLOCO) as TipoBloco[];
