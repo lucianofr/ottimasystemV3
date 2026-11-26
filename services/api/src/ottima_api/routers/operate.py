@@ -21,13 +21,15 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ottima_api.deps import get_db, get_redis, require_operator
+from ottima_api.deps import get_db, get_redis, require_admin, require_operator
 from ottima_api.messages import MSG_FLOW_NAO_ENCONTRADO
 from ottima_core.bus import CHANNEL_FLOW_COMMANDS, FlowCommand
 from ottima_core.flowgraph import (
+    SOFT_SENSOR_METHOD,
     ConstraintObjective,
     CvObjective,
     CvVar,
@@ -46,7 +48,7 @@ from ottima_core.flowgraph import (
 )
 from ottima_core.flowgraph.fuzzy_surface import sample_surface
 from ottima_core.flowgraph.introspect import FuzzyIntrospection, introspect_fll
-from ottima_core.models import Flow, Project, User
+from ottima_core.models import Flow, Project, SoftSensorBinding, SoftSensorModel, User
 from ottima_core.schemas.flows import MAX_BIGINT
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,10 @@ class SpCommand(BaseModel):
 class MvCommand(BaseModel):
     var_id: str
     value: float
+
+
+class ModelCommand(BaseModel):
+    model_id: int = Field(ge=1, le=MAX_BIGINT)
 
 
 class LoopModeCommand(BaseModel):
@@ -484,6 +490,79 @@ async def set_sp(
         flow_id,
         "mpc_sp",
         {"block_id": block_id, "var_id": body.var_id, "value": body.value},
+    )
+    return Response(status_code=202)
+
+
+@router.post("/{flow_id}/{block_id}/model", status_code=202)
+async def set_model(
+    flow_id: FlowId,
+    block_id: BlockId,
+    body: ModelCommand,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+    redis_client: Redis = Depends(get_redis),
+) -> Response:
+    """Ativa um modelo no bloco de sensor virtual (RF-584; spec §5.6-1): valida, grava só
+    `desired_model_id` no vínculo e publica `soft_sensor_model`. `active`/`candidate` são do
+    runtime, que também audita; reenviar a ativação é idempotente (comando perdido)."""
+    node = await _node_do_flow(db, flow_id, block_id)
+    metodo = SOFT_SENSOR_METHOD.get(node.type)
+    if metodo is None:
+        raise _reprovado(f"Bloco '{block_id}' não é um bloco de sensor virtual")
+    flow = await db.get(Flow, flow_id)  # já no mapa de identidade: `_node_do_flow` acabou de ler
+    modelo = (
+        await db.execute(
+            select(
+                SoftSensorModel.project_id,
+                SoftSensorModel.name,
+                SoftSensorModel.method,
+                SoftSensorModel.n_inputs,
+                SoftSensorModel.period_s,
+            ).where(SoftSensorModel.id == body.model_id)
+        )
+    ).first()
+    if modelo is None or modelo.project_id != flow.project_id:
+        raise _reprovado(f"Modelo {body.model_id} não existe neste projeto")
+    if modelo.method != metodo:
+        raise _reprovado(
+            f"Modelo '{modelo.name}' é {modelo.method.upper()}; "
+            f"o bloco '{block_id}' é {metodo.upper()}"
+        )
+    if modelo.n_inputs != node.config.n_inputs:
+        raise _reprovado(
+            f"Modelo '{modelo.name}' tem {modelo.n_inputs} entradas; "
+            f"o bloco '{block_id}' tem {node.config.n_inputs}"
+        )
+    ts = float(flow.ts_seconds)
+    razao = modelo.period_s / ts
+    # Mesma regra do runtime (`model_mismatch`): múltiplo inteiro >= 1 do Ts, tolerância 1e-9.
+    if round(razao) < 1 or abs(razao - round(razao)) > 1e-9:
+        raise _reprovado(
+            f"Período do modelo ({modelo.period_s:g} s) não é múltiplo do Ts do flow ({ts:g} s)"
+        )
+    autor = f"user:{user.id}"
+    await db.execute(
+        pg_insert(SoftSensorBinding)
+        .values(
+            flow_id=flow_id, block_id=block_id, desired_model_id=body.model_id, updated_by=autor
+        )
+        .on_conflict_do_update(
+            index_elements=["flow_id", "block_id"],
+            set_={
+                "desired_model_id": body.model_id,
+                "updated_by": autor,
+                "updated_at": func.now(),
+            },
+        )
+    )
+    await db.commit()
+    await _publicar_comando(
+        redis_client,
+        user,
+        flow_id,
+        "soft_sensor_model",
+        {"block_id": block_id, "model_id": body.model_id},
     )
     return Response(status_code=202)
 

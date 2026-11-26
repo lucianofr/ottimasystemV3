@@ -17,6 +17,7 @@ from ottima_api.historized import (
     remover_variaveis_historiadas,
 )
 from ottima_api.messages import MSG_FLOW_NAO_ENCONTRADO, MSG_PROJETO_NAO_ENCONTRADO
+from ottima_api.softsensor import podar_vinculos_soft_sensor
 from ottima_core.bus import (
     KIND_FLOW_CREATED,
     KIND_FLOW_DELETED,
@@ -302,6 +303,7 @@ async def update_flow(
     # `IntegrityError` AQUI, fora do `try` do commit que o traduz em 409. Rollback do commit
     # desfaz a poda junto: os dois são a mesma transação.
     nomes_podados = await podar_variaveis_historiadas(db, flow.id, grafo)
+    await podar_vinculos_soft_sensor(db, flow.id, grafo)
 
     if body.name is not None:
         flow.name = body.name
