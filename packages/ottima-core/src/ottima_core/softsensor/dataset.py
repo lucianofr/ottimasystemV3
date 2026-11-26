@@ -101,6 +101,16 @@ async def build_dataset(
     """Congela `analyses` (`(sampled_at, valor)`) em um `.npz` e devolve as estatísticas (§7.3)."""
     ordered = sorted(analyses, key=lambda a: a[0])
     total = len(ordered)
+    # Limite superior do blob (as descartadas não entram): recusa ANTES de ler um mês de grade.
+    # O `pack_dataset` segue como a guarda exata.
+    sizes = {k: np.dtype(t).itemsize for k, t in _DTYPES.items()}
+    per_analysis = DATASET_STEPS * len(tag_ids) * sizes["x"] + sizes["y"] + sizes["ts"]
+    if total * per_analysis > MAX_DATASET_BYTES:
+        raise DatasetError(
+            f"O conjunto teria {total} análises com {len(tag_ids)} entradas, acima do máximo de "
+            f"{MAX_DATASET_BYTES // per_analysis} para esse número de entradas; "
+            "encurte o período ou reduza as entradas."
+        )
     xs: list[np.ndarray] = []
     ys: list[float] = []
     stamps: list[float] = []

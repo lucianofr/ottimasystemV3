@@ -286,3 +286,32 @@ async def test_report_e_chamado_por_analise(session_factory):
 
     assert calls == [(1, 3), (2, 3), (3, 3)]  # inclui a descartada (a de ontem não tem processo)
     assert stats["dropped_no_process"] == 1
+
+
+async def test_teto_estimado_recusa_antes_de_ler_qualquer_janela(session_factory, monkeypatch):
+    (tag,) = await _tags(session_factory, 1)
+    por_analise = DATASET_STEPS * 4 + 8 + 8  # x float32 com 1 entrada + y e ts float64
+    monkeypatch.setattr(dataset, "MAX_DATASET_BYTES", 2 * por_analise)
+    lidas: list[datetime] = []
+
+    async def load_grid_espiao(session, tag_ids, *, end, period_s, steps):
+        lidas.append(end)
+        raise AssertionError("o teto estimado tinha de recusar antes de ler")
+
+    monkeypatch.setattr(dataset, "load_grid", load_grid_espiao)
+    analyses = [(END - timedelta(seconds=i), 1.0) for i in range(3)]
+
+    with pytest.raises(DatasetError, match="teria 3 análises com 1 entradas.*máximo de 2"):
+        await _build(session_factory, [tag], analyses)
+
+    assert lidas == []
+
+
+async def test_teto_estimado_aceita_exatamente_o_maximo(session_factory, monkeypatch):
+    (tag,) = await _tags(session_factory, 1)
+    monkeypatch.setattr(dataset, "MAX_DATASET_BYTES", 2 * (DATASET_STEPS * 4 + 8 + 8))
+    analyses = [(END - timedelta(seconds=i), 1.0) for i in range(2)]
+
+    _, stats = await _build(session_factory, [tag], analyses)  # sem processo: ambas descartadas
+
+    assert stats["analyses"] == 2
