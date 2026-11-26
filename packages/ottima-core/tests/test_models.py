@@ -15,6 +15,10 @@ def test_metadata_tem_todas_as_tabelas_relacionais():
         "loop_setpoints",
         "soft_sensor_models",
         "soft_sensor_bindings",
+        "lab_variables",
+        "lab_samples",
+        "soft_sensor_datasets",
+        "ml_jobs",
         "history_retention_settings",
         "system_settings",
     }
