@@ -6,6 +6,7 @@ import deste módulo (que precisa estar no `sys.path` do pai antes do `spawn`)."
 import asyncio
 import os
 
+from ottima_core.softsensor.dataset import DatasetError
 from ottima_ml_worker.handlers import HANDLERS, JobContext
 
 
@@ -20,7 +21,11 @@ async def progresso(ctx: JobContext) -> dict:
 
 
 async def explode(ctx: JobContext) -> dict:
-    raise RuntimeError("falhou de propósito")
+    raise RuntimeError("(psycopg) falhou de propósito")
+
+
+async def explode_dataset(ctx: JobContext) -> dict:
+    raise DatasetError("O conjunto teria 9 análises com 2 entradas, acima do máximo de 4")
 
 
 async def dorme(ctx: JobContext) -> dict:
@@ -44,6 +49,7 @@ HANDLERS.update(
         "teste_ok": ok,
         "teste_progresso": progresso,
         "teste_explode": explode,
+        "teste_explode_dataset": explode_dataset,
         "teste_dorme": dorme,
         "teste_morre": morre,
         "teste_threads": threads,

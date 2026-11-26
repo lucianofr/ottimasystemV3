@@ -17,8 +17,9 @@ from ottima_ml_worker.handlers import HANDLERS, JobContext
 from ottima_ml_worker.jobs import ClaimedJob, Sessions, cancel_requested, finish, write_progress
 
 PROGRESS_INTERVAL_S = 1.0
-# Módulo extra de handlers importado no filho; só os testes o definem.
+# Gancho SÓ de teste (o compose não o define): módulo extra de handlers importado no filho.
 EXTRA_HANDLERS_ENV = "OTTIMA_ML_EXTRA_HANDLERS"
+UNEXPECTED_ERROR = "Falha inesperada na montagem do conjunto (ver o log do ml-worker)."
 # O filho importa numpy ao nascer e o BLAS lê estas variáveis nesse momento (ADR-046 D2).
 BLAS_THREADS_ENV = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 _EOF = ("eof", None)
@@ -67,8 +68,12 @@ def child_main(kind: str, job_id: int, params: dict, database_url: str, conn: Co
         if extra := os.environ.get(EXTRA_HANDLERS_ENV):
             importlib.import_module(extra)
         result = asyncio.run(_run_handler(kind, job_id, params, database_url, conn))
-    except Exception as exc:
+    except ValueError as exc:  # inclui DatasetError: mensagens do projeto, já em pt-BR
         conn.send(("error", str(exc) or type(exc).__name__))
+    except Exception:
+        # Texto de driver ou de biblioteca não vai para a página: o traceback fica no log.
+        logger.exception("falha inesperada no job %d", job_id)
+        conn.send(("error", UNEXPECTED_ERROR))
     else:
         conn.send(("done", result))
     finally:

@@ -53,14 +53,31 @@ async def test_progresso_chega_ao_banco(session_factory, make_job, migrated_data
     assert job.progress == {"done": 2, "total": 2}, "o último progresso não pode se perder"
 
 
-async def test_excecao_no_handler_vira_failed_com_a_mensagem(
+async def test_excecao_inesperada_no_handler_vira_failed_com_mensagem_generica(
     session_factory, make_job, migrated_database_url
 ):
+    """Texto cru de driver ou de biblioteca nunca chega à página: só o log do filho o guarda."""
     job_id = await make_job(status="running")
 
     job = await _run(session_factory, migrated_database_url, job_id, "teste_explode")
 
-    assert (job.status, job.error) == ("failed", "falhou de propósito")
+    assert (job.status, job.error) == (
+        "failed",
+        "Falha inesperada na montagem do conjunto (ver o log do ml-worker).",
+    )
+
+
+async def test_dataset_error_no_handler_passa_a_mensagem_em_ptbr(
+    session_factory, make_job, migrated_database_url
+):
+    job_id = await make_job(status="running")
+
+    job = await _run(session_factory, migrated_database_url, job_id, "teste_explode_dataset")
+
+    assert (job.status, job.error) == (
+        "failed",
+        "O conjunto teria 9 análises com 2 entradas, acima do máximo de 4",
+    )
 
 
 async def test_kind_desconhecido_vira_failed(session_factory, make_job, migrated_database_url):
