@@ -4,9 +4,12 @@ import {
   agoraLocal,
   alternarEntrada,
   fusoDoNavegador,
+  janelaAoVivoDefasada,
   janelaDoConjunto,
   progressoDoJob,
+  podeExcluir,
   podeFinalizar,
+  podeRefazer,
   resumoPareamento,
   temJobAtivo,
   TETO_ENTRADAS,
@@ -51,6 +54,20 @@ test("podeFinalizar só em collecting", () => {
   for (const status of ["building", "ready", "failed"]) {
     expect(podeFinalizar({ status }), status).toBe(false);
   }
+});
+
+test("podeRefazer só em failed (o retry do backend parte de failed; collecting usa Finalizar)", () => {
+  expect(podeRefazer({ status: "failed" })).toBe(true);
+  for (const status of ["collecting", "building", "ready"]) {
+    expect(podeRefazer({ status }), status).toBe(false);
+  }
+});
+
+test("podeExcluir em qualquer estado menos building (o DELETE devolve 409 em montagem)", () => {
+  for (const status of ["collecting", "ready", "failed"]) {
+    expect(podeExcluir({ status }), status).toBe(true);
+  }
+  expect(podeExcluir({ status: "building" })).toBe(false);
 });
 
 test("progressoDoJob lê done/total e devolve null sem progresso", () => {
@@ -115,4 +132,39 @@ test("janelaDoConjunto: teto de 31 dias, o que o /api/history aceita", () => {
 test("agoraLocal formata a hora LOCAL no padrão do datetime-local, sem segundos", () => {
   // construtor com componentes = hora local, independente do TZ da máquina de teste
   expect(agoraLocal(new Date(2026, 10, 26, 9, 5, 59))).toBe("2026-11-26T09:05");
+});
+
+test("janelaAoVivoDefasada: conjunto encerrado nunca refaz (a janela é fixa em [start_ts, end_ts])", () => {
+  const encerrado = { start_ts: "2026-11-26T10:00:00Z", end_ts: "2026-11-26T11:00:00Z" };
+  const agora = Date.parse("2026-12-30T00:00:00Z");
+
+  expect(janelaAoVivoDefasada(encerrado, 60, agora - 3_600_000, agora)).toBe(false);
+});
+
+test("janelaAoVivoDefasada: ao vivo refaz no tique de 5 min", () => {
+  const vivo = { start_ts: "2026-11-26T10:00:00Z", end_ts: null };
+  const agora = Date.parse("2026-11-26T12:00:00Z"); // decorrido 2 h; janela de 2 h cobre
+  const janela = 7200;
+
+  expect(janelaAoVivoDefasada(vivo, janela, agora - 299_000, agora)).toBe(false);
+  expect(janelaAoVivoDefasada(vivo, janela, agora - 300_000, agora)).toBe(true);
+});
+
+test("janelaAoVivoDefasada: ao vivo refaz antes do tique quando o decorrido passa de 1,5x a janela", () => {
+  const agora = Date.parse("2026-11-26T12:00:00Z");
+  const recente = agora - 30_000; // recalculada há 30 s: o tique de 5 min ainda não venceu
+  // janela de 60 s (coleta recém-iniciada): 80 s decorridos ainda cabem em 1,5x, 100 s não
+  expect(
+    janelaAoVivoDefasada({ start_ts: "2026-11-26T11:58:40Z", end_ts: null }, 60, recente, agora),
+  ).toBe(false);
+  expect(
+    janelaAoVivoDefasada({ start_ts: "2026-11-26T11:58:20Z", end_ts: null }, 60, recente, agora),
+  ).toBe(true);
+});
+
+test("janelaAoVivoDefasada: no teto de 31 dias a regra de 1,5x cala (refazer não alargaria nada)", () => {
+  const vivo = { start_ts: "2026-01-01T00:00:00Z", end_ts: null };
+  const agora = Date.parse("2026-11-26T12:00:00Z");
+
+  expect(janelaAoVivoDefasada(vivo, 31 * 86400, agora - 30_000, agora)).toBe(false);
 });

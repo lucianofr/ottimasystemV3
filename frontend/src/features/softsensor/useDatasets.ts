@@ -46,3 +46,14 @@ export function useFinalizeDataset() {
       ]),
   });
 }
+
+/** Admin. 204; 409 em `building` (cancele o job antes). Só a lista de conjuntos muda: os jobs
+ *  já terminados do conjunto apagado ficam no histórico e a tela os ignora. */
+export function useDeleteDataset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      api<void>(`/api/softsensor/datasets/${String(id)}`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: CHAVE_CONJUNTOS }),
+  });
+}

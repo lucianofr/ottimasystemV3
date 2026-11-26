@@ -20,16 +20,19 @@ import { montarMatriz, useHistory, useTags } from "../trend/useHistory";
 import {
   agoraLocal,
   alternarEntrada,
+  janelaAoVivoDefasada,
   janelaDoConjunto,
   PERIODOS_S,
+  podeExcluir,
   podeFinalizar,
+  podeRefazer,
   progressoDoJob,
   resumoPareamento,
   temJobAtivo,
   TETO_ENTRADAS,
 } from "./coleta";
 import type { DatasetCreated, DatasetOut, MlJobOut } from "./types";
-import { useCreateDataset, useDatasets, useFinalizeDataset } from "./useDatasets";
+import { useCreateDataset, useDatasets, useDeleteDataset, useFinalizeDataset } from "./useDatasets";
 import { useCancelJob, useJobs } from "./useJobs";
 import { useAddLabSample, useDeleteLabSample, useImportLabSamples, useLabSamples } from "./useLabSamples";
 import { useCreateLabVariable, useLabVariables } from "./useLabVariables";
@@ -336,11 +339,25 @@ function TendenciaEntradas({ conjunto }: { conjunto: DatasetOut }) {
   const ids = conjunto.input_tag_ids.slice(0, LIMITE_PENAS);
   const chaveIds = ids.join(",");
   const { start_ts: inicio, end_ts: fim } = conjunto;
-  // Estável por conjunto: a largura da janela é chave de cache e de estrutura do gráfico.
+  // A largura da janela é chave de cache e de estrutura do gráfico: só muda quando `calculadaEm`
+  // muda, e isso só acontece no tique grosso abaixo (`janelaAoVivoDefasada`), nunca por render.
+  const [calculadaEm, setCalculadaEm] = useState(() => Date.now());
   const { janelaSegundos, fimEpochS } = useMemo(
-    () => janelaDoConjunto({ start_ts: inicio, end_ts: fim }, Date.now()),
-    [inicio, fim],
+    () => janelaDoConjunto({ start_ts: inicio, end_ts: fim }, calculadaEm),
+    [inicio, fim, calculadaEm],
   );
+  useEffect(() => {
+    if (fim !== null) return;
+    const id = setInterval(() => {
+      const agora = Date.now();
+      setCalculadaEm((atual) =>
+        janelaAoVivoDefasada({ start_ts: inicio, end_ts: fim }, janelaSegundos, atual, agora)
+          ? agora
+          : atual,
+      );
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [inicio, fim, janelaSegundos]);
   const historico = useHistory(ids, janelaSegundos, fimEpochS);
   const dados = useMemo(
     () =>
@@ -619,35 +636,58 @@ function Analises({ variavelId, nome, eu }: AnalisesProps) {
 
 // --------------------------------------------------------------------------- rodapé
 
-function RodapeConjunto({ conjunto, job }: { conjunto: DatasetOut; job: MlJobOut | undefined }) {
+type Confirmacao = "finalizar" | "cancelar" | "excluir";
+
+const PERGUNTA: Record<Confirmacao, string> = {
+  finalizar: "Fechar o período agora e montar o conjunto?",
+  cancelar: "Cancelar a montagem? O conjunto ficará como “falhou”; dá para tentar de novo.",
+  excluir: "Excluir este conjunto de treino?",
+};
+
+interface RodapeProps {
+  conjunto: DatasetOut;
+  job: MlJobOut | undefined;
+  /** Depois de excluir o conjunto o pai larga `?conjunto=` (a seleção apontaria para o nada). */
+  onExcluido: () => void;
+}
+
+function RodapeConjunto({ conjunto, job, onExcluido }: RodapeProps) {
   const podeMutar = useCanMutate();
   const finalizar = useFinalizeDataset();
   const cancelar = useCancelJob();
-  const [confirmando, setConfirmando] = useState(false);
+  const excluir = useDeleteDataset();
+  // Uma confirmação por vez: as três ações são destrutivas ou fecham o período.
+  const [confirmando, setConfirmando] = useState<Confirmacao | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
-  async function confirmarFinalizacao(): Promise<void> {
+  async function executar(acao: () => Promise<unknown>): Promise<void> {
     setErro(null);
     try {
-      await finalizar.mutateAsync(conjunto.id);
-      setConfirmando(false);
+      await acao();
+      setConfirmando(null);
     } catch (err) {
       setErro(mensagem(err));
     }
   }
 
-  async function cancelarMontagem(jobId: number): Promise<void> {
-    setErro(null);
-    try {
-      await cancelar.mutateAsync(jobId);
-    } catch (err) {
-      setErro(mensagem(err));
+  async function confirmar(): Promise<void> {
+    if (confirmando === "finalizar") await executar(() => finalizar.mutateAsync(conjunto.id));
+    if (confirmando === "cancelar" && job !== undefined) {
+      await executar(() => cancelar.mutateAsync(job.id));
+    }
+    if (confirmando === "excluir") {
+      await executar(async () => {
+        await excluir.mutateAsync(conjunto.id);
+        onExcluido();
+      });
     }
   }
 
   const progresso = job === undefined ? null : progressoDoJob(job);
   const falha =
     job?.error ?? (job?.status === "cancelled" ? "Montagem cancelada" : "Falha na montagem do conjunto");
+  const pendente = finalizar.isPending || cancelar.isPending || excluir.isPending;
+  const jobAtivo = conjunto.status === "building" && job !== undefined && temJobAtivo([job]);
 
   return (
     <Card data-testid="sv-coleta-rodape" className="space-y-3 p-4">
@@ -685,50 +725,70 @@ function RodapeConjunto({ conjunto, job }: { conjunto: DatasetOut; job: MlJobOut
           </p>
         )}
 
-        {podeMutar && podeFinalizar(conjunto) && !confirmando && (
-          <Button
-            data-testid="sv-coleta-finalizar"
-            size="sm"
-            className="ml-auto"
-            onClick={() => setConfirmando(true)}
-          >
-            Finalizar
-          </Button>
-        )}
-        {podeMutar && podeFinalizar(conjunto) && confirmando && (
+        {podeMutar && confirmando !== null && (
           <div className="ml-auto flex items-center gap-2">
-            <span className="text-xs text-fg-muted">
-              Fechar o período agora e montar o conjunto?
-            </span>
+            <span className="text-xs text-fg-muted">{PERGUNTA[confirmando]}</span>
             <Button
               size="sm"
-              data-testid="sv-coleta-finalizar-confirmar"
-              disabled={finalizar.isPending}
-              onClick={() => void confirmarFinalizacao()}
+              variant={confirmando === "excluir" ? "destructive" : "primary"}
+              data-testid={`sv-coleta-${confirmando}-confirmar`}
+              disabled={pendente}
+              onClick={() => void confirmar()}
             >
               Confirmar
             </Button>
             <Button
               variant="outline"
               size="sm"
-              data-testid="sv-coleta-finalizar-cancelar"
-              onClick={() => setConfirmando(false)}
+              data-testid={`sv-coleta-${confirmando}-voltar`}
+              onClick={() => setConfirmando(null)}
             >
-              Cancelar
+              Voltar
             </Button>
           </div>
         )}
-        {podeMutar && conjunto.status === "building" && job !== undefined && temJobAtivo([job]) && (
-          <Button
-            variant="outline"
-            size="sm"
-            data-testid="sv-coleta-cancelar"
-            className="ml-auto"
-            disabled={cancelar.isPending}
-            onClick={() => void cancelarMontagem(job.id)}
-          >
-            Cancelar
-          </Button>
+        {podeMutar && confirmando === null && (
+          <div className="ml-auto flex items-center gap-2">
+            {podeFinalizar(conjunto) && (
+              <Button
+                data-testid="sv-coleta-finalizar"
+                size="sm"
+                onClick={() => setConfirmando("finalizar")}
+              >
+                Finalizar
+              </Button>
+            )}
+            {podeRefazer(conjunto) && (
+              <Button
+                data-testid="sv-coleta-refazer"
+                size="sm"
+                disabled={pendente}
+                onClick={() => void executar(() => finalizar.mutateAsync(conjunto.id))}
+              >
+                Tentar de novo
+              </Button>
+            )}
+            {jobAtivo && (
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="sv-coleta-cancelar"
+                onClick={() => setConfirmando("cancelar")}
+              >
+                Cancelar
+              </Button>
+            )}
+            {podeExcluir(conjunto) && (
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="sv-coleta-excluir"
+                onClick={() => setConfirmando("excluir")}
+              >
+                Excluir conjunto
+              </Button>
+            )}
+          </div>
         )}
       </div>
       {erro && (
@@ -870,7 +930,12 @@ export function ColetaTreinoPage() {
             nome={selecionado.lab_variable_name}
             eu={eu}
           />
-          <RodapeConjunto key={`rodape-${String(selecionado.id)}`} conjunto={selecionado} job={job} />
+          <RodapeConjunto
+            key={`rodape-${String(selecionado.id)}`}
+            conjunto={selecionado}
+            job={job}
+            onExcluido={() => setSearchParams({}, { replace: true })}
+          />
         </>
       )}
     </section>

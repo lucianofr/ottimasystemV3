@@ -16,6 +16,11 @@ export const TETO_ENTRADAS = 32;
 const JANELA_MAX_S = 31 * 86400;
 const JANELA_MIN_S = 60;
 
+/** Tique da janela ao vivo: a largura só é refeita a cada 5 min (ou antes, ver
+ *  `janelaAoVivoDefasada`), porque cada refação recria o gráfico e perde o zoom. */
+const TIQUE_JANELA_MS = 300_000;
+const FOLGA_JANELA = 1.5;
+
 /** Fuso IANA do navegador: a API interpreta as datas SEM fuso do CSV de laboratório nele. */
 export function fusoDoNavegador(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -49,6 +54,17 @@ export function temJobAtivo(jobs: readonly Pick<MlJobOut, "status">[] | undefine
 
 export function podeFinalizar(conjunto: Pick<DatasetOut, "status">): boolean {
   return conjunto.status === "collecting";
+}
+
+/** Tentar de novo: só a partir de `failed` (o backend refaz a montagem mantendo `end_ts`);
+ *  em `collecting` quem age é `podeFinalizar`. */
+export function podeRefazer(conjunto: Pick<DatasetOut, "status">): boolean {
+  return conjunto.status === "failed";
+}
+
+/** Em montagem o DELETE devolve 409 (o job ainda lê o conjunto): cancele o job antes. */
+export function podeExcluir(conjunto: Pick<DatasetOut, "status">): boolean {
+  return conjunto.status !== "building";
 }
 
 /** `null` sem `done`/`total` numéricos (ou com total 0): a tela desenha o `<progress>`
@@ -85,4 +101,24 @@ export function janelaDoConjunto(
     janelaSegundos: Math.min(JANELA_MAX_S, Math.max(JANELA_MIN_S, segundos)),
     fimEpochS: conjunto.end_ts === null ? null : fimMs / 1000,
   };
+}
+
+/**
+ * Ao vivo (sem `end_ts`) a largura de `janelaDoConjunto` envelhece: o gráfico desliza
+ * `[agora - largura, agora]` e perde o começo da coleta. Refaz a largura no tique de 5 min, ou
+ * antes quando o decorrido passa de 1,5x a largura (começo da coleta, janela de 1 min). No teto
+ * de 31 dias a regra de 1,5x cala — refazer não alargaria nada. Encerrado: nunca (janela fixa).
+ */
+export function janelaAoVivoDefasada(
+  conjunto: Pick<DatasetOut, "start_ts" | "end_ts">,
+  janelaSegundos: number,
+  calculadaEmMs: number,
+  agoraMs: number,
+): boolean {
+  if (conjunto.end_ts !== null) return false;
+  const decorridoS = (agoraMs - Date.parse(conjunto.start_ts)) / 1000;
+  return (
+    agoraMs - calculadaEmMs >= TIQUE_JANELA_MS ||
+    (janelaSegundos < JANELA_MAX_S && decorridoS > FOLGA_JANELA * janelaSegundos)
+  );
 }
