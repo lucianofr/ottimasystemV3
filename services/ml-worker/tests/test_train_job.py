@@ -59,7 +59,10 @@ async def _dataset(
     period_s: float = 1.0,
     blob: bytes | None = None,
     end_ts: datetime = END,
+    inputs_meta: list | None = None,
 ) -> int:
+    """`inputs_meta` default: nome `F<id>`, diferente do da tag viva (`T<n>`), para provar que o
+    modelo descreve a entrada como foi congelada."""
     return await _add(
         factory,
         SoftSensorDataset(
@@ -71,6 +74,11 @@ async def _dataset(
             start_ts=end_ts - timedelta(hours=1),
             end_ts=end_ts,
             status=status,
+            inputs_meta=(
+                [{"tag_id": t, "name": f"F{t}", "eu": "°C"} for t in tags]
+                if inputs_meta is None
+                else inputs_meta
+            ),
             data=blob if status == "ready" else None,
             created_by="teste",
         ),
@@ -117,7 +125,10 @@ async def test_treino_pls_grava_modelo_com_metricas_e_tags_de_entrada(
     assert model.meta["metrics"] == result["metrics"]
     assert model.meta["dataset_ids"] == [dataset_id]
     assert (model.meta["output_name"], model.meta["output_eu"]) == ("Viscosidade", "cP")
-    assert [(i["name"], i["eu"]) for i in model.meta["inputs"]] == [("T1", "°C"), ("T2", "°C")]
+    assert [(i["name"], i["eu"]) for i in model.meta["inputs"]] == [
+        (f"F{tags[0]}", "°C"),
+        (f"F{tags[1]}", "°C"),
+    ]
     loaded = load_model(model.id, model.meta, model.weights)  # o artefato gravado é utilizável
     assert abs(predict(loaded, np.ones((model.meta["warmup_steps"], 2))) - 4.0) < 0.5
     assert [r["stage"] for r in reports] == ["loading", "training", "saving"]
@@ -249,18 +260,84 @@ async def test_conjunto_com_numero_de_entradas_diferente_do_blob_falha_com_mensa
         await _train(session_factory, make_job, {**PLS, "dataset_ids": [dataset_id]})
 
 
-async def test_tag_de_entrada_apagada_falha_com_mensagem(
+async def test_tag_apagada_depois_do_congelamento_nao_impede_o_treino(
     session_factory, make_job, project_id, lab_variable_id, tags
 ):
-    apagada = tags[-1] + 999
+    apagada = tags[-1] + 999  # o id não existe mais em `tags`; o conjunto guarda o nome congelado
     dataset_id = await _dataset(
         session_factory, project_id, lab_variable_id, "d1", [tags[0], apagada], blob=_blob()
+    )
+
+    await _train(session_factory, make_job, {**PLS, "dataset_ids": [dataset_id]})
+
+    (model,) = await _models(session_factory)
+    assert model.input_tag_ids == [tags[0], apagada]
+    assert [i["name"] for i in model.meta["inputs"]] == [f"F{tags[0]}", f"F{apagada}"]
+
+
+async def test_nomes_das_entradas_vem_do_conjunto_mais_recente(
+    session_factory, make_job, project_id, lab_variable_id, tags
+):
+    velho = await _dataset(
+        session_factory,
+        project_id,
+        lab_variable_id,
+        "velho",
+        tags[:2],
+        blob=_blob(30, seed=1),
+        end_ts=END - timedelta(days=1),
+        inputs_meta=[{"tag_id": t, "name": f"antigo-{t}", "eu": "K"} for t in tags[:2]],
+    )
+    novo = await _dataset(
+        session_factory,
+        project_id,
+        lab_variable_id,
+        "novo",
+        tags[:2],
+        blob=_blob(30, seed=2, t0=100.0),
+    )
+
+    await _train(session_factory, make_job, {**PLS, "dataset_ids": [novo, velho]})
+
+    (model,) = await _models(session_factory)
+    assert [(i["name"], i["eu"]) for i in model.meta["inputs"]] == [
+        (f"F{tags[0]}", "°C"),
+        (f"F{tags[1]}", "°C"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "inputs_meta",
+    [
+        [],
+        [{"tag_id": 1, "name": "a", "eu": ""}],
+        [{"tag_id": 1, "eu": ""}, {"tag_id": 2, "eu": ""}],
+        [{"tag_id": 1, "name": "a"}, {"tag_id": 2, "name": "b"}],
+        [{"tag_id": 1, "name": None, "eu": ""}, {"tag_id": 2, "name": "b", "eu": ""}],
+        ["a", "b"],
+    ],
+    ids=["vazio", "curto", "sem_nome", "sem_eu", "nome_nulo", "nao_e_objeto"],
+)
+async def test_metadados_de_entrada_malformados_falham_com_mensagem(
+    session_factory, make_job, project_id, lab_variable_id, tags, inputs_meta
+):
+    dataset_id = await _dataset(
+        session_factory,
+        project_id,
+        lab_variable_id,
+        "d1",
+        tags[:2],
+        blob=_blob(),
+        inputs_meta=inputs_meta,
     )
 
     with pytest.raises(TrainingError) as raised:
         await _train(session_factory, make_job, {**PLS, "dataset_ids": [dataset_id]})
 
-    assert str(raised.value) == f"Tag de entrada {apagada} não existe mais no projeto"
+    assert str(raised.value) == (
+        "Os metadados de entrada do conjunto 'd1' estão incompletos "
+        "ou não correspondem às suas entradas"
+    )
     assert await _models(session_factory) == []
 
 

@@ -84,18 +84,24 @@ async def train_job(ctx: JobContext) -> dict:
         datasets = await load_compatible_datasets(session, job.project_id, params["dataset_ids"])
         first = datasets[0]  # os conjuntos compartilham variável, entradas e período
         lab_variable = await session.get(LabVariable, first.lab_variable_id)
-        tags = {
-            t.id: t
-            for t in await session.scalars(select(Tag).where(Tag.id.in_(first.input_tag_ids)))
-        }
-        for tag_id in first.input_tag_ids:
-            if tag_id not in tags:
-                raise TrainingError(f"Tag de entrada {tag_id} não existe mais no projeto")
+        # Nome e EU das entradas: os congelados no conjunto mais recente (spec §7.3), não os das
+        # tags vivas. Tag apagada ou renomeada depois do congelamento não muda o que se treinou.
+        latest = max(datasets, key=lambda ds: ds.end_ts)
+        try:
+            inputs = [InputSeed(m["name"], m["eu"]) for m in latest.inputs_meta]
+        except (KeyError, TypeError):
+            inputs = []
+        if len(inputs) != len(latest.input_tag_ids) or not all(
+            isinstance(i.name, str) and isinstance(i.eu, str) for i in inputs
+        ):
+            raise TrainingError(
+                f"Os metadados de entrada do conjunto '{latest.name}' estão incompletos "
+                "ou não correspondem às suas entradas"
+            )
         for ds in datasets:
             await session.refresh(ds, ["data"])
         data = load_train_data([ds.data for ds in datasets])
         project_id, created_by = job.project_id, job.created_by
-        inputs = [InputSeed(tags[i].name, tags[i].eu) for i in first.input_tag_ids]
         input_tag_ids, period_s = list(first.input_tag_ids), first.period_s
         dataset_ids = [ds.id for ds in datasets]
         output_name, output_eu = lab_variable.name, lab_variable.eu
