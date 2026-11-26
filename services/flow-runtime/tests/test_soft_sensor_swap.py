@@ -104,7 +104,7 @@ async def test_candidato_extrapolando_espera_e_e_rejeitado_no_prazo():
     assert gravacoes == []
     await b.step(entradas(5.0))  # varredura 60
     assert b.active_model_id == 1 and b.candidate_model_id is None
-    assert gravacoes == [BindingUpdate(1, None, reset_desired_to_active=True)]
+    assert gravacoes == [BindingUpdate(1, None, reset_desired_to_active=True, rejected_model_id=2)]
     [rejeitado] = kinds(eventos, KIND_SOFT_SENSOR_MODEL_REJECTED)
     assert rejeitado["severity"] == "warning"
     assert rejeitado["payload"] == {"block_id": "ss", "model_id": 2, "reason": "extrapolating"}
@@ -120,7 +120,7 @@ async def test_prazo_cresce_com_janela_e_periodo():
     assert b.candidate_model_id == 2 and gravacoes == []
     await b.step(ruim)
     assert b.candidate_model_id is None
-    assert gravacoes == [BindingUpdate(1, None, reset_desired_to_active=True)]
+    assert gravacoes == [BindingUpdate(1, None, reset_desired_to_active=True, rejected_model_id=2)]
 
 
 async def test_candidato_de_outro_periodo_nao_herda_o_buffer():
@@ -164,7 +164,7 @@ async def test_segundo_candidato_substitui_o_primeiro_e_reinicia_o_prazo():
     assert gravacoes == []
     await b.step(entradas(5.0))  # varredura 90
     assert b.candidate_model_id is None
-    assert gravacoes == [BindingUpdate(1, None, reset_desired_to_active=True)]
+    assert gravacoes == [BindingUpdate(1, None, reset_desired_to_active=True, rejected_model_id=3)]
     assert [e["payload"]["model_id"] for e in kinds(eventos, KIND_SOFT_SENSOR_MODEL_REJECTED)] == [
         3
     ]
@@ -240,7 +240,7 @@ async def test_rejeicao_sobrevive_ao_cancelamento_da_varredura():
     assert b.candidate_model_id is None and b.active_model_id == 1
     libera.set()
     await _ate(lambda: kinds(eventos, KIND_SOFT_SENSOR_MODEL_REJECTED))
-    assert gravacoes == [BindingUpdate(1, None, reset_desired_to_active=True)]
+    assert gravacoes == [BindingUpdate(1, None, reset_desired_to_active=True, rejected_model_id=2)]
 
 
 async def test_promocao_sobrevive_ao_cancelamento_da_varredura():

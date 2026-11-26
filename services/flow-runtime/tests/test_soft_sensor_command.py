@@ -240,6 +240,18 @@ async def test_modelo_de_metodo_errado_e_rejeitado_e_o_desejado_volta_ao_ativo(
     assert rejected[0]["severity"] == "warning"
 
 
+async def test_rejeicao_no_comando_nao_desfaz_desejado_que_ja_mudou(session_factory):
+    scenario = await _scenario(session_factory, PLS_A, ESN, PLS_B)
+    flow_id, (active, esn, z) = scenario["flow_id"], scenario["models"]
+    # A API já gravou o pedido seguinte (Z) quando o comando de ESN é recusado.
+    await _set_binding(session_factory, flow_id, desired_model_id=z, active_model_id=active)
+    block = _block(session_factory, flow_id, _loaded(PLS_A, active))
+
+    await _run(session_factory, _runtime(block), _command(flow_id, esn))
+
+    assert await _binding(session_factory, flow_id) == (z, active, None)
+
+
 async def test_artefato_corrompido_sem_modelo_em_uso_devolve_o_desejado_a_nulo(session_factory):
     scenario = await _scenario(session_factory, PLS_A, weights={0: b"lixo"})
     flow_id, corrompido = scenario["flow_id"], scenario["models"][0]

@@ -50,6 +50,8 @@ class BindingUpdate:
     active_model_id: int | None
     candidate_model_id: int | None
     reset_desired_to_active: bool = False
+    rejected_model_id: int | None = None
+    """Com `reset_desired_to_active`, o desejado só volta se ainda pede este modelo."""
 
 
 @dataclass(eq=False)
@@ -235,6 +237,7 @@ class SoftSensorBlock(Block):
                 active_model_id=active.model.model_id,
                 candidate_model_id=None,
                 reset_desired_to_active=True,
+                rejected_model_id=model_id,
             ),
             self._event(
                 "warning",

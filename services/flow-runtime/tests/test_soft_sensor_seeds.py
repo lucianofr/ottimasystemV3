@@ -429,6 +429,24 @@ async def test_persist_grava_o_vinculo_e_devolve_o_desejado(session_factory):
     assert binding.candidate_model_id is None
 
 
+async def test_rejeicao_nao_desfaz_desejado_que_ja_mudou(session_factory):
+    scenario = await _scenario(session_factory, ["ss", "y", "z"])
+    ativo, y, z = (scenario["models"][k] for k in ("ss", "y", "z"))
+    async with session_factory() as session:  # o aceite de Z chegou antes da rejeição de Y
+        binding = await session.get_one(SoftSensorBinding, (scenario["flow_id"], "ss"))
+        binding.desired_model_id = z
+        await session.commit()
+    persist = make_persist(session_factory, scenario["flow_id"], "ss")
+
+    await persist(BindingUpdate(ativo, None, reset_desired_to_active=True, rejected_model_id=y))
+    binding = await _binding(session_factory, scenario["flow_id"], "ss")
+    assert (binding.desired_model_id, binding.active_model_id) == (z, ativo)
+
+    await persist(BindingUpdate(ativo, None, reset_desired_to_active=True, rejected_model_id=z))
+    binding = await _binding(session_factory, scenario["flow_id"], "ss")
+    assert binding.desired_model_id == ativo
+
+
 async def test_build_definition_instancia_o_bloco_com_a_semente():
     meta, blob = synthetic.pls([1.0, 2.0], 0.5, period_s=1.0)
     model = load_model(7, meta.model_dump(mode="json"), blob)

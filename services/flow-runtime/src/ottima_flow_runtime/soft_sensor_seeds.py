@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Protocol
 
 from redis.asyncio import Redis
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import undefer
 
@@ -99,6 +99,15 @@ def make_emit_event(redis_client: Redis, flow_id: int) -> EmitEvent:
     return emit_event
 
 
+def _desired_after_rejection(rejected_model_id: int, target: int | None) -> ColumnElement[Any]:
+    """`desired_model_id` volta a `target` só se ainda pede o modelo rejeitado: um pedido mais
+    novo, gravado pela API durante a recusa, não pode ser desfeito."""
+    return case(
+        (SoftSensorBinding.desired_model_id == rejected_model_id, target),
+        else_=SoftSensorBinding.desired_model_id,
+    )
+
+
 def make_persist(
     session_factory: async_sessionmaker[AsyncSession] | None, flow_id: int, block_id: str
 ) -> Callable[[BindingUpdate], Awaitable[None]]:
@@ -107,12 +116,17 @@ def make_persist(
     async def persist(change: BindingUpdate) -> None:
         if session_factory is None:
             return
-        values: dict[str, int | None] = {
+        values: dict[str, object] = {
             "active_model_id": change.active_model_id,
             "candidate_model_id": change.candidate_model_id,
         }
         if change.reset_desired_to_active:
-            values["desired_model_id"] = change.active_model_id
+            rejected = change.rejected_model_id
+            values["desired_model_id"] = (
+                change.active_model_id
+                if rejected is None
+                else _desired_after_rejection(rejected, change.active_model_id)
+            )
         await write_binding(session_factory, flow_id, block_id, **values)
 
     return persist
@@ -122,7 +136,7 @@ async def write_binding(
     session_factory: async_sessionmaker[AsyncSession],
     flow_id: int,
     block_id: str,
-    **values: int | None,
+    **values: object,
 ) -> None:
     """Grava só as colunas dadas do vínculo; falha vira log, nunca exceção."""
     stmt = (
@@ -341,9 +355,8 @@ async def soft_sensor_command(
         return
 
     async def reject(reason: str, **values: int | None) -> None:
-        await write_binding(
-            session_factory, flow_id, block_id, desired_model_id=block.intended_model_id, **values
-        )
+        desired = _desired_after_rejection(model_id, block.intended_model_id)
+        await write_binding(session_factory, flow_id, block_id, desired_model_id=desired, **values)
         try:
             await emit_event(
                 severity="warning",
