@@ -430,6 +430,12 @@ KIND_LAB_SAMPLE_ADDED = "lab_sample_added"
 KIND_LAB_SAMPLE_DELETED = "lab_sample_deleted"
 KIND_LAB_SAMPLES_IMPORTED = "lab_samples_imported"  # payload {project_id, imported, by_variable}
 
+# Conjuntos de treino do sensor virtual (RF-586). Auditoria da API: origin `user:<id>`, severity
+# "info"; payload {project_id, dataset_id, name} (+ job_id no finalizado).
+KIND_SOFT_SENSOR_DATASET_CREATED = "soft_sensor_dataset_created"
+KIND_SOFT_SENSOR_DATASET_FINALIZED = "soft_sensor_dataset_finalized"
+KIND_SOFT_SENSOR_DATASET_DELETED = "soft_sensor_dataset_deleted"
+
 
 async def publish_event(
     redis_client: Redis,
