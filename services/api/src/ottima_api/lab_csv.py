@@ -2,6 +2,8 @@
 
 Função pura: bytes entram, linhas validadas saem. Qualquer problema recusa o arquivo inteiro
 (nada é importado pela metade); a rota transforma `LabCsvError.problems` em 422.
+Cabeçalho: a primeira linha não vazia só o é se a 3a coluna não for número E a 1a não for uma
+variável conhecida; senão é dado e passa pela validação normal.
 """
 
 import csv
@@ -112,7 +114,7 @@ def parse_lab_csv(
                 continue
             if first:
                 first = False
-                if len(cells) == 3 and _number(cells[2]) is None:
+                if len(cells) == 3 and _number(cells[2]) is None and cells[0] not in known:
                     continue  # cabeçalho
             try:
                 row = _row(cells, known, tz, now)

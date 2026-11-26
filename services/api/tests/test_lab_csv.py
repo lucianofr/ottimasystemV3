@@ -130,10 +130,22 @@ def test_valor_nao_numerico_e_nan_sao_recusados():
     ]
 
 
-def test_primeira_linha_com_valor_ilegivel_e_tratada_como_cabecalho():
-    # Regra da spec §7.2 lida ao pé da letra: a linha 1 sem número na 3a coluna é descartada.
-    assert p("ENXOFRE;25/11/2026 08:30;abc\nENXOFRE;25/11/2026 09:30;2") == [
-        LabCsvRow(1, datetime(2026, 11, 25, 12, 30, tzinfo=UTC), 2.0)
+def test_primeira_linha_de_variavel_conhecida_com_valor_ilegivel_e_recusada():
+    # Cabeçalho exige 1a coluna fora de `known`: senão o dado da linha 1 sumiria em silêncio
+    # e o resto do arquivo entraria ("nada é importado pela metade").
+    assert problemas("ENXOFRE;25/11/2026 08:30;1.234,5\nENXOFRE;25/11/2026 09:30;2") == [
+        "linha 1: valor '1.234,5' não é um número finito"
+    ]
+    assert problemas("ENXOFRE;25/11/2026 08:30;abc") == [
+        "linha 1: valor 'abc' não é um número finito"
+    ]
+    assert problemas("ENXOFRE;25/11/2026 08:30;") == ["linha 1: valor '' não é um número finito"]
+
+
+def test_cabecalho_real_continua_ignorado():
+    # 3a coluna não numérica e 1a coluna que não é variável conhecida.
+    assert p('"nome do TAG";"data/hora";"valor"\n"ENXOFRE";"25/11/2026 08:30";"12,5"') == [
+        LabCsvRow(1, SP_08_30, 12.5)
     ]
 
 
