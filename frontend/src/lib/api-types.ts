@@ -567,6 +567,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operate/{flow_id}/{block_id}/model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Model
+         * @description Ativa um modelo no bloco de sensor virtual (RF-584; spec §5.6-1): valida, grava só
+         *     `desired_model_id` no vínculo e publica `soft_sensor_model`. `active`/`candidate` são do
+         *     runtime, que também audita; reenviar a ativação é idempotente (comando perdido).
+         */
+        post: operations["set_model_api_operate__flow_id___block_id__model_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operate/{flow_id}/{block_id}/mv": {
         parameters: {
             query?: never;
@@ -727,6 +749,231 @@ export interface paths {
         get: operations["get_loop_surface_api_operate_loop__flow_id___block_id__surface_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/softsensor/blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Blocks */
+        get: operations["list_blocks_api_softsensor_blocks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/softsensor/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Models */
+        get: operations["list_models_api_softsensor_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/softsensor/lab-variables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Lab Variables */
+        get: operations["list_lab_variables_api_softsensor_lab_variables_get"];
+        put?: never;
+        /** Create Lab Variable */
+        post: operations["create_lab_variable_api_softsensor_lab_variables_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/softsensor/lab-variables/{var_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Lab Variable */
+        delete: operations["delete_lab_variable_api_softsensor_lab_variables__var_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Lab Variable */
+        patch: operations["update_lab_variable_api_softsensor_lab_variables__var_id__patch"];
+        trace?: never;
+    };
+    "/api/softsensor/lab-variables/{var_id}/samples": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Lab Samples
+         * @description Crescente por coleta. Acima de `MAX_SAMPLES` o corte descarta as MAIS ANTIGAS (quem quer
+         *     olhar para trás estreita com `start`/`end`).
+         */
+        get: operations["list_lab_samples_api_softsensor_lab_variables__var_id__samples_get"];
+        put?: never;
+        /** Add Lab Sample */
+        post: operations["add_lab_sample_api_softsensor_lab_variables__var_id__samples_post"];
+        /** Delete Lab Sample */
+        delete: operations["delete_lab_sample_api_softsensor_lab_variables__var_id__samples_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/softsensor/lab-samples/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Lab Samples
+         * @description Importa o CSV `nome;data/hora;valor` de uma vez só: qualquer problema recusa o arquivo
+         *     inteiro (422, nada gravado). `tz` é o fuso IANA do navegador para datas sem fuso no texto.
+         */
+        post: operations["import_lab_samples_api_softsensor_lab_samples_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/softsensor/datasets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Datasets */
+        get: operations["list_datasets_api_softsensor_datasets_get"];
+        put?: never;
+        /** Create Dataset */
+        post: operations["create_dataset_api_softsensor_datasets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/softsensor/datasets/{dataset_id}/finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finalize Dataset */
+        post: operations["finalize_dataset_api_softsensor_datasets__dataset_id__finalize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/softsensor/datasets/{dataset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Dataset */
+        delete: operations["delete_dataset_api_softsensor_datasets__dataset_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/softsensor/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Jobs
+         * @description Mais novos primeiro; `active` separa fila e andamento (true) do histórico (false).
+         */
+        get: operations["list_jobs_api_softsensor_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/softsensor/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Job */
+        get: operations["get_job_api_softsensor_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/softsensor/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Job
+         * @description Job `queued` vira `cancelled` aqui mesmo: o ml-worker nunca o verá, então o efeito colateral
+         *     de `jobs.finish` (conjunto `building` -> `failed`) tem de sair desta transação. `running` só
+         *     recebe a flag (o worker a honra). Job já terminado não muda.
+         */
+        post: operations["cancel_job_api_softsensor_jobs__job_id__cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1296,6 +1543,87 @@ export interface components {
              */
             remote_sp: boolean;
         };
+        /** DatasetCreate */
+        DatasetCreate: {
+            /** Name */
+            name: string;
+            /** Lab Variable Id */
+            lab_variable_id: number;
+            /** Input Tag Ids */
+            input_tag_ids: number[];
+            /** Period S */
+            period_s: number;
+            /**
+             * Start Ts
+             * Format: date-time
+             */
+            start_ts: string;
+        };
+        /** DatasetCreated */
+        DatasetCreated: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Lab Variable Id */
+            lab_variable_id: number;
+            /** Lab Variable Name */
+            lab_variable_name: string;
+            /** Input Tag Ids */
+            input_tag_ids: number[];
+            /** Inputs Meta */
+            inputs_meta: unknown[];
+            /** Period S */
+            period_s: number;
+            /**
+             * Start Ts
+             * Format: date-time
+             */
+            start_ts: string;
+            /** End Ts */
+            end_ts: string | null;
+            /** Status */
+            status: string;
+            /** Stats */
+            stats: {
+                [key: string]: unknown;
+            };
+            /** Warnings */
+            warnings: string[];
+        };
+        /**
+         * DatasetOut
+         * @description Nunca traz `data`: o blob do conjunto (até 64 MiB) fica fora das listas.
+         */
+        DatasetOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Lab Variable Id */
+            lab_variable_id: number;
+            /** Lab Variable Name */
+            lab_variable_name: string;
+            /** Input Tag Ids */
+            input_tag_ids: number[];
+            /** Inputs Meta */
+            inputs_meta: unknown[];
+            /** Period S */
+            period_s: number;
+            /**
+             * Start Ts
+             * Format: date-time
+             */
+            start_ts: string;
+            /** End Ts */
+            end_ts: string | null;
+            /** Status */
+            status: string;
+            /** Stats */
+            stats: {
+                [key: string]: unknown;
+            };
+        };
         /**
          * DvOut
          * @description Projeção de uma DV do bloco (spec §4.1-1) — `range` opcional (§4.2, RF-702).
@@ -1786,6 +2114,81 @@ export interface components {
             /** Nc */
             nc: number;
         };
+        /** JobAccepted */
+        JobAccepted: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** LabImportOut */
+        LabImportOut: {
+            /** Imported */
+            imported: number;
+            /** By Variable */
+            by_variable: {
+                [key: string]: number;
+            };
+        };
+        /** LabSampleIn */
+        LabSampleIn: {
+            /** Value */
+            value: number;
+            /**
+             * Sampled At
+             * Format: date-time
+             */
+            sampled_at: string;
+        };
+        /** LabSampleOut */
+        LabSampleOut: {
+            /**
+             * Sampled At
+             * Format: date-time
+             */
+            sampled_at: string;
+            /** Value */
+            value: number;
+            /** Source */
+            source: string;
+        };
+        /** LabVariableCreate */
+        LabVariableCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Eu
+             * @default
+             */
+            eu: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+        };
+        /** LabVariableOut */
+        LabVariableOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Eu */
+            eu: string;
+            /** Description */
+            description: string;
+            /** Sample Count */
+            sample_count: number;
+            /** Last Sampled At */
+            last_sampled_at: string | null;
+        };
+        /** LabVariableUpdate */
+        LabVariableUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Eu */
+            eu?: string | null;
+            /** Description */
+            description?: string | null;
+        };
         /**
          * Limits
          * @description Faixa `{min, max}` — limites de MV (`limits`) ou setpoint de CV (`sp_limits`).
@@ -1972,6 +2375,38 @@ export interface components {
              */
             channel: number;
         };
+        /** MlJobOut */
+        MlJobOut: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Status */
+            status: string;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Progress */
+            progress: {
+                [key: string]: unknown;
+            };
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            } | null;
+            /** Error */
+            error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+        };
         /** ModeCommand */
         ModeCommand: {
             /**
@@ -1984,6 +2419,11 @@ export interface components {
              * @enum {string}
              */
             value: "local" | "remote" | "man" | "auto";
+        };
+        /** ModelCommand */
+        ModelCommand: {
+            /** Model Id */
+            model_id: number;
         };
         /** MpcHistoryResponse */
         MpcHistoryResponse: {
@@ -2232,6 +2672,63 @@ export interface components {
             conn_id: number;
             trusted?: components["schemas"]["ServerCertificateInfoOut"] | null;
             received?: components["schemas"]["ServerCertificateInfoOut"] | null;
+        };
+        /**
+         * SoftSensorBlockOut
+         * @description Um bloco de sensor virtual e o seu vínculo. `desired_model_id` é o que a API gravou;
+         *     só `active_model_id` e `candidate_model_id` são estado (os grava o runtime, spec §5.6).
+         */
+        SoftSensorBlockOut: {
+            /** Flow Id */
+            flow_id: number;
+            /** Flow Name */
+            flow_name: string;
+            /** Block Id */
+            block_id: string;
+            /** Label */
+            label: string;
+            /** Method */
+            method: string;
+            /** N Inputs */
+            n_inputs: number;
+            /** Desired Model Id */
+            desired_model_id?: number | null;
+            /** Active Model Id */
+            active_model_id?: number | null;
+            /** Candidate Model Id */
+            candidate_model_id?: number | null;
+        };
+        /** SoftSensorModelOut */
+        SoftSensorModelOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Method */
+            method: string;
+            /** Period S */
+            period_s: number;
+            /** N Inputs */
+            n_inputs: number;
+            /** Warmup Steps */
+            warmup_steps?: number | null;
+            /**
+             * Metrics
+             * @default {}
+             */
+            metrics: {
+                [key: string]: number;
+            };
+            /**
+             * Input Names
+             * @default []
+             */
+            input_names: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** SpCommand */
         SpCommand: {
@@ -3972,6 +4469,42 @@ export interface operations {
             };
         };
     };
+    set_model_api_operate__flow_id___block_id__model_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flow_id: number;
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_mv_api_operate__flow_id___block_id__mv_post: {
         parameters: {
             query?: never;
@@ -4189,6 +4722,504 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoopSurfaceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_blocks_api_softsensor_blocks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoftSensorBlockOut"][];
+                };
+            };
+        };
+    };
+    list_models_api_softsensor_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoftSensorModelOut"][];
+                };
+            };
+        };
+    };
+    list_lab_variables_api_softsensor_lab_variables_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabVariableOut"][];
+                };
+            };
+        };
+    };
+    create_lab_variable_api_softsensor_lab_variables_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabVariableCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabVariableOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_lab_variable_api_softsensor_lab_variables__var_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                var_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_lab_variable_api_softsensor_lab_variables__var_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                var_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabVariableUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabVariableOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_lab_samples_api_softsensor_lab_variables__var_id__samples_get: {
+        parameters: {
+            query?: {
+                start?: string | null;
+                end?: string | null;
+            };
+            header?: never;
+            path: {
+                var_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabSampleOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_lab_sample_api_softsensor_lab_variables__var_id__samples_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                var_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabSampleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabSampleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_lab_sample_api_softsensor_lab_variables__var_id__samples_delete: {
+        parameters: {
+            query: {
+                sampled_at: string;
+            };
+            header?: never;
+            path: {
+                var_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_lab_samples_api_softsensor_lab_samples_import_post: {
+        parameters: {
+            query: {
+                tz: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/csv": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabImportOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_datasets_api_softsensor_datasets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetOut"][];
+                };
+            };
+        };
+    };
+    create_dataset_api_softsensor_datasets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasetCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    finalize_dataset_api_softsensor_datasets__dataset_id__finalize_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAccepted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_dataset_api_softsensor_datasets__dataset_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_jobs_api_softsensor_jobs_get: {
+        parameters: {
+            query?: {
+                active?: boolean | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MlJobOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_job_api_softsensor_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MlJobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_job_api_softsensor_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

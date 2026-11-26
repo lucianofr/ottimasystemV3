@@ -4,6 +4,7 @@ import { NavLink, Outlet, useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
 import { ThemeToggle } from "../components/ui/theme-toggle";
 import { useAuth } from "../features/auth/useAuth";
+import { useSoftSensorBlocks } from "../features/softsensor/useSoftSensorBlocks";
 import { AnnunciatorBar } from "./AnnunciatorBar";
 import { CanalAoVivoProvider, useCanalAoVivo } from "./CanalAoVivo";
 
@@ -23,6 +24,12 @@ export const NAV_ENGENHARIA = [
   { rotulo: "Tags", para: "/engenharia/tags", testid: "nav-tags" },
   { rotulo: "Flows", para: "/engenharia/flows", testid: "nav-flows" },
   { rotulo: "Trend", para: "/engenharia/trend", testid: "nav-trend" },
+] as const;
+
+/* Itens do sensor virtual: só aparecem quando o projeto ativo tem ao menos um bloco de sensor
+   virtual (`useSoftSensorBlocks`). Constante própria para `NAV_ENGENHARIA` seguir estático. */
+export const NAV_SENSOR_VIRTUAL = [
+  { rotulo: "Coleta e treino", para: "/engenharia/sensor-virtual/coleta", testid: "nav-sv-coleta" },
 ] as const;
 
 /* Configurações gerais (RF-805): grupo próprio, só admin — operador nem vê o item (a rota
@@ -71,6 +78,7 @@ function VigiaSessao() {
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const temSensorVirtual = (useSoftSensorBlocks().data?.length ?? 0) > 0;
   return (
     <CanalAoVivoProvider>
       <VigiaSessao />
@@ -91,6 +99,8 @@ export function AppShell() {
               {NAV_ENGENHARIA.map((item) => (
                 <ItemNav key={item.para} {...item} />
               ))}
+              {temSensorVirtual &&
+                NAV_SENSOR_VIRTUAL.map((item) => <ItemNav key={item.para} {...item} />)}
             </nav>
             {user?.role === "admin" && (
               <>

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { NAV_ADMIN, NAV_ENGENHARIA, NAV_OPERACAO } from "./AppShell";
+import { NAV_ADMIN, NAV_ENGENHARIA, NAV_OPERACAO, NAV_SENSOR_VIRTUAL } from "./AppShell";
 
 /**
  * Contrato de navegação do shell, como função pura (sem browser, sem backend).
@@ -30,12 +30,14 @@ const ROTAS_COM_NAV = [
   "/engenharia/tags",
   "/engenharia/flows",
   "/engenharia/trend",
+  "/engenharia/sensor-virtual/coleta",
   "/configuracoes",
 ] as const;
 
 const GRUPOS = [
   { nome: "NAV_OPERACAO", itens: NAV_OPERACAO },
   { nome: "NAV_ENGENHARIA", itens: NAV_ENGENHARIA },
+  { nome: "NAV_SENSOR_VIRTUAL", itens: NAV_SENSOR_VIRTUAL },
   { nome: "NAV_ADMIN", itens: NAV_ADMIN },
 ] as const;
 
@@ -67,4 +69,12 @@ test("configurações vive só no grupo admin — o único condicionado a role",
   expect(NAV_ADMIN.map((item) => item.para)).toEqual(["/configuracoes"]);
   expect(testidsForaDoAdmin).not.toContain("nav-configuracoes");
   expect(paraForaDoAdmin).not.toContain("/configuracoes");
+});
+
+test("sensor virtual vive em constante própria: NAV_ENGENHARIA segue estático (item condicional)", () => {
+  const paraEngenharia = NAV_ENGENHARIA.map((item) => item.para);
+
+  expect(NAV_SENSOR_VIRTUAL.map((item) => item.para)).toEqual(["/engenharia/sensor-virtual/coleta"]);
+  expect(NAV_SENSOR_VIRTUAL.map((item) => item.testid)).toEqual(["nav-sv-coleta"]);
+  expect(paraEngenharia).not.toContain("/engenharia/sensor-virtual/coleta");
 });
