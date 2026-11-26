@@ -57,6 +57,24 @@ def _train(method: str, data: TrainData, **kw):
     )
 
 
+def test_nomes_de_entrada_em_numero_diferente_do_conjunto_falham_com_mensagem():
+    with pytest.raises(TrainingError) as raised:
+        train(
+            "pls",
+            _data(30),  # 2 entradas
+            HPS["pls"],
+            inputs=[InputSeed("T1", "°C")],
+            output_name="y",
+            output_eu="",
+            period_s=1.0,
+            dataset_ids=[],
+        )
+
+    assert str(raised.value) == (
+        "O conjunto tem 2 entrada(s), mas foram informados 1 nome(s) de entrada"
+    )
+
+
 def test_poucas_linhas_utilizaveis_falha_com_mensagem():
     data = _data(30)
     data.x[:18, 220, 0] = np.nan  # só 12 análises com os últimos 50 passos íntegros

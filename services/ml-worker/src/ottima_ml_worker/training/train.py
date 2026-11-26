@@ -70,6 +70,11 @@ def train(
     epoch_cb: EpochCallback | None = None,
 ) -> tuple[ModelMeta, bytes, dict]:
     """`epoch_cb` recebe as épocas do ajuste nos 80% e, depois, as do reajuste sobre 100%."""
+    if data.x.shape[2] != len(inputs):
+        raise TrainingError(
+            f"O conjunto tem {data.x.shape[2]} entrada(s), "
+            f"mas foram informados {len(inputs)} nome(s) de entrada"
+        )
     k = window_of(method, hp)
     x, y = select_rows(data, k)
     n = len(y)
