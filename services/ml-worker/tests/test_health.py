@@ -34,7 +34,7 @@ class StubSessionFactory:
 @pytest.fixture(autouse=True)
 def app_state_limpo():
     def limpar() -> None:
-        for chave in ("db_ok", "queued", "running_id"):
+        for chave in ("db_ok", "queued", "running_id", "tune_running_id"):
             with suppress(KeyError):
                 delattr(app.state, chave)
 
@@ -54,14 +54,15 @@ async def test_health_ok_e_degraded():
     body = await _health()
     assert body["status"] == "degraded", "sem checagem feita, o serviço não se diz saudável"
     assert body["service"] == "ml-worker"
-    assert body["job"] == {"running_id": None, "queued": 0}
+    assert body["job"] == {"running_id": None, "tune_running_id": None, "queued": 0}
 
     await check_database(StubSessionFactory(fail=False, queued=3), app)
     app.state.running_id = 42
+    app.state.tune_running_id = 7
     body = await _health()
     assert set(body) == {"status", "service", "version", "job"}
     assert body["status"] == "ok"
-    assert body["job"] == {"running_id": 42, "queued": 3}
+    assert body["job"] == {"running_id": 42, "tune_running_id": 7, "queued": 3}
 
     await check_database(StubSessionFactory(fail=True), app)
     assert (await _health())["status"] == "degraded"

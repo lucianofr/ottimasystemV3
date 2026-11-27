@@ -1,7 +1,7 @@
 """Sensor virtual: fila de jobs do ml-worker (ADR-046 D7; spec §7.5; DDL: 0019).
 
 Única fila do sistema (ADR-004): a API só grava linhas; o ml-worker consulta por
-`(status, id)` e executa um job por vez."""
+`(status, id)` e executa um job por vez em cada raia (otimização × geral, emenda ao ADR-046)."""
 
 from datetime import datetime
 
