@@ -1110,49 +1110,76 @@ function lerY0(bruto: unknown): [number, number] {
 
 export const SHED_OPTS = ["shed_to_auto", "shed_to_man", "shed_to_normal"] as const;
 
+/** Leitura dos campos de malha com a coerção do Pydantic LAX (`LoopBaseConfig` não é strict):
+ *  o servidor aceita "80", "true" e 1 e grava o grafo como veio, então ler mais estrito que ele
+ *  perderia o valor no primeiro Save (RF-643, R17). Só dos blocos malha — `numero()`/`inteiro()`
+ *  dos demais blocos ficam como estão. Decimal com vírgula o Pydantic recusa; aqui também. */
+const NUMERO_TEXTO_MALHA = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
+const BOOL_TEXTO_MALHA = new Map<string, boolean>([
+  ["true", true], ["1", true], ["yes", true], ["on", true], ["t", true], ["y", true],
+  ["false", false], ["0", false], ["no", false], ["off", false], ["f", false], ["n", false],
+]);
+
+function numeroOuNuloMalha(valor: unknown): number | null {
+  const n = typeof valor === "string" && NUMERO_TEXTO_MALHA.test(valor.trim()) ? Number(valor) : valor;
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
+
+function numeroMalha(valor: unknown, padrao: number): number {
+  return numeroOuNuloMalha(valor) ?? padrao;
+}
+
+function inteiroMalha(valor: unknown, padrao: number, minimo: number, maximo: number): number {
+  return Math.min(Math.max(Math.trunc(numeroMalha(valor, padrao)), minimo), maximo);
+}
+
+/** Pydantic não apara espaço em booleano (" true " é 422), então aqui também não. */
+function boolMalha(valor: unknown, padrao: boolean): boolean {
+  if (typeof valor === "boolean") return valor;
+  if (valor === 0 || valor === 1) return valor === 1;
+  return (typeof valor === "string" ? BOOL_TEXTO_MALHA.get(valor.toLowerCase()) : undefined) ?? padrao;
+}
+
 /** Casca comum dos blocos malha (`LoopBaseConfig`, 27 campos). Valor ausente ou de tipo errado
  *  cai no default do SERVIDOR — nunca no de bloco novo (`PADRAO_*`), que diverge em campos como
  *  `ti_seconds`: o grafo gravado seria reinterpretado no primeiro Save (RF-643). Os defaults de
- *  casca são idênticos nos dois blocos; só `sp_hi_lim`/`sp_lo_lim` (sem default no servidor)
- *  vêm de quem chama. */
+ *  casca vêm da tabela do PRÓPRIO bloco (`d`); `sp_hi_lim`/`sp_lo_lim` (sem default no
+ *  servidor) também vêm de quem chama. */
 function lerShellMalha(
   dados: Record<string, unknown>,
+  d: Omit<DadosShellMalha, "sp_hi_lim" | "sp_lo_lim">,
   padraoObrigatorios: { sp_hi_lim: number; sp_lo_lim: number },
 ): DadosShellMalha {
-  const d = DEFAULT_SERVIDOR_PID_LOOP;
-  const bool = (valor: unknown, padrao: boolean): boolean => (typeof valor === "boolean" ? valor : padrao);
-  const nulavel = (valor: unknown): number | null =>
-    typeof valor === "number" && Number.isFinite(valor) ? valor : null;
   return {
     permitted: Array.isArray(dados.permitted)
       ? dados.permitted.filter((p: unknown): p is string => typeof p === "string")
       : [...d.permitted],
     normal: texto(dados.normal, d.normal),
     shed_opt: SHED_OPTS.find((opcao) => opcao === dados.shed_opt) ?? d.shed_opt,
-    shed_no_return: bool(dados.shed_no_return, d.shed_no_return),
-    direct_acting: bool(dados.direct_acting, d.direct_acting),
-    sp_pv_track_in_man: bool(dados.sp_pv_track_in_man, d.sp_pv_track_in_man),
-    use_pv_for_bkcal: bool(dados.use_pv_for_bkcal, d.use_pv_for_bkcal),
-    track_enable: bool(dados.track_enable, d.track_enable),
-    track_in_manual: bool(dados.track_in_manual, d.track_in_manual),
-    sp_hi_lim: numero(dados.sp_hi_lim, padraoObrigatorios.sp_hi_lim),
-    sp_lo_lim: numero(dados.sp_lo_lim, padraoObrigatorios.sp_lo_lim),
-    sp_rate_up: nulavel(dados.sp_rate_up),
-    sp_rate_dn: nulavel(dados.sp_rate_dn),
-    out_hi_lim: numero(dados.out_hi_lim, d.out_hi_lim),
-    out_lo_lim: numero(dados.out_lo_lim, d.out_lo_lim),
-    out_rate_up: nulavel(dados.out_rate_up),
-    out_rate_dn: nulavel(dados.out_rate_dn),
-    out_scale_lo: numero(dados.out_scale_lo, d.out_scale_lo),
-    out_scale_hi: numero(dados.out_scale_hi, d.out_scale_hi),
-    out_startup: numero(dados.out_startup, d.out_startup),
-    pv_ftime: numero(dados.pv_ftime, d.pv_ftime),
-    trk_val: numero(dados.trk_val, d.trk_val),
-    lo_val: numero(dados.lo_val, d.lo_val),
-    ff_scale_lo: numero(dados.ff_scale_lo, d.ff_scale_lo),
-    ff_scale_hi: numero(dados.ff_scale_hi, d.ff_scale_hi),
-    ff_gain: numero(dados.ff_gain, d.ff_gain),
-    ff_enable: bool(dados.ff_enable, d.ff_enable),
+    shed_no_return: boolMalha(dados.shed_no_return, d.shed_no_return),
+    direct_acting: boolMalha(dados.direct_acting, d.direct_acting),
+    sp_pv_track_in_man: boolMalha(dados.sp_pv_track_in_man, d.sp_pv_track_in_man),
+    use_pv_for_bkcal: boolMalha(dados.use_pv_for_bkcal, d.use_pv_for_bkcal),
+    track_enable: boolMalha(dados.track_enable, d.track_enable),
+    track_in_manual: boolMalha(dados.track_in_manual, d.track_in_manual),
+    sp_hi_lim: numeroMalha(dados.sp_hi_lim, padraoObrigatorios.sp_hi_lim),
+    sp_lo_lim: numeroMalha(dados.sp_lo_lim, padraoObrigatorios.sp_lo_lim),
+    sp_rate_up: numeroOuNuloMalha(dados.sp_rate_up),
+    sp_rate_dn: numeroOuNuloMalha(dados.sp_rate_dn),
+    out_hi_lim: numeroMalha(dados.out_hi_lim, d.out_hi_lim),
+    out_lo_lim: numeroMalha(dados.out_lo_lim, d.out_lo_lim),
+    out_rate_up: numeroOuNuloMalha(dados.out_rate_up),
+    out_rate_dn: numeroOuNuloMalha(dados.out_rate_dn),
+    out_scale_lo: numeroMalha(dados.out_scale_lo, d.out_scale_lo),
+    out_scale_hi: numeroMalha(dados.out_scale_hi, d.out_scale_hi),
+    out_startup: numeroMalha(dados.out_startup, d.out_startup),
+    pv_ftime: numeroMalha(dados.pv_ftime, d.pv_ftime),
+    trk_val: numeroMalha(dados.trk_val, d.trk_val),
+    lo_val: numeroMalha(dados.lo_val, d.lo_val),
+    ff_scale_lo: numeroMalha(dados.ff_scale_lo, d.ff_scale_lo),
+    ff_scale_hi: numeroMalha(dados.ff_scale_hi, d.ff_scale_hi),
+    ff_gain: numeroMalha(dados.ff_gain, d.ff_gain),
+    ff_enable: boolMalha(dados.ff_enable, d.ff_enable),
   };
 }
 
@@ -1377,15 +1404,15 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
         data: {
           exec_order,
           label,
-          ...lerShellMalha(dados, PADRAO_PID_LOOP),
-          kc: numero(dados.kc, PADRAO_PID_LOOP.kc),
-          ti_seconds: numero(dados.ti_seconds, d.ti_seconds),
-          td_seconds: numero(dados.td_seconds, d.td_seconds),
-          n: numero(dados.n, d.n),
-          beta: numero(dados.beta, d.beta),
-          gamma: numero(dados.gamma, d.gamma),
-          gap_band: numero(dados.gap_band, d.gap_band),
-          gap_gain: numero(dados.gap_gain, d.gap_gain),
+          ...lerShellMalha(dados, d, PADRAO_PID_LOOP),
+          kc: numeroMalha(dados.kc, PADRAO_PID_LOOP.kc),
+          ti_seconds: numeroMalha(dados.ti_seconds, d.ti_seconds),
+          td_seconds: numeroMalha(dados.td_seconds, d.td_seconds),
+          n: numeroMalha(dados.n, d.n),
+          beta: numeroMalha(dados.beta, d.beta),
+          gamma: numeroMalha(dados.gamma, d.gamma),
+          gap_band: numeroMalha(dados.gap_band, d.gap_band),
+          gap_gain: numeroMalha(dados.gap_gain, d.gap_gain),
         },
       };
     }
@@ -1398,15 +1425,15 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
         data: {
           exec_order,
           label,
-          ...lerShellMalha(dados, PADRAO_FUZZY_LOOP),
-          n_loops: inteiro(dados.n_loops, PADRAO_FUZZY_LOOP.n_loops, 1, MAX_LOOPS_FUZZY),
-          ke: numero(dados.ke, PADRAO_FUZZY_LOOP.ke),
-          kde: numero(dados.kde, PADRAO_FUZZY_LOOP.kde),
-          ku: numero(dados.ku, PADRAO_FUZZY_LOOP.ku),
-          tf_de: numero(dados.tf_de, PADRAO_FUZZY_LOOP.tf_de),
+          ...lerShellMalha(dados, d, PADRAO_FUZZY_LOOP),
+          n_loops: inteiroMalha(dados.n_loops, d.n_loops, 1, MAX_LOOPS_FUZZY),
+          ke: numeroMalha(dados.ke, PADRAO_FUZZY_LOOP.ke),
+          kde: numeroMalha(dados.kde, d.kde),
+          ku: numeroMalha(dados.ku, PADRAO_FUZZY_LOOP.ku),
+          tf_de: numeroMalha(dados.tf_de, d.tf_de),
           fll: typeof dados.fll === "string" ? dados.fll : contratoFuzzyLoop.default_fll,
-          lut_enabled: typeof dados.lut_enabled === "boolean" ? dados.lut_enabled : d.lut_enabled,
-          lut_resolution: inteiro(dados.lut_resolution, d.lut_resolution, 33, 257),
+          lut_enabled: boolMalha(dados.lut_enabled, d.lut_enabled),
+          lut_resolution: inteiroMalha(dados.lut_resolution, d.lut_resolution, 33, 257),
         },
       };
     }

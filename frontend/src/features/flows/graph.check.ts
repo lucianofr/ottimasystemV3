@@ -41,7 +41,7 @@ import {
   type NoFuzzyLoop,
 } from "./graph";
 import { validarConfigMpc } from "./mpc/mpcLogic";
-import { DEFAULT_SERVIDOR_PID_LOOP, PADRAO_PID_LOOP } from "./registro";
+import { DEFAULT_SERVIDOR_FUZZY_LOOP, DEFAULT_SERVIDOR_PID_LOOP, PADRAO_PID_LOOP } from "./registro";
 
 const POS = { x: 0, y: 0 };
 
@@ -1384,25 +1384,90 @@ test("fuzzy_loop: campos de shell e LUT fora do default sobrevivem a carregar e 
   expect(dadosDoNo(deGraphJson(noMalha("fuzzy_loop", data)))).toEqual({ exec_order: 1, label: "", ...data });
 });
 
-// Valor torto no grafo gravado não derruba o editor.
-test("campo de malha com tipo errado cai no default do servidor, sem lançar", () => {
+// O servidor valida em Pydantic LAX e grava o grafo como veio: "80" e "true" são valores
+// válidos gravados. Ler mais estrito que ele perderia o valor no primeiro Save (RF-643, R17).
+test("campo de malha em texto/0-1 lê como o Pydantic lax; o que ele recusa cai no default", () => {
   const dados = dadosDoNo(
     deGraphJson(
       noMalha("pid_loop", {
-        sp_hi_lim: 100,
-        sp_lo_lim: 0,
-        kc: 2,
+        sp_hi_lim: "250",
+        sp_lo_lim: " -5 ",
+        kc: "2",
+        out_hi_lim: "80",
+        ff_enable: "true",
+        track_enable: 1,
+        direct_acting: "YES",
+        sp_pv_track_in_man: "off",
+        sp_rate_up: "1.5",
+        sp_rate_dn: "1,5",
+        out_rate_up: null,
+        ti_seconds: "abc",
         permitted: ["auto", 7, null],
         shed_opt: "desconhecido",
-        ff_enable: "true",
-        sp_rate_up: "rápido",
+        use_pv_for_bkcal: "talvez",
+        track_in_manual: 2,
+        out_rate_dn: "rápido",
       }),
     ),
   );
-  expect(dados.permitted).toEqual(["auto"]);
-  expect(dados.shed_opt).toBe("shed_to_auto");
-  expect(dados.ff_enable).toBe(false);
-  expect(dados.sp_rate_up).toBeNull();
+  expect(dados).toMatchObject({
+    sp_hi_lim: 250,
+    sp_lo_lim: -5,
+    kc: 2,
+    out_hi_lim: 80,
+    ff_enable: true,
+    track_enable: true,
+    direct_acting: true,
+    sp_pv_track_in_man: false,
+    sp_rate_up: 1.5,
+    // Recusados pelo Pydantic também ⇒ default do servidor.
+    sp_rate_dn: null,
+    out_rate_up: null,
+    out_rate_dn: null,
+    ti_seconds: DEFAULT_SERVIDOR_PID_LOOP.ti_seconds,
+    permitted: ["auto"],
+    shed_opt: "shed_to_auto",
+    use_pv_for_bkcal: DEFAULT_SERVIDOR_PID_LOOP.use_pv_for_bkcal,
+    track_in_manual: DEFAULT_SERVIDOR_PID_LOOP.track_in_manual,
+  });
+});
+
+test("fuzzy_loop: inteiros e LUT em texto lidos como o Pydantic lax, com os tetos", () => {
+  const dados = dadosDoNo(
+    deGraphJson(
+      noMalha("fuzzy_loop", {
+        sp_hi_lim: 100,
+        sp_lo_lim: 0,
+        ke: "0.1",
+        ku: "4",
+        kde: "0.3",
+        tf_de: "2.5",
+        n_loops: "2",
+        lut_enabled: "on",
+        lut_resolution: "999",
+        fll: fllDefaultMalha(2),
+      }),
+    ),
+  );
+  expect(dados).toMatchObject({ ke: 0.1, ku: 4, kde: 0.3, tf_de: 2.5, n_loops: 2, lut_enabled: true, lut_resolution: 257 });
+});
+
+// Spec §7: o normalizador do Fuzzy Malha lê a tabela do FUZZY, não a do PID nem a de bloco novo.
+test("fuzzy_loop só com os obrigatórios carrega com o default do SERVIDOR do fuzzy", () => {
+  const dados = dadosDoNo(
+    deGraphJson(noMalha("fuzzy_loop", { sp_hi_lim: 100, sp_lo_lim: 0, ke: 0.1, ku: 4 })),
+  );
+  expect(dados).toEqual({
+    exec_order: 1,
+    label: "",
+    ...DEFAULT_SERVIDOR_FUZZY_LOOP,
+    sp_hi_lim: 100,
+    sp_lo_lim: 0,
+    ke: 0.1,
+    ku: 4,
+    // `fll` ausente cai no default do contrato (n_loops = 1).
+    fll: contratoFuzzyLoop.default_fll,
+  });
 });
 
 test("DadosShellMalha aceita os dados dos dois blocos malha", () => {
