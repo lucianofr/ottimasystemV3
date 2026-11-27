@@ -161,6 +161,21 @@ def test_teto_de_componentes_do_pls_usa_as_linhas_antes_do_corte():
     assert tune_module._space("pls", data)["n_components"]["high"] == 18
 
 
+def test_pls_com_conjunto_recusado_propaga_a_mensagem_especifica():
+    """A janela do PLS é fixa em 1 passo: se o conjunto não tem linha de teste, nenhuma tentativa
+    poderia ser válida e o erro é o do corte, não o de "nenhuma tentativa"."""
+    data = _data(30)
+    data.x[24:, -1, :] = np.nan
+
+    with pytest.raises(TrainingError) as raised:
+        _run(data)
+
+    assert str(raised.value) == (
+        "Nenhuma análise utilizável nos 20% finais do conjunto para a janela de 1 passo; "
+        "revise as lacunas do conjunto"
+    )
+
+
 def test_r2_minimo_para_o_estudo_cedo():
     _, trials = _run(_data(60, noise=0.0), n_trials=50, min_r2=0.9)
 

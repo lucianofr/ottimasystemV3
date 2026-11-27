@@ -18,7 +18,6 @@ from ottima_ml_worker.training import (
     TrainData,
     TrainingError,
     metrics,
-    select_rows,
     split_rows,
     train,
 )
@@ -106,7 +105,7 @@ def test_alvo_constante_nao_gera_nan(method, as_model):
     assert meta.metrics["r2"] == 0.0
     weights = unpack_weights(blob)
     assert all(np.isfinite(v).all() for v in weights.values())
-    window = select_rows(data, meta.warmup_steps)[0][0]
+    window = split_rows(data, meta.warmup_steps)[0][0]
     assert abs(predict(load_model(1, meta.model_dump(mode="json"), blob), window) - 7.0) < 0.05
 
 
@@ -120,7 +119,7 @@ def test_entrada_constante_nao_gera_nan(method):
     assert all(np.isfinite(v).all() for v in unpack_weights(blob).values())
     assert all(np.isfinite(v) for v in meta.metrics.values())
     assert meta.metrics["r2"] > 0  # o teste mede só a entrada que varia: nenhum pior que a média
-    window = select_rows(data, meta.warmup_steps)[0][0]
+    window = split_rows(data, meta.warmup_steps)[0][0]
     assert np.isfinite(predict(load_model(1, meta.model_dump(mode="json"), blob), window))
 
 
@@ -264,8 +263,8 @@ def test_janela_sem_analise_de_teste_utilizavel_falha_com_mensagem():
 
 
 def test_janela_com_poucas_analises_antes_do_corte_falha_com_mensagem():
-    data = _data(40)
-    data.x[:19, -40, 0] = np.nan  # 21 utilizáveis, só 13 antes do corte (análise 32)
+    data = _data(100)
+    data.x[:73, -40, 0] = np.nan  # 27 utilizáveis, só 7 antes do corte (análise 80)
 
     with pytest.raises(TrainingError, match="antes do corte dos 20% finais"):
         _train_esn(data, 40)

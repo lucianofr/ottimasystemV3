@@ -54,17 +54,28 @@ def test_janela_sem_analise_de_teste_utilizavel_falha_com_mensagem():
 
 
 def test_poucas_analises_antes_do_corte_falha_com_mensagem():
-    """20 utilizáveis no total, mas só 13 antes do corte: o ajuste não tem o que ajustar."""
-    data = _gapped(40)
-    data.x[:19, -40, 0] = np.nan
+    """26 utilizáveis no total, mas só 7 antes do corte: o `TimeSeriesSplit(3)` do tune exige 8."""
+    data = _gapped(100)
+    data.x[:73, -40, 0] = np.nan
 
     with pytest.raises(TrainingError) as raised:
         split_rows(data, 40)
 
     assert str(raised.value) == (
-        "São necessárias ao menos 16 análises utilizáveis antes do corte dos 20% finais "
-        "para a janela de 40 passos; há 13"
+        "São necessárias ao menos 8 análises utilizáveis antes do corte dos 20% finais "
+        "para a janela de 40 passos; há 7"
     )
+
+
+def test_lacuna_no_trecho_de_ajuste_nao_reprova_conjunto_com_20_utilizaveis():
+    """21 análises (5 de teste) e uma lacuna no ajuste: 20 utilizáveis, 15 de ajuste."""
+    data = _gapped(21)
+    data.x[3, -3, 0] = np.nan
+
+    x, y, n_fit = split_rows(data, 5)
+
+    assert (len(y), n_fit) == (20, 15)
+    assert x.shape == (20, 5, 2)
 
 
 def test_poucas_analises_utilizaveis_falha_com_a_mensagem_do_minimo():
@@ -76,4 +87,23 @@ def test_poucas_analises_utilizaveis_falha_com_a_mensagem_do_minimo():
 
     assert str(raised.value) == (
         "São necessárias ao menos 20 análises utilizáveis para a janela de 50 passos; há 12"
+    )
+
+
+def test_janela_de_um_passo_vai_no_singular_e_nao_sugere_reduzi_la():
+    sem_teste = _gapped(30)
+    sem_teste.x[24:, -1, 0] = np.nan
+    poucas = _gapped(30)
+    poucas.x[:18, -1, 0] = np.nan
+
+    with pytest.raises(TrainingError) as raised:
+        split_rows(sem_teste, 1)
+    assert str(raised.value) == (
+        "Nenhuma análise utilizável nos 20% finais do conjunto para a janela de 1 passo; "
+        "revise as lacunas do conjunto"
+    )
+    with pytest.raises(TrainingError) as raised:
+        split_rows(poucas, 1)
+    assert str(raised.value) == (
+        "São necessárias ao menos 20 análises utilizáveis para a janela de 1 passo; há 12"
     )

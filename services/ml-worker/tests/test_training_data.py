@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from ottima_core.softsensor import DATASET_STEPS, pack_dataset
-from ottima_ml_worker.training import load_train_data, metrics, select_rows
+from ottima_ml_worker.training import load_train_data, metrics, split_rows
 from ottima_ml_worker.training.data import TrainData
 
 
@@ -27,19 +27,19 @@ def test_load_concatena_e_ordena_por_tempo():
     assert data.x[:, 0, 0].tolist() == data.y.tolist()  # x acompanhou y na ordenação
 
 
-def test_select_rows_usa_so_os_ultimos_k_passos():
-    x = np.zeros((3, DATASET_STEPS, 2), dtype=np.float32)
+def test_split_rows_usa_so_os_ultimos_k_passos():
+    x = np.zeros((30, DATASET_STEPS, 2), dtype=np.float32)
     x[1, 100, 0] = np.nan  # lacuna no passo 100 de 256
     x[2, -1, 1] = np.nan  # lacuna no último passo
-    data = TrainData(x=x, y=np.array([10.0, 11.0, 12.0]), ts=np.arange(3.0))
+    data = TrainData(x=x, y=np.arange(10.0, 40.0), ts=np.arange(30.0))
 
-    x50, y50 = select_rows(data, 50)
-    x200, y200 = select_rows(data, 200)
+    x50, y50, _ = split_rows(data, 50)
+    x200, y200, _ = split_rows(data, 200)
 
-    assert y50.tolist() == [10.0, 11.0]  # o nan do passo 100 está fora dos últimos 50
-    assert x50.shape == (2, 50, 2)
-    assert y200.tolist() == [10.0]  # e dentro dos últimos 200
-    assert x200.shape == (1, 200, 2)
+    assert y50.tolist() == [y for y in range(10, 40) if y != 12]  # o nan do passo 100 está fora
+    assert x50.shape == (29, 50, 2)  # dos últimos 50
+    assert y200.tolist() == [y for y in range(10, 40) if y not in (11, 12)]  # e dentro dos 200
+    assert x200.shape == (28, 200, 2)
 
 
 def test_metrics_calcula_r2_rmse_e_mae():
