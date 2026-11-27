@@ -36,24 +36,26 @@ function MalhaSelecionada({ flowId, blockId }: { flowId: number; blockId: string
       ),
     [canal.loopStates, flowId, blockId, nLoops],
   );
-  const primeiro = estados.find((estado) => estado !== undefined);
-
-  // `tsBase`: o `ts` retido na montagem e a cada troca de `canal.estado` (não só ao reabrir):
-  // nenhum quadro chega com o canal fora, então ao reabrir a base já é o quadro retido — se a
-  // captura fosse só no "aberto", o render da reabertura ainda veria a base velha e mostraria
-  // o retido como vivo (ref não re-renderiza).
-  const tsBase = useRef(primeiro?.ts);
-  useEffect(() => {
-    tsBase.current = primeiro?.ts;
-  }, [canal.estado]); // só na troca de canal: depender de `primeiro` apagaria a prova de novidade
-
+  // O portão lê só o canal 0, que não depende da config: o canal 0 novo prova a varredura
+  // inteira, e "primeiro definido de `estados`" mudaria de canal quando `n_loops` chegasse.
+  const estado0 = canal.loopStates.get(`${String(flowId)}/${blockId}:0`);
   const estadoFlow = canal.flowStatus.get(flowId)?.state;
+
+  // `tsBase`: semeada na montagem (síncrono) e, enquanto NÃO está ao vivo, segue o quadro
+  // retido; só congela ao vivo. Assim, no render em que o canal reabre ou o flow volta a
+  // `running` (o runtime publica `running` antes da 1ª varredura, `scheduler.py:246`), a base
+  // já é o retido e nada antigo passa por vivo. Seguir também `estado0` cobre um quadro que
+  // chegue depois do `stopped` (assinaturas distintas no hub não garantem ordem).
+  const tsBase = useRef(estado0?.ts);
   const aoVivo = malhaAoVivo({
     canal: canal.estado,
     estadoFlow,
-    estado: primeiro,
+    estado: estado0,
     tsBase: tsBase.current,
   });
+  useEffect(() => {
+    if (!aoVivo) tsBase.current = estado0?.ts;
+  }, [aoVivo, estado0]);
   const motivo = motivoSemEstado(canal.estado, estadoFlow, flow.data?.desired_state);
 
   return (
