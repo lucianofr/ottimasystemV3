@@ -485,13 +485,14 @@ cancel_requested bool, created_by, created_at, started_at, finished_at)`.
 
 Comum aos três: os conjuntos são ordenados por `ts`; os **últimos 20%** viram teste. O corte é
 feito **uma única vez, no tempo, sobre as análises do conjunto e antes de aplicar a janela** do
-método: o teste é o mesmo qualquer que seja a janela (análises com o mesmo `ts` ficam do mesmo
+método: o corte é o mesmo qualquer que seja a janela (análises com o mesmo `ts` ficam do mesmo
 lado). As métricas exibidas (R², RMSE, MAE, em unidade de engenharia) são desse teste, com o
 modelo treinado só nas análises anteriores ao corte. O modelo que é gravado é **reajustado sobre
 100%** com os mesmos hiperparâmetros. Mínimo de 20 análises emparelhadas para treinar
 **[chamada]**; abaixo disso o job falha com mensagem clara, assim como quando a janela não deixa
-nenhuma linha utilizável no teste ou deixa menos de 16 antes do corte. A única normalização é a
-padronização (média e desvio) do treino.
+nenhuma linha utilizável no teste ou deixa menos de 8 antes do corte **[chamada]** (o mínimo para
+as 3 dobras do §8.2 validarem com 2 linhas cada). A única normalização é a padronização (média e
+desvio) do treino.
 
 - **PLS:** `sklearn.cross_decomposition.PLSRegression` sobre a última linha de cada janela.
   O exportador reduz o modelo a `w` e `b` em unidade de engenharia. (O bibmon do SensorPredict
