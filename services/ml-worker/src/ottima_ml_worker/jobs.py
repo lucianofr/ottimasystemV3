@@ -1,4 +1,6 @@
-"""Fila `ml_jobs` (ADR-046 D1; spec §7.5): única fila do sistema, consumidor único.
+"""Fila `ml_jobs` (ADR-046 D1; spec §7.5): única fila do sistema, consumida só pelo ml-worker em
+duas raias (emenda 2026-11-27): otimização (`tune`) e geral (todo outro kind). `tune=None` é a
+fila inteira; `True`/`False`, a raia.
 
 `dataset_build` que não termina `done` (falha, cancelamento, órfão) leva o conjunto de `building`
 para `failed`: senão ele ficaria travado em construção para sempre."""
@@ -6,7 +8,7 @@ para `failed`: senão ele ficaria travado em construção para sempre."""
 from dataclasses import dataclass
 from typing import Literal
 
-from sqlalchemy import func, select, update
+from sqlalchemy import ColumnElement, func, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ottima_core.models import MlJob, SoftSensorDataset
@@ -23,11 +25,18 @@ class ClaimedJob:
     params: dict
 
 
-async def claim_next(session_factory: Sessions) -> ClaimedJob | None:
+def _lane(tune: bool | None) -> ColumnElement[bool]:
+    """Geral por exclusão: um kind novo cai nela sem tocar aqui."""
+    if tune is None:
+        return true()
+    return MlJob.kind == "tune" if tune else MlJob.kind != "tune"
+
+
+async def claim_next(session_factory: Sessions, *, tune: bool | None = None) -> ClaimedJob | None:
     async with session_factory() as session:
         job = await session.scalar(
             select(MlJob)
-            .where(MlJob.status == "queued")
+            .where(MlJob.status == "queued", _lane(tune))
             .order_by(MlJob.id)
             .limit(1)
             .with_for_update(skip_locked=True)
@@ -78,12 +87,12 @@ async def finish(
         await session.commit()
 
 
-async def fail_orphans(session_factory: Sessions) -> int:
+async def fail_orphans(session_factory: Sessions, *, tune: bool | None = None) -> int:
     async with session_factory() as session:
         rows = (
             await session.execute(
                 update(MlJob)
-                .where(MlJob.status == "running")
+                .where(MlJob.status == "running", _lane(tune))
                 .values(status="failed", error=ORPHAN_ERROR, finished_at=func.now())
                 .returning(MlJob.kind, MlJob.params)
             )

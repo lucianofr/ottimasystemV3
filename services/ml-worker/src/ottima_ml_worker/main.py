@@ -1,7 +1,9 @@
 """Serviço ml-worker (ADR-046 D2): laço da fila `ml_jobs` e `/health` na porta 8005. Sem Redis.
 
-Um job por vez, cada um num processo filho. Sobe sem executar nada além de encerrar os órfãos
-da execução anterior; banco fora na subida não impede o `/health` degradado."""
+Duas raias (emenda 2026-11-27): otimização (`tune`) e geral (os demais kinds), cada uma com um
+job por vez num processo filho próprio — uma otimização de horas não retém conjunto nem treino.
+Sobe sem executar nada além de encerrar os órfãos da execução anterior; banco fora na subida não
+impede o `/health` degradado."""
 
 import asyncio
 import logging
@@ -46,8 +48,8 @@ async def _heartbeat_loop(session_factory: Sessions, app: FastAPI) -> None:
 
 async def run_claimed(session_factory: Sessions, job: ClaimedJob, *, database_url: str) -> bool:
     """`run_job` que explode (banco fora no `finish`, por exemplo) encerra a linha como `failed`.
-    Devolve False se nem isso deu: a linha pode ter ficado `running` e o laço re-arma o
-    `fail_orphans` (consumidor único: `running` com o job já devolvido é sempre órfão)."""
+    Devolve False se nem isso deu: a linha pode ter ficado `running` e a raia re-arma o
+    `fail_orphans` dela (raia serial: `running` do seu kind com o job já devolvido é órfão)."""
     try:
         await run_job(session_factory, job, database_url=database_url)
     except Exception as exc:
@@ -65,22 +67,28 @@ async def run_claimed(session_factory: Sessions, job: ClaimedJob, *, database_ur
     return True
 
 
-async def _job_loop(session_factory: Sessions, app: FastAPI, database_url: str) -> None:
+async def _job_loop(
+    session_factory: Sessions, app: FastAPI, database_url: str, *, tune: bool
+) -> None:
+    """Uma raia. Toda varredura de órfãos (subida e re-arme) fica nos kinds DESTA raia: a outra
+    pode estar com um job vivo, e só aqui um `running` do kind dela seria órfão. A união das duas
+    varreduras da subida cobre a fila inteira."""
+    state_key = "tune_running_id" if tune else "running_id"
     orphans_done = False
     while True:
         try:
             if not orphans_done:
-                if n := await fail_orphans(session_factory):
+                if n := await fail_orphans(session_factory, tune=tune):
                     logger.warning("%d job(s) interrompido(s) pelo reinício marcado(s) failed", n)
                 orphans_done = True
-            job = await claim_next(session_factory)
+            job = await claim_next(session_factory, tune=tune)
             if job is not None:
-                app.state.running_id = job.id
+                setattr(app.state, state_key, job.id)
                 try:
                     if not await run_claimed(session_factory, job, database_url=database_url):
                         orphans_done = False
                 finally:
-                    app.state.running_id = None
+                    setattr(app.state, state_key, None)
                 continue
         except Exception:
             # Banco fora no claim ou nos órfãos: o laço segue e tenta de novo. Um `claim_next` que
@@ -99,7 +107,8 @@ async def lifespan(app: FastAPI):
     session_factory = create_session_factory(engine)
     tasks = [
         asyncio.create_task(_heartbeat_loop(session_factory, app)),
-        asyncio.create_task(_job_loop(session_factory, app, settings.database_url)),
+        asyncio.create_task(_job_loop(session_factory, app, settings.database_url, tune=True)),
+        asyncio.create_task(_job_loop(session_factory, app, settings.database_url, tune=False)),
         asyncio.create_task(watch_log_level(session_factory)),
     ]
     yield
@@ -120,7 +129,8 @@ async def health() -> dict:
         "service": SERVICE_NAME,
         "version": VERSION,
         "job": {
-            "running_id": getattr(app.state, "running_id", None),
+            "running_id": getattr(app.state, "running_id", None),  # raia geral
+            "tune_running_id": getattr(app.state, "tune_running_id", None),
             "queued": getattr(app.state, "queued", 0),
         },
     }

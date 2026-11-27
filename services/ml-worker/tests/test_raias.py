@@ -20,12 +20,12 @@ async def _status(factory, job_id: int) -> str:
         return (await session.get(MlJob, job_id)).status
 
 
-async def _espera(factory, job_id: int, status: str, timeout: float = 15.0) -> None:
-    async def laco() -> None:
-        while await _status(factory, job_id) != status:
-            await asyncio.sleep(0.05)
-
-    await asyncio.wait_for(laco(), timeout)
+async def _espera(factory, job_id: int, status: str) -> None:
+    for _ in range(300):  # até 15 s: folga para a suíte sob carga
+        if await _status(factory, job_id) == status:
+            return
+        await asyncio.sleep(0.05)
+    assert await _status(factory, job_id) == status
 
 
 class Raias:
@@ -126,9 +126,7 @@ async def test_orfaos_da_subida_somem_nas_duas_raias(session_factory, make_job, 
         await _espera(session_factory, train_id, "failed")
 
 
-async def test_subida_de_uma_raia_nao_mata_o_job_da_outra(
-    session_factory, make_job, run_job_falso
-):
+async def test_subida_de_uma_raia_nao_mata_o_job_da_outra(session_factory, make_job, run_job_falso):
     """A raia que sobe depois varre os órfãos: só os do SEU conjunto de kinds."""
     libera, _ = run_job_falso
     async with Raias(session_factory) as raias:
