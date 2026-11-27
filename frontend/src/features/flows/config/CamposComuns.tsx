@@ -68,3 +68,33 @@ export function Campo({
     </div>
   );
 }
+
+/** Caixa de seleção com ajuda abaixo; `id` é também o `name` (marcada ⇒ "on" no FormData). */
+export function CampoBooleano({
+  id,
+  rotulo,
+  valor,
+  ajuda,
+}: {
+  id: string;
+  rotulo: string;
+  valor: boolean;
+  ajuda: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="flex items-center gap-2 text-xs text-fg" htmlFor={id}>
+        <input
+          type="checkbox"
+          id={id}
+          name={id}
+          data-testid={`config-${id.replace(/_/g, "-")}`}
+          defaultChecked={valor}
+          className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+        />
+        {rotulo}
+      </label>
+      <p className="text-[10px] leading-tight text-fg-muted">{ajuda}</p>
+    </div>
+  );
+}

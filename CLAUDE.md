@@ -179,6 +179,16 @@ E2E_ADMIN_USERNAME=$(grep -m1 '^OTTIMA_ADMIN_USERNAME=' deploy/.env|cut -d= -f2-
 # `fuzzy_loop` de `n_loops=2` com o FLL autoral `scripts/fll/malha-mimo-2x2.fll` (regras de
 # desacoplamento); a malha fecha pelo OPC (par w/espelho float2 do opcsim), nunca por aresta
 # de volta no grafo (RF-302). Página MALHA: /operacao/loop?flow=<id>&bloco=fm.
+# Tela MALHA (RF-645/646): seletor sempre visível (`loop-combobox`), abre na primeira malha e
+# mostra sintonia e tendência PV/SP/OUT mesmo com o flow parado; só comanda "ao vivo" (canal
+# /ws aberto + flow `running` + LoopState do canal 0 mais novo que o retido ao perder o ao vivo)
+# — fora disso comandos desabilitados. data-testid: `loop-*` (loop-combobox, loop-faceplate,
+# loop-sem-estado, loop-badge-*, loop-botoeira, loop-modo-<modo>, loop-canal-<i>,
+# loop-barra-<pv|sp|out>, loop-escrita-<rotulo>, loop-erro-comando, loop-sintonia, loop-superficie*)
+# e `loop-trend-*` (as antigas loop-selecao/loop-aguardando não existem mais). O modal do
+# PID Malha/Fuzzy Malha edita a config inteira (RF-641/642), campos `config-<campo>` com `_`→`-`
+# (ex.: config-sp-lo-lim; os do núcleo fuzzy mantêm o id antigo, ex.: config-tf_de), e o editor
+# preserva todos os campos de config da malha ao salvar (RF-643).
 cd frontend && npm run e2e                          # regressão Playwright da F1 (specs novas não)
 # A L2 e o Playwright NÃO podem rodar juntos: o E2E-16 publica project_activated duas vezes e
 # derruba os cenários E2E-F3-03/04/08. Serialize.

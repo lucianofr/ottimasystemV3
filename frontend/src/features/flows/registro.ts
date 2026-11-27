@@ -25,6 +25,7 @@ import {
   type DadosTfs,
   type TipoBloco,
 } from "./graph";
+import type { FuzzyLoopConfig, PidLoopConfig } from "../../lib/contracts.gen";
 
 /**
  * Registro de tipo de Bloco (ARCH-18/TD-021).
@@ -129,20 +130,94 @@ export const PADRAO_PID = {
   starting_output: 0,
 } as const;
 
-/** Defaults do PID Malha (ADR-039): o mínimo que o servidor exige (limites de SP e KC) mais
- *  a escala padrão de OUT e a sintonia PI conservadora — o bloco recém-arrastado passa no
- *  save; os demais campos do `PidLoopConfig` ficam nos defaults do servidor. */
-export const PADRAO_PID_LOOP = {
-  sp_hi_lim: 100,
-  sp_lo_lim: 0,
-  out_scale_lo: 0,
-  out_scale_hi: 100,
+/** Espelho MANUAL dos defaults do servidor (`LoopBaseConfig` + `PidLoopConfig`, `parse.py`) —
+ *  tudo que o servidor preenche sozinho quando o campo falta. O ADR-034 proíbe gerar tabela de
+ *  default; a trava é o teste próprio `test_loop_config_defaults.py`, que compara esta tabela
+ *  com os `model_fields` do Pydantic. Os 3 campos sem default no servidor (`sp_hi_lim`,
+ *  `sp_lo_lim`, `kc`) ficam de fora: a anotação `Omit<…>` faz o `tsc` acusar campo esquecido. */
+export const DEFAULT_SERVIDOR_PID_LOOP: Omit<PidLoopConfig, "sp_hi_lim" | "sp_lo_lim" | "kc"> = {
   permitted: ["oos", "man", "auto"],
   normal: "auto",
+  shed_opt: "shed_to_auto",
+  shed_no_return: false,
   direct_acting: false,
+  sp_pv_track_in_man: true,
+  use_pv_for_bkcal: false,
+  track_enable: false,
+  track_in_manual: false,
+  sp_rate_up: null,
+  sp_rate_dn: null,
+  out_hi_lim: 100,
+  out_lo_lim: 0,
+  out_rate_up: null,
+  out_rate_dn: null,
+  out_scale_lo: 0,
+  out_scale_hi: 100,
+  out_startup: 0,
+  pv_ftime: 0,
+  trk_val: 0,
+  lo_val: 0,
+  ff_scale_lo: 0,
+  ff_scale_hi: 100,
+  ff_gain: 1,
+  ff_enable: false,
+  ti_seconds: 0,
+  td_seconds: 0,
+  n: 8,
+  beta: 1,
+  gamma: 0,
+  gap_band: 0,
+  gap_gain: 1,
+};
+
+/** Idem para o Fuzzy Malha (`LoopBaseConfig` + `FuzzyLoopConfig`). Sem default no servidor:
+ *  `sp_hi_lim`, `sp_lo_lim`, `ke`, `ku`. O `fll` também fica de fora — sai do contrato
+ *  (`PORT_CONTRACTS.fuzzy_loop.default_fll`) dentro do thunk de `defaults`. */
+export const DEFAULT_SERVIDOR_FUZZY_LOOP: Omit<
+  FuzzyLoopConfig,
+  "sp_hi_lim" | "sp_lo_lim" | "ke" | "ku" | "fll"
+> = {
+  permitted: ["oos", "man", "auto"],
+  normal: "auto",
+  shed_opt: "shed_to_auto",
+  shed_no_return: false,
+  direct_acting: false,
+  sp_pv_track_in_man: true,
+  use_pv_for_bkcal: false,
+  track_enable: false,
+  track_in_manual: false,
+  sp_rate_up: null,
+  sp_rate_dn: null,
+  out_hi_lim: 100,
+  out_lo_lim: 0,
+  out_rate_up: null,
+  out_rate_dn: null,
+  out_scale_lo: 0,
+  out_scale_hi: 100,
+  out_startup: 0,
+  pv_ftime: 0,
+  trk_val: 0,
+  lo_val: 0,
+  ff_scale_lo: 0,
+  ff_scale_hi: 100,
+  ff_gain: 1,
+  ff_enable: false,
+  n_loops: 1,
+  kde: 0,
+  tf_de: 1,
+  lut_enabled: false,
+  lut_resolution: 65,
+};
+
+/** Defaults do PID Malha (ADR-039) para o bloco recém-arrastado: o espelho do servidor mais o
+ *  mínimo que o servidor exige (limites de SP e KC) e a sintonia PI conservadora (TI = 60 s —
+ *  o servidor nasceria P puro, `ti_seconds = 0`). Passa no save. */
+export const PADRAO_PID_LOOP: PidLoopConfig = {
+  ...DEFAULT_SERVIDOR_PID_LOOP,
+  sp_hi_lim: 100,
+  sp_lo_lim: 0,
   kc: 1,
   ti_seconds: 60,
-  td_seconds: 0,
 };
 
 /** Defaults do Fuzzy Malha (SPEC_FUZZY §6.4): sintonia de comissionamento — KE cobrindo 20
@@ -150,19 +225,12 @@ export const PADRAO_PID_LOOP = {
  *  recomendada em campo (a derivada entra por último). O `fll` NÃO mora aqui: sai do
  *  contrato dentro do thunk de `defaults`, senão o ciclo de import com `graph.ts` (que lê
  *  esta const) avaliaria `contratoFuzzyLoop` antes da inicialização. */
-export const PADRAO_FUZZY_LOOP = {
+export const PADRAO_FUZZY_LOOP: Omit<FuzzyLoopConfig, "fll"> = {
+  ...DEFAULT_SERVIDOR_FUZZY_LOOP,
   sp_hi_lim: 100,
   sp_lo_lim: 0,
-  out_scale_lo: 0,
-  out_scale_hi: 100,
-  permitted: ["oos", "man", "auto"],
-  normal: "auto",
-  direct_acting: false,
-  n_loops: 1,
   ke: 0.05,
-  kde: 0,
   ku: 2,
-  tf_de: 1,
 };
 
 /** Os três sensores virtuais (RF-581, ADR-046) só diferem no rótulo: mesma descrição e mesma

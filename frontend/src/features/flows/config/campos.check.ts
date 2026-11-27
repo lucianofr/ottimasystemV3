@@ -1,10 +1,14 @@
 import { expect, test } from "@playwright/test";
 
-import { matrizPadrao, type MatrizTfs } from "../graph";
+import { matrizPadrao, type DadosPidLoop, type MatrizTfs } from "../graph";
+import { PADRAO_PID_LOOP } from "../registro";
 import {
+  caixaDeModoDesabilitada,
   campoOpcional,
   inteiroDoCampo,
   matrizDoFormulario,
+  montarDadosPidLoop,
+  montarDadosShellMalha,
   nomeParam,
   numeroDoCampo,
   numeroOuNuloDoCampo,
@@ -132,4 +136,95 @@ test("limite do PID: texto ilegível NÃO apaga o limite, cai no valor anterior"
 test("limite do PID: aceita vírgula decimal e sinal negativo", () => {
   expect(numeroOuNuloDoCampo("12,5", 0)).toBe(12.5);
   expect(numeroOuNuloDoCampo("-40", 0)).toBe(-40);
+});
+
+// Blocos malha (RF-641, RF-642): leitura pura do formulário da casca + sintonia do PID Malha.
+const ATUAL: DadosPidLoop = { exec_order: 1, label: "", ...PADRAO_PID_LOOP, sp_rate_up: 2, ff_enable: true };
+
+test("modo remoto só fica desabilitado se a porta não está ligada E a caixa não está marcada", () => {
+  const semArestas = new Set<string>();
+  expect(caixaDeModoDesabilitada("cas", semArestas, false)).toBe(true);
+  expect(caixaDeModoDesabilitada("cas", semArestas, true)).toBe(false); // nunca desmarca sozinho
+  expect(caixaDeModoDesabilitada("cas", new Set(["cas_in"]), false)).toBe(false);
+  expect(caixaDeModoDesabilitada("rout", new Set(["cas_in"]), false)).toBe(true);
+  expect(caixaDeModoDesabilitada("auto", semArestas, false)).toBe(false);
+});
+
+test("montarDadosPidLoop lê sintonia, ação e campos de shell", () => {
+  const novo = montarDadosPidLoop(
+    ATUAL,
+    formulario({
+      direct_acting: "true",
+      kc: "2,5",
+      ti_seconds: "0",
+      n: "10",
+      beta: "0,5",
+      sp_hi_lim: "250",
+      out_hi_lim: "80",
+      pv_ftime: "1,5",
+      normal: "man",
+      shed_opt: "shed_to_man",
+      permitted_oos: "on",
+      permitted_man: "on",
+    }),
+  );
+  expect(novo).toMatchObject({
+    direct_acting: true,
+    kc: 2.5,
+    ti_seconds: 0,
+    n: 10,
+    beta: 0.5,
+    sp_hi_lim: 250,
+    out_hi_lim: 80,
+    pv_ftime: 1.5,
+    normal: "man",
+    shed_opt: "shed_to_man",
+    permitted: ["oos", "man"],
+  });
+});
+
+test("caixa desmarcada (ausente do FormData) vira false", () => {
+  const novo = montarDadosPidLoop(ATUAL, formulario({ permitted_auto: "on" }));
+  expect(novo.ff_enable).toBe(false);
+  expect(novo.sp_pv_track_in_man).toBe(false);
+});
+
+test("ação direta: ausente preserva o valor anterior, presente lê o literal do select", () => {
+  const direta = { ...ATUAL, direct_acting: true };
+  expect(montarDadosPidLoop(direta, formulario({})).direct_acting).toBe(true);
+  expect(montarDadosPidLoop(direta, formulario({ direct_acting: "false" })).direct_acting).toBe(false);
+});
+
+test("shed_opt desconhecido no formulário preserva o valor anterior", () => {
+  const atual = { ...ATUAL, shed_opt: "shed_to_man" as const };
+  expect(montarDadosPidLoop(atual, formulario({ shed_opt: "inexistente" })).shed_opt).toBe("shed_to_man");
+});
+
+test("rampa: vírgula vira número, vazio vira null, texto ilegível mantém o valor anterior", () => {
+  expect(montarDadosPidLoop(ATUAL, formulario({ sp_rate_up: "1,5" })).sp_rate_up).toBe(1.5);
+  expect(montarDadosPidLoop(ATUAL, formulario({ sp_rate_up: "" })).sp_rate_up).toBeNull();
+  expect(montarDadosPidLoop(ATUAL, formulario({ sp_rate_up: "abc" })).sp_rate_up).toBe(2);
+});
+
+test("permitted: ordem canônica das caixas e modo sem caixa preservado", () => {
+  const atual = { ...ATUAL, permitted: ["auto", "iman", "oos"] };
+  const novo = montarDadosPidLoop(
+    atual,
+    formulario({ permitted_auto: "on", permitted_oos: "on", permitted_cas: "on" }),
+  );
+  expect(novo.permitted).toEqual(["oos", "auto", "cas", "iman"]);
+});
+
+test("recorte fuzzy: shed, tracking e feedforward não são tocados", () => {
+  const atual = { ...ATUAL, shed_opt: "shed_to_man" as const, track_enable: true, trk_val: 33, ff_gain: 0.5 };
+  const novo = montarDadosShellMalha(atual, formulario({ sp_hi_lim: "300", permitted_man: "on" }), "fuzzy_loop");
+  expect(novo).toMatchObject({
+    sp_hi_lim: 300,
+    shed_opt: "shed_to_man",
+    track_enable: true,
+    trk_val: 33,
+    ff_gain: 0.5,
+    ff_enable: true,
+  });
+  expect(novo.permitted).toEqual(["man"]);
 });

@@ -1,5 +1,5 @@
 import type { NoPid } from "../graph";
-import { Campo } from "./CamposComuns";
+import { Campo, CampoBooleano } from "./CamposComuns";
 
 /**
  * Formulário do bloco PID (RF-551..554, ADR-031). Os dez campos ficam sempre visíveis — nenhum
@@ -16,35 +16,6 @@ import { Campo } from "./CamposComuns";
  * `CamposBlocoPid` (não `CamposPid`) porque `mpc/CamposPid.tsx` já existe e é outra coisa: o
  * binding de tags PLC-PID por MV do MPC (spec F4 §2.1-3), sem relação com este bloco.
  */
-
-function CampoBooleano({
-  id,
-  rotulo,
-  valor,
-  ajuda,
-}: {
-  id: string;
-  rotulo: string;
-  valor: boolean;
-  ajuda: string;
-}) {
-  return (
-    <div className="space-y-1">
-      <label className="flex items-center gap-2 text-xs text-fg" htmlFor={id}>
-        <input
-          type="checkbox"
-          id={id}
-          name={id}
-          data-testid={`config-${id.replace(/_/g, "-")}`}
-          defaultChecked={valor}
-          className="h-3.5 w-3.5 accent-[var(--color-accent)]"
-        />
-        {rotulo}
-      </label>
-      <p className="text-[10px] leading-tight text-fg-muted">{ajuda}</p>
-    </div>
-  );
-}
 
 export function CamposBlocoPid({ dados }: { dados: NoPid["data"] }) {
   return (

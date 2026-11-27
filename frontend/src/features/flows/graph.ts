@@ -34,7 +34,7 @@ import {
 } from "../../lib/contracts.gen";
 import { lerModelosMpc, lerVariaveisMpc } from "./mpc/graphMpc";
 import { portaValida, type PortsPorBloco } from "./canalPrimitivos";
-import { BASES_TEMPO, PADRAO_CONSTANT, PADRAO_DEAD_TIME, PADRAO_FIRST_ORDER, PADRAO_INTEGRATOR, PADRAO_KALMAN, PADRAO_LEAD_LAG, PADRAO_PID, PADRAO_PID_LOOP, PADRAO_FUZZY_LOOP, PADRAO_SCALER, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
+import { BASES_TEMPO, PADRAO_CONSTANT, PADRAO_DEAD_TIME, PADRAO_FIRST_ORDER, PADRAO_INTEGRATOR, PADRAO_KALMAN, PADRAO_LEAD_LAG, PADRAO_PID, PADRAO_PID_LOOP, PADRAO_FUZZY_LOOP, DEFAULT_SERVIDOR_PID_LOOP, DEFAULT_SERVIDOR_FUZZY_LOOP, PADRAO_SCALER, REGISTRO_BLOCO, ROTULO_BLOCO } from "./registro";
 
 /**
  * Modelo do grafo do editor + as regras que o editor espelha do servidor.
@@ -256,46 +256,53 @@ export type DadosBusSubscribe = DadosBase & Pick<BusKeyConfig, keyof BusKeyConfi
  *  não serializáveis em JSON. */
 export type DadosPid = DadosBase & Pick<PidConfig, keyof PidConfig>;
 
-/** PID Malha (ADR-039): o editor conhece só os campos que expõe — limites de SP, escala de
- *  OUT (estrutural, D11), permitted/normal/direct_acting e a sintonia PID. Os demais campos
- *  do `PidLoopConfig` ficam nos defaults do servidor; edição completa deles vem com o modal
- *  de sintonia (plano fuzzy-loop). */
-export type DadosPidLoop = DadosBase &
-  Pick<
-    PidLoopConfig,
-    | "sp_hi_lim"
-    | "sp_lo_lim"
-    | "out_scale_lo"
-    | "out_scale_hi"
-    | "permitted"
-    | "normal"
-    | "direct_acting"
-    | "kc"
-    | "ti_seconds"
-    | "td_seconds"
-  >;
+/** Casca comum dos blocos malha (`LoopBaseConfig`, 27 campos: modos, limites de SP/OUT, rampas,
+ *  escala de OUT, rastreio, feedforward). `DadosPidLoop` e `DadosFuzzyLoop` são atribuíveis a
+ *  ela — é o que a tela de configuração da casca consome, sem saber qual é o bloco. */
+export type DadosShellMalha = Pick<
+  PidLoopConfig,
+  | "permitted"
+  | "normal"
+  | "shed_opt"
+  | "shed_no_return"
+  | "direct_acting"
+  | "sp_pv_track_in_man"
+  | "use_pv_for_bkcal"
+  | "track_enable"
+  | "track_in_manual"
+  | "sp_hi_lim"
+  | "sp_lo_lim"
+  | "sp_rate_up"
+  | "sp_rate_dn"
+  | "out_hi_lim"
+  | "out_lo_lim"
+  | "out_rate_up"
+  | "out_rate_dn"
+  | "out_scale_lo"
+  | "out_scale_hi"
+  | "out_startup"
+  | "pv_ftime"
+  | "trk_val"
+  | "lo_val"
+  | "ff_scale_lo"
+  | "ff_scale_hi"
+  | "ff_gain"
+  | "ff_enable"
+>;
 
-/** Fuzzy Malha v2 (SPEC_FUZZY v2 MIMO): `n_loops` canais de controle compartilham o FLL
- *  (posicional: entradas `e_i`/`de_i`, saídas `du_i`) e os ganhos do kernel; portas
- *  `pv_i`/`out_i`. `fll` e `n_loops` são ESTRUTURAIS (D11): editar aqui re-instancia o
- *  bloco no próximo deploy e a malha aterrissa em MAN. */
-export type DadosFuzzyLoop = DadosBase &
-  Pick<
-    FuzzyLoopConfig,
-    | "sp_hi_lim"
-    | "sp_lo_lim"
-    | "out_scale_lo"
-    | "out_scale_hi"
-    | "permitted"
-    | "normal"
-    | "direct_acting"
-    | "n_loops"
-    | "ke"
-    | "kde"
-    | "ku"
-    | "tf_de"
-    | "fll"
-  >;
+/** PID Malha (ADR-039): o `data` do nó carrega a config COMPLETA do servidor (`PidLoopConfig`,
+ *  casca + sintonia). O normalizador lê todos os campos — o que ele não lesse sumiria no
+ *  primeiro Save do canvas (RF-643). `out_scale_*` são estruturais (D11). `Pick<…, keyof …>`
+ *  (como em `DadosPid`) porque o tipo gerado é `interface`, sem a index signature implícita
+ *  que o `Node` do React Flow exige de `data`. */
+export type DadosPidLoop = DadosBase & Pick<PidLoopConfig, keyof PidLoopConfig>;
+
+/** Fuzzy Malha v2 (SPEC_FUZZY v2 MIMO): config COMPLETA do servidor (`FuzzyLoopConfig`, casca +
+ *  kernel + LUT). `n_loops` canais de controle compartilham o FLL (posicional: entradas
+ *  `e_i`/`de_i`, saídas `du_i`) e os ganhos do kernel; portas `pv_i`/`out_i`. `fll` e `n_loops`
+ *  são ESTRUTURAIS (D11): editar aqui re-instancia o bloco no próximo deploy e a malha
+ *  aterrissa em MAN. */
+export type DadosFuzzyLoop = DadosBase & Pick<FuzzyLoopConfig, keyof FuzzyLoopConfig>;
 
 /** `LimitesMpc`/`FaixaMpc`/`ValoresModoPid`/`PidMv` abaixo viram alias do tipo gerado
  *  (ARCH-06/TD-018): `Limits`/`Range`/`ModeValues`/`PidBinding` de `mpc_config.py`, mesmo
@@ -1101,6 +1108,81 @@ function lerY0(bruto: unknown): [number, number] {
   return [numero(valores[0], Y0_PADRAO), numero(valores[1], Y0_PADRAO)];
 }
 
+export const SHED_OPTS = ["shed_to_auto", "shed_to_man", "shed_to_normal"] as const;
+
+/** Leitura dos campos de malha com a coerção do Pydantic LAX (`LoopBaseConfig` não é strict):
+ *  o servidor aceita "80", "true" e 1 e grava o grafo como veio, então ler mais estrito que ele
+ *  perderia o valor no primeiro Save (RF-643, R17). Só dos blocos malha — `numero()`/`inteiro()`
+ *  dos demais blocos ficam como estão. Decimal com vírgula o Pydantic recusa; aqui também. */
+const NUMERO_TEXTO_MALHA = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
+const BOOL_TEXTO_MALHA = new Map<string, boolean>([
+  ["true", true], ["1", true], ["yes", true], ["on", true], ["t", true], ["y", true],
+  ["false", false], ["0", false], ["no", false], ["off", false], ["f", false], ["n", false],
+]);
+
+function numeroOuNuloMalha(valor: unknown): number | null {
+  const n = typeof valor === "string" && NUMERO_TEXTO_MALHA.test(valor.trim()) ? Number(valor) : valor;
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
+
+function numeroMalha(valor: unknown, padrao: number): number {
+  return numeroOuNuloMalha(valor) ?? padrao;
+}
+
+function inteiroMalha(valor: unknown, padrao: number, minimo: number, maximo: number): number {
+  return Math.min(Math.max(Math.trunc(numeroMalha(valor, padrao)), minimo), maximo);
+}
+
+/** Pydantic não apara espaço em booleano (" true " é 422), então aqui também não. */
+function boolMalha(valor: unknown, padrao: boolean): boolean {
+  if (typeof valor === "boolean") return valor;
+  if (valor === 0 || valor === 1) return valor === 1;
+  return (typeof valor === "string" ? BOOL_TEXTO_MALHA.get(valor.toLowerCase()) : undefined) ?? padrao;
+}
+
+/** Casca comum dos blocos malha (`LoopBaseConfig`, 27 campos). Valor ausente ou de tipo errado
+ *  cai no default do SERVIDOR — nunca no de bloco novo (`PADRAO_*`), que diverge em campos como
+ *  `ti_seconds`: o grafo gravado seria reinterpretado no primeiro Save (RF-643). Os defaults de
+ *  casca vêm da tabela do PRÓPRIO bloco (`d`); `sp_hi_lim`/`sp_lo_lim` (sem default no
+ *  servidor) também vêm de quem chama. */
+function lerShellMalha(
+  dados: Record<string, unknown>,
+  d: Omit<DadosShellMalha, "sp_hi_lim" | "sp_lo_lim">,
+  padraoObrigatorios: { sp_hi_lim: number; sp_lo_lim: number },
+): DadosShellMalha {
+  return {
+    permitted: Array.isArray(dados.permitted)
+      ? dados.permitted.filter((p: unknown): p is string => typeof p === "string")
+      : [...d.permitted],
+    normal: texto(dados.normal, d.normal),
+    shed_opt: SHED_OPTS.find((opcao) => opcao === dados.shed_opt) ?? d.shed_opt,
+    shed_no_return: boolMalha(dados.shed_no_return, d.shed_no_return),
+    direct_acting: boolMalha(dados.direct_acting, d.direct_acting),
+    sp_pv_track_in_man: boolMalha(dados.sp_pv_track_in_man, d.sp_pv_track_in_man),
+    use_pv_for_bkcal: boolMalha(dados.use_pv_for_bkcal, d.use_pv_for_bkcal),
+    track_enable: boolMalha(dados.track_enable, d.track_enable),
+    track_in_manual: boolMalha(dados.track_in_manual, d.track_in_manual),
+    sp_hi_lim: numeroMalha(dados.sp_hi_lim, padraoObrigatorios.sp_hi_lim),
+    sp_lo_lim: numeroMalha(dados.sp_lo_lim, padraoObrigatorios.sp_lo_lim),
+    sp_rate_up: numeroOuNuloMalha(dados.sp_rate_up),
+    sp_rate_dn: numeroOuNuloMalha(dados.sp_rate_dn),
+    out_hi_lim: numeroMalha(dados.out_hi_lim, d.out_hi_lim),
+    out_lo_lim: numeroMalha(dados.out_lo_lim, d.out_lo_lim),
+    out_rate_up: numeroOuNuloMalha(dados.out_rate_up),
+    out_rate_dn: numeroOuNuloMalha(dados.out_rate_dn),
+    out_scale_lo: numeroMalha(dados.out_scale_lo, d.out_scale_lo),
+    out_scale_hi: numeroMalha(dados.out_scale_hi, d.out_scale_hi),
+    out_startup: numeroMalha(dados.out_startup, d.out_startup),
+    pv_ftime: numeroMalha(dados.pv_ftime, d.pv_ftime),
+    trk_val: numeroMalha(dados.trk_val, d.trk_val),
+    lo_val: numeroMalha(dados.lo_val, d.lo_val),
+    ff_scale_lo: numeroMalha(dados.ff_scale_lo, d.ff_scale_lo),
+    ff_scale_hi: numeroMalha(dados.ff_scale_hi, d.ff_scale_hi),
+    ff_gain: numeroMalha(dados.ff_gain, d.ff_gain),
+    ff_enable: boolMalha(dados.ff_enable, d.ff_enable),
+  };
+}
+
 function lerNo(bruto: unknown, indice: number): BlocoNode | null {
   const cru = objeto(bruto);
   if (cru === null) return null;
@@ -1314,8 +1396,7 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
         },
       };
     case "pid_loop": {
-      const permittedCru = Array.isArray(dados.permitted) ? dados.permitted : PADRAO_PID_LOOP.permitted;
-      const permitted = permittedCru.filter((p: unknown): p is string => typeof p === "string");
+      const d = DEFAULT_SERVIDOR_PID_LOOP;
       return {
         id,
         type: tipo,
@@ -1323,23 +1404,20 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
         data: {
           exec_order,
           label,
-          sp_hi_lim: numero(dados.sp_hi_lim, PADRAO_PID_LOOP.sp_hi_lim),
-          sp_lo_lim: numero(dados.sp_lo_lim, PADRAO_PID_LOOP.sp_lo_lim),
-          out_scale_lo: numero(dados.out_scale_lo, PADRAO_PID_LOOP.out_scale_lo),
-          out_scale_hi: numero(dados.out_scale_hi, PADRAO_PID_LOOP.out_scale_hi),
-          permitted,
-          normal: typeof dados.normal === "string" ? dados.normal : PADRAO_PID_LOOP.normal,
-          direct_acting:
-            typeof dados.direct_acting === "boolean" ? dados.direct_acting : PADRAO_PID_LOOP.direct_acting,
-          kc: numero(dados.kc, PADRAO_PID_LOOP.kc),
-          ti_seconds: numero(dados.ti_seconds, PADRAO_PID_LOOP.ti_seconds),
-          td_seconds: numero(dados.td_seconds, PADRAO_PID_LOOP.td_seconds),
+          ...lerShellMalha(dados, d, PADRAO_PID_LOOP),
+          kc: numeroMalha(dados.kc, PADRAO_PID_LOOP.kc),
+          ti_seconds: numeroMalha(dados.ti_seconds, d.ti_seconds),
+          td_seconds: numeroMalha(dados.td_seconds, d.td_seconds),
+          n: numeroMalha(dados.n, d.n),
+          beta: numeroMalha(dados.beta, d.beta),
+          gamma: numeroMalha(dados.gamma, d.gamma),
+          gap_band: numeroMalha(dados.gap_band, d.gap_band),
+          gap_gain: numeroMalha(dados.gap_gain, d.gap_gain),
         },
       };
     }
     case "fuzzy_loop": {
-      const permittedCru = Array.isArray(dados.permitted) ? dados.permitted : PADRAO_FUZZY_LOOP.permitted;
-      const permitted = permittedCru.filter((p: unknown): p is string => typeof p === "string");
+      const d = DEFAULT_SERVIDOR_FUZZY_LOOP;
       return {
         id,
         type: tipo,
@@ -1347,20 +1425,15 @@ function lerNo(bruto: unknown, indice: number): BlocoNode | null {
         data: {
           exec_order,
           label,
-          sp_hi_lim: numero(dados.sp_hi_lim, PADRAO_FUZZY_LOOP.sp_hi_lim),
-          sp_lo_lim: numero(dados.sp_lo_lim, PADRAO_FUZZY_LOOP.sp_lo_lim),
-          out_scale_lo: numero(dados.out_scale_lo, PADRAO_FUZZY_LOOP.out_scale_lo),
-          out_scale_hi: numero(dados.out_scale_hi, PADRAO_FUZZY_LOOP.out_scale_hi),
-          permitted,
-          normal: typeof dados.normal === "string" ? dados.normal : PADRAO_FUZZY_LOOP.normal,
-          direct_acting:
-            typeof dados.direct_acting === "boolean" ? dados.direct_acting : PADRAO_FUZZY_LOOP.direct_acting,
-          n_loops: inteiro(dados.n_loops, PADRAO_FUZZY_LOOP.n_loops, 1, MAX_LOOPS_FUZZY),
-          ke: numero(dados.ke, PADRAO_FUZZY_LOOP.ke),
-          kde: numero(dados.kde, PADRAO_FUZZY_LOOP.kde),
-          ku: numero(dados.ku, PADRAO_FUZZY_LOOP.ku),
-          tf_de: numero(dados.tf_de, PADRAO_FUZZY_LOOP.tf_de),
+          ...lerShellMalha(dados, d, PADRAO_FUZZY_LOOP),
+          n_loops: inteiroMalha(dados.n_loops, d.n_loops, 1, MAX_LOOPS_FUZZY),
+          ke: numeroMalha(dados.ke, PADRAO_FUZZY_LOOP.ke),
+          kde: numeroMalha(dados.kde, d.kde),
+          ku: numeroMalha(dados.ku, PADRAO_FUZZY_LOOP.ku),
+          tf_de: numeroMalha(dados.tf_de, d.tf_de),
           fll: typeof dados.fll === "string" ? dados.fll : contratoFuzzyLoop.default_fll,
+          lut_enabled: boolMalha(dados.lut_enabled, d.lut_enabled),
+          lut_resolution: inteiroMalha(dados.lut_resolution, d.lut_resolution, 33, 257),
         },
       };
     }

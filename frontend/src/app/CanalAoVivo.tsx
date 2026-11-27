@@ -77,7 +77,7 @@ export interface LeituraTag {
  *  `{ts, severity, origin, message, payload}` que a REST devolve (bus §1.1). */
 export type EventMessage = EventOut;
 
-type EstadoConexaoCanal = "conectando" | "aberto" | "reconectando" | "sessao_invalida";
+export type EstadoConexaoCanal = "conectando" | "aberto" | "reconectando" | "sessao_invalida";
 
 export interface EstadoDoCanal {
   estado: EstadoConexaoCanal;

@@ -35,11 +35,13 @@ import {
   tipoPorta,
   type BlocoEdge,
   type BlocoNode,
+  type DadosShellMalha,
   type FaixaMpc,
   type MapaTags,
   type NoFuzzyLoop,
 } from "./graph";
 import { validarConfigMpc } from "./mpc/mpcLogic";
+import { DEFAULT_SERVIDOR_FUZZY_LOOP, DEFAULT_SERVIDOR_PID_LOOP, PADRAO_PID_LOOP } from "./registro";
 
 const POS = { x: 0, y: 0 };
 
@@ -208,20 +210,7 @@ function pidLoop(id: string, ordem: number, permitted: readonly string[] = ["oos
     id,
     type: "pid_loop",
     position: POS,
-    data: {
-      exec_order: ordem,
-      label: "",
-      sp_hi_lim: 100,
-      sp_lo_lim: 0,
-      out_scale_lo: 0,
-      out_scale_hi: 100,
-      permitted: [...permitted],
-      normal: "auto",
-      direct_acting: false,
-      kc: 1,
-      ti_seconds: 60,
-      td_seconds: 0,
-    },
+    data: { exec_order: ordem, label: "", ...PADRAO_PID_LOOP, permitted: [...permitted] },
   };
 }
 
@@ -1301,4 +1290,190 @@ test("fuzzy com sp_source='entrada' ganha a porta sp; nas outras fontes, não", 
     data: { ...no.data, sp_source: "operador" as const, setpoint: 50 },
   };
   expect(handlesEntrada(operador)).toEqual(["IN1"]);
+});
+
+// --------------------------------------------------------------------------------------
+// Blocos malha: o normalizador preserva toda a config do servidor (RF-643)
+// --------------------------------------------------------------------------------------
+
+const SHELL_FORA_DO_DEFAULT = {
+  permitted: ["oos", "man", "auto", "iman"],
+  normal: "man",
+  shed_opt: "shed_to_man",
+  shed_no_return: true,
+  direct_acting: true,
+  sp_pv_track_in_man: false,
+  use_pv_for_bkcal: true,
+  track_enable: true,
+  track_in_manual: true,
+  sp_hi_lim: 250,
+  sp_lo_lim: 50,
+  sp_rate_up: 1.5,
+  sp_rate_dn: 2.5,
+  out_hi_lim: 80,
+  out_lo_lim: 10,
+  out_rate_up: 3,
+  out_rate_dn: 4,
+  out_scale_lo: 4,
+  out_scale_hi: 20,
+  out_startup: 15,
+  pv_ftime: 2,
+  trk_val: 33,
+  lo_val: 44,
+  ff_scale_lo: 1,
+  ff_scale_hi: 9,
+  ff_gain: 0.5,
+  ff_enable: true,
+};
+const PID_FORA_DO_DEFAULT = {
+  ...SHELL_FORA_DO_DEFAULT,
+  kc: 2.5,
+  ti_seconds: 12,
+  td_seconds: 3,
+  n: 10,
+  beta: 0.4,
+  gamma: 0.2,
+  gap_band: 0.7,
+  gap_gain: 0.3,
+};
+
+function noMalha(type: "pid_loop" | "fuzzy_loop", data: Record<string, unknown>) {
+  return { nodes: [{ id: "m", type, position: POS, data: { exec_order: 1, label: "", ...data } }], edges: [] };
+}
+
+/** `data` do nó como sai para o servidor — `Record` solto porque a união de `data` não expõe
+ *  os campos de malha sem estreitar por tipo. */
+function dadosDoNo(grafo: ReturnType<typeof deGraphJson>): Record<string, unknown> {
+  return paraGraphJson(grafo.nodes, grafo.edges).nodes[0].data as unknown as Record<string, unknown>;
+}
+
+test("pid_loop: os 35 campos fora do default sobrevivem a carregar e salvar (RF-643)", () => {
+  expect(dadosDoNo(deGraphJson(noMalha("pid_loop", PID_FORA_DO_DEFAULT)))).toEqual({
+    exec_order: 1,
+    label: "",
+    ...PID_FORA_DO_DEFAULT,
+  });
+});
+
+test("pid_loop só com os obrigatórios carrega com o default do SERVIDOR (TI = 0, não 60)", () => {
+  const dados = dadosDoNo(deGraphJson(noMalha("pid_loop", { sp_hi_lim: 100, sp_lo_lim: 0, kc: 2 })));
+  expect(dados).toEqual({
+    exec_order: 1,
+    label: "",
+    ...DEFAULT_SERVIDOR_PID_LOOP,
+    sp_hi_lim: 100,
+    sp_lo_lim: 0,
+    kc: 2,
+  });
+});
+
+test("fuzzy_loop: campos de shell e LUT fora do default sobrevivem a carregar e salvar", () => {
+  const data = {
+    ...SHELL_FORA_DO_DEFAULT,
+    permitted: ["oos", "man"],
+    normal: "man",
+    n_loops: 2,
+    ke: 0.1,
+    kde: 0.3,
+    ku: 4,
+    tf_de: 2.5,
+    fll: fllDefaultMalha(2),
+    lut_enabled: true,
+    lut_resolution: 129,
+  };
+  expect(dadosDoNo(deGraphJson(noMalha("fuzzy_loop", data)))).toEqual({ exec_order: 1, label: "", ...data });
+});
+
+// O servidor valida em Pydantic LAX e grava o grafo como veio: "80" e "true" são valores
+// válidos gravados. Ler mais estrito que ele perderia o valor no primeiro Save (RF-643, R17).
+test("campo de malha em texto/0-1 lê como o Pydantic lax; o que ele recusa cai no default", () => {
+  const dados = dadosDoNo(
+    deGraphJson(
+      noMalha("pid_loop", {
+        sp_hi_lim: "250",
+        sp_lo_lim: " -5 ",
+        kc: "2",
+        out_hi_lim: "80",
+        ff_enable: "true",
+        track_enable: 1,
+        direct_acting: "YES",
+        sp_pv_track_in_man: "off",
+        sp_rate_up: "1.5",
+        sp_rate_dn: "1,5",
+        out_rate_up: null,
+        ti_seconds: "abc",
+        permitted: ["auto", 7, null],
+        shed_opt: "desconhecido",
+        use_pv_for_bkcal: "talvez",
+        track_in_manual: 2,
+        out_rate_dn: "rápido",
+      }),
+    ),
+  );
+  expect(dados).toMatchObject({
+    sp_hi_lim: 250,
+    sp_lo_lim: -5,
+    kc: 2,
+    out_hi_lim: 80,
+    ff_enable: true,
+    track_enable: true,
+    direct_acting: true,
+    sp_pv_track_in_man: false,
+    sp_rate_up: 1.5,
+    // Recusados pelo Pydantic também ⇒ default do servidor.
+    sp_rate_dn: null,
+    out_rate_up: null,
+    out_rate_dn: null,
+    ti_seconds: DEFAULT_SERVIDOR_PID_LOOP.ti_seconds,
+    permitted: ["auto"],
+    shed_opt: "shed_to_auto",
+    use_pv_for_bkcal: DEFAULT_SERVIDOR_PID_LOOP.use_pv_for_bkcal,
+    track_in_manual: DEFAULT_SERVIDOR_PID_LOOP.track_in_manual,
+  });
+});
+
+test("fuzzy_loop: inteiros e LUT em texto lidos como o Pydantic lax, com os tetos", () => {
+  const dados = dadosDoNo(
+    deGraphJson(
+      noMalha("fuzzy_loop", {
+        sp_hi_lim: 100,
+        sp_lo_lim: 0,
+        ke: "0.1",
+        ku: "4",
+        kde: "0.3",
+        tf_de: "2.5",
+        n_loops: "2",
+        lut_enabled: "on",
+        lut_resolution: "999",
+        fll: fllDefaultMalha(2),
+      }),
+    ),
+  );
+  expect(dados).toMatchObject({ ke: 0.1, ku: 4, kde: 0.3, tf_de: 2.5, n_loops: 2, lut_enabled: true, lut_resolution: 257 });
+});
+
+// Spec §7: o normalizador do Fuzzy Malha lê a tabela do FUZZY, não a do PID nem a de bloco novo.
+test("fuzzy_loop só com os obrigatórios carrega com o default do SERVIDOR do fuzzy", () => {
+  const dados = dadosDoNo(
+    deGraphJson(noMalha("fuzzy_loop", { sp_hi_lim: 100, sp_lo_lim: 0, ke: 0.1, ku: 4 })),
+  );
+  expect(dados).toEqual({
+    exec_order: 1,
+    label: "",
+    ...DEFAULT_SERVIDOR_FUZZY_LOOP,
+    sp_hi_lim: 100,
+    sp_lo_lim: 0,
+    ke: 0.1,
+    ku: 4,
+    // `fll` ausente cai no default do contrato (n_loops = 1).
+    fll: contratoFuzzyLoop.default_fll,
+  });
+});
+
+test("DadosShellMalha aceita os dados dos dois blocos malha", () => {
+  const pid = deGraphJson(noMalha("pid_loop", PID_FORA_DO_DEFAULT)).nodes[0];
+  const fuzzy = deGraphJson(noMalha("fuzzy_loop", SHELL_FORA_DO_DEFAULT)).nodes[0];
+  if (pid.type !== "pid_loop" || fuzzy.type !== "fuzzy_loop") throw new Error("tipo preservado");
+  const cascas: DadosShellMalha[] = [pid.data, fuzzy.data];
+  expect(cascas.map((c) => c.sp_hi_lim)).toEqual([250, 250]);
 });

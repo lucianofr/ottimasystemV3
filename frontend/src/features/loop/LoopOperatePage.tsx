@@ -1,362 +1,158 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router";
 
 import { useAssinatura, useCanalAoVivo } from "../../app/CanalAoVivo";
-import { apiResposta, ApiError } from "../../lib/api";
-import type { LoopState } from "../../lib/contracts.gen";
-import { Badge } from "../../components/ui/badge";
 import { Card } from "../../components/ui/card";
 import { Select } from "../../components/ui/select";
-import { cn } from "../../lib/cn";
-import { HeatmapSuperficie } from "./HeatmapSuperficie";
+import { useFlow } from "../flows/useFlows";
+import { FaceplateMalha } from "./FaceplateMalha";
+import { malhaAoVivo, motivoSemEstado, resolverSelecao } from "./malhaLogica";
+import { SintoniaVigente } from "./SintoniaVigente";
+import { TrendMalha } from "./TrendMalha";
 import { rotuloLoop, useLoops, useLoopConfig } from "./useLoops";
 import type { LoopNodeOut } from "./types";
 
 /**
- * PID MALHA (ADR-039 §4.10) — faceplate mínimo de operação: combobox da malha do projeto
- * ativo (`?flow=&bloco=` em query string, mesmo padrão de `FuzzyOperatePage`), badges
- * ALVO/REAL, botoeira de modo, barras PV/SP/OUT ao vivo (`loop_state`), escrita de SP/OUT
- * (202-async: "Comandado ≠ confirmado" — o ALVO muda na hora, o REAL só quando o runtime
- * confirmar via canal) e aba de sintonia somente leitura (edição é do editor de flow).
+ * PID MALHA (ADR-039 §4.10, RF-645) — combobox da malha do projeto ativo (`?flow=&bloco=`,
+ * mesmo padrão de `FuzzyOperatePage`), faceplate e sintonia somente leitura (edição é do
+ * editor de flow). O que decide (seleção, ao vivo, escala) mora em `malhaLogica.ts`.
  */
-
-export const MODOS_LOOP = ["oos", "iman", "lo", "man", "auto", "cas", "rcas", "rout"] as const;
-export type ModoLoop = (typeof MODOS_LOOP)[number];
-
-/** Modos que o operador pode COMANDAR (os demais existem no FF mas são atingidos por
- *  rebaixamento/cascata — a API também só aceita estes). */
-const MODOS_COMANDAVEIS: readonly ModoLoop[] = ["oos", "man", "auto", "cas", "rcas", "rout"];
-
-/** Modo comandável está em `permitted`? Pura para check. */
-export function podeComandar(estado: LoopState, modo: ModoLoop): boolean {
-  return MODOS_COMANDAVEIS.includes(modo) && estado.permitted.includes(modo);
-}
 
 function chaveNo(no: LoopNodeOut): string {
   return `${String(no.flow_id)}/${no.block_id}`;
 }
 
-function formatar(v: number | null): string {
-  return v === null ? "—" : v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
-}
-
-function Barra({ rotulo, valor, minimo, maximo, ruim }: {
-  rotulo: string;
-  valor: number | null;
-  minimo: number;
-  maximo: number;
-  ruim?: boolean;
-}) {
-  const pct =
-    valor === null || maximo <= minimo
-      ? 0
-      : Math.max(0, Math.min(100, ((valor - minimo) / (maximo - minimo)) * 100));
-  return (
-    <div className="space-y-0.5" data-testid={`loop-barra-${rotulo.toLowerCase()}`}>
-      <div className="flex justify-between text-xs">
-        <span className={cn(ruim && "text-alarm")}>{rotulo}</span>
-        <span className="process-value">{formatar(valor)}</span>
-      </div>
-      <div className="h-2 w-full overflow-hidden rounded-sm bg-well">
-        <div
-          className={cn("h-full", ruim ? "bg-alarm" : "bg-accent")}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function EscritaValor({ rotulo, habilitado, aoEnviar, minimo, maximo }: {
-  rotulo: string;
-  habilitado: boolean;
-  aoEnviar: (v: number) => void;
-  minimo: number;
-  maximo: number;
-}) {
-  const [valor, setValor] = useState("");
-
-  function enviar(evento: FormEvent<HTMLFormElement>): void {
-    evento.preventDefault();
-    const numero = Number(valor);
-    if (!Number.isFinite(numero)) return;
-    aoEnviar(numero);
-    setValor("");
-  }
-
-  return (
-    <form onSubmit={enviar} className="flex items-end gap-2" data-testid={`loop-escrita-${rotulo}`}>
-      <label className="text-xs text-fg-muted">{rotulo}</label>
-      <input
-        type="number"
-        step="any"
-        min={minimo}
-        max={maximo}
-        disabled={!habilitado}
-        value={valor}
-        onChange={(e) => setValor(e.target.value)}
-        className="process-value w-24 rounded-sm border border-border bg-surface px-2 py-1 text-xs disabled:opacity-50"
-      />
-      <button
-        type="submit"
-        disabled={!habilitado}
-        className="rounded-sm border border-border px-2 py-1 text-xs disabled:opacity-50"
-      >
-        Enviar
-      </button>
-    </form>
-  );
-}
-
-function LoopResolvido({ flowId, blockId }: { flowId: number; blockId: string }) {
-  useAssinatura({ loop_state: [`${String(flowId)}/${blockId}`] });
+function MalhaSelecionada({ flowId, blockId }: { flowId: number; blockId: string }) {
+  useAssinatura({ loop_state: [`${String(flowId)}/${blockId}`], flow_status: [flowId] });
   const canal = useCanalAoVivo();
   const config = useLoopConfig(flowId, blockId);
-  const [erroComando, setErroComando] = useState<string | null>(null);
+  const flow = useFlow(flowId);
 
-  async function comandar(
-    rota: "mode" | "sp" | "out",
-    corpo: Record<string, unknown>,
-  ): Promise<void> {
-    setErroComando(null);
-    try {
-      await apiResposta(`/api/operate/${String(flowId)}/${blockId}/${rota}`, {
-        method: "POST",
-        body: JSON.stringify(corpo),
-      });
-    } catch (erro) {
-      setErroComando(erro instanceof ApiError ? erro.message : "Falha ao enviar o comando");
-    }
-  }
-
-  // v2 multicanal: um LoopState por canal na mesma assinatura; SISO (pid_loop e fuzzy de
-  // 1 canal) é o caso n_loops=1 — a página não ramifica por tipo, só por contagem.
+  // v2 multicanal: um LoopState por canal na mesma assinatura; SISO é o caso n_loops=1.
   const nLoops = config.data?.n_loops ?? 1;
-  const estados = Array.from({ length: nLoops }, (_, i) =>
-    canal.loopStates.get(`${String(flowId)}/${blockId}:${String(i)}`),
+  const estados = useMemo(
+    () =>
+      Array.from({ length: nLoops }, (_, i) =>
+        canal.loopStates.get(`${String(flowId)}/${blockId}:${String(i)}`),
+      ),
+    [canal.loopStates, flowId, blockId, nLoops],
   );
-  const primeiro = estados.find((estado) => estado !== undefined);
+  // O portão lê só o canal 0, que não depende da config: o canal 0 novo prova a varredura
+  // inteira, e "primeiro definido de `estados`" mudaria de canal quando `n_loops` chegasse.
+  const estado0 = canal.loopStates.get(`${String(flowId)}/${blockId}:0`);
+  const estadoFlow = canal.flowStatus.get(flowId)?.state;
 
-  if (primeiro === undefined) {
-    return (
-      <Card className="max-w-lg p-6" data-testid="loop-aguardando">
-        <p className="text-sm text-fg-muted">
-          Aguardando estado da malha (o bloco precisa estar rodando)…
-        </p>
-      </Card>
-    );
-  }
-
-  const sintonia = config.data?.tuning;
-  // A sintonia e por TIPO de malha (o backend devolve uma das duas formas); `type` no
-  // detalhe e o discriminante — tambem decide se a aba de superficie existe.
-  const eFuzzy = config.data?.type === "fuzzy_loop";
+  // `tsBase`: semeada na montagem (síncrono) e, enquanto NÃO está ao vivo, segue o quadro
+  // retido; só congela ao vivo. Assim, no render em que o canal reabre ou o flow volta a
+  // `running` (o runtime publica `running` antes da 1ª varredura, `scheduler.py:246`), a base
+  // já é o retido e nada antigo passa por vivo. Seguir também `estado0` cobre um quadro que
+  // chegue depois do `stopped` (assinaturas distintas no hub não garantem ordem).
+  const tsBase = useRef(estado0?.ts);
+  const aoVivo = malhaAoVivo({
+    canal: canal.estado,
+    estadoFlow,
+    estado: estado0,
+    tsBase: tsBase.current,
+  });
+  useEffect(() => {
+    if (!aoVivo) tsBase.current = estado0?.ts;
+  }, [aoVivo, estado0]);
+  const motivo = motivoSemEstado(canal.estado, estadoFlow, flow.data?.desired_state);
 
   return (
-    <div className="space-y-4 p-4" data-testid="loop-faceplate">
-      <header className="flex flex-wrap items-center gap-3">
-        <span className="plaqueta text-sm">{blockId}</span>
-        {nLoops > 1 && (
-          <Badge tone="neutral" data-testid="loop-badge-canais">
-            {nLoops} CANAIS
-          </Badge>
-        )}
-        <Badge tone="neutral" data-testid="loop-badge-target">
-          ALVO {primeiro.target.toUpperCase()}
-        </Badge>
-        <Badge
-          tone={primeiro.actual === primeiro.target ? "neutral" : "alarm"}
-          data-testid="loop-badge-actual"
-        >
-          REAL {primeiro.actual.toUpperCase()}
-        </Badge>
-        {estados.some((estado) => estado !== undefined && !estado.pv_ok) && (
-          <Badge tone="alarm" data-testid="loop-badge-pv-ruim">
-            PV sem qualidade
-          </Badge>
-        )}
-      </header>
-
-      <div className="flex flex-wrap gap-2" data-testid="loop-botoeira">
-        {MODOS_COMANDAVEIS.map((modo) => (
-          <button
-            key={modo}
-            disabled={!podeComandar(primeiro, modo)}
-            data-testid={`loop-modo-${modo}`}
-            onClick={() => void comandar("mode", { target: modo })}
-            className={cn(
-              "rounded-sm border border-border px-3 py-1.5 text-xs",
-              primeiro.target === modo && "bg-accent text-fg",
-              "disabled:opacity-40",
-            )}
-          >
-            {modo.toUpperCase()}
-          </button>
-        ))}
+    <div className="space-y-4">
+      <FaceplateMalha
+        flowId={flowId}
+        blockId={blockId}
+        config={config.data}
+        estados={estados}
+        aoVivo={aoVivo}
+        motivoSemEstado={motivo}
+      />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+        {config.data !== undefined && <SintoniaVigente config={config.data} />}
+        {/* Fora de `aoVivo`: o histórico aparece com o flow parado; só a borda viva é portada. */}
+        <div className="lg:col-start-2">
+          <TrendMalha flowId={flowId} blockId={blockId} nLoops={nLoops} estados={estados} aoVivo={aoVivo} />
+        </div>
       </div>
-
-      {estados.map((estado, i) =>
-        estado === undefined ? null : (
-          <section
-            key={i}
-            data-testid={`loop-canal-${String(i)}`}
-            className="space-y-2 border-t border-border pt-3 first:border-t-0 first:pt-0"
-          >
-            {nLoops > 1 && (
-              <h3 className="plaqueta text-xs text-fg-muted">Canal {String(i + 1)}</h3>
-            )}
-            <div className="max-w-md space-y-2">
-              <Barra rotulo="PV" valor={estado.pv} minimo={0} maximo={100} ruim={!estado.pv_ok} />
-              <Barra rotulo="SP" valor={estado.sp} minimo={0} maximo={100} />
-              <Barra
-                rotulo="OUT"
-                valor={estado.out}
-                minimo={0}
-                maximo={100}
-                ruim={estado.hi_limited || estado.lo_limited}
-              />
-            </div>
-
-            <div className="flex flex-wrap gap-6">
-              <EscritaValor
-                rotulo="SP"
-                habilitado={estado.actual === "auto"}
-                aoEnviar={(v) => void comandar("sp", { value: v, channel: i })}
-                minimo={0}
-                maximo={100}
-              />
-              <EscritaValor
-                rotulo="OUT (%)"
-                habilitado={estado.actual === "man"}
-                aoEnviar={(v) => void comandar("out", { value: v, channel: i })}
-                minimo={0}
-                maximo={100}
-              />
-            </div>
-
-            {eFuzzy && (
-              <HeatmapSuperficie flowId={flowId} blockId={blockId} estado={estado} channel={i} />
-            )}
-          </section>
-        ),
-      )}
-
-      {erroComando !== null && (
-        <p role="alert" data-testid="loop-erro-comando" className="text-sm text-alarm">
-          {erroComando}
-        </p>
-      )}
-
-      {sintonia !== undefined && (
-        <Card className="max-w-md p-4" data-testid="loop-sintonia">
-          <h3 className="mb-2 text-xs text-fg-muted">Sintonia vigente (leitura)</h3>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            {"kc" in sintonia ? (
-              <>
-                <dt>KC</dt>
-                <dd className="process-value">{formatar(sintonia.kc)}</dd>
-                <dt>TI</dt>
-                <dd className="process-value">
-                  {sintonia.ti_seconds === 0 ? "desligada" : `${formatar(sintonia.ti_seconds)} s`}
-                </dd>
-                <dt>TD</dt>
-                <dd className="process-value">
-                  {sintonia.td_seconds === 0 ? "desligada" : `${formatar(sintonia.td_seconds)} s`}
-                </dd>
-              </>
-            ) : (
-              <>
-                <dt>KE</dt>
-                <dd className="process-value">{formatar(sintonia.ke)}</dd>
-                <dt>KDE</dt>
-                <dd className="process-value">
-                  {sintonia.kde === 0 ? "desligada" : formatar(sintonia.kde)}
-                </dd>
-                <dt>KU</dt>
-                <dd className="process-value">{formatar(sintonia.ku)} %/s</dd>
-                <dt>TF_DE</dt>
-                <dd className="process-value">{formatar(sintonia.tf_de)} s</dd>
-              </>
-            )}
-            <dt>Ação</dt>
-            <dd>{sintonia.direct_acting ? "direta" : "reversa"}</dd>
-          </dl>
-        </Card>
-      )}
     </div>
   );
 }
 
 export function LoopOperatePage() {
-  const [params] = useSearchParams();
   const loops = useLoops();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const flowParam = searchParams.get("flow");
+  const blocoParam = searchParams.get("bloco");
+  const selecionada = resolverSelecao(loops.data ?? [], flowParam, blocoParam);
 
+  // URL sem seleção válida (primeiro acesso, link velho, bloco apagado): fixa a malha resolvida
+  // na URL com `replace`, para o combobox e o link refletirem o que está na tela.
+  useEffect(() => {
+    if (!loops.isSuccess || selecionada === null) return;
+    if (String(selecionada.flow_id) === flowParam && selecionada.block_id === blocoParam) return;
+    setSearchParams(
+      { flow: String(selecionada.flow_id), bloco: selecionada.block_id },
+      { replace: true },
+    );
+  }, [loops.isSuccess, selecionada, flowParam, blocoParam, setSearchParams]);
+
+  let corpo;
   if (loops.isPending) {
-    return (
-      <Card className="m-4 max-w-lg p-6">
+    corpo = (
+      <Card className="max-w-lg p-6">
         <p className="text-sm text-fg-muted">Carregando…</p>
       </Card>
     );
-  }
-  if (loops.isError) {
-    return (
-      <Card className="m-4 max-w-lg p-6">
+  } else if (loops.isError) {
+    corpo = (
+      <Card className="max-w-lg p-6">
         <p role="alert" className="text-sm text-alarm">
           Falha ao listar as malhas do projeto ativo
         </p>
       </Card>
     );
-  }
-  if (loops.data.length === 0) {
-    return (
-      <Card className="m-4 max-w-lg p-6">
+  } else if (selecionada === null) {
+    corpo = (
+      <Card className="max-w-lg p-6">
         <p className="text-sm text-fg-muted">
           Nenhuma malha no projeto ativo — arraste um bloco PID Malha no editor de flow.
         </p>
       </Card>
     );
+  } else {
+    corpo = (
+      <MalhaSelecionada
+        key={chaveNo(selecionada)}
+        flowId={selecionada.flow_id}
+        blockId={selecionada.block_id}
+      />
+    );
   }
 
-  const flowSel = params.get("flow");
-  const blocoSel = params.get("bloco");
-  const selecionada =
-    flowSel !== null && blocoSel !== null
-      ? loops.data.find((no) => String(no.flow_id) === flowSel && no.block_id === blocoSel)
-      : undefined;
-
-  if (selecionada === undefined) {
-    return (
-      <div className="m-4 max-w-md space-y-2" data-testid="loop-selecao">
-        <h2 className="text-sm">Operar malha</h2>
+  return (
+    <section className="space-y-4 p-4">
+      <div className="flex items-center gap-3">
+        <h1 className="plaqueta text-sm">Malha</h1>
         <Select
+          aria-label="Malha"
           data-testid="loop-combobox"
-          value=""
-          onChange={(e) => {
-            const chave = e.target.value;
-            if (chave === "") return;
-            const no = loops.data.find((n) => chaveNo(n) === chave);
-            if (no !== undefined) {
-              params.set("flow", String(no.flow_id));
-              params.set("bloco", no.block_id);
-            }
+          className="h-8 w-72"
+          value={selecionada === null ? "" : chaveNo(selecionada)}
+          onChange={(evento) => {
+            const no = (loops.data ?? []).find((n) => chaveNo(n) === evento.target.value);
+            if (no !== undefined) setSearchParams({ flow: String(no.flow_id), bloco: no.block_id });
           }}
         >
-          <option value="">Escolha a malha…</option>
-          {loops.data.map((no) => (
+          {(loops.data ?? []).map((no) => (
             <option key={chaveNo(no)} value={chaveNo(no)}>
               {rotuloLoop(no)}
             </option>
           ))}
         </Select>
       </div>
-    );
-  }
-
-  return (
-    <LoopResolvido
-      key={chaveNo(selecionada)}
-      flowId={selecionada.flow_id}
-      blockId={selecionada.block_id}
-    />
+      {corpo}
+    </section>
   );
 }
