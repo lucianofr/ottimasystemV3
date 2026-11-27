@@ -5,6 +5,7 @@ mudou: atualize ESTA tabela e o espelho em `frontend/src/features/flows/registro
 (`DEFAULT_SERVIDOR_PID_LOOP` / `DEFAULT_SERVIDOR_FUZZY_LOOP`) no mesmo commit.
 """
 
+from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 
 from ottima_core.flowgraph.parse import FuzzyLoopConfig, PidLoopConfig
@@ -56,8 +57,8 @@ _FUZZY = {
 }
 
 
-def _defaults(model) -> dict:
-    saida = {}
+def _defaults(model: type[BaseModel]) -> dict[str, object]:
+    saida: dict[str, object] = {}
     for nome, campo in model.model_fields.items():
         if campo.default_factory is not None:
             saida[nome] = campo.default_factory()

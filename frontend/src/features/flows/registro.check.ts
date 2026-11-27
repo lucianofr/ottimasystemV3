@@ -94,9 +94,17 @@ test("bloco recém-arrastado ≠ default do servidor: PID novo nasce PI (TI = 60
 });
 
 test("defaults do fuzzy_loop: espelho do servidor e bloco novo com a sintonia de comissionamento", () => {
-  expect(DEFAULT_SERVIDOR_FUZZY_LOOP.lut_enabled).toBe(false);
-  expect(DEFAULT_SERVIDOR_FUZZY_LOOP.lut_resolution).toBe(65);
-  expect(DEFAULT_SERVIDOR_FUZZY_LOOP.sp_pv_track_in_man).toBe(true);
+  expect(DEFAULT_SERVIDOR_FUZZY_LOOP).toEqual({
+    permitted: ["oos", "man", "auto"], normal: "auto",
+    shed_opt: "shed_to_auto", shed_no_return: false,
+    direct_acting: false, sp_pv_track_in_man: true, use_pv_for_bkcal: false,
+    track_enable: false, track_in_manual: false,
+    sp_rate_up: null, sp_rate_dn: null,
+    out_hi_lim: 100, out_lo_lim: 0, out_rate_up: null, out_rate_dn: null,
+    out_scale_lo: 0, out_scale_hi: 100, out_startup: 0, pv_ftime: 0,
+    trk_val: 0, lo_val: 0, ff_scale_lo: 0, ff_scale_hi: 100, ff_gain: 1, ff_enable: false,
+    n_loops: 1, kde: 0, tf_de: 1, lut_enabled: false, lut_resolution: 65,
+  });
   expect(PADRAO_FUZZY_LOOP).toEqual({
     ...DEFAULT_SERVIDOR_FUZZY_LOOP, sp_lo_lim: 0, sp_hi_lim: 100, ke: 0.05, ku: 2,
   });
