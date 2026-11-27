@@ -8,6 +8,7 @@ import { useFlow } from "../flows/useFlows";
 import { FaceplateMalha } from "./FaceplateMalha";
 import { malhaAoVivo, motivoSemEstado, resolverSelecao } from "./malhaLogica";
 import { SintoniaVigente } from "./SintoniaVigente";
+import { TrendMalha } from "./TrendMalha";
 import { rotuloLoop, useLoops, useLoopConfig } from "./useLoops";
 import type { LoopNodeOut } from "./types";
 
@@ -70,7 +71,10 @@ function MalhaSelecionada({ flowId, blockId }: { flowId: number; blockId: string
       />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
         {config.data !== undefined && <SintoniaVigente config={config.data} />}
-        {/* Tarefa 7 (RF-646): TrendMalha entra aqui, ao lado da sintonia. */}
+        {/* Fora de `aoVivo`: o histórico aparece com o flow parado; só a borda viva é portada. */}
+        <div className="lg:col-start-2">
+          <TrendMalha flowId={flowId} blockId={blockId} nLoops={nLoops} estados={estados} aoVivo={aoVivo} />
+        </div>
       </div>
     </div>
   );

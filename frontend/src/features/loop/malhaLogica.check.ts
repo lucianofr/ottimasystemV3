@@ -9,7 +9,7 @@
 import { expect, test } from "@playwright/test";
 
 import { ROTULO_CONEXAO } from "../flows/useFlowStatus";
-import { montarMatrizFuzzy } from "../fuzzy/historicoFuzzy";
+import { montarMatrizFuzzy, resumirSeriesFuzzy } from "../fuzzy/historicoFuzzy";
 import {
   malhaAoVivo,
   leiturasVivasMalha,
@@ -130,4 +130,15 @@ test("histórico + matriz: amostra nula vira lacuna na pena, sem afetar a vizinh
   );
   expect(matriz[1]).toEqual([1, null, 3]);
   expect(matriz[2]).toEqual([5, 5, 5]);
+});
+
+// A legenda recebe `valor: null` sem `semDado` quando a ÚLTIMA amostra é nula (PV ruim agora);
+// `formatarValorLegenda(null)` e `foraDaFaixa(_, null)` já tratam `null` como "—" / sem aviso.
+test("legenda: última amostra nula dá valor null e não SEM DADO", () => {
+  const T = ["2026-11-27T12:00:00Z", "2026-11-27T12:00:01Z"];
+  const resumo = resumirSeriesFuzzy(
+    historicoComLacunas({ mode: "raw", start: T[0], end: T[1], series: [{ var_id: "pv", t: T, v: [1, null] }] }),
+    ["pv"],
+  );
+  expect(resumo).toEqual([{ varId: "pv", valor: null, semDado: false }]);
 });
