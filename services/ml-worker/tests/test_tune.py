@@ -171,10 +171,12 @@ def test_parametros_fora_do_espaco_de_busca_vem_da_base(monkeypatch):
 def test_mesma_semente_repete_o_resultado():
     data = _data(60, d=4, noise=1.0)
 
-    first, _ = _run(data, n_trials=10)
-    second, _ = _run(data, n_trials=10)
+    first, first_trials = _run(data, n_trials=10)
+    second, second_trials = _run(data, n_trials=10)
 
     assert first == second
+    # o melhor pode coincidir por acaso (só 4 valores de n_components): a sequência não
+    assert [t["params"] for t in first_trials] == [t["params"] for t in second_trials]
 
 
 def _lstm_space(monkeypatch) -> None:
