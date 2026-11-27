@@ -931,7 +931,13 @@ async def delete_model(
             detail=f"Modelo em uso pelo bloco '{uso.block_id}' do flow '{uso.name}'",
         )
     await db.execute(delete(SoftSensorModel).where(SoftSensorModel.id == model_id))
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:  # vínculo criado entre a checagem e o commit (FK adiada)
+        await db.rollback()
+        raise HTTPException(
+            status_code=409, detail="Modelo em uso por um bloco; tente de novo"
+        ) from None
     await _auditar(
         redis_client,
         user,

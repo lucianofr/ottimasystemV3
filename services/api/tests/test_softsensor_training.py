@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import insert, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ottima_core.bus import KIND_SOFT_SENSOR_JOB_QUEUED, KIND_SOFT_SENSOR_MODEL_DELETED
 from ottima_core.models import (
@@ -513,6 +515,27 @@ async def test_apagar_modelo_candidato_e_409(client, admin_headers, db_session):
     assert await db_session.scalar(
         select(SoftSensorModel.id).where(SoftSensorModel.id == candidato)
     )
+
+
+async def test_apagar_modelo_vinculado_entre_a_checagem_e_o_commit_e_409(
+    client, admin_headers, db_session, eventos, monkeypatch
+):
+    """Um vínculo criado depois da checagem derruba o COMMIT (FK adiada): 409, não 500."""
+    cen = await _cenario(client, admin_headers, db_session)
+    modelo = await _modelo(db_session, cen["pid"], "corrida")
+    await eventos()
+
+    async def commit_recusado(self):
+        raise IntegrityError("DELETE", {}, Exception("fk adiada"))
+
+    with monkeypatch.context() as m:  # só o DELETE vê o commit recusado
+        m.setattr(AsyncSession, "commit", commit_recusado)
+        r = await client.delete(f"{MODELS}/{modelo}", headers=admin_headers)
+
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "Modelo em uso por um bloco; tente de novo"
+    assert await db_session.scalar(select(SoftSensorModel.id).where(SoftSensorModel.id == modelo))
+    assert await eventos() == []  # nada foi apagado, nada a auditar
 
 
 async def test_apagar_modelo_inexistente_ou_de_outro_projeto_e_404(
