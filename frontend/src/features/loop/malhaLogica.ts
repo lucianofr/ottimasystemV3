@@ -5,14 +5,24 @@
  * (`malhaLogica.check.ts`).
  */
 
+import type { EstadoConexaoCanal } from "../../app/CanalAoVivo";
 import { ROTULO_CONEXAO } from "../flows/useFlowStatus";
 import type { FuzzyHistoryResponse } from "../fuzzy/types";
 import type { LeituraViva } from "../trend/bordaViva";
 import { LIMITE_PENAS } from "../trend/trendTheme";
 import type { LoopHistoryResponse, LoopNodeOut, LoopState } from "./types";
 
-/** Estado do canal ao vivo. A Tarefa 6 troca por `EstadoConexaoCanal` de `CanalAoVivo`. */
-export type EstadoCanal = "conectando" | "aberto" | "reconectando" | "sessao_invalida";
+export const MODOS_LOOP = ["oos", "iman", "lo", "man", "auto", "cas", "rcas", "rout"] as const;
+export type ModoLoop = (typeof MODOS_LOOP)[number];
+
+/** Modos que o operador pode COMANDAR (os demais existem no FF mas são atingidos por
+ *  rebaixamento/cascata — a API também só aceita estes). */
+export const MODOS_COMANDAVEIS: readonly ModoLoop[] = ["oos", "man", "auto", "cas", "rcas", "rout"];
+
+/** Modo comandável está em `permitted`? Pura para check. */
+export function podeComandar(estado: LoopState, modo: ModoLoop): boolean {
+  return MODOS_COMANDAVEIS.includes(modo) && estado.permitted.includes(modo);
+}
 
 /** A malha que casa com `?flow=&bloco=`; sem casar (link velho, bloco apagado), a primeira. */
 export function resolverSelecao(
@@ -25,7 +35,7 @@ export function resolverSelecao(
 }
 
 export interface CondicaoMalha {
-  readonly canal: EstadoCanal;
+  readonly canal: EstadoConexaoCanal;
   /** `status.state` publicado no canal do flow — não o `desired_state` REST, que pode estar velho. */
   readonly estadoFlow: string | undefined;
   readonly estado: LoopState | undefined;
@@ -47,7 +57,7 @@ export function malhaAoVivo(c: CondicaoMalha): boolean {
 /** Texto do aviso quando não está ao vivo. `desejado` (`desired_state` REST) só escolhe o
  *  texto: pode estar velho, por isso não entra no predicado. */
 export function motivoSemEstado(
-  canal: EstadoCanal,
+  canal: EstadoConexaoCanal,
   estadoFlow: string | undefined,
   desejado: "running" | "stopped" | undefined,
 ): string {
