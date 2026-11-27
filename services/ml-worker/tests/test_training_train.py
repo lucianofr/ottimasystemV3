@@ -231,3 +231,44 @@ def test_epoch_cb_chega_ao_treinador():
     _train("lstm", _data(40), epoch_cb=lambda epoch, loss: calls.append(epoch))
 
     assert calls == [1, 2, 3, 4, 5, 1, 2, 3, 4, 5]  # as épocas do ajuste nos 80% e as do reajuste
+
+
+def _train_esn(data: TrainData, warmup: int):
+    return train(
+        "esn",
+        data,
+        EsnHyperparams(units=20, warmup=warmup, ridge=1e-3),
+        inputs=SEEDS,
+        output_name="y",
+        output_eu="",
+        period_s=1.0,
+        dataset_ids=[],
+    )
+
+
+@pytest.mark.parametrize(("warmup", "rows_used"), [(5, 50), (40, 40)])
+def test_o_teste_e_o_mesmo_para_qualquer_janela(warmup, rows_used):
+    """A lacuna das 10 primeiras análises (passo -30) só tira linhas de janelas de 30+ passos;
+    o teste são sempre as 10 últimas das 50 do conjunto."""
+    data = _data(50)
+    data.x[:10, -30, 0] = np.nan
+
+    _, _, info = _train_esn(data, warmup)
+
+    assert info == {"rows_used": rows_used, "rows_test": 10}
+
+
+def test_janela_sem_analise_de_teste_utilizavel_falha_com_mensagem():
+    data = _data(30)
+    data.x[24:, -40, 0] = np.nan  # as 6 análises do teste (24..29) sem 40 passos íntegros
+
+    with pytest.raises(TrainingError, match="Nenhuma análise utilizável nos 20% finais"):
+        _train_esn(data, 40)
+
+
+def test_janela_com_poucas_analises_antes_do_corte_falha_com_mensagem():
+    data = _data(40)
+    data.x[:19, -40, 0] = np.nan  # 21 utilizáveis, só 13 antes do corte (análise 32)
+
+    with pytest.raises(TrainingError, match="antes do corte dos 20% finais"):
+        _train_esn(data, 40)
