@@ -11,8 +11,14 @@ from ottima_core.softsensor import unpack_dataset
 
 MIN_TRAIN_ROWS = 20
 TEST_FRACTION = 0.2
-# Piso do ajuste: o que o corte antigo (por linhas utilizáveis) deixava com o mínimo de análises.
-MIN_FIT_ROWS = MIN_TRAIN_ROWS - math.ceil(TEST_FRACTION * MIN_TRAIN_ROWS)
+FOLDS = 3  # dobras da validação do `tune` (`TimeSeriesSplit`)
+MIN_VALIDATION_ROWS = (
+    2  # com uma só o R² não existe; mais que isso reprovaria conjuntos de 20 linhas
+)
+# Piso de linhas de ajuste (antes do corte). Sem ele o `TimeSeriesSplit` do `tune` levanta
+# ValueError em inglês (poucas linhas) ou valida com menos de `MIN_VALIDATION_ROWS`: ele dá
+# `n // (FOLDS + 1)` linhas a cada dobra de validação.
+MIN_FIT_ROWS = (FOLDS + 1) * MIN_VALIDATION_ROWS
 
 
 class TrainingError(ValueError):
@@ -35,30 +41,23 @@ def load_train_data(blobs: Sequence[bytes]) -> TrainData:
     return TrainData(x=x[order], y=y[order], ts=ts[order])
 
 
-def _usable(data: TrainData, k: int) -> np.ndarray:
-    return np.isfinite(data.x[:, -k:, :]).all(axis=(1, 2)) & np.isfinite(data.y)
-
-
-def select_rows(data: TrainData, k: int) -> tuple[np.ndarray, np.ndarray]:
-    """Últimos `k` passos de cada análise, só das linhas sem lacuna nesses passos."""
-    usable = _usable(data, k)
-    return data.x[:, -k:, :][usable], data.y[usable]
-
-
 def split_rows(data: TrainData, k: int) -> tuple[np.ndarray, np.ndarray, int]:
-    """`select_rows` + o corte treino/teste, feito UMA vez no tempo e antes da janela: as análises
-    dos últimos 20% do conjunto (ao menos 1) são teste, qualquer que seja `k`. Devolve `x`, `y` e
-    `n_fit`: as `n_fit` primeiras linhas são o ajuste (e a validação do Optuna), as demais o teste.
+    """Últimos `k` passos de cada análise, só das linhas sem lacuna nesses passos, e o corte
+    treino/teste, feito UMA vez no tempo e antes da janela: as análises dos últimos 20% do conjunto
+    (ao menos 1) são teste, qualquer que seja `k`. Devolve `x`, `y` e `n_fit`: as `n_fit` primeiras
+    linhas são o ajuste (e a validação do Optuna), as demais o teste.
 
     Análises com o mesmo `ts` (conjuntos sobrepostos) ficam do mesmo lado: o corte recua até o
     início do empate. Levanta `TrainingError` se a janela deixa poucas linhas utilizáveis, nenhuma
     no teste ou menos de `MIN_FIT_ROWS` no ajuste: `train` e `tune` recusam as mesmas janelas."""
-    usable = _usable(data, k)
-    x, y = data.x[:, -k:, :][usable], data.y[usable]
+    x = data.x[:, -k:, :]
+    usable = np.isfinite(x).all(axis=(1, 2)) & np.isfinite(data.y)
+    x, y = x[usable], data.y[usable]
+    window = "1 passo" if k == 1 else f"{k} passos"
     if len(y) < MIN_TRAIN_ROWS:
         raise TrainingError(
             f"São necessárias ao menos {MIN_TRAIN_ROWS} análises utilizáveis "
-            f"para a janela de {k} passos; há {len(y)}"
+            f"para a janela de {window}; há {len(y)}"
         )
     n_all = len(data.ts)
     cut_ts = data.ts[n_all - max(1, math.ceil(TEST_FRACTION * n_all))]
@@ -66,12 +65,13 @@ def split_rows(data: TrainData, k: int) -> tuple[np.ndarray, np.ndarray, int]:
     if n_fit == len(y):
         raise TrainingError(
             f"Nenhuma análise utilizável nos {TEST_FRACTION:.0%} finais do conjunto "
-            f"para a janela de {k} passos; revise as lacunas do conjunto ou reduza a janela"
+            f"para a janela de {window}; revise as lacunas do conjunto"
+            f"{' ou reduza a janela' if k > 1 else ''}"
         )
     if n_fit < MIN_FIT_ROWS:
         raise TrainingError(
             f"São necessárias ao menos {MIN_FIT_ROWS} análises utilizáveis antes do corte dos "
-            f"{TEST_FRACTION:.0%} finais para a janela de {k} passos; há {n_fit}"
+            f"{TEST_FRACTION:.0%} finais para a janela de {window}; há {n_fit}"
         )
     return x, y, n_fit
 

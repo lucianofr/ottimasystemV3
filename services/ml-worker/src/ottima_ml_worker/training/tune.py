@@ -23,15 +23,11 @@ from ottima_core.softsensor import (
     window_of,
 )
 
-from .data import TrainData, TrainingError, metrics, split_rows
+from .data import FOLDS, MIN_VALIDATION_ROWS, TrainData, TrainingError, metrics, split_rows
 from .train import fit
 
 MIN_TRIALS, MAX_TRIALS = 10, 500
 INVALID = -1e9  # valor finito de uma tentativa inutilizável: ela conta e o estudo segue
-FOLDS = 3
-MIN_VALIDATION_ROWS = (
-    2  # com uma só o R² não existe; mais que isso reprovaria conjuntos de 20 linhas
-)
 NO_VALID_TRIAL = "Nenhuma tentativa produziu um modelo válido; reveja o conjunto ou reduza a janela"
 
 logger = logging.getLogger(__name__)

@@ -7,7 +7,6 @@ from .data import (
     TrainingError,
     load_train_data,
     metrics,
-    select_rows,
     split_rows,
 )
 from .train import InputSeed, fit, train
@@ -20,7 +19,6 @@ __all__ = [
     "fit",
     "load_train_data",
     "metrics",
-    "select_rows",
     "split_rows",
     "train",
 ]
