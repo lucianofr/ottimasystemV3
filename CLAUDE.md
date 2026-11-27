@@ -4,7 +4,7 @@ Plataforma on-premise de APC industrial: estratégias de controle montadas em ca
 
 ## 🔒 Fonte da verdade (leia antes de qualquer coisa)
 
-1. **`docs/adr/ADR-001…040` são NORMATIVOS.** Nenhuma decisão registrada em ADR pode ser relitigada, "melhorada" ou contornada em código. Em conflito entre código, plano, PRD e ADR — **o ADR vence**.
+1. **`docs/adr/ADR-001…046` são NORMATIVOS.** Nenhuma decisão registrada em ADR pode ser relitigada, "melhorada" ou contornada em código. Em conflito entre código, plano, PRD e ADR — **o ADR vence**.
 2. **`docs/PRD.md`** é a fonte de requisitos (RF-xxx / RNF-xx) e dos contratos (§7: canais do barramento, JSON de projeto, grupos de API) e fases (§8).
 3. **`docs/GLOSSARY.md`** fixa o vocabulário. Use os termos de lá; não invente sinônimos.
 4. Encontrou contradição ou lacuna real? **PARE.** Não resolva silenciosamente no código: proponha a atualização do ADR/PRD ao usuário e aguarde a decisão.

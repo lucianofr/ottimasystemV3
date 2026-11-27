@@ -357,6 +357,6 @@ Nós do `graph` que referenciam tags (blocos `opc_read`/`opc_write` e variáveis
 
 ## 10. Referências
 
-- `adr/ADR-001…026` — decisões de arquitetura (normativas)
+- `adr/ADR-001…046` — decisões de arquitetura (normativas)
 - `GLOSSARY.md` — vocabulário do domínio
 - do-mpc · asyncua · React Flow (@xyflow/react) · TimescaleDB · uPlot · SciPy/HiGHS · OSQP
