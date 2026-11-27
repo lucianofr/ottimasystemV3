@@ -83,8 +83,11 @@ async def _job_loop(session_factory: Sessions, app: FastAPI, database_url: str) 
                     app.state.running_id = None
                 continue
         except Exception:
-            # Banco fora no claim ou nos órfãos: o laço segue e tenta de novo.
+            # Banco fora no claim ou nos órfãos: o laço segue e tenta de novo. Um `claim_next` que
+            # comitou o `running` e perdeu a conexão na volta deixa um job que ninguém executa;
+            # sem job em andamento aqui, o `running` que sobra é órfão: re-arma a varredura.
             logger.exception("falha no laço de jobs do ml-worker")
+            orphans_done = False
         await asyncio.sleep(JOB_POLL_INTERVAL_S)
 
 

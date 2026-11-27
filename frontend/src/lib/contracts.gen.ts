@@ -876,3 +876,220 @@ export interface SoftSensorConfig {
   n_inputs: number;
   output_eu: string;
 }
+
+// --------------------------------------------------------------------------------------
+// Hiperparâmetros do sensor virtual: defaults/limites derivados dos schemas Pydantic e faixas
+// do Optuna (ottima_core.softsensor.hyperparams) — a UI nunca digita esses números.
+// --------------------------------------------------------------------------------------
+
+/** Hiperparâmetro numérico: default e limites do schema Pydantic. `min` é inclusivo, exceto
+ * quando `exclusive_min` é true (campo `gt`): aí o valor igual a `min` é recusado. */
+export interface HiperparametroNumerico {
+  default: number;
+  min: number;
+  max: number;
+  exclusive_min?: boolean;
+}
+
+/** Hiperparâmetro de lista fechada (`Literal`): as opções saem do schema. */
+export interface HiperparametroEscolha {
+  default: number;
+  choices: number[];
+}
+
+export type Hiperparametro = HiperparametroNumerico | HiperparametroEscolha;
+
+/** Faixa de busca do Optuna: `low`/`high` para int/float/log, `choices` para choice. */
+export interface FaixaDeBusca {
+  kind: "int" | "float" | "log" | "choice";
+  low?: number;
+  high?: number;
+  choices?: number[];
+}
+
+export const SOFT_SENSOR_HYPERPARAMS: Record<"pls" | "esn" | "lstm", Record<string, Hiperparametro>> = {
+  "pls": {
+    "n_components": {
+      "default": 3,
+      "min": 1,
+      "max": 50
+    }
+  },
+  "esn": {
+    "units": {
+      "default": 500,
+      "min": 10,
+      "max": 500
+    },
+    "sr": {
+      "default": 0.9,
+      "min": 0,
+      "max": 2,
+      "exclusive_min": true
+    },
+    "lr": {
+      "default": 0.3,
+      "min": 0,
+      "max": 1,
+      "exclusive_min": true
+    },
+    "rc_connectivity": {
+      "default": 0.1,
+      "min": 0,
+      "max": 1,
+      "exclusive_min": true
+    },
+    "input_connectivity": {
+      "default": 0.1,
+      "min": 0,
+      "max": 1,
+      "exclusive_min": true
+    },
+    "input_scaling": {
+      "default": 1,
+      "min": 0,
+      "max": 5,
+      "exclusive_min": true
+    },
+    "ridge": {
+      "default": 0.000001,
+      "min": 0,
+      "max": 1
+    },
+    "warmup": {
+      "default": 100,
+      "min": 1,
+      "max": 256
+    },
+    "seed": {
+      "default": 42,
+      "min": 0,
+      "max": 99999
+    }
+  },
+  "lstm": {
+    "units": {
+      "default": 64,
+      "min": 8,
+      "max": 256
+    },
+    "layers": {
+      "default": 2,
+      "min": 1,
+      "max": 4
+    },
+    "epochs": {
+      "default": 100,
+      "min": 1,
+      "max": 500
+    },
+    "batch_size": {
+      "default": 32,
+      "choices": [
+        8,
+        16,
+        32,
+        64
+      ]
+    },
+    "sequence_length": {
+      "default": 10,
+      "min": 2,
+      "max": 256
+    },
+    "lr": {
+      "default": 0.001,
+      "min": 0,
+      "max": 0.1,
+      "exclusive_min": true
+    }
+  }
+};
+
+export const SOFT_SENSOR_SEARCH_SPACE: Record<"pls" | "esn" | "lstm", Record<string, FaixaDeBusca>> = {
+  "pls": {
+    "n_components": {
+      "kind": "int",
+      "low": 1,
+      "high": 20
+    }
+  },
+  "esn": {
+    "units": {
+      "kind": "int",
+      "low": 100,
+      "high": 500
+    },
+    "sr": {
+      "kind": "float",
+      "low": 0.1,
+      "high": 1.5
+    },
+    "rc_connectivity": {
+      "kind": "float",
+      "low": 0.01,
+      "high": 0.99
+    },
+    "input_connectivity": {
+      "kind": "float",
+      "low": 0.01,
+      "high": 0.99
+    },
+    "lr": {
+      "kind": "float",
+      "low": 0.01,
+      "high": 1
+    },
+    "ridge": {
+      "kind": "log",
+      "low": 1e-8,
+      "high": 0.1
+    },
+    "input_scaling": {
+      "kind": "float",
+      "low": 0.1,
+      "high": 3
+    },
+    "warmup": {
+      "kind": "int",
+      "low": 10,
+      "high": 200
+    }
+  },
+  "lstm": {
+    "units": {
+      "kind": "int",
+      "low": 16,
+      "high": 256
+    },
+    "layers": {
+      "kind": "int",
+      "low": 1,
+      "high": 4
+    },
+    "epochs": {
+      "kind": "int",
+      "low": 30,
+      "high": 200
+    },
+    "batch_size": {
+      "kind": "choice",
+      "choices": [
+        8,
+        16,
+        32,
+        64
+      ]
+    },
+    "sequence_length": {
+      "kind": "int",
+      "low": 3,
+      "high": 50
+    },
+    "lr": {
+      "kind": "log",
+      "low": 0.0001,
+      "high": 0.01
+    }
+  }
+};

@@ -72,6 +72,7 @@ from ottima_core.flowgraph.fll_defaults import (
     fuzzy_loop_default_fll,
 )
 from ottima_core.flowgraph.parse import MAX_FUZZY_FLL_LENGTH
+from ottima_core.softsensor import HYPERPARAMS, SEARCH_SPACE
 
 __all__ = ["FUZZY_LOOP_DEFAULT_FLL"]  # reexport do modulo folha (SPEC_FUZZY secao 3.2)
 
@@ -400,14 +401,37 @@ _NODE_CONFIG_MODELS = (
 )
 
 
+def _hyperparams_contract() -> dict[str, dict[str, dict[str, object]]]:
+    """Por método e campo, `{default, min, max}` (ou `{default, choices}` para `Literal`),
+    derivado do JSON Schema dos modelos de hiperparâmetro — nenhum limite digitado aqui.
+    `gt` vira `min` com `exclusive_min: true` (valor igual a `min` é recusado); campo `ge` não
+    leva a chave. Os schemas não usam `lt`; se um dia usarem, `prop["maximum"]` falha alto."""
+    contract: dict[str, dict[str, dict[str, object]]] = {}
+    for method, model in HYPERPARAMS.items():
+        fields: dict[str, dict[str, object]] = {}
+        for name, prop in model.model_json_schema()["properties"].items():
+            if "enum" in prop:
+                fields[name] = {"default": prop["default"], "choices": prop["enum"]}
+            else:
+                low = prop["minimum"] if "minimum" in prop else prop["exclusiveMinimum"]
+                fields[name] = {"default": prop["default"], "min": low, "max": prop["maximum"]}
+                if "exclusiveMinimum" in prop:
+                    fields[name]["exclusive_min"] = True
+        contract[method] = fields
+    return contract
+
+
 def build_contracts() -> dict[str, object]:
-    """Monta o payload completo (porta + WS + config de nó) — puro, sem I/O."""
+    """Monta o payload completo (porta + WS + config de nó + hiperparâmetros do sensor virtual)
+    — puro, sem I/O."""
     return {
         "port_contracts": PORT_CONTRACTS,
         "ws_payloads": {model.__name__: model.model_json_schema() for model in _WS_MODELS},
         "node_configs": {
             model.__name__: model.model_json_schema() for model in _NODE_CONFIG_MODELS
         },
+        "SOFT_SENSOR_HYPERPARAMS": _hyperparams_contract(),
+        "SOFT_SENSOR_SEARCH_SPACE": SEARCH_SPACE,
     }
 
 

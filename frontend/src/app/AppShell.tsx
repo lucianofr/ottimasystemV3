@@ -30,6 +30,7 @@ export const NAV_ENGENHARIA = [
    virtual (`useSoftSensorBlocks`). Constante própria para `NAV_ENGENHARIA` seguir estático. */
 export const NAV_SENSOR_VIRTUAL = [
   { rotulo: "Coleta e treino", para: "/engenharia/sensor-virtual/coleta", testid: "nav-sv-coleta" },
+  { rotulo: "Otimização", para: "/engenharia/sensor-virtual/otimizacao", testid: "nav-sv-otim" },
 ] as const;
 
 /* Configurações gerais (RF-805): grupo próprio, só admin — operador nem vê o item (a rota

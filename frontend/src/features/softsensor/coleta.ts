@@ -4,6 +4,7 @@
  * leitura aqui valida o tipo em vez de confiar na forma.
  */
 
+import { ApiError } from "../../lib/api";
 import type { DatasetOut, MlJobOut } from "./types";
 
 /** Períodos aceitos pelo modelo (`ottima_core.softsensor.PERIODS_S`); o 422 do POST confere. */
@@ -31,6 +32,11 @@ export function fusoDoNavegador(): string {
 export function agoraLocal(agora: Date = new Date()): string {
   const dois = (n: number) => String(n).padStart(2, "0");
   return `${String(agora.getFullYear())}-${dois(agora.getMonth() + 1)}-${dois(agora.getDate())}T${dois(agora.getHours())}:${dois(agora.getMinutes())}`;
+}
+
+/** Texto do erro de uma chamada: o `detail` do servidor (pt-BR) como veio. */
+export function mensagem(erro: unknown): string {
+  return erro instanceof ApiError ? erro.message : "Erro de comunicação com o servidor";
 }
 
 function numero(dados: Record<string, unknown>, chave: string): number {

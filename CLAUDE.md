@@ -120,6 +120,7 @@ cd frontend && npm run test:unit                    # checks puros do frontend (
 cd frontend && npm run generate:api                 # tipos do OpenAPI + contratos gerados; exige frontend/openapi.json (gitignored)
 cd frontend && npm run generate:contracts           # só os contratos (portas por bloco + payloads do WS) de ottima_core.contracts_export
 uv run pytest -m slow services/flow-runtime/tests   # carga do MPC (RNF-02); o run default exclui `slow` além de `e2e`
+uv run pytest -m slow services/ml-worker/tests      # treino real de LSTM (SV-3); também fora do run default
 
 # Stack. O override e2e só expõe portas de host do gate: use SEMPRE os dois arquivos.
 cd deploy && docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d   # 9 serviços
@@ -139,7 +140,7 @@ OTTIMA_E2E=1 bash deploy/smoke.sh                   # L1 — stack, retenção, 
 # deixa o flow no mapa como stopped. Re-rodar o L1 depois da L2 da vermelho falso; nesse caso
 # `docker compose ... restart flow-runtime` antes.
 E2E_ADMIN_USERNAME=$(grep -m1 '^OTTIMA_ADMIN_USERNAME=' deploy/.env|cut -d= -f2-) E2E_ADMIN_PASSWORD=$(grep -m1 '^OTTIMA_ADMIN_PASSWORD=' deploy/.env|cut -d= -f2-) uv run pytest -m e2e tests/e2e -v
-                                                     # L2 — 51 cenários (5 F1 + 9 F2 + 10 F3 + 10 F4 + 7 F5 + 2 fuzzy + 4 SV + 4 SV2)
+                                                     # L2 — 55 cenários (5 F1 + 9 F2 + 10 F3 + 10 F4 + 7 F5 + 2 fuzzy + 4 SV + 4 SV2 + 4 SV3)
 # tests/e2e/test_api_e2e.py (F1) lê credenciais só de os.environ (default ""), nunca de
 # deploy/.env: a bateria completa exige o env inline acima (não basta o deploy/.env preenchido).
 # F4: POST /api/operate/{flow_id}/{block_id}/mode|sp|mv publica FlowCommand (202); o runtime

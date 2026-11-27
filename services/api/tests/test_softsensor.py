@@ -351,9 +351,12 @@ async def test_blocks_lista_so_o_projeto_ativo_com_o_vinculo(
             "label": "sv1",  # nó sem `label`: cai para o id do bloco
             "method": "pls",
             "n_inputs": 2,
+            "ts_seconds": 1.0,
             "desired_model_id": outro.id,
             "active_model_id": modelo.id,
             "candidate_model_id": outro.id,
+            "active_input_names": ["x0", "x1"],  # do modelo EM USO, não do candidato
+            "warmup_s": 1.0,
         }
     ]
 

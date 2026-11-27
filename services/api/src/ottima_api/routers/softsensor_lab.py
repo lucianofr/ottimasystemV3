@@ -7,19 +7,20 @@ outro projeto é 404. A análise guarda o instante da COLETA (`sampled_at`), nun
 mesmo instante de uma análise existente substitui (é o que torna o import idempotente).
 
 Conjunto e job: leitura é do operador, criar/finalizar/apagar conjunto e cancelar job são do admin.
-A API só grava linhas em `ml_jobs`; quem as executa é o ml-worker (ADR-046).
+A API só grava linhas em `ml_jobs`; quem as executa é o ml-worker (ADR-046). Treino e otimização
+(RF-587, RF-588) também entram na fila por aqui, e o modelo gerado se apaga por aqui (RF-581).
 """
 
 import asyncio
 import math
 from collections import Counter
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from redis.asyncio import Redis
-from sqlalchemy import Select, delete, func, select, update
+from sqlalchemy import Select, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,18 +38,28 @@ from ottima_core.bus import (
     KIND_SOFT_SENSOR_DATASET_CREATED,
     KIND_SOFT_SENSOR_DATASET_DELETED,
     KIND_SOFT_SENSOR_DATASET_FINALIZED,
+    KIND_SOFT_SENSOR_JOB_QUEUED,
+    KIND_SOFT_SENSOR_MODEL_DELETED,
     publish_event,
 )
 from ottima_core.models import (
+    Flow,
     HistoryRetentionSettings,
     LabSample,
     LabVariable,
     MlJob,
     Project,
+    SoftSensorBinding,
     SoftSensorDataset,
+    SoftSensorModel,
     User,
 )
-from ottima_core.softsensor import PERIODS_S
+from ottima_core.softsensor import (
+    PERIODS_S,
+    DatasetError,
+    load_compatible_datasets,
+    parse_hyperparams,
+)
 
 router = APIRouter()
 
@@ -81,6 +92,7 @@ MSG_INICIO_FUTURO = "O início do conjunto não pode estar no futuro"
 MSG_JA_FINALIZADO = "Conjunto já finalizado"
 MSG_EM_MONTAGEM = "Conjunto em montagem; cancele o job antes"
 MSG_JOB_NAO_ENCONTRADO = "Job não encontrado"
+MSG_MODELO_NAO_ENCONTRADO = "Modelo não encontrado"
 
 
 class LabVariableCreate(BaseModel):
@@ -150,6 +162,29 @@ class DatasetCreated(DatasetOut):
 
 class JobAccepted(BaseModel):
     job_id: int
+
+
+class TrainJobIn(BaseModel):
+    """Corpo de `POST /jobs` com `kind: "train"`. `hyperparams` é `dict`, não `BaseModel`: `0`,
+    `[]` ou `false` têm de dar 422 aqui, já que `parse_hyperparams` lê falsy como "defaults"."""
+
+    kind: Literal["train"]
+    method: str  # método desconhecido: `parse_hyperparams` o recusa, em pt-BR
+    dataset_ids: list[Id]
+    name: str
+    hyperparams: dict[str, Any] | None = None
+
+
+class TuneJobIn(BaseModel):
+    kind: Literal["tune"]
+    method: str
+    dataset_ids: list[Id]
+    name: str
+    n_trials: int = Field(20, ge=10, le=500)
+    min_r2: float = Field(0.0, ge=0, le=1)
+
+
+JobIn = Annotated[TrainJobIn | TuneJobIn, Field(discriminator="kind")]
 
 
 class MlJobOut(BaseModel):
@@ -746,12 +781,25 @@ async def _job(db: AsyncSession, project_id: int, job_id: int) -> MlJob:
 
 
 @router.get("/jobs", response_model=list[MlJobOut], dependencies=[Depends(require_operator)])
-async def list_jobs(active: bool | None = None, db: AsyncSession = Depends(get_db)) -> list[MlJob]:
-    """Mais novos primeiro; `active` separa fila e andamento (true) do histórico (false)."""
+async def list_jobs(
+    active: bool | None = None,
+    dataset_id: Id | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> list[MlJob]:
+    """Mais novos primeiro; `active` separa fila e andamento (true) do histórico (false).
+    `dataset_id` fica com os jobs do conjunto: a montagem (`params.dataset_id`) e o treino e a
+    otimização que o usam (`params.dataset_ids`). O teto de `MAX_JOBS` vale depois do filtro."""
     project_id = await _projeto_ativo(db)
     if project_id is None:
         return []
     stmt = select(MlJob).where(MlJob.project_id == project_id)
+    if dataset_id is not None:
+        stmt = stmt.where(
+            or_(
+                MlJob.params.contains({"dataset_id": dataset_id}),
+                MlJob.params.contains({"dataset_ids": [dataset_id]}),
+            )
+        )
     if active is not None:
         stmt = stmt.where(
             MlJob.status.in_(JOBS_ATIVOS) if active else MlJob.status.notin_(JOBS_ATIVOS)
@@ -796,3 +844,104 @@ async def cancel_job(job_id: Id, db: AsyncSession = Depends(get_db)) -> Response
         )
     await db.commit()
     return Response(status_code=202)
+
+
+@router.post("/jobs", response_model=JobAccepted, status_code=202)
+async def enqueue_job(
+    body: JobIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+    redis_client: Redis = Depends(get_redis),
+) -> JobAccepted:
+    """Enfileira um treino (`train`) ou uma otimização (`tune`). Tudo que o handler do ml-worker
+    recusaria sem custo é recusado aqui, antes da fila: um `tune` de horas não pode falhar só no
+    fim por nome repetido. O handler mantém as mesmas checagens como retaguarda."""
+    nome = body.name.strip()
+    if not nome:
+        raise HTTPException(status_code=422, detail=MSG_NOME_VAZIO)
+    try:  # também recusa método desconhecido
+        parse_hyperparams(body.method, body.hyperparams if body.kind == "train" else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    project_id = await _exigir_projeto(db)
+    try:
+        conjuntos = await load_compatible_datasets(db, project_id, body.dataset_ids)
+    except DatasetError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    if await db.scalar(
+        select(SoftSensorModel.id).where(
+            SoftSensorModel.project_id == project_id, SoftSensorModel.name == nome
+        )
+    ):
+        raise HTTPException(status_code=409, detail=f"Já existe um modelo com o nome '{nome}'")
+
+    params = body.model_dump(exclude={"kind"}, exclude_none=True) | {
+        "name": nome,
+        "dataset_ids": [ds.id for ds in conjuntos],  # sem repetidos, na ordem dada
+    }
+    job = MlJob(project_id=project_id, kind=body.kind, params=params, created_by=f"user:{user.id}")
+    db.add(job)
+    await db.commit()
+    await _auditar(
+        redis_client,
+        user,
+        KIND_SOFT_SENSOR_JOB_QUEUED,
+        f"{'Treino' if body.kind == 'train' else 'Otimização'} do modelo '{nome}' enfileirado",
+        {"job_id": job.id, "job_kind": body.kind, "method": body.method, "name": nome},
+    )
+    return JobAccepted(job_id=job.id)
+
+
+# ---------------------------------------------------------------------------------- modelos
+
+
+@router.delete("/models/{model_id}", status_code=204)
+async def delete_model(
+    model_id: Id,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+    redis_client: Redis = Depends(get_redis),
+) -> None:
+    project_id = await _exigir_projeto(db)
+    nome = await db.scalar(
+        select(SoftSensorModel.name).where(
+            SoftSensorModel.id == model_id, SoftSensorModel.project_id == project_id
+        )
+    )
+    if nome is None:
+        raise HTTPException(status_code=404, detail=MSG_MODELO_NAO_ENCONTRADO)
+    # As FKs do vínculo são DEFERRED: sem esta checagem o DELETE só falharia no COMMIT (500).
+    uso = (
+        await db.execute(
+            select(SoftSensorBinding.block_id, Flow.name)
+            .join(Flow, Flow.id == SoftSensorBinding.flow_id)
+            .where(
+                or_(
+                    SoftSensorBinding.desired_model_id == model_id,
+                    SoftSensorBinding.active_model_id == model_id,
+                    SoftSensorBinding.candidate_model_id == model_id,
+                )
+            )
+            .limit(1)
+        )
+    ).first()
+    if uso is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Modelo em uso pelo bloco '{uso.block_id}' do flow '{uso.name}'",
+        )
+    await db.execute(delete(SoftSensorModel).where(SoftSensorModel.id == model_id))
+    try:
+        await db.commit()
+    except IntegrityError:  # vínculo criado entre a checagem e o commit (FK adiada)
+        await db.rollback()
+        raise HTTPException(
+            status_code=409, detail="Modelo em uso por um bloco; tente de novo"
+        ) from None
+    await _auditar(
+        redis_client,
+        user,
+        KIND_SOFT_SENSOR_MODEL_DELETED,
+        f"Modelo '{nome}' excluído",
+        {"project_id": project_id, "model_id": model_id, "name": nome},
+    )

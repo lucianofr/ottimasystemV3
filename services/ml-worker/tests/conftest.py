@@ -4,6 +4,7 @@ e não enxerga transação aberta de teste) e fábricas mínimas de projeto, tag
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
+import numpy as np
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -16,6 +17,7 @@ from ottima_core.models import (
     SoftSensorDataset,
     Tag,
 )
+from ottima_core.softsensor import InputMeta, LoadedModel, ModelMeta, load_model, pack_weights
 
 Sessions = async_sessionmaker[AsyncSession]
 END = datetime.now(UTC).replace(microsecond=0)
@@ -132,3 +134,23 @@ def make_job(session_factory: Sessions, project_id: int) -> Callable[..., Awaita
         )
 
     return make
+
+
+@pytest.fixture
+def as_model() -> Callable[..., LoadedModel]:
+    """Pesos de um treinador -> modelo pelo caminho do runtime (float32 no `.npz`, `load_model`)."""
+
+    def build(method: str, weights: dict[str, np.ndarray], n_inputs: int, k: int) -> LoadedModel:
+        meta = ModelMeta(
+            schema_version=1,
+            method=method,
+            period_s=1.0,
+            inputs=[InputMeta(name=f"x{j}", min=-1e6, max=1e6) for j in range(n_inputs)],
+            output_name="y",
+            hyperparams={},
+            warmup_steps=k,
+            trained_at=datetime.now(UTC),
+        )
+        return load_model(0, meta.model_dump(mode="json"), pack_weights(weights))
+
+    return build

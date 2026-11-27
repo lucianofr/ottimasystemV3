@@ -1,6 +1,9 @@
 import type { NodeProps, NodeTypes } from "@xyflow/react";
+import { useParams } from "react-router";
 
 import type { TagOut } from "../../../lib/api";
+import { rotuloDaPorta } from "../../softsensor/treino";
+import { useSoftSensorBlocks } from "../../softsensor/useSoftSensorBlocks";
 import { ROTULO_TIPO } from "../../tags/useTags";
 import {
   PORTA_MPC_AUTO,
@@ -549,16 +552,28 @@ export function NoFuzzyLoop({ id, data, selected }: NodeProps<NoFuzzyLoopData>) 
 
 /** Sensor virtual (RF-581, ADR-046): um componente para os três métodos (`type` vem do
  *  próprio nó). Entradas `IN1..INn` por `n_inputs` e a saída fixa `out` do contrato, com a
- *  unidade declarada. O modelo não aparece aqui: o vínculo bloco → modelo mora em tabela
- *  (SPEC_SENSOR_VIRTUAL §5.1); rótulos de porta com o nome da tag esperada ficam para a SV-3. */
+ *  unidade declarada. O vínculo bloco → modelo mora em tabela (SPEC_SENSOR_VIRTUAL §5.1) e chega
+ *  por `/blocks`: com modelo ativo, cada entrada leva o nome da tag que ele espera (RF-581). Só o
+ *  `rotulo` muda; o `id` da porta segue `IN<n>`, que é o que as arestas e o 422 do save usam.
+ *  Bloco ainda não salvo (fora de `/blocks`) fica com `IN<n>`. */
 export function NoSensorVirtual({ id, type, data, selected }: NodeProps<NoSensorVirtualData>) {
+  const { flowId } = useParams();
+  // `false`: só lê o cache que o AppShell mantém — um timer de polling por nó multiplicaria as
+  // requisições enquanto um modelo aquece.
+  const bloco = useSoftSensorBlocks(false).data?.find(
+    (candidato) => candidato.flow_id === Number(flowId) && candidato.block_id === id,
+  );
+  const nomes = bloco?.active_input_names ?? null;
   return (
     <BlocoChapa
       tipo={type}
       label={data.label}
       execOrder={data.exec_order}
       selecionado={selected}
-      entradas={portas(portasScript("IN", data.n_inputs))}
+      entradas={portasScript("IN", data.n_inputs).map((porta, i) => ({
+        id: porta,
+        rotulo: rotuloDaPorta(i, nomes),
+      }))}
       saidas={portasFixas(type, "output").map((porta) => ({
         id: porta,
         rotulo: porta,

@@ -931,10 +931,18 @@ export interface paths {
         /**
          * List Jobs
          * @description Mais novos primeiro; `active` separa fila e andamento (true) do histórico (false).
+         *     `dataset_id` fica com os jobs do conjunto: a montagem (`params.dataset_id`) e o treino e a
+         *     otimização que o usam (`params.dataset_ids`). O teto de `MAX_JOBS` vale depois do filtro.
          */
         get: operations["list_jobs_api_softsensor_jobs_get"];
         put?: never;
-        post?: never;
+        /**
+         * Enqueue Job
+         * @description Enfileira um treino (`train`) ou uma otimização (`tune`). Tudo que o handler do ml-worker
+         *     recusaria sem custo é recusado aqui, antes da fila: um `tune` de horas não pode falhar só no
+         *     fim por nome repetido. O handler mantém as mesmas checagens como retaguarda.
+         */
+        post: operations["enqueue_job_api_softsensor_jobs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -975,6 +983,23 @@ export interface paths {
          */
         post: operations["cancel_job_api_softsensor_jobs__job_id__cancel_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/softsensor/models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Model */
+        delete: operations["delete_model_api_softsensor_models__model_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2691,12 +2716,18 @@ export interface components {
             method: string;
             /** N Inputs */
             n_inputs: number;
+            /** Ts Seconds */
+            ts_seconds: number;
             /** Desired Model Id */
             desired_model_id?: number | null;
             /** Active Model Id */
             active_model_id?: number | null;
             /** Candidate Model Id */
             candidate_model_id?: number | null;
+            /** Active Input Names */
+            active_input_names?: string[] | null;
+            /** Warmup S */
+            warmup_s?: number | null;
         };
         /** SoftSensorModelOut */
         SoftSensorModelOut: {
@@ -2712,6 +2743,15 @@ export interface components {
             n_inputs: number;
             /** Warmup Steps */
             warmup_steps?: number | null;
+            /** Warmup S */
+            warmup_s?: number | null;
+            /**
+             * Hyperparams
+             * @default {}
+             */
+            hyperparams: {
+                [key: string]: number;
+            };
             /**
              * Metrics
              * @default {}
@@ -2725,10 +2765,33 @@ export interface components {
              */
             input_names: string[];
             /**
+             * In Use
+             * @default []
+             */
+            in_use: components["schemas"]["SoftSensorUseOut"][];
+            /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * SoftSensorUseOut
+         * @description Um bloco que referencia o modelo. `pending`: pedido (`desired`) que o runtime ainda não
+         *     atendeu, sem candidato em curso (spec §5.6: "aguardando o runtime").
+         */
+        SoftSensorUseOut: {
+            /** Flow Id */
+            flow_id: number;
+            /** Flow Name */
+            flow_name: string;
+            /** Block Id */
+            block_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "candidate" | "pending";
         };
         /** SpCommand */
         SpCommand: {
@@ -2918,6 +2981,52 @@ export interface components {
             eu?: string | null;
             /** Description */
             description?: string | null;
+        };
+        /**
+         * TrainJobIn
+         * @description Corpo de `POST /jobs` com `kind: "train"`. `hyperparams` é `dict`, não `BaseModel`: `0`,
+         *     `[]` ou `false` têm de dar 422 aqui, já que `parse_hyperparams` lê falsy como "defaults".
+         */
+        TrainJobIn: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "train";
+            /** Method */
+            method: string;
+            /** Dataset Ids */
+            dataset_ids: number[];
+            /** Name */
+            name: string;
+            /** Hyperparams */
+            hyperparams?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** TuneJobIn */
+        TuneJobIn: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "tune";
+            /** Method */
+            method: string;
+            /** Dataset Ids */
+            dataset_ids: number[];
+            /** Name */
+            name: string;
+            /**
+             * N Trials
+             * @default 20
+             */
+            n_trials: number;
+            /**
+             * Min R2
+             * @default 0
+             */
+            min_r2: number;
         };
         /** UserCreate */
         UserCreate: {
@@ -5144,6 +5253,7 @@ export interface operations {
         parameters: {
             query?: {
                 active?: boolean | null;
+                dataset_id?: number | null;
             };
             header?: never;
             path?: never;
@@ -5158,6 +5268,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MlJobOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enqueue_job_api_softsensor_jobs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrainJobIn"] | components["schemas"]["TuneJobIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAccepted"];
                 };
             };
             /** @description Validation Error */
@@ -5221,6 +5364,35 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_model_api_softsensor_models__model_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

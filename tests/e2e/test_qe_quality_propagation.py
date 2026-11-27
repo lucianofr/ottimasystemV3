@@ -28,13 +28,11 @@ from typing import Any
 import httpx
 import pytest
 import redis
-from asyncua import Client, ua
 
 from opcsim import NODE_SINE, NODE_STATIC, NODE_W_FLOAT, NODE_WD_FROM_SYSTEM, NODE_WD_TO_SYSTEM
 from ottima_core.bus import KIND_MPC_INPUT_INVALID
 
 from .conftest import (
-    OPCSIM_HOST_URL,
     RUN_ID,
     EventStream,
     _health_do_runtime,
@@ -48,6 +46,7 @@ from .conftest import (
     evento_mpc,
     valor_unico,
 )
+from .f3_support import MULTIPLIER, config_mpc_minimo, escrever_status
 
 pytestmark = pytest.mark.e2e
 
@@ -58,14 +57,7 @@ SUFIXO = f"qe-quality-{RUN_ID}"
 
 # MPC mínimo — Ts_flow=1 s, multiplier=2 => Ts_mpc=2 s, Np=ceil(10/2)=5.
 TS_FLOW = 1.0
-MULTIPLIER = 2
 TS_MPC = TS_FLOW * MULTIPLIER
-GANHO_CV = 1.0
-TAU1_CV = 2.0
-TAU2_CV = 0.5
-TSS_MALHA = 10.0
-LIMITES_MV = {"min": 0.0, "max": 100.0}
-LIMITES_SP_CV = {"min": 0.0, "max": 100.0}
 
 
 @pytest.fixture(scope="session")
@@ -105,75 +97,6 @@ def _historico(
     return corpo["series"][0]
 
 
-def _escrever_status(node_id: str, *, valor: float, ruim: bool) -> None:
-    """Escreve um DataValue completo: valor bom OU StatusCode Bad (sob status ruim o servidor
-    asyncua anula o Variant — OPC-UA Part 4 §7.7.1 — e é o STATUS que o opc-worker lê)."""
-
-    async def _run() -> None:
-        status = ua.StatusCodes.BadSensorFailure if ruim else ua.StatusCodes.Good
-        dv = ua.DataValue(
-            ua.Variant(valor, ua.VariantType.Double),
-            StatusCode=ua.StatusCode(status),
-        )
-        async with Client(url=OPCSIM_HOST_URL, timeout=10) as client:
-            await client.get_node(node_id).write_value(dv)
-
-    import asyncio
-
-    asyncio.run(_run())
-
-
-def _config_mpc_minimo() -> dict[str, Any]:
-    """1 MV direta (sem PID, sem readback — sempre RCAS_OK), 1 CV self-reg, 1 DV."""
-    return {
-        "name": "MPC QE",
-        "multiplier": MULTIPLIER,
-        "variables": {
-            "mvs": [
-                {
-                    "id": "mv_1",
-                    "name": "MV direta",
-                    "eu": "%",
-                    "limits": dict(LIMITES_MV),
-                    "max_rate": 5.0,
-                    "initial_value": 0.0,
-                }
-            ],
-            "cvs": [
-                {
-                    "id": "cv_1",
-                    "name": "CV filtrada",
-                    "eu": "C",
-                    "kind": "selfreg",
-                    "tss": TSS_MALHA,
-                    "weight": 1.0,
-                    "sp_limits": dict(LIMITES_SP_CV),
-                }
-            ],
-            "constraints": [],
-            "dvs": [
-                {
-                    "id": "dv_1",
-                    "name": "DV de carga",
-                    "eu": "m3/h",
-                }
-            ],
-        },
-        "models": {
-            "cv_1": {
-                "mv_1": {
-                    "enabled": True,
-                    "params": {"K": GANHO_CV, "tau1": TAU1_CV, "tau2": TAU2_CV, "theta": 0.0},
-                },
-                "dv_1": {
-                    "enabled": True,
-                    "params": {"K": 0.5, "tau1": 5.0, "tau2": 0.0, "theta": 0.0},
-                },
-            }
-        },
-    }
-
-
 def _grafo_qe(tag_senso: int, tag_dv: int) -> dict[str, Any]:
     """OPC-Read(node de teste) -> Filtro 1ª ordem -> MPC(cv_1); OPC-Read -> MPC(dv_1).
 
@@ -203,7 +126,7 @@ def _grafo_qe(tag_senso: int, tag_dv: int) -> dict[str, Any]:
                 "id": "mpc_qe",
                 "type": "mpc",
                 "position": {"x": 0.0, "y": 0.0},
-                "data": {"exec_order": 4, **_config_mpc_minimo()},
+                "data": {"exec_order": 4, **config_mpc_minimo()},
             },
         ],
         "edges": [
@@ -432,7 +355,7 @@ def test_qe2_qe3_bad_invalida_mpc_e_good_restaura(
 
         # 1) corrompe o node de origem
         marco_bad = datetime.now(UTC)
-        _escrever_status(NODE_STATIC, valor=0.0, ruim=True)
+        escrever_status(NODE_STATIC, valor=0.0, ruim=True)
 
         fluxo.esperar(
             lambda e: e["status"]["input_valid"] is False,
@@ -468,7 +391,7 @@ def test_qe2_qe3_bad_invalida_mpc_e_good_restaura(
         ms_congelado = ms_cauda[-1]
 
         # 2) cura o node: estado volta a válido E o solve recomeça
-        _escrever_status(NODE_STATIC, valor=42.0, ruim=False)
+        escrever_status(NODE_STATIC, valor=42.0, ruim=False)
         fluxo.esperar(
             lambda e: e["status"]["input_valid"] is True,
             timeout=45.0,
@@ -516,7 +439,7 @@ def test_qe4_tag_calculada_pior_de_n(admin: httpx.Client, ambiente_qe: dict[str,
     assert set(serie["q"]) == {0}, f"tag calculada deveria nascer boa: {serie['q']}"
 
     marco_bad = datetime.now(UTC)
-    _escrever_status(NODE_STATIC, valor=0.0, ruim=True)
+    escrever_status(NODE_STATIC, valor=0.0, ruim=True)
 
     def serie_ruim() -> list[int] | None:
         s = _historico(admin, tag_calc, start=marco_bad)
@@ -529,7 +452,7 @@ def test_qe4_tag_calculada_pior_de_n(admin: httpx.Client, ambiente_qe: dict[str,
     assert len(ruins) >= 2
 
     # cura: pior-de-N volta a good quando a entrada ruim volta
-    _escrever_status(NODE_STATIC, valor=42.0, ruim=False)
+    escrever_status(NODE_STATIC, valor=42.0, ruim=False)
     marco_cura = datetime.now(UTC)
 
     def serie_curada() -> list[int] | None:
@@ -568,7 +491,7 @@ def test_qe5_dv_bad_congela_internamente_e_good_retoma(
         )
 
         # 1) DV boa com valor distintivo: a DV reportada segue a tag
-        _escrever_status(NODE_W_FLOAT, valor=25.0, ruim=False)
+        escrever_status(NODE_W_FLOAT, valor=25.0, ruim=False)
         fluxo.esperar(
             lambda e: abs(e["vars"]["dv_1"]["v"] - 25.0) < 0.01,
             timeout=45.0,
@@ -576,7 +499,7 @@ def test_qe5_dv_bad_congela_internamente_e_good_retoma(
         )
 
         # 2) corrompe o node da DV: o bloco NÃO invalida, a DV congela, o solve continua
-        _escrever_status(NODE_W_FLOAT, valor=0.0, ruim=True)
+        escrever_status(NODE_W_FLOAT, valor=0.0, ruim=True)
         janela = fluxo.coletar(
             quantidade=6,
             timeout=TS_MPC * 6 + 15.0,
@@ -593,7 +516,7 @@ def test_qe5_dv_bad_congela_internamente_e_good_retoma(
         assert len(solves) >= 2, f"solve precisa continuar rodando com DV ruim: {solves}"
 
         # 3) cura: a DV volta a seguir a tag (valor novo flui)
-        _escrever_status(NODE_W_FLOAT, valor=33.0, ruim=False)
+        escrever_status(NODE_W_FLOAT, valor=33.0, ruim=False)
         fluxo.esperar(
             lambda e: abs(e["vars"]["dv_1"]["v"] - 33.0) < 0.01,
             timeout=45.0,

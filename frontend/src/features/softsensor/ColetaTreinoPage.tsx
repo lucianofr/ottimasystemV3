@@ -6,7 +6,6 @@ import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Select } from "../../components/ui/select";
-import { ApiError } from "../../lib/api";
 import { useCanMutate } from "../auth/useAuth";
 import { useConnections } from "../connections/useConnections";
 import { paraIsoUtc } from "../events/eventos";
@@ -22,6 +21,7 @@ import {
   alternarEntrada,
   janelaAoVivoDefasada,
   janelaDoConjunto,
+  mensagem,
   PERIODOS_S,
   podeExcluir,
   podeFinalizar,
@@ -31,9 +31,10 @@ import {
   temJobAtivo,
   TETO_ENTRADAS,
 } from "./coleta";
+import { SecaoTreino } from "./SecaoTreino";
 import type { DatasetCreated, DatasetOut, MlJobOut } from "./types";
 import { useCreateDataset, useDatasets, useDeleteDataset, useFinalizeDataset } from "./useDatasets";
-import { useCancelJob, useJobs } from "./useJobs";
+import { useCancelJob, useJobsDoConjunto } from "./useJobs";
 import { useAddLabSample, useDeleteLabSample, useImportLabSamples, useLabSamples } from "./useLabSamples";
 import { useCreateLabVariable, useLabVariables } from "./useLabVariables";
 
@@ -48,10 +49,6 @@ const ROTULO_ORIGEM: Record<string, string> = { manual: "Manual", csv: "CSV" };
 
 /** Sem escala fixada: o trend das entradas é visão geral, em autoescala. */
 const ESCALAS_AUTO: Readonly<Record<string, EscalaVar>> = {};
-
-function mensagem(erro: unknown): string {
-  return erro instanceof ApiError ? erro.message : "Erro de comunicação com o servidor";
-}
 
 function quando(iso: string): string {
   return new Date(iso).toLocaleString("pt-BR");
@@ -807,7 +804,6 @@ export function ColetaTreinoPage() {
   const projectId = projeto.data?.id ?? null;
   const podeMutar = useCanMutate();
   const conjuntos = useDatasets();
-  const jobs = useJobs(false);
   const variaveis = useLabVariables();
   const [searchParams, setSearchParams] = useSearchParams();
   const [formAberto, setFormAberto] = useState(false);
@@ -817,6 +813,7 @@ export function ColetaTreinoPage() {
   const lista = conjuntos.data ?? [];
   const selecionado = lista.find((conjunto) => String(conjunto.id) === conjuntoParam) ?? null;
   const primeiro = lista[0];
+  const jobs = useJobsDoConjunto(selecionado?.id ?? null);
 
   // Sem seleção válida na URL (primeiro acesso, conjunto de outro projeto): cai no primeiro.
   useEffect(() => {
@@ -840,13 +837,7 @@ export function ColetaTreinoPage() {
   }
 
   // O job mais novo (a lista vem do mais novo para o mais antigo) que monta este conjunto.
-  const job =
-    selecionado === null
-      ? undefined
-      : jobs.data?.find(
-          (candidato) =>
-            candidato.kind === "dataset_build" && candidato.params.dataset_id === selecionado.id,
-        );
+  const job = jobs.data?.find((candidato) => candidato.kind === "dataset_build");
   const eu = variaveis.data?.find((v) => v.id === selecionado?.lab_variable_id)?.eu ?? "";
 
   return (
@@ -936,6 +927,14 @@ export function ColetaTreinoPage() {
             job={job}
             onExcluido={() => setSearchParams({}, { replace: true })}
           />
+          {selecionado.status === "ready" && (
+            <SecaoTreino
+              key={`treino-${String(selecionado.id)}`}
+              conjunto={selecionado}
+              conjuntos={lista}
+              jobs={jobs.data}
+            />
+          )}
         </>
       )}
     </section>

@@ -436,6 +436,12 @@ KIND_SOFT_SENSOR_DATASET_CREATED = "soft_sensor_dataset_created"
 KIND_SOFT_SENSOR_DATASET_FINALIZED = "soft_sensor_dataset_finalized"
 KIND_SOFT_SENSOR_DATASET_DELETED = "soft_sensor_dataset_deleted"
 
+# Treino, otimização e modelos do sensor virtual (RF-587, RF-588). Auditoria da API: origin
+# `user:<id>`, severity "info". `publish_event` reserva `kind` no payload para o do evento, então
+# o tipo do job (`train`/`tune`) vai em `job_kind`.
+KIND_SOFT_SENSOR_JOB_QUEUED = "soft_sensor_job_queued"  # payload {job_id, job_kind, method, name}
+KIND_SOFT_SENSOR_MODEL_DELETED = "soft_sensor_model_deleted"  # payload {project_id, model_id, name}
+
 
 async def publish_event(
     redis_client: Redis,

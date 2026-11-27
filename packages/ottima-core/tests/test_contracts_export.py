@@ -73,14 +73,21 @@ def test_saida_e_deterministica_entre_execucoes(capsys):
     assert primeira.strip() != ""
 
 
-def test_main_imprime_json_valido_com_as_tres_secoes(capsys):
+def test_main_imprime_json_valido_com_todas_as_secoes(capsys):
     main()
     corpo = json.loads(capsys.readouterr().out)
     # `node_configs` entrou com o ARCH-06/TD-018 (ADR-034: a FORMA dos configs de bloco é
     # gerada do Pydantic, não reescrita à mão em `graph.ts`). A asserção é de conjunto EXATO
     # de propósito: seção nova no exportador tem de passar por aqui, porque cada uma vira
-    # um bloco gerado em `contracts.gen.ts` que o frontend importa.
-    assert set(corpo) == {"port_contracts", "ws_payloads", "node_configs"}
+    # um bloco gerado em `contracts.gen.ts` que o frontend importa. As duas SOFT_SENSOR_* são
+    # os hiperparâmetros do sensor virtual (RF-587/588): defaults/limites e faixas do Optuna.
+    assert set(corpo) == {
+        "port_contracts",
+        "ws_payloads",
+        "node_configs",
+        "SOFT_SENSOR_HYPERPARAMS",
+        "SOFT_SENSOR_SEARCH_SPACE",
+    }
     assert corpo == build_contracts()
 
 
@@ -95,3 +102,10 @@ def test_gen_ts_tem_campo_ts_em_mpcstate_e_mpcprediction():
         assert re.search(r"\bts: string;", corpo.group(1)), (
             f"{nome} sem campo `ts` em {GEN_TS_PATH} — rode npm run generate:contracts"
         )
+
+
+def test_gen_ts_exporta_hiperparametros_do_sensor_virtual():
+    # Trava o `contracts.gen.ts` commitado: a UI lê defaults, limites e faixas dali.
+    texto = GEN_TS_PATH.read_text(encoding="utf-8")
+    for nome in ("SOFT_SENSOR_HYPERPARAMS", "SOFT_SENSOR_SEARCH_SPACE"):
+        assert f"export const {nome}" in texto, f"{nome} ausente — rode npm run generate:contracts"
