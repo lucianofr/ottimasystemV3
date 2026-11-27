@@ -1,6 +1,13 @@
 import type { KeyboardEvent } from "react";
 
-import { type DadosPid, type ElementoTfs, type LinhaTfs, type MatrizTfs } from "../graph";
+import {
+  type DadosPid,
+  type DadosPidLoop,
+  type DadosShellMalha,
+  type ElementoTfs,
+  type LinhaTfs,
+  type MatrizTfs,
+} from "../graph";
 
 /**
  * Leitura dos campos numéricos do modal.
@@ -134,5 +141,104 @@ export function montarDadosPid(atual: DadosPid, campos: FormData): DadosPid {
     proportional_on_measurement: campos.get("proportional_on_measurement") === "on",
     differential_on_measurement: campos.get("differential_on_measurement") === "on",
     starting_output: numeroDoCampo(campos.get("starting_output"), atual.starting_output),
+  };
+}
+
+/** Modos com caixa de seleção no formulário da casca, na ordem canônica de `permitted`. Modo
+ *  fora desta lista (ex.: `iman`) não tem caixa e é preservado de `atual.permitted`. */
+export const MODOS_COM_CAIXA = ["oos", "man", "auto", "cas", "rcas", "rout"] as const;
+
+/** Porta de entrada que alimenta cada modo remoto: sem aresta nela o modo não tem de onde ler. */
+export const PORTA_DO_MODO_REMOTO: Readonly<Record<string, string>> = {
+  cas: "cas_in",
+  rcas: "rcas_in",
+  rout: "rout_in",
+};
+
+/** Caixa de modo remoto sem aresta na porta fica travada — mas NUNCA desmarca sozinha: uma caixa
+ *  já marcada continua habilitada, para o engenheiro ver e desfazer a escolha. */
+export function caixaDeModoDesabilitada(
+  modo: string,
+  portasLigadas: ReadonlySet<string>,
+  marcado: boolean,
+): boolean {
+  const porta = PORTA_DO_MODO_REMOTO[modo];
+  return porta !== undefined && !portasLigadas.has(porta) && !marcado;
+}
+
+/**
+ * Reconstrói a casca dos blocos malha (RF-641, RF-642) a partir do formulário. Pura, no padrão de
+ * `montarDadosPid`. Contrato do `FormData`: numéricos/nuláveis pelo próprio nome; booleanos por
+ * checkbox (marcado = "on", ausente = desmarcado); `direct_acting` por select "true"/"false";
+ * `normal`/`shed_opt` por select; `permitted` por uma caixa `permitted_<modo>`.
+ * `normal`, `shed_opt` e `direct_acting` ausentes preservam o valor anterior (o select pode não
+ * ter sido renderizado). O recorte do fuzzy deixa shed/tracking/feedforward intactos: o
+ * `FuzzyLoopConfig` os carrega, mas a tela do fuzzy não os edita.
+ */
+export function montarDadosShellMalha<T extends DadosShellMalha>(
+  atual: T,
+  campos: FormData,
+  tipo: "pid_loop" | "fuzzy_loop",
+): T {
+  const numero = (campo: string, padrao: number): number => numeroDoCampo(campos.get(campo), padrao);
+  const nulavel = (campo: string, padrao: number | null): number | null =>
+    numeroOuNuloDoCampo(campos.get(campo), padrao);
+  const marcado = (campo: string): boolean => campos.get(campo) === "on";
+  const direta = campos.get("direct_acting");
+  const normal = campos.get("normal");
+  const shedOpt = campos.get("shed_opt");
+  const modosDoFormulario: readonly string[] = MODOS_COM_CAIXA;
+  return {
+    ...atual,
+    direct_acting: direta === null ? atual.direct_acting : direta === "true",
+    sp_lo_lim: numero("sp_lo_lim", atual.sp_lo_lim),
+    sp_hi_lim: numero("sp_hi_lim", atual.sp_hi_lim),
+    sp_rate_up: nulavel("sp_rate_up", atual.sp_rate_up),
+    sp_rate_dn: nulavel("sp_rate_dn", atual.sp_rate_dn),
+    sp_pv_track_in_man: marcado("sp_pv_track_in_man"),
+    out_scale_lo: numero("out_scale_lo", atual.out_scale_lo),
+    out_scale_hi: numero("out_scale_hi", atual.out_scale_hi),
+    out_lo_lim: numero("out_lo_lim", atual.out_lo_lim),
+    out_hi_lim: numero("out_hi_lim", atual.out_hi_lim),
+    out_rate_up: nulavel("out_rate_up", atual.out_rate_up),
+    out_rate_dn: nulavel("out_rate_dn", atual.out_rate_dn),
+    out_startup: numero("out_startup", atual.out_startup),
+    pv_ftime: numero("pv_ftime", atual.pv_ftime),
+    permitted: [
+      ...MODOS_COM_CAIXA.filter((modo) => marcado(`permitted_${modo}`)),
+      ...atual.permitted.filter((modo) => !modosDoFormulario.includes(modo)),
+    ],
+    normal: typeof normal === "string" ? normal : atual.normal,
+    ...(tipo === "pid_loop" && {
+      // O select só oferece literais do contrato; valor fora dele o servidor recusa com 422.
+      shed_opt: typeof shedOpt === "string" ? (shedOpt as DadosShellMalha["shed_opt"]) : atual.shed_opt,
+      shed_no_return: marcado("shed_no_return"),
+      track_enable: marcado("track_enable"),
+      track_in_manual: marcado("track_in_manual"),
+      trk_val: numero("trk_val", atual.trk_val),
+      lo_val: numero("lo_val", atual.lo_val),
+      use_pv_for_bkcal: marcado("use_pv_for_bkcal"),
+      ff_enable: marcado("ff_enable"),
+      ff_gain: numero("ff_gain", atual.ff_gain),
+      ff_scale_lo: numero("ff_scale_lo", atual.ff_scale_lo),
+      ff_scale_hi: numero("ff_scale_hi", atual.ff_scale_hi),
+    }),
+  };
+}
+
+/** Casca + os 8 campos de sintonia do PID Malha (RF-641). */
+export function montarDadosPidLoop(atual: DadosPidLoop, campos: FormData): DadosPidLoop {
+  const base = montarDadosShellMalha(atual, campos, "pid_loop");
+  const numero = (campo: string, padrao: number): number => numeroDoCampo(campos.get(campo), padrao);
+  return {
+    ...base,
+    kc: numero("kc", base.kc),
+    ti_seconds: numero("ti_seconds", base.ti_seconds),
+    td_seconds: numero("td_seconds", base.td_seconds),
+    n: numero("n", base.n),
+    beta: numero("beta", base.beta),
+    gamma: numero("gamma", base.gamma),
+    gap_band: numero("gap_band", base.gap_band),
+    gap_gain: numero("gap_gain", base.gap_gain),
   };
 }
