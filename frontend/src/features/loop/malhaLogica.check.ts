@@ -1,6 +1,7 @@
 /**
  * Checks puros da lógica da tela MALHA (RF-645, RF-646): seleção da malha, predicado "ao vivo",
- * escala da barra, ids das penas, ponta viva e limpeza de nulos do histórico.
+ * escala da barra, ids das penas, ponta viva, nulos do histórico mantidos como lacuna e valor
+ * da escrita de SP/OUT.
  *
  * Vale um teste porque errar aqui é silencioso: um quadro velho tratado como ao vivo, ou uma
  * amostra nula virando zero no trend, leva o operador a ler uma malha que não está como parece.

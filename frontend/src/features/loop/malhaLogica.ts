@@ -1,6 +1,7 @@
 /**
  * Decisões puras da tela MALHA (RF-645, RF-646): qual malha está selecionada, se o dado é "ao
- * vivo", a escala da barra, os ids das penas do trend, a ponta viva e a limpeza do histórico.
+ * vivo", a escala da barra, os ids das penas do trend, a ponta viva, o histórico com as amostras
+ * nulas mantidas como lacuna e o valor de uma escrita de SP/OUT.
  * Sem React — a página só liga estas funções aos hooks; o que decide fica testável aqui
  * (`malhaLogica.check.ts`).
  */
@@ -130,7 +131,12 @@ export function leiturasVivasMalha(
 }
 
 /** Forma `FuzzyHistoryResponse` (sem `v_min`/`v_max`, que o gráfico não usa) para reaproveitar a
- *  matriz e a mescla viva de `../fuzzy/historicoFuzzy`. Mantém TODA amostra, nulas incluídas. */
+ *  matriz e a mescla viva de `../fuzzy/historicoFuzzy`. Mantém TODA amostra, nulas incluídas.
+ *
+ *  O cast abaixo é SABIDAMENTE falso: o tipo declara `v: number[]`, mas aqui `v` pode conter
+ *  `null`. O resultado só é consumido por `alinharNoEixo`, `montarMatrizFuzzy`,
+ *  `resumirSeriesFuzzy` e `mesclarHistoricoFuzzyVivo`, que toleram `null` (lacuna conhecida).
+ *  Não passe este valor a outro consumidor de `FuzzyHistoryResponse` sem conferir isso. */
 export function historicoComLacunas(resposta: LoopHistoryResponse): FuzzyHistoryResponse {
   return {
     mode: resposta.mode,

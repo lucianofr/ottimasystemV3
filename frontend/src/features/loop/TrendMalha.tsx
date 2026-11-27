@@ -38,7 +38,9 @@ import { useHistoryLoop } from "./useHistoryLoop";
  * quando `n_loops` chega. Sem EU: o bloco de malha não publica unidade.
  *
  * O histórico aparece com o flow parado; só a ponta viva depende de `aoVivo` (quadro novo do
- * canal 0), para o quadro retido de antes não entrar no gráfico como se fosse de agora.
+ * canal 0). Fora do ao vivo `useBordaViva` só ESCONDE a ponta — continua acumulando —, então o
+ * quadro retido entra no gráfico quando o ao vivo volta, no seu carimbo real (`ts`), nunca
+ * como se fosse de agora.
  */
 
 const JANELA_DEFAULT_SEGUNDOS = 1800;
