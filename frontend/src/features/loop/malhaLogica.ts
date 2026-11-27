@@ -121,23 +121,18 @@ export function leiturasVivasMalha(
   return vivas;
 }
 
-/** Descarta amostra nula com o seu carimbo (nunca vira zero) e `v_min`/`v_max`, que o gráfico
- *  não usa. O resultado é atribuível a `FuzzyHistoryResponse`, então a montagem da matriz e a
- *  mescla com a ponta viva de `../fuzzy/historicoFuzzy` servem sem duplicação. */
-export function semNulos(resposta: LoopHistoryResponse): FuzzyHistoryResponse {
+/** Forma `FuzzyHistoryResponse` (sem `v_min`/`v_max`, que o gráfico não usa) para reaproveitar a
+ *  matriz e a mescla viva de `../fuzzy/historicoFuzzy`. Mantém TODA amostra, nulas incluídas. */
+export function historicoComLacunas(resposta: LoopHistoryResponse): FuzzyHistoryResponse {
   return {
     mode: resposta.mode,
     start: resposta.start,
     end: resposta.end,
-    series: resposta.series.map((s) => {
-      const t: string[] = [];
-      const v: number[] = [];
-      s.v.forEach((valor, i) => {
-        if (valor === null) return;
-        t.push(s.t[i]);
-        v.push(valor);
-      });
-      return { var_id: s.var_id, t, v };
-    }),
+    series: resposta.series.map((s) => ({
+      var_id: s.var_id,
+      t: s.t,
+      // null preservado de propósito: `alinharNoEixo` o trata como lacuna conhecida.
+      v: s.v as number[],
+    })),
   };
 }

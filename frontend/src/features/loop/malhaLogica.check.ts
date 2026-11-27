@@ -9,6 +9,7 @@
 import { expect, test } from "@playwright/test";
 
 import { ROTULO_CONEXAO } from "../flows/useFlowStatus";
+import { montarMatrizFuzzy } from "../fuzzy/historicoFuzzy";
 import {
   malhaAoVivo,
   leiturasVivasMalha,
@@ -16,7 +17,7 @@ import {
   penasIniciais,
   percentualBarra,
   resolverSelecao,
-  semNulos,
+  historicoComLacunas,
   varsMalha,
   type CondicaoMalha,
 } from "./malhaLogica";
@@ -103,17 +104,30 @@ test("ponta viva: uma leitura por pena e canal; PV nula fica de fora, PV sem qua
 });
 
 // Review Focus 5
-test("histórico: amostra nula some com o seu carimbo, nunca vira zero", () => {
-  const limpo = semNulos({
-    mode: "raw", start: "2026-11-27T11:00:00Z", end: "2026-11-27T12:00:00Z",
-    series: [
-      { var_id: "pv", t: ["t1", "t2", "t3"], v: [1, null, 3] },
-      { var_id: "sp", t: ["t1"], v: [null] },
-    ],
+test("histórico: amostra nula é mantida com o seu carimbo, nunca vira zero", () => {
+  const T = ["2026-11-27T12:00:00Z", "2026-11-27T12:00:01Z", "2026-11-27T12:00:02Z"];
+  const r = historicoComLacunas({
+    mode: "raw", start: T[0], end: T[2],
+    series: [{ var_id: "pv", t: T, v: [1, null, 3], v_min: [1, null, 3], v_max: [1, null, 3] }],
   });
-  expect(limpo.series).toEqual([
-    { var_id: "pv", t: ["t1", "t3"], v: [1, 3] },
-    { var_id: "sp", t: [], v: [] },
-  ]);
-  expect(limpo.mode).toBe("raw");
+  expect(r.series).toEqual([{ var_id: "pv", t: T, v: [1, null, 3] }]);
+  expect(r.mode).toBe("raw");
+});
+
+// R11: o trend alinha as penas no eixo união — uma amostra nula tem de chegar até lá como
+// lacuna conhecida, senão `alinharNoEixo` repete o último valor bom como se fosse atual.
+test("histórico + matriz: amostra nula vira lacuna na pena, sem afetar a vizinha", () => {
+  const T = ["2026-11-27T12:00:00Z", "2026-11-27T12:00:01Z", "2026-11-27T12:00:02Z"];
+  const matriz = montarMatrizFuzzy(
+    historicoComLacunas({
+      mode: "raw", start: T[0], end: T[2],
+      series: [
+        { var_id: "pv", t: T, v: [1, null, 3] },
+        { var_id: "sp", t: T, v: [5, 5, 5] },
+      ],
+    }),
+    ["pv", "sp"],
+  );
+  expect(matriz[1]).toEqual([1, null, 3]);
+  expect(matriz[2]).toEqual([5, 5, 5]);
 });
