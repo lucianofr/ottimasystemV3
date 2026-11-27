@@ -80,6 +80,21 @@ async def test_dataset_error_no_handler_passa_a_mensagem_em_ptbr(
     )
 
 
+async def test_value_error_de_biblioteca_no_ajuste_chega_ao_job_em_ptbr(
+    session_factory, make_job, migrated_database_url
+):
+    """O runner repassa todo `ValueError` (inclusive os de sklearn, scipy e numpy): o texto em
+    inglês da biblioteca não pode chegar à página."""
+    job_id = await make_job(status="running")
+
+    job = await _run(session_factory, migrated_database_url, job_id, "teste_ajuste_quebra")
+
+    assert (job.status, job.error) == (
+        "failed",
+        "O ajuste do PLS falhou com estes dados (ver o log do ml-worker)",
+    )
+
+
 async def test_kind_desconhecido_vira_failed(session_factory, make_job, migrated_database_url):
     job_id = await make_job(status="running")
 

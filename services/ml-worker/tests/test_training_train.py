@@ -186,6 +186,45 @@ def test_pesos_nao_finitos_falham_com_mensagem(monkeypatch):
         _train("pls", _data(40))
 
 
+def test_peso_que_estoura_o_float32_falha_com_mensagem(monkeypatch):
+    """Finito em float64, mas o `pack_weights` o grava como inf: a recusa é antes do artefato."""
+    monkeypatch.setattr(
+        train_module, "fit", lambda *a, **k: {"w": np.array([1e39, 0.0]), "b": np.zeros(1)}
+    )
+
+    with pytest.raises(TrainingError, match="não finitos"):
+        _train("pls", _data(40))
+
+
+@pytest.mark.parametrize("quebra_na_chamada", [1, 2])  # 1 = ajuste nos 80%, 2 = reajuste em 100%
+def test_value_error_da_biblioteca_vira_mensagem_em_ptbr(monkeypatch, quebra_na_chamada):
+    real_fit, chamadas = train_module.fit, []
+
+    def fit(*args, **kw):
+        chamadas.append(1)
+        if len(chamadas) == quebra_na_chamada:
+            raise ValueError("slice 0 has a NaN entry")
+        return real_fit(*args, **kw)
+
+    monkeypatch.setattr(train_module, "fit", fit)
+
+    with pytest.raises(TrainingError) as raised:
+        _train("pls", _data(40))
+
+    assert str(raised.value) == "O ajuste do PLS falhou com estes dados (ver o log do ml-worker)"
+    assert isinstance(raised.value.__cause__, ValueError)  # o original fica encadeado e no log
+
+
+def test_training_error_do_ajuste_passa_sem_troca_de_mensagem(monkeypatch):
+    def fit(*args, **kw):
+        raise TrainingError("mensagem do projeto")
+
+    monkeypatch.setattr(train_module, "fit", fit)
+
+    with pytest.raises(TrainingError, match="^mensagem do projeto$"):
+        _train("pls", _data(40))
+
+
 def test_epoch_cb_chega_ao_treinador():
     calls: list[int] = []
 
