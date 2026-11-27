@@ -39,18 +39,20 @@ from ottima_core.softsensor import ModelMeta, synthetic
 
 from .conftest import RUN_ID, EventStream, esperar_ate, esperar_conexao
 from .f3_support import (
-    StatusStream,
     aguardar_parado,
     aresta,
     assinantes_de_status,
     ativar_projeto,
     bloco,
+    bloco_softsensor,
+    blocos_softsensor,
     de_varredura,
     deploy,
+    esperar_historico,
+    esperar_saida_boa,
     id_da_sentinela,
     montar_grafo,
     porta,
-    porta_valida,
     valor,
 )
 
@@ -243,63 +245,11 @@ def implantar(admin: httpx.Client) -> Iterator[Callable[[int], None]]:
 # --------------------------------------------------------------------------------------
 
 
-def _blocos(admin: httpx.Client) -> list[dict[str, Any]]:
-    r = admin.get("/api/softsensor/blocks")
-    assert r.status_code == 200, f"GET /api/softsensor/blocks: HTTP {r.status_code} {r.text}"
-    return r.json()
-
-
-def _bloco_api(admin: httpx.Client, flow_id: int) -> dict[str, Any]:
-    return next(b for b in _blocos(admin) if b["flow_id"] == flow_id and b["block_id"] == BLOCO)
-
-
-def _esperar_historico(admin: httpx.Client, tag_ids: list[int], *, span_s: float) -> None:
-    """Espera o recorder ter gravado `span_s` segundos de cada tag (primeiro a último ponto).
-
-    Com `span_s=0` só espera o primeiro ponto, o que garante que o `ValueSnapshot` do runtime já
-    viu as tags e a 1a varredura não lê `opc_read` frio. As tags importadas têm id novo: o
-    histórico delas começa na ativação do projeto, não existe de antes.
-    """
-
-    def coberto() -> bool | None:
-        r = admin.get("/api/history", params={"tag_ids": ",".join(str(i) for i in tag_ids)})
-        assert r.status_code == 200, f"GET /api/history: HTTP {r.status_code} {r.text}"
-        for serie in r.json()["series"]:
-            instantes = [datetime.fromisoformat(t) for t in serie["t"]]
-            if not instantes or (instantes[-1] - instantes[0]).total_seconds() < span_s:
-                return None
-        return True
-
-    esperar_ate(
-        coberto,
-        timeout=span_s + 90.0,
-        intervalo=1.0,
-        descricao=f"{span_s:.0f} s de histórico das entradas no recorder",
-    )
-
-
-def _proxima_varredura(estado: StatusStream, *, timeout: float = 30.0) -> dict[str, Any]:
-    """Próxima publicação de VARREDURA (a de transição tem `ports` vazio, spec F3 §4.2)."""
-    return estado.esperar(de_varredura, timeout=timeout, descricao="varredura do flow")
-
-
 def _estimativa(status: dict[str, Any], b: float) -> float:
     """`w·x + b` com as entradas do MESMO `flow.status` do `out` (as portas `r1`/`r2`)."""
     x1, x2 = valor(status, "r1", "out"), valor(status, "r2", "out")
     assert x1 is not None and x2 is not None, "entrada do sensor sem valor na varredura"
     return PESOS[0] * float(x1) + PESOS[1] * float(x2) + b
-
-
-def _esperar_saida_boa(estado: StatusStream, *, ate: int) -> dict[str, Any]:
-    """Primeira varredura (de até `ate`) com `out` GOOD e com valor; falha mostrando as vistas."""
-    vistas: list[tuple[Any, Any]] = []
-    for _ in range(ate):
-        status = _proxima_varredura(estado)
-        saida = porta(status, BLOCO, "out")
-        vistas.append((saida["v"], saida["quality"]))
-        if porta_valida(status, BLOCO, "out") and saida["v"] is not None:
-            return status
-    pytest.fail(f"`out` do sensor não ficou GOOD em {ate} varreduras: (v, quality) = {vistas}")
 
 
 def _ativacao(flow_id: int, model_id: int) -> Callable[[dict[str, Any]], bool]:
@@ -330,17 +280,17 @@ def test_e2e_sv_01_import_deploy_e_estimativa(
     """RF-581/582/590: import com modelo vinculado, deploy e `out` GOOD igual a `w·x + b` em até
     5 varreduras; o vínculo na API mostra o modelo em uso igual ao desejado."""
     flow_id = projeto_sv.flows[FLOW_01]
-    _esperar_historico(admin, projeto_sv.tag_ids, span_s=0)
+    esperar_historico(admin, projeto_sv.tag_ids, span_s=0)
     estado = assinar_status(flow_id)
     implantar(flow_id)
 
-    status = _esperar_saida_boa(estado, ate=5)
+    status = esperar_saida_boa(estado, BLOCO, ate=5)
     assert porta(status, BLOCO, "out")["v"] == pytest.approx(
         _estimativa(status, B_A), abs=TOLERANCIA
     )
 
     def vinculo_em_dia() -> dict[str, Any] | None:
-        vinculo = _bloco_api(admin, flow_id)
+        vinculo = bloco_softsensor(admin, flow_id, BLOCO)
         em_uso = vinculo["active_model_id"]
         return vinculo if em_uso is not None and em_uso == vinculo["desired_model_id"] else None
 
@@ -362,15 +312,18 @@ def test_e2e_sv_02_troca_de_modelo_em_execucao(
     `soft_sensor_model_activated` em até 10 s, sem nenhuma amostra de `out` fora de GOOD."""
     flow_id = projeto_sv.flows[FLOW_02]
     modelo_b = projeto_sv.modelos[MODELO_PLS_B]
-    _esperar_historico(admin, projeto_sv.tag_ids, span_s=0)
+    esperar_historico(admin, projeto_sv.tag_ids, span_s=0)
     estado = assinar_status(flow_id)
     implantar(flow_id)
 
-    status = _esperar_saida_boa(estado, ate=5)
+    status = esperar_saida_boa(estado, BLOCO, ate=5)
     assert porta(status, BLOCO, "out")["v"] == pytest.approx(
         _estimativa(status, B_A), abs=TOLERANCIA
     )
-    assert _bloco_api(admin, flow_id)["active_model_id"] == projeto_sv.modelos[MODELO_PLS_A]
+    assert (
+        bloco_softsensor(admin, flow_id, BLOCO)["active_model_id"]
+        == projeto_sv.modelos[MODELO_PLS_A]
+    )
 
     r = admin.post(f"/api/operate/{flow_id}/{BLOCO}/model", json={"model_id": modelo_b})
     assert r.status_code == 202, f"POST /operate model: HTTP {r.status_code} {r.text}"
@@ -395,7 +348,7 @@ def test_e2e_sv_02_troca_de_modelo_em_execucao(
         f"a troca derrubou a qualidade de `out`: {amostras}"
     )
     esperar_ate(
-        lambda: _bloco_api(admin, flow_id)["active_model_id"] == modelo_b,
+        lambda: bloco_softsensor(admin, flow_id, BLOCO)["active_model_id"] == modelo_b,
         timeout=5.0,
         descricao="active_model_id passar ao modelo B",
     )
@@ -412,11 +365,11 @@ def test_e2e_sv_03_prewarm_pelo_historico(
     """RF-583: o LSTM de K=10 implantado depois de 20 s de histórico sai GOOD em até 3 varreduras
     (sem o pré-aquecimento de `samples` seriam 10)."""
     flow_id = projeto_sv.flows[FLOW_03]
-    _esperar_historico(admin, projeto_sv.tag_ids, span_s=20.0)
+    esperar_historico(admin, projeto_sv.tag_ids, span_s=20.0)
     estado = assinar_status(flow_id)
     implantar(flow_id)
 
-    _esperar_saida_boa(estado, ate=3)
+    esperar_saida_boa(estado, BLOCO, ate=3)
 
 
 def test_e2e_sv_04_recusa_de_modelo_de_outro_metodo(
@@ -424,7 +377,7 @@ def test_e2e_sv_04_recusa_de_modelo_de_outro_metodo(
 ) -> None:
     """RF-584: ESN num bloco PLS é 422 com o método na mensagem, e o vínculo não muda."""
     flow_id = projeto_sv.flows[FLOW_04]
-    antes = _blocos(admin)
+    antes = blocos_softsensor(admin)
 
     r = admin.post(
         f"/api/operate/{flow_id}/{BLOCO}/model", json={"model_id": projeto_sv.modelos[MODELO_ESN]}
@@ -432,4 +385,4 @@ def test_e2e_sv_04_recusa_de_modelo_de_outro_metodo(
 
     assert r.status_code == 422, f"POST /operate model: HTTP {r.status_code} {r.text}"
     assert "é ESN" in r.json()["detail"], r.text
-    assert _blocos(admin) == antes
+    assert blocos_softsensor(admin) == antes

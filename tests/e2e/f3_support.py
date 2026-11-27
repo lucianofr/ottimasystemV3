@@ -9,23 +9,33 @@ As fixtures `assinar_status` e `criar_flow` moram aqui e são importadas por nom
 de teste: o `conftest.py` da suíte é o da F2 e está em uso por outros três arquivos.
 """
 
+import asyncio
 import json
 import subprocess
 import time
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 import httpx
 import redis
+from asyncua import Client, ua
 
 from ottima_core.bus import channel_flow_status
 from ottima_core.signal import Quality
 
 from .conftest import (
+    GANHO_CV,
+    LIMITES_MV,
+    LIMITES_SP_CV,
     NODE_WD_FROM_SYSTEM,
     NODE_WD_TO_SYSTEM,
+    OPCSIM_HOST_URL,
     RUN_ID,
     SENTINELA,
+    TAU1_CV,
+    TAU2_CV,
+    TSS_MALHA,
     Ambiente,
     EventStream,
     compose,
@@ -373,11 +383,21 @@ def assinantes_de_status(redis_bus: redis.Redis) -> Any:
             pubsub.close()
 
 
-def fabrica_de_flows(admin: httpx.Client, ambiente: Ambiente) -> Any:
+def fabrica_de_flows(
+    admin: httpx.Client,
+    ambiente: Ambiente,
+    *,
+    par_watchdog: tuple[str, str] = (NODE_WD_TO_SYSTEM, NODE_WD_FROM_SYSTEM),
+) -> Any:
     """Cria flows no projeto do módulo e garante o teardown: parar, aguardar e excluir.
 
     Excluir flow rodando é 409 (§5.1), e excluir sem esperar a parada deixaria varredura
     órfã escrevendo em tag que o cenário seguinte observa.
+
+    `par_watchdog` é `(nó lido, nó escrito)`. O `projeto_com_conexao` já mantém um flow vivo no
+    par 1: dois flows no MESMO par fazem o bit alternar a ritmo de dois escritores, e conforme a
+    fase relativa o handshake de um deles vê o bit parado e nunca arma (`sem alternância`). Quem
+    precisa de um flow com watchdog ao lado dele passa o par 2.
     """
     criados: list[int] = []
 
@@ -402,8 +422,8 @@ def fabrica_de_flows(admin: httpx.Client, ambiente: Ambiente) -> Any:
             json={
                 "watchdog_enabled": True,
                 "watchdog_connection_id": ambiente.conn_id,
-                "watchdog_read_node_id": NODE_WD_TO_SYSTEM,
-                "watchdog_write_node_id": NODE_WD_FROM_SYSTEM,
+                "watchdog_read_node_id": par_watchdog[0],
+                "watchdog_write_node_id": par_watchdog[1],
                 "watchdog_period_ms": 1000,
             },
         )
@@ -417,3 +437,165 @@ def fabrica_de_flows(admin: httpx.Client, ambiente: Ambiente) -> Any:
             admin.post(f"/api/flows/{flow_id}/stop")
             aguardar_parado(flow_id)
             admin.delete(f"/api/flows/{flow_id}")
+
+
+# --------------------------------------------------------------------------------------
+# Sensor virtual (SV-1..SV-3), laboratório e MPC mínimo
+# --------------------------------------------------------------------------------------
+#
+# Peças que os módulos `test_sv1_*`, `test_sv2_*`, `test_sv3_*` e `test_qe_*` dividem; antes
+# eram privadas de um deles e importadas à força pelos outros.
+
+LAB = "/api/softsensor"
+MULTIPLIER = 2  # Ts_mpc = 2 × Ts do flow no MPC mínimo (Np = ceil(10 / Ts_mpc))
+
+
+def escrever_status(node_id: str, *, valor: float, ruim: bool) -> None:
+    """Escreve um DataValue completo no opcsim do host: valor bom OU StatusCode Bad (sob status
+    ruim o servidor asyncua anula o Variant — OPC-UA Part 4 §7.7.1 — e é o STATUS que o
+    opc-worker lê). Só vale em nó que o laço do opcsim não reescreve (a senoide, por exemplo,
+    é regravada a cada 0,2 s e apagaria o Bad)."""
+
+    async def _run() -> None:
+        status = ua.StatusCodes.BadSensorFailure if ruim else ua.StatusCodes.Good
+        dv = ua.DataValue(
+            ua.Variant(valor, ua.VariantType.Double),
+            StatusCode=ua.StatusCode(status),
+        )
+        async with Client(url=OPCSIM_HOST_URL, timeout=10) as client:
+            await client.get_node(node_id).write_value(dv)
+
+    asyncio.run(_run())
+
+
+def esperar_historico(admin: httpx.Client, tag_ids: list[int], *, span_s: float) -> None:
+    """Espera o recorder ter gravado `span_s` segundos de cada tag (primeiro a último ponto).
+
+    Com `span_s=0` só espera o primeiro ponto, o que garante que o `ValueSnapshot` do runtime já
+    viu as tags e a 1a varredura não lê `opc_read` frio. As tags importadas têm id novo: o
+    histórico delas começa na ativação do projeto, não existe de antes.
+    """
+
+    def coberto() -> bool | None:
+        r = admin.get("/api/history", params={"tag_ids": ",".join(str(i) for i in tag_ids)})
+        assert r.status_code == 200, f"GET /api/history: HTTP {r.status_code} {r.text}"
+        for serie in r.json()["series"]:
+            instantes = [datetime.fromisoformat(t) for t in serie["t"]]
+            if not instantes or (instantes[-1] - instantes[0]).total_seconds() < span_s:
+                return None
+        return True
+
+    esperar_ate(
+        coberto,
+        timeout=span_s + 90.0,
+        intervalo=1.0,
+        descricao=f"{span_s:.0f} s de histórico das entradas no recorder",
+    )
+
+
+def esperar_saida_boa(estado: StatusStream, block_id: str, *, ate: int) -> dict[str, Any]:
+    """Primeira varredura (de até `ate`) com `out` do bloco GOOD e com valor; falha mostrando as
+    vistas."""
+    vistas: list[tuple[Any, Any]] = []
+    for _ in range(ate):
+        status = estado.esperar(de_varredura, timeout=30.0, descricao="varredura do flow")
+        saida = porta(status, block_id, "out")
+        vistas.append((saida["v"], saida["quality"]))
+        if porta_valida(status, block_id, "out") and saida["v"] is not None:
+            return status
+    raise AssertionError(
+        f"`out` do sensor não ficou GOOD em {ate} varreduras: (v, quality) = {vistas}"
+    )
+
+
+def blocos_softsensor(admin: httpx.Client) -> list[dict[str, Any]]:
+    r = admin.get(f"{LAB}/blocks")
+    assert r.status_code == 200, f"GET {LAB}/blocks: HTTP {r.status_code} {r.text}"
+    return r.json()
+
+
+def bloco_softsensor(admin: httpx.Client, flow_id: int, block_id: str) -> dict[str, Any]:
+    return next(
+        b for b in blocos_softsensor(admin) if b["flow_id"] == flow_id and b["block_id"] == block_id
+    )
+
+
+def criar_variavel_lab(admin: httpx.Client, nome: str) -> dict[str, Any]:
+    r = admin.post(f"{LAB}/lab-variables", json={"name": nome, "eu": "%"})
+    assert r.status_code == 201, f"POST lab-variables: HTTP {r.status_code} {r.text}"
+    return r.json()
+
+
+def csv_de_analises(nome: str, analises: list[tuple[datetime, float]]) -> bytes:
+    """`"nome";"data/hora";"valor"` com ISO-8601 e fuso explícito (o `tz` da rota nem é usado)."""
+    linhas = (f"{nome};{quando.isoformat()};{valor}" for quando, valor in analises)
+    return "\n".join(linhas).encode()
+
+
+def importar_csv_lab(admin: httpx.Client, corpo: bytes, *, timeout: float = 20.0) -> httpx.Response:
+    return admin.post(
+        f"{LAB}/lab-samples/import",
+        params={"tz": "UTC"},
+        content=corpo,
+        headers={"Content-Type": "text/csv"},
+        timeout=timeout,
+    )
+
+
+def job_ml(admin: httpx.Client, job_id: int) -> dict[str, Any]:
+    r = admin.get(f"{LAB}/jobs/{job_id}")
+    assert r.status_code == 200, f"GET jobs/{job_id}: HTTP {r.status_code} {r.text}"
+    return r.json()
+
+
+def config_mpc_minimo(*, fail_action: str = "no_action") -> dict[str, Any]:
+    """1 MV direta (sem PID, sem readback — sempre RCAS_OK), 1 CV self-reg (`fail_action` da CV
+    configurável), 1 DV. Toda porta de entrada precisa de aresta, senão o portão frio nunca abre."""
+    return {
+        "name": "MPC QE",
+        "multiplier": MULTIPLIER,
+        "variables": {
+            "mvs": [
+                {
+                    "id": "mv_1",
+                    "name": "MV direta",
+                    "eu": "%",
+                    "limits": dict(LIMITES_MV),
+                    "max_rate": 5.0,
+                    "initial_value": 0.0,
+                }
+            ],
+            "cvs": [
+                {
+                    "id": "cv_1",
+                    "name": "CV filtrada",
+                    "eu": "C",
+                    "kind": "selfreg",
+                    "tss": TSS_MALHA,
+                    "weight": 1.0,
+                    "sp_limits": dict(LIMITES_SP_CV),
+                    "fail_action": fail_action,
+                }
+            ],
+            "constraints": [],
+            "dvs": [
+                {
+                    "id": "dv_1",
+                    "name": "DV de carga",
+                    "eu": "m3/h",
+                }
+            ],
+        },
+        "models": {
+            "cv_1": {
+                "mv_1": {
+                    "enabled": True,
+                    "params": {"K": GANHO_CV, "tau1": TAU1_CV, "tau2": TAU2_CV, "theta": 0.0},
+                },
+                "dv_1": {
+                    "enabled": True,
+                    "params": {"K": 0.5, "tau1": 5.0, "tau2": 0.0, "theta": 0.0},
+                },
+            }
+        },
+    }
