@@ -152,7 +152,7 @@ async def test_laco_encerra_o_job_mesmo_quando_o_finish_de_fallback_tambem_falha
     monkeypatch.setattr(main, "run_job", banco_fora)
     monkeypatch.setattr(main, "finish", banco_fora)
     monkeypatch.setattr(main, "JOB_POLL_INTERVAL_S", 0.05)
-    task = asyncio.create_task(main._job_loop(session_factory, FastAPI(), "x"))
+    task = asyncio.create_task(main._job_loop(session_factory, FastAPI(), "x", tune=False))
     try:
         for _ in range(100):  # até 5 s: o laço fecha a linha no segundo ciclo
             if (await _job(session_factory, job_id)).status == "failed":
@@ -175,17 +175,17 @@ async def test_claim_que_comita_mas_perde_a_conexao_na_volta_re_arma_a_varredura
     job_id = await make_job()
     chamadas = 0
 
-    async def claim_que_perde_a_volta(factory):
+    async def claim_que_perde_a_volta(factory, *, tune):
         nonlocal chamadas
         chamadas += 1
         if chamadas == 1:
-            await claim_next(factory)  # comita o `running`
+            await claim_next(factory, tune=tune)  # comita o `running`
             raise ConnectionError("conexão perdida na volta")
         return None
 
     monkeypatch.setattr(main, "claim_next", claim_que_perde_a_volta)
     monkeypatch.setattr(main, "JOB_POLL_INTERVAL_S", 0.05)
-    task = asyncio.create_task(main._job_loop(session_factory, FastAPI(), "x"))
+    task = asyncio.create_task(main._job_loop(session_factory, FastAPI(), "x", tune=False))
     try:
         for _ in range(100):
             if (await _job(session_factory, job_id)).status == "failed":
