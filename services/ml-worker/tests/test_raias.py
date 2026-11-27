@@ -200,7 +200,6 @@ async def test_cancelar_um_job_em_cada_raia(
         tune_id, train_id = await make_job("tune"), await make_job("train")
         await _espera(session_factory, tune_id, "running")
         await _espera(session_factory, train_id, "running")
-        await asyncio.sleep(1.0)  # os filhos já nasceram e as raias publicaram o id no estado
         assert (raias.app.state.tune_running_id, raias.app.state.running_id) == (
             tune_id,
             train_id,
