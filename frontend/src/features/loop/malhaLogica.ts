@@ -71,6 +71,14 @@ export function motivoSemEstado(
   return "Aguardando estado ao vivo da malha…";
 }
 
+/** Valor da escrita de SP/OUT, ou `null` = não enviar. Vazio NÃO é zero (`Number("")` é 0 e
+ *  levaria a OUT a 0 %); vírgula decimal vale, como em `numeroDoCampo`. A faixa é da API. */
+export function valorParaEnvio(texto: string): number | null {
+  const limpo = texto.trim().replace(",", ".");
+  const valor = limpo === "" ? NaN : Number(limpo);
+  return Number.isFinite(valor) ? valor : null;
+}
+
 /** Posição na faixa do bloco, 0…100. Faixa degenerada ou valor ausente/NaN ⇒ 0, nunca NaN. */
 export function percentualBarra(valor: number | null, minimo: number, maximo: number): number {
   if (valor === null || !(maximo > minimo)) return 0;

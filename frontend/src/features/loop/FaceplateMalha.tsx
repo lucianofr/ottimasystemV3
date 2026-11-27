@@ -4,7 +4,7 @@ import { apiResposta, ApiError } from "../../lib/api";
 import { Badge } from "../../components/ui/badge";
 import { cn } from "../../lib/cn";
 import { HeatmapSuperficie } from "./HeatmapSuperficie";
-import { MODOS_COMANDAVEIS, percentualBarra, podeComandar } from "./malhaLogica";
+import { MODOS_COMANDAVEIS, percentualBarra, podeComandar, valorParaEnvio } from "./malhaLogica";
 import type { LoopDetailOut, LoopState } from "./types";
 
 export function formatar(v: number | null): string {
@@ -43,11 +43,14 @@ function EscritaValor({ rotulo, habilitado, aoEnviar, minimo, maximo }: {
   maximo: number | undefined;
 }) {
   const [valor, setValor] = useState("");
+  const numero = valorParaEnvio(valor);
+  // Só dica: a faixa é validada pela API (o 422 aparece em `loop-erro-comando`).
+  const faixa =
+    minimo !== undefined && maximo !== undefined ? `Faixa ${formatar(minimo)} a ${formatar(maximo)}` : undefined;
 
   function enviar(evento: FormEvent<HTMLFormElement>): void {
     evento.preventDefault();
-    const numero = Number(valor);
-    if (!Number.isFinite(numero)) return;
+    if (numero === null) return;
     aoEnviar(numero);
     setValor("");
   }
@@ -55,11 +58,11 @@ function EscritaValor({ rotulo, habilitado, aoEnviar, minimo, maximo }: {
   return (
     <form onSubmit={enviar} className="flex items-end gap-2" data-testid={`loop-escrita-${rotulo}`}>
       <label className="text-xs text-fg-muted">{rotulo}</label>
+      {/* text + decimal, nunca number: o input number descarta a vírgula pt-BR (CamposComuns). */}
       <input
-        type="number"
-        step="any"
-        min={minimo}
-        max={maximo}
+        type="text"
+        inputMode="decimal"
+        title={faixa}
         disabled={!habilitado}
         value={valor}
         onChange={(e) => setValor(e.target.value)}
@@ -67,7 +70,7 @@ function EscritaValor({ rotulo, habilitado, aoEnviar, minimo, maximo }: {
       />
       <button
         type="submit"
-        disabled={!habilitado}
+        disabled={!habilitado || numero === null}
         className="rounded-sm border border-border px-2 py-1 text-xs disabled:opacity-50"
       >
         Enviar

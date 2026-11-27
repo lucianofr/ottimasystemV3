@@ -18,6 +18,7 @@ import {
   percentualBarra,
   resolverSelecao,
   historicoComLacunas,
+  valorParaEnvio,
   varsMalha,
   type CondicaoMalha,
 } from "./malhaLogica";
@@ -141,4 +142,16 @@ test("legenda: última amostra nula dá valor null e não SEM DADO", () => {
     ["pv"],
   );
   expect(resumo).toEqual([{ varId: "pv", valor: null, semDado: false }]);
+});
+
+// Campo vazio NÃO é zero: `Number("")` daria 0 e um Enter no vazio (ou o 2º clique, depois de o
+// campo ser limpo) levaria a OUT a 0 % em MAN ou o SP a 0 em AUTO.
+test("escrita: vazio ou texto inválido não envia; vírgula decimal vale; 0 e negativo enviam", () => {
+  expect(valorParaEnvio("")).toBeNull();
+  expect(valorParaEnvio("   ")).toBeNull();
+  expect(valorParaEnvio("abc")).toBeNull();
+  expect(valorParaEnvio("12,5")).toBe(12.5);
+  expect(valorParaEnvio(" 12.5 ")).toBe(12.5);
+  expect(valorParaEnvio("0")).toBe(0);
+  expect(valorParaEnvio("-3")).toBe(-3);
 });
