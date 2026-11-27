@@ -1108,7 +1108,7 @@ function lerY0(bruto: unknown): [number, number] {
   return [numero(valores[0], Y0_PADRAO), numero(valores[1], Y0_PADRAO)];
 }
 
-const SHED_OPTS = ["shed_to_auto", "shed_to_man", "shed_to_normal"] as const;
+export const SHED_OPTS = ["shed_to_auto", "shed_to_man", "shed_to_normal"] as const;
 
 /** Casca comum dos blocos malha (`LoopBaseConfig`, 27 campos). Valor ausente ou de tipo errado
  *  cai no default do SERVIDOR — nunca no de bloco novo (`PADRAO_*`), que diverge em campos como

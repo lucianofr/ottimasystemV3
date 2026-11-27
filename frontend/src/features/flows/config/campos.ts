@@ -1,6 +1,7 @@
 import type { KeyboardEvent } from "react";
 
 import {
+  SHED_OPTS,
   type DadosPid,
   type DadosPidLoop,
   type DadosShellMalha,
@@ -210,8 +211,7 @@ export function montarDadosShellMalha<T extends DadosShellMalha>(
     ],
     normal: typeof normal === "string" ? normal : atual.normal,
     ...(tipo === "pid_loop" && {
-      // O select só oferece literais do contrato; valor fora dele o servidor recusa com 422.
-      shed_opt: typeof shedOpt === "string" ? (shedOpt as DadosShellMalha["shed_opt"]) : atual.shed_opt,
+      shed_opt: SHED_OPTS.find((opcao) => opcao === shedOpt) ?? atual.shed_opt,
       shed_no_return: marcado("shed_no_return"),
       track_enable: marcado("track_enable"),
       track_in_manual: marcado("track_in_manual"),

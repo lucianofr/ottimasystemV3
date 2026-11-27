@@ -195,6 +195,11 @@ test("ação direta: ausente preserva o valor anterior, presente lê o literal d
   expect(montarDadosPidLoop(direta, formulario({ direct_acting: "false" })).direct_acting).toBe(false);
 });
 
+test("shed_opt desconhecido no formulário preserva o valor anterior", () => {
+  const atual = { ...ATUAL, shed_opt: "shed_to_man" as const };
+  expect(montarDadosPidLoop(atual, formulario({ shed_opt: "inexistente" })).shed_opt).toBe("shed_to_man");
+});
+
 test("rampa: vírgula vira número, vazio vira null, texto ilegível mantém o valor anterior", () => {
   expect(montarDadosPidLoop(ATUAL, formulario({ sp_rate_up: "1,5" })).sp_rate_up).toBe(1.5);
   expect(montarDadosPidLoop(ATUAL, formulario({ sp_rate_up: "" })).sp_rate_up).toBeNull();
