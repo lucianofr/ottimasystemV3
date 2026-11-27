@@ -76,7 +76,7 @@ frontend (React+Vite) ⇄ api (FastAPI: REST + WebSocket)
 | **recorder** | Assina o barramento e grava amostras na hypertable | 003 |
 | **redis / db** | Barramento fire-and-forget / persistência única (cadastros + hypertables) | 002, 003 |
 | **calc-worker** | Executa tags calculadas (script Python do usuário sobre outras tags como entrada), uma task asyncio + processo `ScriptPool` por tag; publica em `calc.values` | 033 |
-| **ml-worker** | Treino de sensor virtual: consome a fila `ml_jobs` (tabela Postgres), um job por vez em processo filho (`dataset_build`, `train`, `tune` com Optuna); grava o modelo como artefato numérico (`.npz` + JSON, sem pickle). Não usa o barramento; porta de health 8005 | 046 |
+| **ml-worker** | Treino de sensor virtual: consome a fila `ml_jobs` (tabela Postgres) em duas raias — otimização (`tune` com Optuna) e geral (`dataset_build`, `train`) —, cada uma um job por vez em processo filho próprio; grava o modelo como artefato numérico (`.npz` + JSON, sem pickle). Não usa o barramento; porta de health 8005 | 046 |
 
 Loops vivos rodam em asyncio; `mpc.make_step()` e `exec()` de scripts sempre via executor, nunca no event loop (ADR-004). Sem Celery.
 
