@@ -14,3 +14,4 @@ export type LoopDetailOut = components["schemas"]["LoopDetailOut"];
 export type LoopTuningOut = components["schemas"]["LoopTuningOut"];
 export type FuzzyLoopTuningOut = components["schemas"]["FuzzyLoopTuningOut"];
 export type LoopSurfaceOut = components["schemas"]["LoopSurfaceOut"];
+export type LoopHistoryResponse = components["schemas"]["LoopHistoryResponse"];
