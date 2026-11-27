@@ -280,7 +280,7 @@ O caminho de escrita é o hot-swap em classe de sintonia (ADR-039 D11): engenhar
 Reutiliza integralmente `SPEC_FUZZY_with_SHELL.md` §8. Diferenças:
 
 - Config: `PidLoopConfig` em `parse.py`; sem LUT e sem tabela de superfície.
-- Faceplate: no lugar do heatmap, aba de sintonia — `KC`, `TI`, `TD`, `BETA`, `GAMMA`, `GAP_*` vigentes (somente leitura; edição é engenharia, no editor de flow).
+- Faceplate: no lugar do heatmap, aba de sintonia — `KC`, `TI`, `TD`, `BETA`, `GAMMA`, `GAP_*` vigentes (somente leitura; edição é engenharia, no editor de flow). Config completa no editor e tela MALHA: ver `SPEC_MALHA_CONFIG_E_OPERACAO.md` (RF-641…646).
 - Histórico de sintonia: log de eventos (diff de config, ADR-020) — sem endpoint dedicado.
 
 ---

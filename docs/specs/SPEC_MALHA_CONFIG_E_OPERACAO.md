@@ -1,6 +1,6 @@
 # SPEC — Blocos malha: config completa no editor e tela MALHA
 
-**Data:** 2026-11-27 · **Status:** desenho aprovado, aguardando plano de implementação
+**Data:** 2026-11-27 · **Status:** implementada (plano `docs/superpowers/plans/2026-11-27-malha-config-e-operacao.md`)
 **Baseline:** `main` @ `e061827`
 **Depende de:** ADR-039 (shell de bloco), ADR-045 (fuzzy_loop multicanal), ADR-034 (espelho de
 contrato), ADR-005 (frontend não executa lógica de flow)
