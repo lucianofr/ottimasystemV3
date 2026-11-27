@@ -80,7 +80,7 @@ uso em `blocks/shell/block.py`). Falta só a superfície.
 
 | | Abordagem | Trade-off |
 |---|---|---|
-| **Escolhida** | `DadosPidLoop`/`DadosFuzzyLoop` passam a cobrir **todas** as chaves do contrato gerado (`PidLoopConfig`/`FuzzyLoopConfig` de `contracts.gen.ts`, forma gerada); os defaults do servidor são **espelhados à mão** em `registro.ts` e travados por teste nos dois lados | Tipado; é o que o ADR-034 prescreve para leitor de `graph_json`. Custo: quem mudar um default no Pydantic precisa atualizar o espelho — o teste Python fica vermelho e aponta o arquivo |
+| **Escolhida** | `DadosPidLoop`/`DadosFuzzyLoop` passam a cobrir **todas** as chaves do contrato gerado (`PidLoopConfig`/`FuzzyLoopConfig` de `contracts.gen.ts`, forma gerada); os defaults do servidor são **espelhados à mão** em `registro.ts` e travados por um teste Python | Tipado; é o que o ADR-034 prescreve para leitor de `graph_json`. Custo: quem mudar um default no Pydantic precisa atualizar o espelho — o teste Python fica vermelho e aponta o arquivo |
 | Descartada | Gerar a tabela de defaults em `contracts_export.py` | Sem cópia manual, mas o **ADR-034 proíbe** ("Não se gera tabela de defaults"; adendo de 2026-11-27: "default de config de bloco espelhado à mão") — exigiria emenda de ADR |
 | Descartada | Normalizador repassa campos desconhecidos sem tipar (`...dados`) | Corrige a perda (D2) mas não dá formulário e foge do padrão tipado de `graph.ts` |
 
@@ -114,14 +114,16 @@ uso em `blocks/shell/block.py`). Falta só a superfície.
 - `DEFAULT_SERVIDOR_FUZZY_LOOP` — idem para `FuzzyLoopConfig` (menos `sp_hi_lim`, `sp_lo_lim`,
   `ke`, `ku`, e menos `fll`, que já vem de `PORT_CONTRACTS.fuzzy_loop.default_fll`).
 
-Trava do espelho (ADR-034, "teste próprio"), nos dois lados:
+Trava do espelho (ADR-034, "teste próprio"):
 
-- **Python** (`packages/ottima-core/tests/`): teste que compara os defaults de
-  `PidLoopConfig`/`FuzzyLoopConfig` (via `model_fields`) com uma tabela literal e, na mensagem
-  de falha, manda atualizar `frontend/src/features/flows/registro.ts`. Mudou default no
-  servidor ⇒ vermelho.
-- **TS** (`graph.check.ts`): grafo de bloco malha só com os campos obrigatórios normaliza para
-  a mesma tabela.
+- **Python** (`packages/ottima-core/tests/`) — **é a trava de deriva**: compara os defaults de
+  `PidLoopConfig`/`FuzzyLoopConfig` (via `model_fields`) com uma tabela literal e, na
+  mensagem de falha, manda atualizar `frontend/src/features/flows/registro.ts`. Mudou default
+  no servidor ⇒ vermelho. Roda no gate manual `uv run pytest` — **não** no CI (ADR-035), que
+  não executa pytest.
+- **TS** — não detecta deriva (compara literal com literal); garante duas outras coisas: a
+  anotação `Omit<PidLoopConfig, …>` faz o `tsc` acusar campo novo esquecido no espelho, e o
+  check de `graph.check.ts` prova que grafo só com os obrigatórios normaliza para a tabela.
 
 Nada é gerado: `contracts_export.py` e `generate-contracts.mjs` não mudam.
 
@@ -241,14 +243,30 @@ MALHA   [ Flow A · PID_MALHA            ▾ ]
   combobox sempre visível com `value` = malha selecionada; sem seleção válida na URL, um
   efeito seleciona a primeira malha com `replace: true`. Estados vazio/erro/carregando
   mantidos.
-- **Ao vivo ⇔** canal `/ws` aberto (`canal.estado === "aberto"`) **e** `flow_status` do flow
-  em `running` **e** existe `LoopState` do bloco — predicado puro, testado. A página passa a
-  assinar `flow_status: [flowId]` além de `loop_state` (padrão de `OperatePage.tsx:54`); o
-  tipo `EstadoConexaoCanal` de `CanalAoVivo.tsx:80` passa a ser exportado (só o tipo).
-  Fora disso: botoeira e escritas desabilitadas, barras e badges sem valor ("—") e aviso
-  `data-testid="loop-sem-estado"` — "Flow parado — sem estado ao vivo" ou, com o canal
-  fora, o rótulo de conexão que a casa já usa. O `LoopState` retido em memória (flow que
-  parou, socket que caiu) **nunca** é exibido como valor atual.
+- **Ao vivo** é um predicado puro, testado, com **quatro** termos — todos necessários, porque
+  o `/ws` não tem replay e o provider retém o último quadro para sempre:
+  1. canal aberto (`canal.estado === "aberto"`);
+  2. último `flow_status` do flow em `running`;
+  3. existe `LoopState` do bloco;
+  4. esse `LoopState` é **novo**: o `ts` dele difere do `ts` que estava retido quando a
+     página montou ou quando o canal reabriu pela última vez. Sem isto, voltar à tela depois
+     de o flow parar (a página desmontada não assina `flow_status` e perde o quadro de
+     parada) ou reconectar depois de uma queda mostraria o quadro antigo como atual.
+  A página passa a assinar `flow_status: [flowId]` além de `loop_state`; o tipo
+  `EstadoConexaoCanal` de `CanalAoVivo.tsx:80` passa a ser exportado (só o tipo).
+  O `desired_state` REST do flow (`useFlow(flowId)`, a fonte que o editor usa em
+  `rotuloDeEspera`, `useFlowStatus.ts:55`) **não** entra no predicado — é cache de
+  requisição e pode estar velho; serve só para escolher o texto do aviso.
+- **Fora do ao vivo:** botoeira e escritas desabilitadas, barras e badges sem valor ("—") e
+  aviso `data-testid="loop-sem-estado"`: com o canal fora, o rótulo de conexão que a casa já
+  usa; flow comandado a parar ou com `flow_status` `stopped` ⇒ "Flow parado — sem estado ao
+  vivo"; `failed` ⇒ "Flow em falha — sem estado ao vivo"; nos demais casos (rodando, quadro
+  novo ainda não chegou) ⇒ "Aguardando estado ao vivo da malha…". Num flow lento a espera
+  dura até um Ts — é o preço de não mostrar número velho.
+- **Limite conhecido:** se o processo `flow-runtime` morrer sem publicar parada, com a página
+  aberta e o canal vivo, o último quadro continua valendo como atual — nenhum dos quatro
+  termos enxerga isso. É o mesmo limite de toda tela de operação hoje; fechá-lo exige
+  expiração por tempo e pertence ao plano advisor/013, para as três telas de uma vez.
 - **Relação com o plano 013** (`docs/reports/advisor/013`, TODO): isto entrega, para a tela
   MALHA, o que o Passo 3 do 013 pede. O 013 continua dono do MPC e do FUZZY; ao executá-lo, a
   checagem de drift dele vai acusar `features/loop` — a parte de malha já estará feita.
@@ -288,7 +306,7 @@ Lógica pura em `*.check.ts` (`npm run test:unit`), TDD:
 | `montarDadosPidLoop` / `montarDadosShellMalha` | caixa desmarcada ⇒ `false`; rampa em branco ⇒ `null`; `permitted` a partir das caixas; recorte fuzzy não toca shed/tracking/FF |
 | Modos remotos × arestas | CAS desabilitado sem aresta em `cas_in`; habilitado com; modo já marcado não é desmarcado |
 | Seleção da MALHA | resolução de `?flow=&bloco=`; fallback na primeira malha; chave inexistente |
-| Escalas e "ao vivo" | percentual da barra com limites ≠ 0–100; flow parado ⇒ não ao vivo mesmo com `LoopState` retido; canal `reconectando` ⇒ não ao vivo |
+| Escalas e "ao vivo" | percentual da barra com limites ≠ 0–100; cada um dos quatro termos derruba o ao vivo sozinho (canal fora, `flow_status` parado, sem estado, quadro retido de antes da montagem/reconexão); texto do aviso por causa |
 | Histórico da malha | ids por canal; mescla histórico + ponta viva |
 
 Python (`ottima-core`): o teste de trava do espelho de defaults (§5.1).

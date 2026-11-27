@@ -23,6 +23,21 @@
 - **Worktree:** uma worktree para esta entrega, branch `feat/malha-config-operacao` criada a partir de `docs/pid-malha-config` (onde estão a spec, o PRD 3.5 e este plano). Subagente em worktree usa **caminho absoluto** em todo read/write/edit, `cwd` explícito em todo comando, confirma cada escrita por shell e termina com `git status --porcelain` do checkout principal vazio (CLAUDE.md, "Subagente em worktree").
 - Rodar um check isolado: `cd frontend && npx playwright test -c playwright.unit.config.ts <caminho do .check.ts>`.
 
+## Contratos do PRD §7 usados (verbatim — nenhum é alterado)
+
+Canal (§7.1), entregue pelo `/ws` na chave `loop_state`, uma mensagem por canal de controle:
+
+| Canal | Produtor | Consumidores | Payload (JSON) |
+|---|---|---|---|
+| `loop.state.<flow_id>.<block_id>` | flow-runtime | api(WS), recorder | {ts, target, actual, permitted[], pv, pv_ok, sp, out, u_pct, man_out, hi_limited, lo_limited, diag{}, channel} |
+
+Rotas (§7.3, todas `require_operator`):
+
+- `GET /api/operate/loop` → `LoopNodeOut[]` `{flow_id, flow_name, block_id, label, type, n_loops}`
+- `GET /api/operate/loop/{flow_id}/{block_id}` → `LoopDetailOut` `{flow_id, flow_name, block_id, label, type, permitted[], sp_lo_lim, sp_hi_lim, out_lo_lim, out_hi_lim, out_scale_lo, out_scale_hi, n_loops, tuning}`; `tuning` é `{kc, ti_seconds, td_seconds, n, beta, gamma, gap_band, gap_gain, direct_acting}` (PID) ou `{ke, kde, ku, tf_de, direct_acting}` (fuzzy)
+- `POST /api/operate/{flow_id}/{block_id}/mode` `{target}` · `/sp` `{value, channel}` · `/out` `{value, channel}` → 202 (comandado ≠ confirmado)
+- `GET /api/history/loop?flow_id=&block_id=&var_ids=&start=&end=` → `{mode: "raw"|"1m", start, end, series[{var_id, t[], v[], v_min?, v_max?}]}`; `var_ids` ∈ `pv|sp|out|mode` com sufixo `:<canal>` para canal ≥ 1; `v` pode ser `null`
+
 ## Review Focus
 
 Condições que a spec implica e que mordem quem usa; cada uma tem teste na tarefa dona do código.
@@ -485,8 +500,9 @@ git commit -m "feat(flows): modal do PID Malha com todos os parâmetros e campos
 - Produces:
   - `export type EstadoCanal = "conectando" | "aberto" | "reconectando" | "sessao_invalida";` (a Tarefa 6 troca por `import type { EstadoConexaoCanal }` de `CanalAoVivo`)
   - `export function resolverSelecao(loops: readonly LoopNodeOut[], flow: string | null, bloco: string | null): LoopNodeOut | null` — a malha que casa com a URL; sem casar, a primeira; lista vazia ⇒ `null`.
-  - `export function malhaAoVivo(canal: EstadoCanal, estadoFlow: string | undefined, estado: LoopState | undefined): boolean` — `canal === "aberto" && estadoFlow === "running" && estado !== undefined`.
-  - `export function motivoSemEstado(canal: EstadoCanal): string` — texto do aviso quando não está ao vivo.
+  - `export interface CondicaoMalha { readonly canal: EstadoCanal; readonly estadoFlow: string | undefined; readonly estado: LoopState | undefined; readonly tsBase: string | undefined }` — `tsBase` é o `ts` do `LoopState` que estava retido quando a página montou ou o canal reabriu (`undefined` se não havia).
+  - `export function malhaAoVivo(c: CondicaoMalha): boolean` — os quatro termos da spec §6.
+  - `export function motivoSemEstado(canal: EstadoCanal, estadoFlow: string | undefined, desejado: "running" | "stopped" | undefined): string` — texto do aviso quando não está ao vivo; `desejado` é o `desired_state` REST do flow e **só** escolhe o texto (pode estar velho; por isso fica fora do predicado).
   - `export function percentualBarra(valor: number | null, minimo: number, maximo: number): number` — 0…100.
   - `export interface VarMalha { readonly id: string; readonly rotulo: string }`
   - `export function varsMalha(nLoops: number): VarMalha[]` — ids da API, canal 0 sem sufixo.
@@ -513,19 +529,31 @@ test("seleção: casa com a URL; sem casar cai na primeira; lista vazia é null"
   expect(resolverSelecao([], "1", "a")).toBeNull();
 });
 
-test("ao vivo exige canal aberto, flow rodando e estado presente", () => {
-  expect(malhaAoVivo("aberto", "running", ESTADO)).toBe(true);
-  expect(malhaAoVivo("aberto", "stopped", ESTADO)).toBe(false);     // estado retido de flow parado
-  expect(malhaAoVivo("reconectando", "running", ESTADO)).toBe(false); // socket caiu
-  expect(malhaAoVivo("aberto", undefined, ESTADO)).toBe(false);
-  expect(malhaAoVivo("aberto", "running", undefined)).toBe(false);
+const VIVO: CondicaoMalha = { canal: "aberto", estadoFlow: "running", estado: ESTADO, tsBase: undefined };
+
+test("ao vivo: cada um dos quatro termos derruba sozinho", () => {
+  expect(malhaAoVivo(VIVO)).toBe(true);
+  expect(malhaAoVivo({ ...VIVO, canal: "reconectando" })).toBe(false); // socket caiu
+  expect(malhaAoVivo({ ...VIVO, estadoFlow: "stopped" })).toBe(false);
+  expect(malhaAoVivo({ ...VIVO, estadoFlow: undefined })).toBe(false);
+  expect(malhaAoVivo({ ...VIVO, estado: undefined })).toBe(false);
 });
 
-test("aviso de sem-estado: flow parado com o canal aberto; rótulo da casa com o canal fora", () => {
-  expect(motivoSemEstado("aberto")).toBe("Flow parado — sem estado ao vivo");
-  expect(motivoSemEstado("reconectando")).toBe(ROTULO_CONEXAO.reconectando);
-  expect(motivoSemEstado("conectando")).toBe(ROTULO_CONEXAO.conectando);
-  expect(motivoSemEstado("sessao_invalida")).toBe("Sessão expirada — entre novamente");
+test("quadro retido de antes da montagem ou da reconexão não é ao vivo; o seguinte é", () => {
+  expect(malhaAoVivo({ ...VIVO, tsBase: ESTADO.ts })).toBe(false);
+  const novo = { ...ESTADO, ts: "2026-11-27T12:00:01Z" };
+  expect(malhaAoVivo({ ...VIVO, estado: novo, tsBase: ESTADO.ts })).toBe(true);
+});
+
+test("aviso de sem-estado diz a causa: canal, flow parado, falha ou espera do primeiro quadro", () => {
+  expect(motivoSemEstado("reconectando", "running", "running")).toBe(ROTULO_CONEXAO.reconectando);
+  expect(motivoSemEstado("conectando", "running", "running")).toBe(ROTULO_CONEXAO.conectando);
+  expect(motivoSemEstado("sessao_invalida", "running", "running")).toBe("Sessão expirada — entre novamente");
+  expect(motivoSemEstado("aberto", "running", "stopped")).toBe("Flow parado — sem estado ao vivo");
+  expect(motivoSemEstado("aberto", "stopped", "running")).toBe("Flow parado — sem estado ao vivo");
+  expect(motivoSemEstado("aberto", "failed", "running")).toBe("Flow em falha — sem estado ao vivo");
+  expect(motivoSemEstado("aberto", "running", "running")).toBe("Aguardando estado ao vivo da malha…");
+  expect(motivoSemEstado("aberto", undefined, undefined)).toBe("Aguardando estado ao vivo da malha…");
 });
 
 test("barra usa a faixa do bloco, não 0–100", () => {
@@ -588,7 +616,7 @@ Expected: FAIL — módulo inexistente.
 - [ ] **Step 3: Implementar `malhaLogica.ts`**
 
 Funções puras, sem React. Notas que os testes não determinam sozinhos:
-- `ROTULO_CONEXAO` vem de `../flows/useFlowStatus` (`:46`) — reusar os textos, não reescrever. Ele é chaveado por `"aberta"` (feminino), e o canal usa `"aberto"`: por isso `motivoSemEstado` mapeia caso a caso em vez de indexar direto.
+- `ROTULO_CONEXAO` vem de `../flows/useFlowStatus` (`:46`) — reusar os textos, não reescrever. Ele é chaveado por `"aberta"` (feminino), e o canal usa `"aberto"`: por isso `motivoSemEstado` mapeia caso a caso em vez de indexar direto. Ordem de precedência do aviso: canal fora → falha (`estadoFlow === "failed"`) → flow parado (`desejado` ou `estadoFlow` em `stopped`) → espera.
 - `varsMalha`: canal `i` (0-based) tem sufixo `""` se `i === 0`, senão `":" + i`; rótulo sem canal quando `nLoops === 1`, senão `"<VAR> · canal <i+1>"`.
 - `leiturasVivasMalha`: indexa pelo `channel` do próprio `LoopState` (não pela posição no array).
 - `semNulos` descarta `v_min`/`v_max` (o gráfico não os usa) e devolve objeto atribuível a `FuzzyHistoryResponse`, o que permite reusar `montarMatrizFuzzy`/`resumirSeriesFuzzy`/`mesclarHistoricoFuzzyVivo` de `../fuzzy/historicoFuzzy` na Tarefa 7 sem duplicá-los.
@@ -637,13 +665,15 @@ Expected: verde. Se exportar o tipo criar ciclo de import que quebre o build, PA
 - Efeito: quando `loops.isSuccess`, há malhas e a URL não aponta exatamente para `selecionada`, `setSearchParams({ flow, bloco }, { replace: true })`.
 - Cabeçalho sempre visível: título "Malha" + `<Select data-testid="loop-combobox" aria-label="Malha" value={chave da selecionada} onChange={… setSearchParams({ flow, bloco })}>` com uma `<option>` por malha (`rotuloLoop`). O ramo `loop-selecao` e a `<option value="">Escolha a malha…` desaparecem.
 - Estados carregando/erro/vazio mantidos como hoje.
-- Corpo, com `key={chave}` na malha selecionada: `useAssinatura({ loop_state: [chave], flow_status: [flowId] })`, `useLoopConfig`, `estados` por canal (como hoje, `canal.loopStates.get("<flow>/<bloco>:<i>")`), `aoVivo = malhaAoVivo(canal.estado, canal.flowStatus.get(flowId)?.state, primeiro estado definido)`. O array `estados` é montado com `useMemo` sobre `canal.loopStates` — ele é dependência da ponta viva da tendência (Tarefa 7) e não pode ser recriado a cada render.
+- Corpo, com `key={chave}` na malha selecionada: `useAssinatura({ loop_state: [chave], flow_status: [flowId] })`, `useLoopConfig`, `useFlow(flowId)` (de `../flows/useFlows`, para `desired_state`) e `estados` por canal (como hoje, `canal.loopStates.get("<flow>/<bloco>:<i>")`).
+- `tsBase`: um `useRef<string | undefined>` que guarda o `ts` do primeiro estado definido **no momento** em que o corpo monta e, por um efeito dependente de `canal.estado`, de novo a cada vez que o canal passa a `"aberto"`. É só captura — a decisão é de `malhaAoVivo`.
+- `const estadoFlow = canal.flowStatus.get(flowId)?.state`; `aoVivo = malhaAoVivo({ canal: canal.estado, estadoFlow, estado: primeiro estado definido, tsBase })`; `motivo = motivoSemEstado(canal.estado, estadoFlow, flow.data?.desired_state)`. O array `estados` é montado com `useMemo` sobre `canal.loopStates` — ele é dependência da ponta viva da tendência (Tarefa 7) e não pode ser recriado a cada render.
 - Layout: `FaceplateMalha` em cima; abaixo, lado a lado, `SintoniaVigente` (quando `config.data` existe) e o espaço da tendência (Tarefa 7).
 
 - [ ] **Step 3: `FaceplateMalha.tsx` (defeitos D5, D6)**
 
 Recebe o JSX do atual `LoopResolvido` (badges, botoeira, seções por canal com `Barra`/`EscritaValor`, heatmap, erro de comando), com estas mudanças:
-- `!aoVivo`: aviso `<p data-testid="loop-sem-estado">{motivoSemEstado}</p>`; badges ALVO/REAL e valores das barras mostram "—"; botoeira e `EscritaValor` com `disabled`. Nenhum valor de `estados` é renderizado. O texto vem da página: `motivoSemEstado(canal.estado)` (Tarefa 5).
+- `!aoVivo`: aviso `<p data-testid="loop-sem-estado">{motivoSemEstado}</p>`; badges ALVO/REAL e valores das barras mostram "—"; botoeira e `EscritaValor` com `disabled`. Nenhum valor de `estados` é renderizado. O texto vem da página (`motivoSemEstado`, Tarefa 5).
 - Com `!aoVivo` e sem nenhum estado, desenha uma seção de canal por `config.n_loops` (ou 1) com barras vazias — a tela não fica em branco. O ramo `loop-aguardando` desaparece.
 - `Barra` passa a calcular a largura com `percentualBarra`; PV e SP com `config.sp_lo_lim`/`sp_hi_lim`, OUT com `config.out_scale_lo`/`out_scale_hi` (fallback 0/100 enquanto `config` carrega).
 - `EscritaValor` de SP: `min/max` = limites de SP; de OUT (%): `min/max` = `config.out_lo_lim`/`out_hi_lim`.
