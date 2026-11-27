@@ -1,5 +1,6 @@
 """Otimização de hiperparâmetros com Optuna (RF-588, SPEC_SENSOR_VIRTUAL §8.2): cada tentativa é
-validada em dobras em ordem de tempo sobre os 80% iniciais, e o R² sai do `predict` compartilhado
+validada em dobras em ordem de tempo sobre as análises anteriores ao corte do teste final (o mesmo
+do `train`), e o R² sai do `predict` compartilhado
 aplicado ao artefato exportado, nunca do `predict` da biblioteca de treino."""
 
 import logging
@@ -22,15 +23,11 @@ from ottima_core.softsensor import (
     window_of,
 )
 
-from .data import MIN_TRAIN_ROWS, TrainData, TrainingError, chrono_split, metrics, select_rows
+from .data import FOLDS, MIN_VALIDATION_ROWS, TrainData, TrainingError, metrics, split_rows
 from .train import fit
 
 MIN_TRIALS, MAX_TRIALS = 10, 500
 INVALID = -1e9  # valor finito de uma tentativa inutilizável: ela conta e o estudo segue
-FOLDS = 3
-MIN_VALIDATION_ROWS = (
-    2  # com uma só o R² não existe; mais que isso reprovaria conjuntos de 20 linhas
-)
 NO_VALID_TRIAL = "Nenhuma tentativa produziu um modelo válido; reveja o conjunto ou reduza a janela"
 
 logger = logging.getLogger(__name__)
@@ -51,7 +48,7 @@ def _suggest(trial: optuna.Trial, name: str, spec: dict):
 def _space(method: str, data: TrainData) -> dict[str, dict]:
     space = SEARCH_SPACE[method]
     if method == "pls":  # o ajuste não passa de `min(entradas, linhas - 1)` componentes
-        n_fit = chrono_split(len(select_rows(data, 1)[1]))[0].stop
+        n_fit = split_rows(data, 1)[2]
         spec = space["n_components"]
         cap = max(1, min(data.x.shape[2], n_fit - 1, spec["high"]))
         space = {**space, "n_components": {**spec, "high": cap}}
@@ -91,7 +88,8 @@ def tune(
     """Melhores hiperparâmetros de `method` como instância do schema do método. `on_trial` recebe
     `{"number", "r2", "state", "params"}` ao fim de cada tentativa (`r2` é `None` se podada).
 
-    Levanta `TrainingError` se nenhuma tentativa produziu um modelo válido."""
+    Levanta `TrainingError` se nenhuma tentativa produziu um modelo válido ou, no PLS (janela fixa
+    em 1 passo), se `split_rows` recusa o conjunto: nenhuma tentativa poderia ser válida."""
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     space = _space(method, data)
     d = data.x.shape[2]
@@ -99,11 +97,11 @@ def tune(
     def objective(trial: optuna.Trial) -> float:
         hp = _with(base, {name: _suggest(trial, name, spec) for name, spec in space.items()})
         k = window_of(method, hp)
-        x, y = select_rows(data, k)
-        if len(y) < MIN_TRAIN_ROWS:  # o `train` final recusaria esta janela
+        try:
+            x, y, n_fit = split_rows(data, k)
+        except TrainingError:  # o `train` final recusaria esta janela
             return INVALID
-        fit_rows = chrono_split(len(y))[0]  # os 20% finais ficam para o teste do `train`
-        x, y = x[fit_rows], y[fit_rows]
+        x, y = x[:n_fit], y[:n_fit]  # o teste do `train` fica fora da validação
 
         def prune(epoch: int, loss: float) -> None:
             trial.report(-loss, epoch)

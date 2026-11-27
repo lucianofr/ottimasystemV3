@@ -483,11 +483,16 @@ cancel_requested bool, created_by, created_at, started_at, finished_at)`.
 
 ### 8.1 Como cada método treina (no ml-worker)
 
-Comum aos três: os conjuntos são ordenados por `ts`; os **últimos 20%** viram teste; as
-métricas exibidas (R², RMSE, MAE, em unidade de engenharia) são desse teste, com o modelo
-treinado nos 80% iniciais. O modelo que é gravado é **reajustado sobre 100%** com os mesmos
-hiperparâmetros. Mínimo de 20 análises emparelhadas para treinar **[chamada]**; abaixo disso o
-job falha com mensagem clara. A única normalização é a padronização (média e desvio) do treino.
+Comum aos três: os conjuntos são ordenados por `ts`; os **últimos 20%** viram teste. O corte é
+feito **uma única vez, no tempo, sobre as análises do conjunto e antes de aplicar a janela** do
+método: o corte é o mesmo qualquer que seja a janela (análises com o mesmo `ts` ficam do mesmo
+lado). As métricas exibidas (R², RMSE, MAE, em unidade de engenharia) são desse teste, com o
+modelo treinado só nas análises anteriores ao corte. O modelo que é gravado é **reajustado sobre
+100%** com os mesmos hiperparâmetros. Mínimo de 20 análises emparelhadas para treinar
+**[chamada]**; abaixo disso o job falha com mensagem clara, assim como quando a janela não deixa
+nenhuma linha utilizável no teste ou deixa menos de 8 antes do corte **[chamada]** (o mínimo para
+as 3 dobras do §8.2 validarem com 2 linhas cada). A única normalização é a padronização (média e
+desvio) do treino.
 
 - **PLS:** `sklearn.cross_decomposition.PLSRegression` sobre a última linha de cada janela.
   O exportador reduz o modelo a `w` e `b` em unidade de engenharia. (O bibmon do SensorPredict
@@ -511,7 +516,8 @@ LSTM `units = 64, layers = 2, epochs = 100, batch_size = 32, sequence_length = 1
 ### 8.2 Otimização (Optuna)
 
 Objetivo: maximizar o R² médio de uma validação em **3 blocos em ordem de tempo**
-(`TimeSeriesSplit(n_splits=3)`) sobre os 80% de treino. Nunca embaralha.
+(`TimeSeriesSplit(n_splits=3)`) sobre as análises anteriores ao corte do §8.1: a validação
+nunca enxerga análises do teste final, seja qual for a janela da tentativa. Nunca embaralha.
 
 Faixas de busca, copiadas do SensorPredict com uma exceção: `units` do ESN vai até 500, não
 1000, pelo custo por passo medido no §5.3. O mesmo teto vale para o treino manual.

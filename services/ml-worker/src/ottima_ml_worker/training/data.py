@@ -1,5 +1,5 @@
 """Dados de treino do sensor virtual (RF-587, SPEC_SENSOR_VIRTUAL §8.1): carga dos conjuntos,
-janela útil, divisão em ordem de tempo e métricas em unidade de engenharia."""
+janela útil, corte treino/teste no tempo e métricas em unidade de engenharia."""
 
 import math
 from collections.abc import Sequence
@@ -10,6 +10,15 @@ import numpy as np
 from ottima_core.softsensor import unpack_dataset
 
 MIN_TRAIN_ROWS = 20
+TEST_FRACTION = 0.2
+FOLDS = 3  # dobras da validação do `tune` (`TimeSeriesSplit`)
+MIN_VALIDATION_ROWS = (
+    2  # com uma só o R² não existe; mais que isso reprovaria conjuntos de 20 linhas
+)
+# Piso de linhas de ajuste (antes do corte). Sem ele o `TimeSeriesSplit` do `tune` levanta
+# ValueError em inglês (poucas linhas) ou valida com menos de `MIN_VALIDATION_ROWS`: ele dá
+# `n // (FOLDS + 1)` linhas a cada dobra de validação.
+MIN_FIT_ROWS = (FOLDS + 1) * MIN_VALIDATION_ROWS
 
 
 class TrainingError(ValueError):
@@ -32,17 +41,39 @@ def load_train_data(blobs: Sequence[bytes]) -> TrainData:
     return TrainData(x=x[order], y=y[order], ts=ts[order])
 
 
-def select_rows(data: TrainData, k: int) -> tuple[np.ndarray, np.ndarray]:
-    """Últimos `k` passos de cada análise, só das linhas sem lacuna nesses passos."""
+def split_rows(data: TrainData, k: int) -> tuple[np.ndarray, np.ndarray, int]:
+    """Últimos `k` passos de cada análise, só das linhas sem lacuna nesses passos, e o corte
+    treino/teste, feito UMA vez no tempo e antes da janela: as análises dos últimos 20% do conjunto
+    (ao menos 1) são teste, qualquer que seja `k`. Devolve `x`, `y` e `n_fit`: as `n_fit` primeiras
+    linhas são o ajuste (e a validação do Optuna), as demais o teste.
+
+    Análises com o mesmo `ts` (conjuntos sobrepostos) ficam do mesmo lado: o corte recua até o
+    início do empate. Levanta `TrainingError` se a janela deixa poucas linhas utilizáveis, nenhuma
+    no teste ou menos de `MIN_FIT_ROWS` no ajuste: `train` e `tune` recusam as mesmas janelas."""
     x = data.x[:, -k:, :]
     usable = np.isfinite(x).all(axis=(1, 2)) & np.isfinite(data.y)
-    return x[usable], data.y[usable]
-
-
-def chrono_split(n: int, test_fraction: float = 0.2) -> tuple[slice, slice]:
-    """Treino = primeiras linhas, teste = últimas (ao menos 1): nunca embaralha."""
-    n_test = max(1, math.ceil(test_fraction * n))
-    return slice(0, n - n_test), slice(n - n_test, n)
+    x, y = x[usable], data.y[usable]
+    window = "1 passo" if k == 1 else f"{k} passos"
+    if len(y) < MIN_TRAIN_ROWS:
+        raise TrainingError(
+            f"São necessárias ao menos {MIN_TRAIN_ROWS} análises utilizáveis "
+            f"para a janela de {window}; há {len(y)}"
+        )
+    n_all = len(data.ts)
+    cut_ts = data.ts[n_all - max(1, math.ceil(TEST_FRACTION * n_all))]
+    n_fit = int(np.count_nonzero(data.ts[usable] < cut_ts))
+    if n_fit == len(y):
+        raise TrainingError(
+            f"Nenhuma análise utilizável nos {TEST_FRACTION:.0%} finais do conjunto "
+            f"para a janela de {window}; revise as lacunas do conjunto"
+            f"{' ou reduza a janela' if k > 1 else ''}"
+        )
+    if n_fit < MIN_FIT_ROWS:
+        raise TrainingError(
+            f"São necessárias ao menos {MIN_FIT_ROWS} análises utilizáveis antes do corte dos "
+            f"{TEST_FRACTION:.0%} finais para a janela de {window}; há {n_fit}"
+        )
+    return x, y, n_fit
 
 
 def metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:

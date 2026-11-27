@@ -100,6 +100,82 @@ def test_validacao_e_em_ordem_de_tempo(monkeypatch):
         assert max(fold["val"]) < 48
 
 
+def _esn_com_duas_janelas(monkeypatch) -> None:
+    """ESN minúsculo cuja janela (`warmup`) é 5 ou 40 passos, para o conjunto utilizável mudar."""
+    monkeypatch.setitem(SEARCH_SPACE["esn"], "units", {"kind": "int", "low": 10, "high": 20})
+    monkeypatch.setitem(SEARCH_SPACE["esn"], "warmup", {"kind": "choice", "choices": [5, 40]})
+
+
+def test_validacao_nao_enxerga_o_teste_final_seja_qual_for_a_janela(monkeypatch):
+    """O índice da análise viaja na 1ª entrada; a lacuna na 2ª tira as análises 0..19 das janelas
+    de 10+ passos. O corte dos 20% finais (análises 40..49 de 50) é um só: com a janela de 40
+    passos, o corte refeito sobre as linhas utilizáveis deixaria 40..43 para o ajuste."""
+    _esn_com_duas_janelas(monkeypatch)
+    data = _data(50)
+    data.x[:, :, 0] = np.arange(50, dtype=np.float32)[:, None]
+    data.x[:20, -10, 1] = np.nan
+    windows: set[int] = set()
+    used: list[float] = []
+    real_fit, real_predict = tune_module.fit, tune_module.predict
+
+    def spy_fit(method, x_k, y, hp, **kw):
+        windows.add(x_k.shape[1])
+        used.extend(x_k[:, -1, 0])
+        return real_fit(method, x_k, y, hp, **kw)
+
+    def spy_predict(model, window):
+        used.append(window[-1, 0])
+        return real_predict(model, window)
+
+    monkeypatch.setattr(tune_module, "fit", spy_fit)
+    monkeypatch.setattr(tune_module, "predict", spy_predict)
+
+    _run(data, n_trials=10, base=EsnHyperparams(), method="esn")
+
+    assert windows == {5, 40}
+    assert max(used) < 40
+
+
+def test_janela_sem_analise_de_teste_utilizavel_e_tentativa_invalida(monkeypatch):
+    """Com 40 passos os 20% finais perdem todas as linhas: o `train` recusaria essa janela, então
+    o estudo não pode eleger quem a usa."""
+    _esn_com_duas_janelas(monkeypatch)
+    data = _data(50)
+    data.x[40:, -30, 1] = np.nan
+
+    best, trials = _run(data, n_trials=10, base=EsnHyperparams(), method="esn")
+
+    by_window = {w: [t["r2"] for t in trials if t["params"]["warmup"] == w] for w in (5, 40)}
+    assert by_window[5] and by_window[40]
+    assert all(r2 == INVALID for r2 in by_window[40])
+    assert all(r2 > INVALID for r2 in by_window[5])
+    assert best.warmup == 5
+
+
+def test_teto_de_componentes_do_pls_usa_as_linhas_antes_do_corte():
+    """25 análises utilizáveis (as 5 primeiras perdem o último passo); o corte, por tempo, deixa
+    19 para o ajuste (análises 5..23) e o teto é 19 - 1, não 20 - 1."""
+    data = _data(30, d=25)
+    data.x[:5, -1, :] = np.nan
+
+    assert tune_module._space("pls", data)["n_components"]["high"] == 18
+
+
+def test_pls_com_conjunto_recusado_propaga_a_mensagem_especifica():
+    """A janela do PLS é fixa em 1 passo: se o conjunto não tem linha de teste, nenhuma tentativa
+    poderia ser válida e o erro é o do corte, não o de "nenhuma tentativa"."""
+    data = _data(30)
+    data.x[24:, -1, :] = np.nan
+
+    with pytest.raises(TrainingError) as raised:
+        _run(data)
+
+    assert str(raised.value) == (
+        "Nenhuma análise utilizável nos 20% finais do conjunto para a janela de 1 passo; "
+        "revise as lacunas do conjunto"
+    )
+
+
 def test_r2_minimo_para_o_estudo_cedo():
     _, trials = _run(_data(60, noise=0.0), n_trials=50, min_r2=0.9)
 

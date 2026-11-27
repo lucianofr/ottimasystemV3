@@ -1,5 +1,6 @@
-"""Treino de um método do sensor virtual (RF-587, SPEC_SENSOR_VIRTUAL §8.1): ajusta nos 80%
-iniciais, mede nos 20% finais pelo `predict` compartilhado e grava o reajuste sobre 100%."""
+"""Treino de um método do sensor virtual (RF-587, SPEC_SENSOR_VIRTUAL §8.1): ajusta nas análises
+anteriores ao corte no tempo, mede nos 20% finais pelo `predict` compartilhado e grava o reajuste
+sobre 100%."""
 
 import logging
 from collections.abc import Callable, Sequence
@@ -18,7 +19,7 @@ from ottima_core.softsensor import (
     window_of,
 )
 
-from .data import MIN_TRAIN_ROWS, TrainData, TrainingError, chrono_split, metrics, select_rows
+from .data import TrainData, TrainingError, metrics, split_rows
 from .esn import fit_esn
 from .pls import fit_pls
 
@@ -92,21 +93,14 @@ def train(
     dataset_ids: Sequence[int],
     epoch_cb: EpochCallback | None = None,
 ) -> tuple[ModelMeta, bytes, dict]:
-    """`epoch_cb` recebe as épocas do ajuste nos 80% e, depois, as do reajuste sobre 100%."""
+    """`epoch_cb` recebe as épocas do ajuste antes do corte e, depois, as do reajuste sobre 100%."""
     if data.x.shape[2] != len(inputs):
         raise TrainingError(
             f"O conjunto tem {data.x.shape[2]} entrada(s), "
             f"mas foram informados {len(inputs)} nome(s) de entrada"
         )
     k = window_of(method, hp)
-    x, y = select_rows(data, k)
-    n = len(y)
-    if n < MIN_TRAIN_ROWS:
-        raise TrainingError(
-            f"São necessárias ao menos {MIN_TRAIN_ROWS} análises utilizáveis "
-            f"para a janela de {k} passos; há {n}"
-        )
-    fit_rows, test_rows = chrono_split(n)
+    x, y, n_fit = split_rows(data, k)
     meta = ModelMeta(
         schema_version=1,
         method=method,
@@ -123,16 +117,16 @@ def train(
         dataset_ids=list(dataset_ids),
     )
 
-    weights = _fit_checked(method, x[fit_rows], y[fit_rows], hp, epoch_cb)
+    weights = _fit_checked(method, x[:n_fit], y[:n_fit], hp, epoch_cb)
     candidate = load_model(0, meta.model_dump(mode="json"), pack_weights(weights))
-    predicted = np.array([predict(candidate, window) for window in x[test_rows]])
+    predicted = np.array([predict(candidate, window) for window in x[n_fit:]])
     if not np.isfinite(predicted).all():
         raise TrainingError("O modelo treinado produziu predições não finitas no teste")
 
     final = _fit_checked(method, x, y, hp, epoch_cb)
-    meta = meta.model_copy(update={"metrics": metrics(y[test_rows], predicted)})
+    meta = meta.model_copy(update={"metrics": metrics(y[n_fit:], predicted)})
     return (
         meta,
         pack_weights(final),
-        {"rows_used": n, "rows_test": test_rows.stop - test_rows.start},
+        {"rows_used": len(y), "rows_test": len(y) - n_fit},
     )

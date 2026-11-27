@@ -5,10 +5,9 @@ from .data import (
     MIN_TRAIN_ROWS,
     TrainData,
     TrainingError,
-    chrono_split,
     load_train_data,
     metrics,
-    select_rows,
+    split_rows,
 )
 from .train import InputSeed, fit, train
 
@@ -17,10 +16,9 @@ __all__ = [
     "InputSeed",
     "TrainData",
     "TrainingError",
-    "chrono_split",
     "fit",
     "load_train_data",
     "metrics",
-    "select_rows",
+    "split_rows",
     "train",
 ]

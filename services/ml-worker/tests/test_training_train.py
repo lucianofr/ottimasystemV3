@@ -17,9 +17,8 @@ from ottima_ml_worker.training import (
     InputSeed,
     TrainData,
     TrainingError,
-    chrono_split,
     metrics,
-    select_rows,
+    split_rows,
     train,
 )
 from ottima_ml_worker.training.pls import fit_pls
@@ -106,7 +105,7 @@ def test_alvo_constante_nao_gera_nan(method, as_model):
     assert meta.metrics["r2"] == 0.0
     weights = unpack_weights(blob)
     assert all(np.isfinite(v).all() for v in weights.values())
-    window = select_rows(data, meta.warmup_steps)[0][0]
+    window = split_rows(data, meta.warmup_steps)[0][0]
     assert abs(predict(load_model(1, meta.model_dump(mode="json"), blob), window) - 7.0) < 0.05
 
 
@@ -120,21 +119,18 @@ def test_entrada_constante_nao_gera_nan(method):
     assert all(np.isfinite(v).all() for v in unpack_weights(blob).values())
     assert all(np.isfinite(v) for v in meta.metrics.values())
     assert meta.metrics["r2"] > 0  # o teste mede só a entrada que varia: nenhum pior que a média
-    window = select_rows(data, meta.warmup_steps)[0][0]
+    window = split_rows(data, meta.warmup_steps)[0][0]
     assert np.isfinite(predict(load_model(1, meta.model_dump(mode="json"), blob), window))
 
 
 def test_metricas_vem_do_teste_e_o_modelo_final_usa_tudo(as_model):
     data = _data(50)
-    x, y = select_rows(data, 1)
-    fit_rows, test_rows = chrono_split(len(y))
+    x, y, n_fit = split_rows(data, 1)
 
     meta, blob, info = _train("pls", data)
 
-    on_80 = as_model("pls", fit_pls(x[fit_rows], y[fit_rows], HPS["pls"]), 2, 1)
-    expected = metrics(
-        y[test_rows], np.array([predict(on_80, x[i]) for i in range(test_rows.start, 50)])
-    )
+    on_80 = as_model("pls", fit_pls(x[:n_fit], y[:n_fit], HPS["pls"]), 2, 1)
+    expected = metrics(y[n_fit:], np.array([predict(on_80, x[i]) for i in range(n_fit, 50)]))
     assert meta.metrics == pytest.approx(expected)
     assert info == {"rows_used": 50, "rows_test": 10}
     assert info["rows_test"] == -(-50 // 5)  # ceil(0.2 * n)
@@ -231,3 +227,44 @@ def test_epoch_cb_chega_ao_treinador():
     _train("lstm", _data(40), epoch_cb=lambda epoch, loss: calls.append(epoch))
 
     assert calls == [1, 2, 3, 4, 5, 1, 2, 3, 4, 5]  # as épocas do ajuste nos 80% e as do reajuste
+
+
+def _train_esn(data: TrainData, warmup: int):
+    return train(
+        "esn",
+        data,
+        EsnHyperparams(units=20, warmup=warmup, ridge=1e-3),
+        inputs=SEEDS,
+        output_name="y",
+        output_eu="",
+        period_s=1.0,
+        dataset_ids=[],
+    )
+
+
+@pytest.mark.parametrize(("warmup", "rows_used"), [(5, 50), (40, 40)])
+def test_o_teste_e_o_mesmo_para_qualquer_janela(warmup, rows_used):
+    """A lacuna das 10 primeiras análises (passo -30) só tira linhas de janelas de 30+ passos;
+    o teste são sempre as 10 últimas das 50 do conjunto."""
+    data = _data(50)
+    data.x[:10, -30, 0] = np.nan
+
+    _, _, info = _train_esn(data, warmup)
+
+    assert info == {"rows_used": rows_used, "rows_test": 10}
+
+
+def test_janela_sem_analise_de_teste_utilizavel_falha_com_mensagem():
+    data = _data(30)
+    data.x[24:, -40, 0] = np.nan  # as 6 análises do teste (24..29) sem 40 passos íntegros
+
+    with pytest.raises(TrainingError, match="Nenhuma análise utilizável nos 20% finais"):
+        _train_esn(data, 40)
+
+
+def test_janela_com_poucas_analises_antes_do_corte_falha_com_mensagem():
+    data = _data(100)
+    data.x[:73, -40, 0] = np.nan  # 27 utilizáveis, só 7 antes do corte (análise 80)
+
+    with pytest.raises(TrainingError, match="antes do corte dos 20% finais"):
+        _train_esn(data, 40)
