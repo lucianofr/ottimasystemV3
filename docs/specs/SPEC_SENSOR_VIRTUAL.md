@@ -471,7 +471,9 @@ concatenados em ordem de tempo. É assim que o dado de seis meses atrás sobrevi
 cancel_requested bool, created_by, created_at, started_at, finished_at)`.
 
 - O ml-worker consulta a tabela a cada 2 s (`FOR UPDATE SKIP LOCKED`) e executa **um job por
-  vez**, num processo filho (`multiprocessing` com `spawn`).
+  vez por raia**, num processo filho (`multiprocessing` com `spawn`). Duas raias (emenda de
+  2026-11-27 ao ADR-046): otimização (`tune`) e geral (demais kinds); a otimização longa não
+  retém montagem de conjunto e treino.
 - **Cancelar:** a API liga `cancel_requested`; o laço do ml-worker vê e mata o processo filho.
 - **Progresso:** o filho devolve o progresso ao pai por `Pipe`; o pai grava `progress`. A
   página consulta por REST a cada 2 s enquanto houver job ativo.
@@ -675,7 +677,8 @@ sai de BAD.
   discreto. Reavaliado: treino e otimização são jobs de minutos a horas, um por vez, sem
   necessidade de broker. Decisão: fila em tabela Postgres (`ml_jobs`), consumidor único
   (`ml-worker`), execução em processo filho. **Celery continua fora da stack.** MPC, scripts e
-  OPC continuam loops vivos; nada do caminho de controle passa por fila.
+  OPC continuam loops vivos; nada do caminho de controle passa por fila. (Emendado em
+  2026-11-27: um job por vez **por raia** — otimização e geral; ver ADR-046 §Emenda.)
 - **D2 — Serviço `ml-worker`**, porta 8005, sem acesso ao barramento.
 - **D3 — Artefato numérico.** Modelo treinado é persistido como metadados JSON + `.npz` sem
   pickle. O flow-runtime infere só com numpy e nunca importa biblioteca de treino.

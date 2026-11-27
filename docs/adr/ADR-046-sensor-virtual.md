@@ -1,6 +1,6 @@
 # ADR-046 — Sensor virtual: jobs de treino, artefato numérico e serviço ml-worker
 
-**Status:** Aceito · 2026-11-25 · **Emenda ao ADR-004** (passa a existir um job discreto: o treino) **e ao ADR-023** (a lista de serviços do Compose ganha o `ml-worker`; a stack passa de 8 para 9 serviços) · Relacionado: ADR-003, 011, 012, 018, 043 · Spec: `docs/specs/SPEC_SENSOR_VIRTUAL.md`
+**Status:** Aceito · 2026-11-25 · **Emenda ao ADR-004** (passa a existir um job discreto: o treino) **e ao ADR-023** (a lista de serviços do Compose ganha o `ml-worker`; a stack passa de 8 para 9 serviços) · Relacionado: ADR-003, 011, 012, 018, 043 · Spec: `docs/specs/SPEC_SENSOR_VIRTUAL.md` · Emendado em 2026-11-27 (D1: raias de otimização e geral no `ml-worker`)
 
 ## Contexto
 Um **sensor virtual** estima, a cada varredura, uma variável que só existe como análise de laboratório (teor, viscosidade, ponto de fulgor) a partir de variáveis contínuas de processo. Hoje isso roda num aplicativo desktop separado (SensorPredict), com seu próprio cliente OPC-UA, seu próprio histórico em SQLite e sem nenhuma das garantias de qualidade de sinal do Ottima. Trazê-lo para dentro dá ao sensor virtual o histórico contínuo das entradas, a qualidade fim a fim (ADR-043), a execução no flow e a possibilidade de a estimativa alimentar um PID ou um MPC. Como a saída pode ser só indicação **ou** fechar malha, enquanto o valor não for confiável a qualidade da saída é BAD (ou UNCERTAIN) — nunca um número com cara de bom.
@@ -14,7 +14,9 @@ O ADR-004 previa reavaliar Celery/RQ quando surgisse um job discreto (a decisão
 ### D1 — Jobs discretos existem
 O ADR-004 previa reavaliar Celery/RQ quando surgisse um job discreto. Reavaliado: treino e otimização são jobs de minutos a horas, um por vez, sem necessidade de broker. Decisão: fila em tabela Postgres (`ml_jobs`), consumidor único (`ml-worker`), execução em processo filho. **Celery continua fora da stack.** MPC, scripts e OPC continuam loops vivos; nada do caminho de controle passa por fila.
 
-Contrato da fila (spec §7.5): `ml_jobs(kind ∈ {dataset_build, train, tune}, status ∈ {queued, running, done, failed, cancelled}, params, progress, result, error, cancel_requested, …)`. O `ml-worker` consulta a tabela a cada 2 s (`FOR UPDATE SKIP LOCKED`) e executa **um job por vez**, num processo filho (`multiprocessing` com `spawn`). Cancelar = a API liga `cancel_requested` e o laço do `ml-worker` mata o filho. O filho devolve o progresso ao pai por `Pipe`. Job `running` órfão (reinício do serviço) vira `failed` com o erro "interrompido pelo reinício do serviço"; não há retomada. O estudo do Optuna é em memória, dentro do filho — nenhuma tabela do Optuna no banco.
+Contrato da fila (spec §7.5): `ml_jobs(kind ∈ {dataset_build, train, tune}, status ∈ {queued, running, done, failed, cancelled}, params, progress, result, error, cancel_requested, …)`. O `ml-worker` consulta a tabela a cada 2 s (`FOR UPDATE SKIP LOCKED`) e executa **um job por vez** — por raia, desde a emenda de 2026-11-27 —, num processo filho (`multiprocessing` com `spawn`). Cancelar = a API liga `cancel_requested` e o laço do `ml-worker` mata o filho. O filho devolve o progresso ao pai por `Pipe`. Job `running` órfão (reinício do serviço) vira `failed` com o erro "interrompido pelo reinício do serviço"; não há retomada. O estudo do Optuna é em memória, dentro do filho — nenhuma tabela do Optuna no banco.
+
+> **Emendado em 2026-11-27 (§Emenda — raias do ml-worker):** "um job por vez" passa a valer por raia; são duas raias, otimização (`tune`) e geral (demais kinds).
 
 ### D2 — Serviço `ml-worker`, porta 8005, sem acesso ao barramento
 Pacote `ottima_ml_worker` em `services/ml-worker/`; health na porta **8005** (`OTTIMA_HEALTH_URL_ML_WORKER`, default `http://ml-worker:8005/health`, incluído em `GET /api/health/workers`). Não usa Redis. Mesmo padrão do RNF-04/ADR-018: o `env_file` lista só `OTTIMA_DATABASE_URL` e `OTTIMA_LOG_LEVEL`. Sobe sem executar nada. **Limite de CPU:** o servidor on-prem é um só; o serviço limita as threads do torch e do BLAS (`OTTIMA_ML_THREADS`, default 2) e tem `cpus` limitado no Compose, para o treino não disputar núcleo com o `flow-runtime` (treino ou Optuna atrasarem a varredura de qualquer flow é anti-meta).
@@ -93,3 +95,28 @@ CLAUDE.md exige justificativa para dependência fora da stack declarada. O `flow
 - (−) **Limitação residual do pré-aquecimento:** depois de uma falha de comunicação o histórico do período é BAD e a janela fica contaminada; como o bloco recém-instanciado ainda não calculou nenhum valor, a saída é `None`, e um MPC que use a estimativa como CV fica inteiro no portão frio até a janela ficar limpa (`K × period_s` depois de o dado bom voltar).
 - (−) Os modelos são válidos só para o `period_s` do conjunto de treino: o Ts do flow precisa ser divisor dele, a ativação recusa (422) quando não for e o deploy de um flow cujo Ts deixou de dividir o período sobe o bloco sem modelo (`soft_sensor_model_missing`).
 - Fora desta decisão (não-metas): SPE e contribuições por variável, análise de laboratório como entrada do modelo, importação de Excel/`.spm`, escrita automática de métricas em tag OPC, detecção de deriva do modelo, variável de laboratório no TREND e GPU.
+
+## Emenda — raias do ml-worker (2026-11-27)
+
+**Contexto:** D1 fixou um job por vez no serviço inteiro. Uma otimização (`tune`) de ESN chega a
+durar horas (centenas de tentativas, cada uma calculando a predição janela por janela), e
+enquanto ela roda nenhuma montagem de conjunto (`dataset_build`) nem treino manual (`train`)
+sai da fila.
+
+**Decisão:** o `ml-worker` passa a ter **duas raias**, cada uma executando **um job por vez**
+num processo filho `spawn` próprio:
+
+- **raia de otimização:** só jobs `kind = 'tune'`;
+- **raia geral:** todo outro kind (definida por exclusão: um kind novo cai nela).
+
+No máximo dois filhos simultâneos (um `tune` e um outro); dois `tune` continuam serializados.
+Continua sendo **um único serviço consumidor** e a fila continua em tabela Postgres (`ml_jobs`,
+`FOR UPDATE SKIP LOCKED`, ordem por id dentro da raia). Cancelamento, progresso por `Pipe` e
+tratamento de órfão seguem D1, por job. A varredura de órfãos de cada raia fica restrita aos
+kinds dela — na subida (a união das duas cobre a fila inteira) e no re-arme após erro —, para
+nunca alcançar o job vivo da outra raia. O `/health` do serviço mantém `job.running_id` (raia
+geral) e ganha `job.tune_running_id`.
+
+**Consequência:** as duas raias dividem o mesmo limite de CPU do contêiner (D2); com dois
+filhos ao mesmo tempo, cada um com `OTTIMA_ML_THREADS` threads de BLAS, o contêiner pode
+pedir o dobro de threads. Nada muda no caminho de controle nem na contagem de filas.
