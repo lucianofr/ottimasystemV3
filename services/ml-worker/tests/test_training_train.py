@@ -110,6 +110,20 @@ def test_alvo_constante_nao_gera_nan(method, as_model):
     assert abs(predict(load_model(1, meta.model_dump(mode="json"), blob), window) - 7.0) < 0.05
 
 
+@pytest.mark.parametrize("method", ["pls", "lstm"])
+def test_entrada_constante_nao_gera_nan(method):
+    data = _data(40)
+    data.x[:, :, 1] = 4.0  # P1 travada (sensor congelado, setpoint fixo)
+
+    meta, blob, _ = _train(method, data)
+
+    assert all(np.isfinite(v).all() for v in unpack_weights(blob).values())
+    assert all(np.isfinite(v) for v in meta.metrics.values())
+    assert meta.metrics["r2"] > 0  # o teste mede só a entrada que varia: nenhum pior que a média
+    window = select_rows(data, meta.warmup_steps)[0][0]
+    assert np.isfinite(predict(load_model(1, meta.model_dump(mode="json"), blob), window))
+
+
 def test_metricas_vem_do_teste_e_o_modelo_final_usa_tudo(as_model):
     data = _data(50)
     x, y = select_rows(data, 1)

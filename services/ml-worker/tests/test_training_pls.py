@@ -1,6 +1,7 @@
 """PLS (RF-587): o `w`, `b` exportado reproduz o `predict` do scikit-learn em unidade bruta."""
 
 import numpy as np
+import pytest
 from sklearn.cross_decomposition import PLSRegression
 
 from ottima_core.softsensor import PlsHyperparams, predict
@@ -56,3 +57,40 @@ def test_pesos_no_formato_do_artefato():
     )
 
     assert set(w) == {"w", "b"} and w["w"].shape == (3,) and w["b"].shape == (1,)
+
+
+def test_entrada_constante_nao_gera_nan(as_model):
+    rng = np.random.default_rng(5)
+    x = np.column_stack([rng.normal(size=40), np.full(40, 3.0)]).astype(np.float32)
+    y = 2 * x[:, 0] + 1
+
+    w = fit_pls(_windows(x), y, PlsHyperparams(n_components=3))
+
+    assert all(np.isfinite(v).all() for v in w.values()) and w["w"][1] == 0
+    model = as_model("pls", w, 2, 1)
+    pred = np.array([predict(model, x[i : i + 1]) for i in range(len(x))])
+    assert metrics(y, pred)["rmse"] < 1e-3
+
+
+def test_todas_as_entradas_constantes_devolvem_a_media(as_model):
+    x = np.full((30, 3), 2.0, dtype=np.float32)
+    y = np.arange(30.0)
+
+    w = fit_pls(_windows(x), y, PlsHyperparams())
+
+    assert np.array_equal(w["w"], np.zeros(3)) and w["b"][0] == pytest.approx(y.mean())
+    assert abs(predict(as_model("pls", w, 3, 1), x[:1]) - y.mean()) < 1e-4
+
+
+def test_entrada_constante_e_colinear_nao_gera_nan(as_model):
+    rng = np.random.default_rng(6)
+    a = rng.normal(size=40)
+    x = np.column_stack([a, 2 * a, np.full(40, -1.0)]).astype(np.float32)  # posto 1 em 3 colunas
+    y = 3 * a + 1
+
+    w = fit_pls(_windows(x), y, PlsHyperparams(n_components=3))
+
+    assert all(np.isfinite(v).all() for v in w.values())
+    model = as_model("pls", w, 3, 1)
+    pred = np.array([predict(model, x[i : i + 1]) for i in range(len(x))])
+    assert metrics(y, pred)["rmse"] < 1e-3

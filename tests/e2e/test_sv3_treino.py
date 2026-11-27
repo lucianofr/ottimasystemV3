@@ -15,9 +15,6 @@ calculado do MESMO histórico (`/api/history`) que o congelamento do conjunto l�
 ou antes do instante, mesma grade da RF-591). Uma tag calculada pelo calc-worker seria defasada
 de até ~2 s da entrada, e uma defasagem de 1 s numa senoide de 60 s já derruba o R² do trecho de
 teste (os 6 últimos pontos) perto de um pico; o cenário mediria a defasagem, não o treino.
-
-`static` é constante no opcsim, e o PLS com mais componentes que o posto dos dados (o default é 3)
-quebra no scikit-learn com `slice 0 has a NaN entry`: o treino pede `n_components = 1`.
 """
 
 import bisect
@@ -81,8 +78,6 @@ HISTORICO_S = 115.0  # 87 s das análises + ~23 s de processo antes da 1a: janel
 # passos do LSTM do E2E-SV3-03 têm linhas suficientes (MIN_TRAIN_ROWS = 20) para o estudo rodar
 MARGEM_S = 5  # a análise mais nova fica 5 s no passado: o recorder já gravou tudo até ela
 W_SINE, W_STATIC, B_LAB = 0.5, 0.1, 2.0
-
-PLS_HP = {"n_components": 1}
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,7 +193,6 @@ def _treinar_pls(admin: httpx.Client, conjunto: Conjunto, nome: str) -> dict[str
             "method": "pls",
             "dataset_ids": [conjunto.id],
             "name": nome,
-            "hyperparams": PLS_HP,
         },
     )
     return _esperar_job(admin, job_id, timeout=120.0)
