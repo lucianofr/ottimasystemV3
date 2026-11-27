@@ -492,8 +492,8 @@ export function NoPid({ id, data, selected }: NodeProps<NoPidData>) {
   );
 }
 
-/** PID Malha (ADR-039): nós com chassis padrão e o resumo dos três ganhos ISA — o modal de
- *  sintonia completa (permitted/modos/limites/FF) vem com o plano fuzzy-loop. */
+/** PID Malha (ADR-039): nós com chassis padrão e o resumo da ação (direta/reversa) e dos três
+ *  ganhos ISA — a sintonia completa e as seções de shell vivem no modal (`CamposPidMalha`). */
 export function NoPidLoop({ id, data, selected }: NodeProps<NoPidLoopData>) {
   return (
     <BlocoChapa
@@ -506,6 +506,7 @@ export function NoPidLoop({ id, data, selected }: NodeProps<NoPidLoopData>) {
       blockId={id}
     >
       <div className="space-y-0.5">
+        <LinhaResumo rotulo="Ação" valor={data.direct_acting ? "direta" : "reversa"} />
         <LinhaResumo rotulo="Ganho KC" valor={FORMATO_PARAM.format(data.kc)} />
         <LinhaResumo
           rotulo="Tempo integral Ti"

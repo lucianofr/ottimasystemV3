@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -31,14 +31,17 @@ import {
   inteiroDoCampo,
   matrizDoFormulario,
   montarDadosPid,
+  montarDadosPidLoop,
+  montarDadosShellMalha,
   numeroDoCampo,
   numeroOuNuloDoCampo,
 } from "./campos";
 import { CamposBlocoPid } from "./CamposBlocoPid";
 import { CamposDeadTime, CamposLeadLag } from "./CamposCompensacao";
 import { CamposMalhaFuzzy } from "./CamposMalhaFuzzy";
+import { CamposPidMalha } from "./CamposPidMalha";
 import { CamposFiltroKalman, CamposFiltroPrimeiraOrdem } from "./CamposFiltros";
-import { CamposHistoriar } from "./CamposHistoriar";
+import { CamposHistoriar, portasComAresta } from "./CamposHistoriar";
 import { CamposSensorVirtual } from "./CamposSensorVirtual";
 import { CamposBusKey, CamposConstant, CamposIntegrator, CamposScaler } from "./CamposUtilitarios";
 import { CamposTfs } from "./CamposTfs";
@@ -346,6 +349,8 @@ export function ModalConfigBloco({
   const [nOutputsScript, setNOutputsScript] = useState(no.type === "script" ? no.data.n_outputs : 0);
   const [nOutputsFuzzy, setNOutputsFuzzy] = useState(no.type === "fuzzy" ? no.data.n_outputs : 0);
 
+  const portasLigadas = useMemo(() => portasComAresta(edges, no.id), [edges, no.id]);
+
   // `main.tsx` monta sob <StrictMode>: em dev o efeito roda duas vezes e `showModal()` num
   // <dialog> já aberto levanta InvalidStateError, que sem error boundary derruba a árvore.
   useEffect(() => {
@@ -531,30 +536,22 @@ export function ModalConfigBloco({
         onAplicar({ ...no, data: { ...montarDadosPid(no.data, campos), label } }, execOrder);
         break;
       case "pid_loop":
-        // Malha (ADR-039): o modal v1 aplica só rótulo e ordem — a sintonia completa
-        // (permitted/modos/limites/FF) vem com o plano fuzzy-loop; os demais campos
-        // sobrevivem nos defaults do servidor.
-        onAplicar({ ...no, data: { ...no.data, label } }, execOrder);
+        onAplicar({ ...no, data: { ...montarDadosPidLoop(no.data, campos), label } }, execOrder);
         break;
       case "fuzzy_loop":
-        // Fuzzy Malha v2 (SPEC_FUZZY v2): canais, ganhos do kernel, limites e FLL.
-        // `permitted`/`normal` seguem nos defaults do servidor (oos/man/auto).
+        // Fuzzy Malha v2 (SPEC_FUZZY v2): a casca (limites, rampas, modos) vem de
+        // `montarDadosShellMalha`; aqui só canais, ganhos do kernel e FLL.
         onAplicar(
           {
             ...no,
             data: {
-              ...no.data,
+              ...montarDadosShellMalha(no.data, campos, "fuzzy_loop"),
               label,
               n_loops: inteiroDoCampo(campos.get("n_loops"), no.data.n_loops, 1, MAX_LOOPS_FUZZY),
               ke: numeroDoCampo(campos.get("ke"), no.data.ke),
               kde: numeroDoCampo(campos.get("kde"), no.data.kde),
               ku: numeroDoCampo(campos.get("ku"), no.data.ku),
               tf_de: numeroDoCampo(campos.get("tf_de"), no.data.tf_de),
-              direct_acting: campos.get("direct_acting") === "true",
-              sp_lo_lim: numeroDoCampo(campos.get("sp_lo_lim"), no.data.sp_lo_lim),
-              sp_hi_lim: numeroDoCampo(campos.get("sp_hi_lim"), no.data.sp_hi_lim),
-              out_scale_lo: numeroDoCampo(campos.get("out_scale_lo"), no.data.out_scale_lo),
-              out_scale_hi: numeroDoCampo(campos.get("out_scale_hi"), no.data.out_scale_hi),
               fll: String(campos.get("fll") ?? ""),
             },
           },
@@ -672,7 +669,8 @@ export function ModalConfigBloco({
             <CamposFuzzy dados={no.data} nOutputs={nOutputsFuzzy} aoMudarNOutputs={setNOutputsFuzzy} />
           )}
           {no.type === "pid" && <CamposBlocoPid dados={no.data} />}
-          {no.type === "fuzzy_loop" && <CamposMalhaFuzzy dados={no.data} />}
+          {no.type === "pid_loop" && <CamposPidMalha dados={no.data} portasLigadas={portasLigadas} />}
+          {no.type === "fuzzy_loop" && <CamposMalhaFuzzy dados={no.data} portasLigadas={portasLigadas} />}
           {ehSensorVirtual(no) && <CamposSensorVirtual dados={no.data} />}
           <CamposHistoriar
             no={no}

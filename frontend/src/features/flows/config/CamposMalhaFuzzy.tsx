@@ -5,6 +5,7 @@ import { Label } from "../../../components/ui/label";
 import { Select } from "../../../components/ui/select";
 import { fllDefaultMalha, MAX_FLL_LENGTH, MAX_LOOPS_FUZZY, type NoFuzzyLoop } from "../graph";
 import { indentarComTab } from "./campos";
+import { CamposShellMalha } from "./CamposShellMalha";
 
 const OPCOES_CANAL = Array.from({ length: MAX_LOOPS_FUZZY }, (_, i) => i + 1);
 
@@ -41,11 +42,18 @@ function CampoNumero({
 }
 
 /**
- * Fuzzy Malha v2 (SPEC_FUZZY v2 MIMO): canais, ganhos do kernel, limites e a base de
- * regras FLL. `n_loops` e `fll` são ESTRUTURAIS (ADR-039 D11): mudá-los re-instancia o
- * bloco no próximo deploy e a malha aterrissa em MAN — o aviso mora no rodapé do FLL.
+ * Fuzzy Malha v2 (SPEC_FUZZY v2 MIMO): canais, ganhos do kernel, seções de shell (limites,
+ * rampas, modos — `CamposShellMalha`) e a base de regras FLL. `n_loops` e `fll` são
+ * ESTRUTURAIS (ADR-039 D11): mudá-los re-instancia o bloco no próximo deploy e a malha
+ * aterrissa em MAN — o aviso mora no rodapé do FLL.
  */
-export function CamposMalhaFuzzy({ dados }: { dados: NoFuzzyLoop["data"] }) {
+export function CamposMalhaFuzzy({
+  dados,
+  portasLigadas,
+}: {
+  dados: NoFuzzyLoop["data"];
+  portasLigadas: ReadonlySet<string>;
+}) {
   const [nLoops, setNLoops] = useState(dados.n_loops);
   const [fll, setFll] = useState(dados.fll);
 
@@ -97,12 +105,7 @@ export function CamposMalhaFuzzy({ dados }: { dados: NoFuzzyLoop["data"] }) {
         <CampoNumero id="tf_de" rotulo="TF_DE (s)" valor={dados.tf_de} dica="filtro da derivada" />
       </div>
 
-      <div className="grid grid-cols-4 gap-3">
-        <CampoNumero id="sp_lo_lim" rotulo="SP mín (EU)" valor={dados.sp_lo_lim} />
-        <CampoNumero id="sp_hi_lim" rotulo="SP máx (EU)" valor={dados.sp_hi_lim} />
-        <CampoNumero id="out_scale_lo" rotulo="OUT escala mín (EU)" valor={dados.out_scale_lo} />
-        <CampoNumero id="out_scale_hi" rotulo="OUT escala máx (EU)" valor={dados.out_scale_hi} />
-      </div>
+      <CamposShellMalha dados={dados} tipo="fuzzy_loop" portasLigadas={portasLigadas} />
 
       <div className="space-y-1">
         <Label htmlFor="fll">FLL (FuzzyLite Language) — base de regras</Label>
