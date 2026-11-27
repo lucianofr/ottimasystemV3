@@ -105,3 +105,16 @@ esconderia o config incompleto e poderia chegar à planta.
   divergente, esta ADR deve ser revisitada — o defeito é a evidência que hoje falta.
 - (−) Quem acrescentar um campo com default ao Pydantic precisa lembrar do leitor TS. Mitigação
   existente: o teste de ida-e-volta de `graph.check.ts` e, para regra, o golden.
+
+## Adendo — tabelas de hiperparâmetros do sensor virtual (2026-11-27)
+
+A entrega SV-3 do sensor virtual (ADR-046) passou a gerar `SOFT_SENSOR_HYPERPARAMS` e
+`SOFT_SENSOR_SEARCH_SPACE` em `frontend/src/lib/contracts.gen.ts`, por
+`contracts_export::build_contracts()`, a partir dos schemas Pydantic de
+`ottima_core/softsensor/hyperparams.py`. Isso **não conflita** com "Não se gera tabela de defaults":
+aquela regra trata dos **leitores de `graph_json`**, onde o TS espelha à mão os defaults de config de
+bloco, e segue valendo sem alteração. As duas tabelas só alimentam os formulários de treino e de
+otimização do sensor virtual e saem do mesmo schema que o `ml-worker` valida
+(`parse_hyperparams`, `SEARCH_SPACE`) — fonte única, sem cópia manual e sem a divergência que a
+decisão original tolera. A fronteira desta ADR fica como está: forma e tabela de formulário geradas,
+default de config de bloco espelhado à mão e coberto por golden ou teste próprio.
