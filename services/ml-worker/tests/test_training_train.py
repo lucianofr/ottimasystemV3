@@ -17,9 +17,9 @@ from ottima_ml_worker.training import (
     InputSeed,
     TrainData,
     TrainingError,
-    chrono_split,
     metrics,
     select_rows,
+    split_rows,
     train,
 )
 from ottima_ml_worker.training.pls import fit_pls
@@ -126,15 +126,12 @@ def test_entrada_constante_nao_gera_nan(method):
 
 def test_metricas_vem_do_teste_e_o_modelo_final_usa_tudo(as_model):
     data = _data(50)
-    x, y = select_rows(data, 1)
-    fit_rows, test_rows = chrono_split(len(y))
+    x, y, n_fit = split_rows(data, 1)
 
     meta, blob, info = _train("pls", data)
 
-    on_80 = as_model("pls", fit_pls(x[fit_rows], y[fit_rows], HPS["pls"]), 2, 1)
-    expected = metrics(
-        y[test_rows], np.array([predict(on_80, x[i]) for i in range(test_rows.start, 50)])
-    )
+    on_80 = as_model("pls", fit_pls(x[:n_fit], y[:n_fit], HPS["pls"]), 2, 1)
+    expected = metrics(y[n_fit:], np.array([predict(on_80, x[i]) for i in range(n_fit, 50)]))
     assert meta.metrics == pytest.approx(expected)
     assert info == {"rows_used": 50, "rows_test": 10}
     assert info["rows_test"] == -(-50 // 5)  # ceil(0.2 * n)

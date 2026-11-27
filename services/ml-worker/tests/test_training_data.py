@@ -1,10 +1,11 @@
-"""Dados de treino do sensor virtual (RF-587): carga, janela útil, divisão no tempo, métricas."""
+"""Dados de treino do sensor virtual (RF-587): carga, janela útil, métricas (o corte no tempo é
+do test_training_split.py)."""
 
 import numpy as np
 import pytest
 
 from ottima_core.softsensor import DATASET_STEPS, pack_dataset
-from ottima_ml_worker.training import chrono_split, load_train_data, metrics, select_rows
+from ottima_ml_worker.training import load_train_data, metrics, select_rows
 from ottima_ml_worker.training.data import TrainData
 
 
@@ -39,19 +40,6 @@ def test_select_rows_usa_so_os_ultimos_k_passos():
     assert x50.shape == (2, 50, 2)
     assert y200.tolist() == [10.0]  # e dentro dos últimos 200
     assert x200.shape == (1, 200, 2)
-
-
-@pytest.mark.parametrize("n", [1, 5, 10, 20, 21, 100])
-def test_chrono_split_nunca_embaralha_e_teste_tem_ao_menos_uma_linha(n):
-    train, test = chrono_split(n)
-
-    assert train.start == 0 and train.stop == test.start and test.stop == n
-    assert test.stop - test.start >= 1
-    assert test.stop - test.start == max(1, -(-n // 5))  # ceil(0.2 * n)
-
-
-def test_chrono_split_20_por_cento_do_fim():
-    assert chrono_split(10) == (slice(0, 8), slice(8, 10))
 
 
 def test_metrics_calcula_r2_rmse_e_mae():
